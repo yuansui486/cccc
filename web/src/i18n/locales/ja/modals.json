@@ -384,7 +384,8 @@
     "scopeHint": "",
     "connectAction": "ログイン",
     "refreshAction": "残高を更新",
-    "disconnectAction": "現在の接続を解除",
-    "disconnectHint": "解除すると、このブラウザに保存されたログイン情報を削除します。必要なときは再度ログインできます。"
+    "disconnectAction": "ログアウト",
+    "disconnectHint": "ログアウトすると、このブラウザに保存されたログイン情報を削除します。必要なときは再度ログインできます。",
+    "dashboardAction": "算力センターへ移動"
   }
 }

@@ -384,7 +384,8 @@
     "scopeHint": "",
     "connectAction": "登录",
     "refreshAction": "刷新余额",
-    "disconnectAction": "断开当前连接",
-    "disconnectHint": "断开后将清除当前浏览器中的登录信息；如需继续使用，可重新登录。"
+    "disconnectAction": "退出登录",
+    "disconnectHint": "退出后将清除当前浏览器中的登录信息；需要使用时可重新登录。",
+    "dashboardAction": "跳转至算力中心"
   }
 }

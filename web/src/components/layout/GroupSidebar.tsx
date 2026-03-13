@@ -111,10 +111,10 @@ export function GroupSidebar({
           >
             <div className={classNames("flex items-center", isCollapsed ? "" : "gap-3")}>
               <div className={classNames(
-                "w-11 h-11 rounded-xl flex items-center justify-center glass-btn",
-                "text-cyan-600 dark:text-cyan-400"
+                "w-12 h-12 rounded-2xl flex items-center justify-center glass-btn",
+                "text-[var(--color-accent-primary)]"
               )}>
-                <img src={appLogoPath} alt={`${appBrandName} Logo`} className="w-6 h-6 object-contain" />
+                <img src={appLogoPath} alt={`${appBrandName} Logo`} className="w-8 h-8 object-contain" />
               </div>
               {!isCollapsed && (
                 <span className="text-lg font-bold tracking-tight text-[var(--color-text-primary)]">{appBrandName}</span>
@@ -183,7 +183,7 @@ export function GroupSidebar({
               <button
                 className={classNames(
                   "w-11 h-11 rounded-xl flex items-center justify-center transition-all glass-btn-accent",
-                  "text-cyan-700 dark:text-cyan-300"
+                  "text-[var(--color-accent-primary)]"
                 )}
                 onClick={onCreateGroup}
                 aria-label={t('createNewGroup')}
@@ -258,7 +258,7 @@ export function GroupSidebar({
                 <button
                   className={classNames(
                     "text-sm px-5 py-2.5 rounded-xl font-medium min-h-[44px] transition-all glass-btn-accent",
-                    "text-cyan-700 dark:text-cyan-300"
+                    "text-[var(--color-accent-primary)]"
                   )}
                   onClick={onCreateGroup}
                 >

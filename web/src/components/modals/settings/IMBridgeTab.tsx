@@ -68,6 +68,22 @@ export function IMBridgeTab({
   onStopBridge,
 }: IMBridgeTabProps) {
   const { t } = useTranslation("settings");
+  const getPlatformDisplayName = (platform: IMPlatform | string | null | undefined) => {
+    switch (platform) {
+      case "feishu":
+        return "飞书";
+      case "dingtalk":
+        return "钉钉";
+      case "telegram":
+        return "Telegram";
+      case "slack":
+        return "Slack";
+      case "discord":
+        return "Discord";
+      default:
+        return String(platform || "");
+    }
+  };
   const getBotTokenLabel = () => {
     switch (imPlatform) {
       case "telegram": return t("imBridge.botTokenTelegram");
@@ -295,7 +311,7 @@ export function IMBridgeTab({
           </div>
           {imStatus.configured && (
             <div className="text-xs mt-1 text-[var(--color-text-tertiary)]">
-              {t("imBridge.platform")}: {imStatus.platform} • {t("imBridge.subscribers")}: {imStatus.subscribers}
+              {t("imBridge.platform")}: {getPlatformDisplayName(imStatus.platform)} • {t("imBridge.subscribers")}: {imStatus.subscribers}
             </div>
           )}
         </div>
@@ -313,8 +329,8 @@ export function IMBridgeTab({
             <option value="telegram">Telegram</option>
             <option value="slack">Slack</option>
             <option value="discord">Discord</option>
-            <option value="feishu">Feishu/Lark</option>
-            <option value="dingtalk">DingTalk</option>
+            <option value="feishu">飞书</option>
+            <option value="dingtalk">钉钉</option>
           </select>
         </div>
 

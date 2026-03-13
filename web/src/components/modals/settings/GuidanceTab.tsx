@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
 import type { Actor } from "../../../types";
 import { buildHelpMarkdown, parseHelpMarkdown, type HelpChangedBlock, type ParsedHelpMarkdown } from "../../../utils/helpMarkdown";
@@ -383,23 +383,19 @@ export function GuidanceTab({ isDark, groupId }: {
     };
   });
 
-  const selectedHelpScopeItem = [commonScope, foremanScope, peerScope, ...actorScopes, ...orphanActorScopes].find(
-    (item) => item.id === selectedHelpScope
-  ) || commonScope;
+  const visibleActorScopes = [...actorScopes, ...orphanActorScopes];
+
+  useEffect(() => {
+    if (!visibleActorScopes.length) return;
+    if (!visibleActorScopes.some((item) => item.id === selectedHelpScope)) {
+      setSelectedHelpScope(visibleActorScopes[0].id);
+    }
+  }, [selectedHelpScope, visibleActorScopes]);
+
+  const selectedHelpScopeItem = visibleActorScopes.find((item) => item.id === selectedHelpScope) || visibleActorScopes[0] || null;
 
   const updateSelectedHelpScopeValue = (value: string) => {
-    if (selectedHelpScopeItem.id === "common") {
-      updateCommon(value);
-      return;
-    }
-    if (selectedHelpScopeItem.id === "role:foreman") {
-      updateRole("foreman", value);
-      return;
-    }
-    if (selectedHelpScopeItem.id === "role:peer") {
-      updateRole("peer", value);
-      return;
-    }
+    if (!selectedHelpScopeItem) return;
     updateActorNote(selectedHelpScopeItem.id.slice("actor:".length), value);
   };
 
@@ -441,154 +437,76 @@ export function GuidanceTab({ isDark, groupId }: {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-gray-900"}`}>{t("guidance.helpTitle")}</div>
-          <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-gray-500"}`}>{t("guidance.helpHint")}</div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {!expanded ? (
-            <button
-              type="button"
-              className={`px-2 py-1 rounded-md text-[11px] transition-colors ${
-                isDark ? "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800" : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-200"
-              }`}
-              onClick={() => setExpandedKind("help")}
-              disabled={busy}
-              title={t("guidance.expandTitle")}
-            >
-              {t("guidance.expand")}
-            </button>
-          ) : null}
-          <div className={`px-2 py-1 rounded-md text-[11px] ${helpBadge}`}>
-            {helpSource === "home" ? t("guidance.overrideBadge") : t("guidance.builtinBadge")}
-          </div>
-        </div>
+        {!expanded ? (
+          <button
+            type="button"
+            className={`px-2 py-1 rounded-md text-[11px] transition-colors shrink-0 ${
+              isDark ? "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800" : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-200"
+            }`}
+            onClick={() => setExpandedKind("help")}
+            disabled={busy}
+            title={t("guidance.expandTitle")}
+          >
+            {t("guidance.expand")}
+          </button>
+        ) : null}
       </div>
 
-      {help?.path ? (
-        <div className={preClass(isDark)}>
-          <span className="font-mono">{help.path}</span>
-        </div>
-      ) : null}
-
       <div className={`mt-3 rounded-xl border px-3 py-3 ${isDark ? "border-slate-800 bg-slate-950/30" : "border-gray-200 bg-white"}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className={`text-sm font-medium ${isDark ? "text-slate-100" : "text-gray-900"}`}>{t("guidance.helpEditorTitle", "Help editor")}</div>
-            <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-gray-500"}`}>
-              {t("guidance.helpEditorHint", "Structured mode edits common, role, and actor notes; raw mode keeps full-file control.")}
-            </div>
-          </div>
-          <div className={`inline-flex rounded-lg border p-1 ${isDark ? "border-slate-800 bg-slate-900" : "border-gray-200 bg-gray-50"}`}>
-            <button
-              type="button"
-              className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
-                helpViewMode === "structured"
-                  ? "bg-blue-600 text-white"
-                  : isDark
-                    ? "text-slate-300 hover:bg-slate-800"
-                    : "text-gray-700 hover:bg-white"
-              }`}
-              onClick={() => setHelpViewMode("structured")}
-            >
-              {t("guidance.structuredView", "Structured")}
-            </button>
-            <button
-              type="button"
-              className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
-                helpViewMode === "raw"
-                  ? "bg-blue-600 text-white"
-                  : isDark
-                    ? "text-slate-300 hover:bg-slate-800"
-                    : "text-gray-700 hover:bg-white"
-              }`}
-              onClick={() => setHelpViewMode("raw")}
-            >
-              {t("guidance.rawView", "Raw Markdown")}
-            </button>
-          </div>
-        </div>
-
-        {helpStructured.usedLegacyRoleNotes ? (
-          <div className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${isDark ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-            {t("guidance.legacyRoleNotesHint", "Legacy role notes were detected and mapped into the structured fields. Saving here will normalize them into scoped help blocks.")}
-          </div>
-        ) : null}
-
-        {helpViewMode === "structured" ? (
-          <div className={`mt-4 grid grid-cols-1 ${expanded ? "xl:grid-cols-[240px_minmax(0,1fr)]" : "xl:grid-cols-[210px_minmax(0,1fr)]"} gap-4 items-start`}>
+        <div className={`grid grid-cols-1 ${expanded ? "xl:grid-cols-[240px_minmax(0,1fr)]" : "xl:grid-cols-[210px_minmax(0,1fr)]"} gap-4 items-start`}>
             <div className={`rounded-xl border p-2.5 space-y-2.5 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-gray-200 bg-gray-50"}`}>
-              <div className="space-y-2">
-                {renderHelpScopeButton(commonScope)}
-                {renderHelpScopeButton(foremanScope)}
-                {renderHelpScopeButton(peerScope)}
+              <div className={`text-[11px] font-medium ${isDark ? "text-slate-400" : "text-gray-600"}`}>
+                {t("guidance.actorNotesTitle", "Actor Notes")}
               </div>
-
-              <div className={`pt-1 border-t ${isDark ? "border-slate-800" : "border-gray-200"}`}>
-                <div className={`text-[11px] font-medium mb-2 ${isDark ? "text-slate-400" : "text-gray-600"}`}>
-                  {t("guidance.actorNotesTitle", "Actor Notes")}
+              {visibleActorScopes.length ? (
+                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                  {visibleActorScopes.map((item) => renderHelpScopeButton(item))}
                 </div>
-                {actorScopes.length ? (
-                  <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                    {actorScopes.map((item) => renderHelpScopeButton(item))}
-                  </div>
-                ) : (
-                  <div className={`rounded-lg border border-dashed px-3 py-4 text-sm ${isDark ? "border-slate-800 text-slate-500" : "border-gray-200 text-gray-400"}`}>
-                    {t("guidance.noActorsForStructuredHelp", "No actors available in this group yet.")}
-                  </div>
-                )}
-              </div>
-
-              {orphanActorScopes.length ? (
-                <div className={`pt-3 border-t ${isDark ? "border-slate-800" : "border-gray-200"}`}>
-                  <div className={`text-[11px] font-medium mb-2 ${isDark ? "text-slate-400" : "text-gray-600"}`}>
-                    {t("guidance.orphanActorNotesTitle", "Other actor notes")}
-                  </div>
-                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                    {orphanActorScopes.map((item) => renderHelpScopeButton(item))}
-                  </div>
+              ) : (
+                <div className={`rounded-lg border border-dashed px-3 py-4 text-sm ${isDark ? "border-slate-800 text-slate-500" : "border-gray-200 text-gray-400"}`}>
+                  {t("guidance.noActorsForStructuredHelp", "No actors available in this group yet.")}
                 </div>
-              ) : null}
+              )}
             </div>
 
             <div className={`rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-gray-200 bg-white"}`}>
-              <div className="flex items-start gap-3 mb-3">
-                <div className="min-w-0">
-                  <div className={`text-xs font-medium ${isDark ? "text-slate-400" : "text-gray-500"}`}>
-                    {t("guidance.editKind", { kind: selectedHelpScopeItem.title })}
+              {selectedHelpScopeItem ? (
+                <>
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className="min-w-0">
+                      <div className={`text-xs font-medium ${isDark ? "text-slate-400" : "text-gray-500"}`}>
+                        {t("guidance.editKind", { kind: selectedHelpScopeItem.title })}
+                      </div>
+                      <div className={`text-sm font-semibold mt-0.5 ${isDark ? "text-slate-100" : "text-gray-900"}`}>
+                        {selectedHelpScopeItem.title}
+                      </div>
+                      <div className={`text-[11px] mt-1 ${isDark ? "text-slate-500" : "text-gray-500"}`}>
+                        {selectedHelpScopeItem.hint}
+                      </div>
+                    </div>
+                    {selectedHelpScopeItem.roleLabel ? (
+                      <div className={`ml-auto text-[10px] px-2 py-1 rounded-full shrink-0 ${isDark ? "bg-slate-800 text-slate-300" : "bg-gray-100 text-gray-600"}`}>
+                        {selectedHelpScopeItem.roleLabel}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className={`text-sm font-semibold mt-0.5 ${isDark ? "text-slate-100" : "text-gray-900"}`}>
-                    {selectedHelpScopeItem.title}
-                  </div>
-                  <div className={`text-[11px] mt-1 ${isDark ? "text-slate-500" : "text-gray-500"}`}>
-                    {selectedHelpScopeItem.hint}
-                  </div>
-                </div>
-                {selectedHelpScopeItem.roleLabel ? (
-                  <div className={`ml-auto text-[10px] px-2 py-1 rounded-full shrink-0 ${isDark ? "bg-slate-800 text-slate-300" : "bg-gray-100 text-gray-600"}`}>
-                    {selectedHelpScopeItem.roleLabel}
-                  </div>
-                ) : null}
-              </div>
 
-              <textarea
-                className={`${inputClass(isDark)} font-mono text-[12px] ${expanded ? "min-h-[440px] h-[62vh]" : "min-h-[320px] h-[44vh]"} resize-y`}
-                value={selectedHelpScopeItem.value}
-                onChange={(e) => updateSelectedHelpScopeValue(e.target.value)}
-                placeholder={selectedHelpScopeItem.placeholder}
-                spellCheck={false}
-              />
+                  <textarea
+                    className={`${inputClass(isDark)} font-mono text-[12px] ${expanded ? "min-h-[440px] h-[62vh]" : "min-h-[320px] h-[44vh]"} resize-y`}
+                    value={selectedHelpScopeItem.value}
+                    onChange={(e) => updateSelectedHelpScopeValue(e.target.value)}
+                    placeholder={selectedHelpScopeItem.placeholder}
+                    spellCheck={false}
+                  />
+                </>
+              ) : (
+                <div className={`rounded-lg border border-dashed px-3 py-6 text-sm ${isDark ? "border-slate-800 text-slate-500" : "border-gray-200 text-gray-400"}`}>
+                  {t("guidance.noActorsForStructuredHelp", "No actors available in this group yet.")}
+                </div>
+              )}
             </div>
           </div>
-        ) : (
-          <div className="mt-4">
-            <label className={labelClass(isDark)}>{t("guidance.markdown")}</label>
-            <textarea
-              className={`${inputClass(isDark)} font-mono text-[12px] ${expanded ? "min-h-[440px] h-[62vh] resize-y" : "min-h-[320px] h-[44vh] resize-y"}`}
-              value={help?.content || ""}
-              onChange={(e) => setHelpContentRaw(e.target.value)}
-              spellCheck={false}
-            />
-          </div>
-        )}
       </div>
 
       <div className="mt-3 flex items-center gap-2">
@@ -622,12 +540,6 @@ export function GuidanceTab({ isDark, groupId }: {
   return (
     <div className="space-y-4">
       {err ? <div className={`text-sm ${isDark ? "text-rose-300" : "text-red-600"}`}>{err}</div> : null}
-
-      <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-gray-500"}`}>
-        <Trans i18nKey="guidance.overridesHint" ns="settings" components={[<span className="font-mono" />]} />
-      </div>
-
-      {renderPreambleCard()}
       {renderHelpCard()}
 
       {expandedKind ? (
@@ -657,7 +569,7 @@ export function GuidanceTab({ isDark, groupId }: {
               </button>
             </div>
             <div className="h-full overflow-y-auto p-4 sm:p-6 md:p-8 pt-16">
-              {expandedKind === "help" ? renderHelpCard(true) : renderPreambleCard(true)}
+              {renderHelpCard(true)}
             </div>
           </div>
         </div>

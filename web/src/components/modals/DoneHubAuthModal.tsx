@@ -43,6 +43,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
   const title = showConnectedView ? t("modals:doneHub.connectedTitle") : t("modals:doneHub.connectTitle");
   const quotaValue = useMemo(() => formatDoneHubQuota(session?.quota), [session?.quota]);
   const usedQuotaValue = useMemo(() => formatDoneHubQuota(session?.used_quota), [session?.used_quota]);
+  const dashboardUrl = "https://peer.shierkeji.com/panel/dashboard";
 
   if (!isOpen) return null;
 
@@ -174,7 +175,16 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
         ) : (
           <div className="mt-4 rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-4">
             <div className="text-sm text-[var(--color-text-secondary)]">{t("modals:doneHub.disconnectHint")}</div>
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <a
+                href={dashboardUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="glass-btn rounded-xl px-4 py-2.5 text-sm text-[var(--color-text-secondary)]"
+              >
+                {t("modals:doneHub.dashboardAction")}
+              </a>
+              <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={() => void refresh()}
@@ -193,6 +203,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
               >
                 {t("modals:doneHub.disconnectAction")}
               </button>
+              </div>
             </div>
           </div>
         )}

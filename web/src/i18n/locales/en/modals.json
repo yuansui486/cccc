@@ -384,7 +384,8 @@
     "scopeHint": "",
     "connectAction": "Sign in",
     "refreshAction": "Refresh balance",
-    "disconnectAction": "Disconnect current connection",
-    "disconnectHint": "Disconnect clears the sign-in data stored in this browser. You can sign in again whenever needed."
+    "disconnectAction": "Sign out",
+    "disconnectHint": "Signing out clears the sign-in data stored in this browser. You can sign in again whenever needed.",
+    "dashboardAction": "Open Compute Center"
   }
 }

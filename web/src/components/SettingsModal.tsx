@@ -6,12 +6,8 @@ import * as api from "../services/api";
 import { useObservabilityStore } from "../stores";
 import {
   AutomationTab,
-  DeliveryTab,
-  MessagingTab,
   IMBridgeTab,
-  TranscriptTab,
   GuidanceTab,
-  GroupSpaceTab,
   BlueprintTab,
   CapabilitiesTab,
   ActorProfilesTab,
@@ -733,6 +729,13 @@ export function SettingsModal({
     ] : []),
   ], [globalSettingsEnabled, currentBrowserSignedIn, t]);
 
+  const groupTabs = useMemo<{ id: GroupTabId; label: string }[]>(() => [
+    { id: "guidance", label: t("tabs.guidance") },
+    { id: "automation", label: t("tabs.automation") },
+    { id: "im", label: t("tabs.im") },
+    { id: "blueprint", label: t("tabs.blueprint") },
+  ], [t]);
+
   useEffect(() => {
     if (scope !== "global") return;
     if (!globalTabs.length) return;
@@ -740,6 +743,14 @@ export function SettingsModal({
       setGlobalTab(globalTabs[0].id);
     }
   }, [globalTab, globalTabs, scope]);
+
+  useEffect(() => {
+    if (scope !== "group") return;
+    if (!groupTabs.length) return;
+    if (!groupTabs.some((tab) => tab.id === groupTab)) {
+      setGroupTab(groupTabs[0].id);
+    }
+  }, [groupTab, groupTabs, scope]);
 
   // ============ Render ============
 
@@ -754,16 +765,6 @@ export function SettingsModal({
     return String((active || first)?.url || "").trim();
   })();
 
-  const groupTabs: { id: GroupTabId; label: string }[] = [
-    { id: "guidance", label: t("tabs.guidance") },
-    { id: "automation", label: t("tabs.automation") },
-    { id: "delivery", label: t("tabs.delivery") },
-    { id: "space", label: t("tabs.space") },
-    { id: "messaging", label: t("tabs.messaging") },
-    { id: "im", label: t("tabs.im") },
-    { id: "transcript", label: t("tabs.transcript") },
-    { id: "blueprint", label: t("tabs.blueprint") },
-  ];
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
   const activeTab = scope === "group" ? groupTab : globalTab;
   const setActiveTab = (tab: GroupTabId | GlobalTabId) => {
@@ -849,29 +850,6 @@ export function SettingsModal({
                 />
               )}
 
-              {activeTab === "delivery" && (
-                <DeliveryTab
-                  isDark={isDark}
-                  busy={busy}
-                  deliveryInterval={deliveryInterval}
-                  setDeliveryInterval={setDeliveryInterval}
-                  autoMarkOnDelivery={autoMarkOnDelivery}
-                  setAutoMarkOnDelivery={setAutoMarkOnDelivery}
-                  onSave={handleSaveDeliverySettings}
-                  onAutoSave={handleAutoSave}
-                />
-              )}
-
-              {activeTab === "messaging" && (
-                <MessagingTab
-                  isDark={isDark}
-                  busy={busy}
-                  defaultSendTo={defaultSendTo}
-                  setDefaultSendTo={setDefaultSendTo}
-                  onSave={handleSaveMessagingSettings}
-                />
-              )}
-
               {activeTab === "im" && (
                 <IMBridgeTab
                   isDark={isDark}
@@ -903,47 +881,7 @@ export function SettingsModal({
                 />
               )}
 
-              {activeTab === "transcript" && (
-                <TranscriptTab
-                  isDark={isDark}
-                  busy={busy}
-                  groupId={groupId}
-                  devActors={devActors}
-                  terminalVisibility={terminalVisibility}
-                  setTerminalVisibility={setTerminalVisibility}
-                  terminalNotifyTail={terminalNotifyTail}
-                  setTerminalNotifyTail={setTerminalNotifyTail}
-                  terminalNotifyLines={terminalNotifyLines}
-                  setTerminalNotifyLines={setTerminalNotifyLines}
-                  onSaveTranscriptSettings={handleSaveTranscriptSettings}
-                  tailActorId={tailActorId}
-                  setTailActorId={setTailActorId}
-                  tailMaxChars={tailMaxChars}
-                  setTailMaxChars={setTailMaxChars}
-                  tailStripAnsi={tailStripAnsi}
-                  setTailStripAnsi={setTailStripAnsi}
-                  tailCompact={tailCompact}
-                  setTailCompact={setTailCompact}
-                  tailText={tailText}
-                  tailHint={tailHint}
-                  tailErr={tailErr}
-                  tailBusy={tailBusy}
-                  tailCopyInfo={tailCopyInfo}
-                  onLoadTail={loadTerminalTail}
-                  onCopyTail={copyTailLastLines}
-                  onClearTail={clearTail}
-                />
-              )}
-
               {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
-
-              {activeTab === "space" && (
-                <GroupSpaceTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  isActive={scope === "group" && activeTab === "space"}
-                />
-              )}
 
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
 
