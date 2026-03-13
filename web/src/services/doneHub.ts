@@ -115,8 +115,8 @@ export function formatDoneHubQuota(value: number | null | undefined): string {
   if (!Number.isFinite(amount)) return "0元";
   const rmb = amount / 500000;
   const formatted = new Intl.NumberFormat(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(rmb);
   return `${formatted}元`;
 }

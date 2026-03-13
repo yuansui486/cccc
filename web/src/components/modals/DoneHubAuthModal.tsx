@@ -180,7 +180,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
                 href={dashboardUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="glass-btn rounded-xl px-4 py-2.5 text-sm text-[var(--color-text-secondary)]"
+                className="glass-btn rounded-xl border border-[var(--glass-border-subtle)] px-4 py-2.5 text-sm text-[var(--color-text-secondary)] shadow-[0_0_0_1px_var(--color-accent-primary)]"
               >
                 {t("modals:doneHub.dashboardAction")}
               </a>

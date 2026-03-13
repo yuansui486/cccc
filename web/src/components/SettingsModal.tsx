@@ -9,10 +9,7 @@ import {
   IMBridgeTab,
   GuidanceTab,
   BlueprintTab,
-  CapabilitiesTab,
   ActorProfilesTab,
-  WebAccessTab,
-  DeveloperTab,
   SettingsScope,
   GroupTabId,
   GlobalTabId,
@@ -48,7 +45,7 @@ export function SettingsModal({
   const { modalRef } = useModalA11y(isOpen, onClose);
   const [scope, setScope] = useState<SettingsScope>(groupId ? "group" : "global");
   const [groupTab, setGroupTab] = useState<GroupTabId>("automation");
-  const [globalTab, setGlobalTab] = useState<GlobalTabId>("capabilities");
+  const [globalTab, setGlobalTab] = useState<GlobalTabId>("actorProfiles");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
 
@@ -717,16 +714,9 @@ export function SettingsModal({
   const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
 
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
-    ...(globalSettingsEnabled ? [
-      { id: "capabilities" as const, label: t("tabs.capabilities") },
-      { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
-    ] : []),
+    ...(globalSettingsEnabled ? [{ id: "actorProfiles" as const, label: t("tabs.actorProfiles") }] : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
     ...(currentBrowserSignedIn && !globalSettingsEnabled ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }] : []),
-    ...(globalSettingsEnabled ? [
-      { id: "webAccess" as const, label: t("tabs.webAccess") },
-      { id: "developer" as const, label: t("tabs.developer") },
-    ] : []),
   ], [globalSettingsEnabled, currentBrowserSignedIn, t]);
 
   const groupTabs = useMemo<{ id: GroupTabId; label: string }[]>(() => [
@@ -885,13 +875,6 @@ export function SettingsModal({
 
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
 
-              {activeTab === "capabilities" && (
-                <CapabilitiesTab
-                  isDark={isDark}
-                  isActive={scope === "global" && activeTab === "capabilities"}
-                />
-              )}
-
               {activeTab === "actorProfiles" && (
                 <ActorProfilesTab
                   isDark={isDark}
@@ -908,52 +891,6 @@ export function SettingsModal({
                 />
               )}
 
-              {activeTab === "webAccess" && (
-                <WebAccessTab
-                  isDark={isDark}
-                  isActive={scope === "global" && activeTab === "webAccess"}
-                />
-              )}
-
-
-              {activeTab === "developer" && (
-                <DeveloperTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  developerMode={developerMode}
-                  setDeveloperMode={setDeveloperMode}
-                  logLevel={logLevel}
-                  setLogLevel={setLogLevel}
-                  terminalBacklogMiB={terminalBacklogMiB}
-                  setTerminalBacklogMiB={setTerminalBacklogMiB}
-                  terminalScrollbackLines={terminalScrollbackLines}
-                  setTerminalScrollbackLines={setTerminalScrollbackLines}
-                  obsBusy={obsBusy}
-                  onSaveObservability={handleSaveObservability}
-                  debugSnapshot={debugSnapshot}
-                  debugSnapshotErr={debugSnapshotErr}
-                  debugSnapshotBusy={debugSnapshotBusy}
-                  onLoadDebugSnapshot={loadDebugSnapshot}
-                  onClearDebugSnapshot={() => {
-                    setDebugSnapshot("");
-                    setDebugSnapshotErr("");
-                  }}
-                  logComponent={logComponent}
-                  setLogComponent={setLogComponent}
-                  logLines={logLines}
-                  setLogLines={setLogLines}
-                  logText={logText}
-                  logErr={logErr}
-                  logBusy={logBusy}
-                  onLoadLogTail={loadLogTail}
-                  onClearLogs={handleClearLogs}
-                  registryBusy={registryBusy}
-                  registryErr={registryErr}
-                  registryResult={registryResult}
-                  onPreviewRegistry={loadRegistryPreview}
-                  onReconcileRegistry={handleReconcileRegistry}
-                />
-              )}
               </>
             )}
           </div>

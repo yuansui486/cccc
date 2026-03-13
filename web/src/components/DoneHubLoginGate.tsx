@@ -49,15 +49,16 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
         <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" />
       </div>
 
-      <div className="relative z-10 w-full max-w-md rounded-[32px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-xl md:p-6">
-        <div className="rounded-[28px] border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] px-5 py-6 md:px-6">
-          <div className="mb-6 flex items-center justify-center gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] shadow-[var(--glass-shadow)]">
-              <img src={appLogoPath} alt={`${appBrandName} Logo`} className="h-9 w-9 object-contain" />
-            </div>
-            <div className="text-2xl font-semibold tracking-tight text-[var(--color-text-primary)]">{appBrandName}</div>
+      <div className="relative z-10 w-full max-w-md">
+        <div className="mb-5 flex items-center justify-center gap-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-[26px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur-xl">
+            <img src={appLogoPath} alt={`${appBrandName} Logo`} className="h-11 w-11 object-contain" />
           </div>
+          <div className="text-[2rem] font-semibold tracking-tight text-[var(--color-text-primary)]">{appBrandName}</div>
+        </div>
 
+        <div className="rounded-[32px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur-xl md:p-6">
+          <div className="rounded-[28px] border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] px-5 py-6 md:px-6">
           {busy ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
               <div className="h-12 w-12 animate-spin rounded-full border-2 border-emerald-400/25 border-t-blue-500" />
@@ -124,6 +125,7 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
               </form>
             </>
           )}
+          </div>
         </div>
       </div>
     </div>
