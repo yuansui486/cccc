@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from 'react-i18next';
 import { useTheme } from "../hooks/useTheme";
+import { getAppBrandName } from "../utils/displayText";
 import * as api from "../services/api";
 
 type AuthStatus = "checking" | "authenticated" | "login";
@@ -20,6 +21,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const { t } = useTranslation('layout');
+  const appBrandName = getAppBrandName();
   const hostname = typeof window !== "undefined" ? String(window.location.hostname || "").trim().toLowerCase() : "";
   const isLocalAccess = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
   const localRecoveryPath = "~/.cccc/access_tokens.yaml";
@@ -101,7 +103,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       >
         <div className="flex flex-col items-center gap-1 mb-6">
           <h1 className="text-lg font-semibold gradient-text">
-            CCCC
+            {appBrandName}
           </h1>
           <p className="text-sm text-[var(--color-text-tertiary)]">
             {t('enterToken')}

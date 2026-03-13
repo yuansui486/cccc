@@ -52,7 +52,7 @@
   "important": "请确认",
   "relayedFrom": "转发自 {{groupId}} · {{eventId}}",
   "openOriginalMessage": "打开原始消息",
-  "sentTo": "发送至 {{label}} · {{to}}",
+  "sentTo": "发送给 {{label}} · {{to}}",
   "updated": "更新于 {{time}}",
   "noAgentStateYet": "暂无智能体状态",
   "taskShort": "任务 {{id}}",
@@ -93,5 +93,6 @@
   "copyEventId": "复制事件 ID",
   "openMessageContext": "打开消息上下文",
   "closeSearchModal": "关闭搜索窗口",
-  "to": "To"
+  "to": "发送给",
+  "toRecipient": "发送给 {{label}}"
 }

@@ -17,6 +17,7 @@ import { formatFullTime, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { getRecipientDisplayName } from "../hooks/useActorDisplayName";
+import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayText";
 import { ImageIcon, FileIcon, CloseIcon } from "./Icons";
 
 const RUNTIME_LOGO_BASE = import.meta.env.BASE_URL;
@@ -395,13 +396,10 @@ export const MessageBubble = memo(function MessageBubble({
     const toLabel = useMemo(() => {
         if (hasDestination) {
             const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
-            const dstToLabel = dstTo.length > 0 ? dstTo.join(", ") : "@all";
-            return `group: ${dstLabel} · ${dstToLabel}`;
+            const dstToLabel = formatRecipientList(dstTo, displayNameMap);
+            return `${dstLabel} · ${dstToLabel}`;
         }
-        if (!recipients || recipients.length === 0) return "@all";
-        return recipients
-            .map(r => getRecipientDisplayName(r, displayNameMap))
-            .join(", ");
+        return formatRecipientList(recipients || [], displayNameMap);
     }, [displayNameMap, dstGroupId, dstTo, groupLabelById, hasDestination, recipients]);
 
     // Sender display name (use title if available)
@@ -412,7 +410,8 @@ export const MessageBubble = memo(function MessageBubble({
 
     const senderDisplayName = useMemo(() => {
         const by = String(ev.by || "");
-        if (!by || by === "user") return by;
+        if (!by) return by;
+        if (by === "user") return getRecipientDisplayLabel(by, displayNameMap);
         return String(senderActor?.title || "").trim() || displayNameMap.get(by) || by;
     }, [displayNameMap, ev.by, senderActor]);
 
@@ -509,9 +508,9 @@ export const MessageBubble = memo(function MessageBubble({
                             "text-[10px] min-w-0 truncate",
                             "text-[var(--color-text-muted)]"
                         )}
-                        title={`to ${toLabel}`}
+                        title={t("toRecipient", { label: toLabel })}
                     >
-                        to {toLabel}
+                        {t("toRecipient", { label: toLabel })}
                     </span>
                 </div>
 
@@ -536,8 +535,8 @@ export const MessageBubble = memo(function MessageBubble({
                     <span className={`text-[10px] flex-shrink-0 text-[var(--color-text-muted)]`}>
                         {isOptimistic ? t('sending', '发送中…') : formatTime(ev.ts)}
                     </span>
-                    <span className={classNames("text-[10px] min-w-0 truncate", "text-[var(--color-text-muted)]")} title={`to ${toLabel}`}>
-                        to {toLabel}
+                    <span className={classNames("text-[10px] min-w-0 truncate", "text-[var(--color-text-muted)]")} title={t("toRecipient", { label: toLabel })}>
+                        {t("toRecipient", { label: toLabel })}
                     </span>
                 </div>
 
@@ -589,7 +588,7 @@ export const MessageBubble = memo(function MessageBubble({
                     {/* Outbound cross-group send record */}
                     {hasDestination ? (() => {
                         const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
-                        const dstToLabel = dstTo.length > 0 ? dstTo.join(", ") : "@all";
+                        const dstToLabel = formatRecipientList(dstTo, displayNameMap);
                         return (
                             <div
                                 className={classNames(

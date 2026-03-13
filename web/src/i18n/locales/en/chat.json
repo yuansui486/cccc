@@ -93,5 +93,6 @@
   "copyEventId": "Copy event id",
   "openMessageContext": "Open message context",
   "closeSearchModal": "Close search modal",
-  "to": "To"
+  "to": "To",
+  "toRecipient": "to {{label}}"
 }

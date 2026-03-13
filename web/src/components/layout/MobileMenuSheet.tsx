@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Actor, GroupDoc } from "../../types";
+import { Actor, DoneHubStatus, GroupDoc } from "../../types";
 import { getGroupStatusUnified } from "../../utils/groupStatus";
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
@@ -25,11 +25,18 @@ export interface MobileMenuSheetProps {
   selectedGroupRunning: boolean;
   actors: Actor[];
   busy: string;
+  doneHub?: {
+    status: DoneHubStatus;
+    displayName: string;
+    quota: number | null;
+    errorMessage: string;
+  };
   onClose: () => void;
   onToggleTheme: () => void;
   onOpenSearch: () => void;
   onOpenContext: () => void;
   onOpenSettings: () => void;
+  onOpenDoneHubAuth: () => void;
   onOpenGroupEdit?: () => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
@@ -44,11 +51,13 @@ export function MobileMenuSheet({
   selectedGroupRunning,
   actors,
   busy,
+  doneHub,
   onClose,
   onToggleTheme,
   onOpenSearch,
   onOpenContext,
   onOpenSettings,
+  onOpenDoneHubAuth,
   onOpenGroupEdit,
   onStartGroup,
   onStopGroup,
@@ -56,6 +65,11 @@ export function MobileMenuSheet({
 }: MobileMenuSheetProps) {
   const { modalRef } = useModalA11y(isOpen, onClose);
   const { t } = useTranslation('layout');
+  const doneHubStatus = doneHub?.status || "idle";
+  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const doneHubQuota = doneHub && doneHub.quota != null
+    ? new Intl.NumberFormat().format(Number(doneHub.quota || 0))
+    : "0";
   if (!isOpen) return null;
 
   return (
@@ -162,6 +176,28 @@ export function MobileMenuSheet({
               <span>{t('settingsButton')}</span>
             </button>
           </div>
+
+          <button
+            className={classNames(
+              "w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] glass-btn border",
+              doneHubConnected
+                ? "border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+                : doneHubStatus === "error"
+                  ? "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                  : "border-[var(--glass-border-subtle)] text-[var(--color-text-primary)]"
+            )}
+            onClick={() => {
+              onClose();
+              onOpenDoneHubAuth();
+            }}
+          >
+            <span>{t("doneHubEntry")}</span>
+            <span className="text-xs font-semibold">
+              {doneHubConnected
+                ? t("doneHubBalanceInline", { value: doneHubQuota })
+                : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect")}
+            </span>
+          </button>
 
           <div className="grid grid-cols-2 gap-2">
             <LanguageSwitcher

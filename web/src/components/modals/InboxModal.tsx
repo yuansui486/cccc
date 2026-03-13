@@ -4,6 +4,7 @@ import { Actor, LedgerEvent } from "../../types";
 import { formatFullTime, formatTime } from "../../utils/time";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { useModalA11y } from "../../hooks/useModalA11y";
+import { getRecipientDisplayLabel } from "../../utils/displayText";
 
 function formatEventLine(
   ev: LedgerEvent,
@@ -49,8 +50,7 @@ export function InboxModal({ isOpen, actorId, actors, messages, busy, onClose, o
       if (id) map.set(id, actor.title || id);
     }
     return (id: string) => {
-      if (!id || id === "user") return id;
-      return map.get(id) || id;
+      return getRecipientDisplayLabel(id, map);
     };
   }, [actors]);
 

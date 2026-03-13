@@ -5,6 +5,7 @@ import { Actor, LedgerEvent } from "../types";
 import { formatFullTime, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
 import { useModalA11y } from "../hooks/useModalA11y";
+import { getRecipientDisplayLabel } from "../utils/displayText";
 
 type KindFilter = "all" | "chat" | "notify";
 
@@ -110,8 +111,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
       if (id) map.set(id, actor.title || id);
     }
     return (id: string) => {
-      if (!id || id === "user") return id;
-      return map.get(id) || id;
+      return getRecipientDisplayLabel(id, map);
     };
   }, [actors]);
 
@@ -289,7 +289,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
                 )}
               >
                 <option value="">{t('any')}</option>
-                <option value="user">user</option>
+                <option value="user">{getRecipientDisplayLabel("user")}</option>
                 <option value="system">system</option>
                 {actorIds.map((id) => (
                   <option key={id} value={id}>

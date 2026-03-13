@@ -3,6 +3,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Actor, GroupMeta, ReplyTarget } from "../../types";
 import { classNames } from "../../utils/classNames";
+import { getRecipientDisplayLabel } from "../../utils/displayText";
 import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon } from "../../components/Icons";
 import { ScrollFade } from "../../components/ScrollFade";
 import { useTranslation } from 'react-i18next';
@@ -146,7 +147,7 @@ export function ChatComposer({
   // Get display name for reply target
   const replyByDisplayName = useMemo(() => {
     if (!replyTarget?.by) return "";
-    if (replyTarget.by === "user") return "user";
+    if (replyTarget.by === "user") return getRecipientDisplayLabel("user");
     const actor = actors.find(a => a.id === replyTarget.by);
     return actor?.title || replyTarget.by;
   }, [replyTarget, actors]);
@@ -462,11 +463,11 @@ export function ChatComposer({
                         ? "bg-white/5 text-slate-400 border-white/5 hover:border-white/20 hover:text-slate-200"
                         : "bg-black/5 text-gray-600 border-transparent hover:border-black/10 hover:text-gray-800"
                   )}
-                  onClick={() => onToggleRecipient(tok)}
+                onClick={() => onToggleRecipient(tok)}
                   disabled={!selectedGroupId || busy === "send"}
                   aria-pressed={active}
                 >
-                  {tok}
+                  {getRecipientDisplayLabel(tok)}
                 </button>
               );
             })}

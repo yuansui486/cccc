@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import * as api from "../../../services/api";
+import { getRecipientTokenLabel } from "../../../utils/displayText";
 import type { Actor, AutomationRule, AutomationRuleAction, AutomationRuleSet, AutomationRuleStatus } from "../../../types";
 import {
   Section,
@@ -107,9 +108,9 @@ export function AutomationTab(props: AutomationTabProps) {
 
   const actorTargetOptions = useMemo(() => {
     const out: Array<{ value: string; label: string }> = [
-      { value: "@foreman", label: "@foreman" },
-      { value: "@peers", label: "@peers" },
-      { value: "@all", label: "@all" },
+      { value: "@foreman", label: getRecipientTokenLabel("@foreman") },
+      { value: "@peers", label: getRecipientTokenLabel("@peers") },
+      { value: "@all", label: getRecipientTokenLabel("@all") },
     ];
     for (const a of props.devActors || []) {
       if (!a || !a.id || a.id === "user") continue;

@@ -8,6 +8,7 @@ import type { TemplatePreviewDetailsProps } from "./TemplatePreviewDetails";
 import { MobileMenuSheet } from "./layout/MobileMenuSheet";
 import { AddActorModal } from "./modals/AddActorModal";
 import { CreateGroupModal } from "./modals/CreateGroupModal";
+import { DoneHubAuthModal } from "./modals/DoneHubAuthModal";
 import {
   EditActorModal,
   NO_CHANGES_SENTINEL,
@@ -22,12 +23,14 @@ import { parsePrivateEnvSetText } from "../utils/privateEnvInput";
 import { parseHelpMarkdown, updateActorHelpNote } from "../utils/helpMarkdown";
 import { formatCapabilityIdInput, normalizeCapabilityIdList, parseCapabilityIdInput } from "../utils/capabilityAutoload";
 import { actorProfileIdentityKey, actorProfileMatchesRef } from "../utils/actorProfiles";
+import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayText";
 import {
   useGroupStore,
   useUIStore,
   useModalStore,
   useInboxStore,
   useFormStore,
+  useDoneHubStore,
 } from "../stores";
 import { getAckRecipientIdsForEvent, getRecipientActorIdsForEvent } from "../hooks/useSSE";
 import * as api from "../services/api";
@@ -95,6 +98,9 @@ export function AppModals({
     showNotice,
     setActiveTab,
   } = useUIStore();
+  const doneHubStatus = useDoneHubStore((state) => state.status);
+  const doneHubSession = useDoneHubStore((state) => state.session);
+  const doneHubErrorMessage = useDoneHubStore((state) => state.errorMessage);
 
   const {
     modals,
@@ -214,6 +220,12 @@ export function AppModals({
     (s) => s.groups.find((g) => String(g.group_id || "") === s.selectedGroupId)?.running ?? false
   );
   const hasForeman = actors.some((a) => a.role === "foreman");
+  const doneHub = useMemo(() => ({
+    status: doneHubStatus,
+    displayName: doneHubSession?.display_name || doneHubSession?.username || "",
+    quota: doneHubSession?.quota ?? null,
+    errorMessage: doneHubErrorMessage,
+  }), [doneHubErrorMessage, doneHubSession?.display_name, doneHubSession?.quota, doneHubSession?.username, doneHubStatus]);
 
   // Compute messageMeta for RecipientsModal (moved from App.tsx)
   const messageMetaEvent = useMemo(() => {
@@ -233,7 +245,13 @@ export function AppModals({
     const toTokensList = toRaw
       .map((x) => String(x || "").trim())
       .filter((s) => s.length > 0);
-    const toLabel = toTokensList.length > 0 ? toTokensList.join(", ") : "@all";
+    const displayNameMap = new Map<string, string>();
+    for (const actor of actors) {
+      const id = String(actor.id || "").trim();
+      if (!id) continue;
+      displayNameMap.set(id, String(actor.title || id));
+    }
+    const toLabel = formatRecipientList(toTokensList, displayNameMap);
 
     const msgData = messageMetaEvent.data as ChatMessageData | undefined;
     const os =
@@ -247,9 +265,9 @@ export function AppModals({
         ...actors
           .map((a) => String(a.id || ""))
           .filter((id) => id && recipientIdSet.has(id))
-          .map((id) => [id, !!(os[id]?.reply_required ? os[id]?.replied : os[id]?.acked)] as const),
+          .map((id) => [getRecipientDisplayLabel(id, displayNameMap), !!(os[id]?.reply_required ? os[id]?.replied : os[id]?.acked)] as const),
         recipientIdSet.has("user")
-          ? (["user", !!(os["user"]?.reply_required ? os["user"]?.replied : os["user"]?.acked)] as const)
+          ? ([getRecipientDisplayLabel("user", displayNameMap), !!(os["user"]?.reply_required ? os["user"]?.replied : os["user"]?.acked)] as const)
           : null,
       ].filter(Boolean) as Array<readonly [string, boolean]>;
       const anyReplyRequired = recipientIds.some((id) => !!os[id]?.reply_required);
@@ -270,8 +288,8 @@ export function AppModals({
         ...actors
           .map((a) => String(a.id || ""))
           .filter((id) => id && recipientIdSet.has(id))
-          .map((id) => [id, !!(as && as[id])] as const),
-        recipientIdSet.has("user") ? (["user", !!(as && as["user"])] as const) : null,
+          .map((id) => [getRecipientDisplayLabel(id, displayNameMap), !!(as && as[id])] as const),
+        recipientIdSet.has("user") ? ([getRecipientDisplayLabel("user", displayNameMap), !!(as && as["user"])] as const) : null,
       ].filter(Boolean) as Array<readonly [string, boolean]>;
 
       return { toLabel, entries, statusKind: "ack" as const };
@@ -288,7 +306,7 @@ export function AppModals({
     const entries = actors
       .map((a) => String(a.id || ""))
       .filter((id) => id && recipientIdSet.has(id))
-      .map((id) => [id, !!(rs && rs[id])] as const);
+      .map((id) => [getRecipientDisplayLabel(id, displayNameMap), !!(rs && rs[id])] as const);
 
     return { toLabel, entries, statusKind: "read" as const };
   }, [actors, messageMetaEvent]);
@@ -1021,6 +1039,7 @@ export function AppModals({
         selectedGroupRunning={selectedGroupRunning}
         actors={actors}
         busy={busy}
+        doneHub={doneHub}
         onClose={() => closeModal("mobileMenu")}
         onToggleTheme={onThemeToggle}
         onOpenSearch={() => openModal("search")}
@@ -1029,6 +1048,7 @@ export function AppModals({
           openModal("context");
         }}
         onOpenSettings={() => openModal("settings")}
+        onOpenDoneHubAuth={() => openModal("doneHubAuth")}
         onOpenGroupEdit={canManageGroups ? () => {
           if (groupDoc) {
             setEditGroupTitle(groupDoc.title || "");
@@ -1039,6 +1059,12 @@ export function AppModals({
         onStartGroup={onStartGroup}
         onStopGroup={onStopGroup}
         onSetGroupState={onSetGroupState}
+      />
+
+      <DoneHubAuthModal
+        isOpen={modals.doneHubAuth}
+        isDark={isDark}
+        onClose={() => closeModal("doneHubAuth")}
       />
 
       {modals.relay && relayEventId ? (

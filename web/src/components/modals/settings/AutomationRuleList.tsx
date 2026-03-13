@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AutomationRule, AutomationRuleStatus } from "../../../types";
+import { formatRecipientList } from "../../../utils/displayText";
 import {
   ACTOR_OPERATION_COPY,
   GROUP_STATE_COPY,
@@ -108,7 +109,7 @@ export function AutomationRuleList({
         let actionLabel = "Action not set";
         if (kind === "notify") {
           const contentLabel = snippetRef ? `Snippet: ${snippetRef}` : message ? "Typed message" : "Message not set";
-          const recipientsLabel = recipients.length > 0 ? recipients.join(", ") : "(no recipients)";
+          const recipientsLabel = recipients.length > 0 ? formatRecipientList(recipients) : "(no recipients)";
           actionLabel = `Reminder -> ${recipientsLabel} • ${contentLabel}`;
         } else if (kind === "group_state") {
           const stateValue = String(rule.action && "state" in rule.action ? rule.action.state || "paused" : "paused");
@@ -124,7 +125,7 @@ export function AutomationRuleList({
           const normalizedOperation = (["start", "stop", "restart"].includes(operation)
             ? operation
             : "restart") as "start" | "stop" | "restart";
-          actionLabel = `${ACTOR_OPERATION_COPY[normalizedOperation].label} -> ${targets.length > 0 ? targets.join(", ") : "(no targets)"}`;
+          actionLabel = `${ACTOR_OPERATION_COPY[normalizedOperation].label} -> ${targets.length > 0 ? formatRecipientList(targets) : "(no targets)"}`;
         }
 
         const hasError = Boolean(ruleStatus.last_error);

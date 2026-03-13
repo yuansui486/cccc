@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Actor, ChatMessageData, GroupMeta, LedgerEvent } from "../../types";
 import { classNames } from "../../utils/classNames";
+import { formatRecipientList, getRecipientDisplayLabel } from "../../utils/displayText";
 import * as api from "../../services/api";
 import { useModalA11y } from "../../hooks/useModalA11y";
 
@@ -78,6 +79,15 @@ export function RelayMessageModal({
     const actorIds = (dstActors || []).map((a) => String(a.id || "")).filter((id) => id);
     actorIds.sort();
     return [...base, ...actorIds];
+  }, [dstActors]);
+  const dstDisplayNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const actor of dstActors || []) {
+      const id = String(actor.id || "").trim();
+      if (!id) continue;
+      map.set(id, String(actor.title || id));
+    }
+    return map;
   }, [dstActors]);
 
   const toggleToken = (token: string) => {
@@ -193,15 +203,15 @@ export function RelayMessageModal({
                         )}
                         onClick={() => toggleToken(tok)}
                         disabled={busy}
-                        title={tok}
+                        title={getRecipientDisplayLabel(tok, dstDisplayNameMap)}
                       >
-                        {tok}
+                        {getRecipientDisplayLabel(tok, dstDisplayNameMap)}
                       </button>
                     );
                   })}
                 </div>
                 <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-                  {toTokens.length ? t("relay.selectedTokens", { tokens: toTokens.join(", ") }) : t("relay.selectedBroadcast")}
+                  {toTokens.length ? t("relay.selectedTokens", { tokens: formatRecipientList(toTokens, dstDisplayNameMap) }) : t("relay.selectedBroadcast")}
                 </div>
               </div>
 

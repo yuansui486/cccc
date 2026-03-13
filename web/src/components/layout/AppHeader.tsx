@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Actor, GroupDoc, Theme } from "../../types";
+import { Actor, DoneHubStatus, GroupDoc, Theme } from "../../types";
 import { getGroupStatusUnified } from "../../utils/groupStatus";
 import { classNames } from "../../utils/classNames";
 import { ThemeToggleCompact } from "../ThemeToggle";
@@ -28,6 +28,12 @@ export interface AppHeaderProps {
   actors: Actor[];
   sseStatus: "connected" | "connecting" | "disconnected";
   busy: string;
+  doneHub?: {
+    status: DoneHubStatus;
+    displayName: string;
+    quota: number | null;
+    errorMessage: string;
+  };
   onOpenSidebar: () => void;
   onOpenGroupEdit?: () => void;
   onOpenSearch: () => void;
@@ -36,6 +42,7 @@ export interface AppHeaderProps {
   onStopGroup: () => void;
   onSetGroupState: (state: "active" | "paused" | "idle") => void | Promise<void>;
   onOpenSettings: () => void;
+  onOpenDoneHubAuth: () => void;
   onOpenMobileMenu: () => void;
 }
 
@@ -49,6 +56,7 @@ export function AppHeader({
   selectedGroupRunning,
   actors,
   busy,
+  doneHub,
   onOpenSidebar,
   onOpenGroupEdit,
   onOpenSearch,
@@ -57,10 +65,16 @@ export function AppHeader({
   onStopGroup,
   onSetGroupState,
   onOpenSettings,
+  onOpenDoneHubAuth,
   onOpenMobileMenu,
   sseStatus,
 }: AppHeaderProps) {
   const { t } = useTranslation('layout');
+  const doneHubStatus = doneHub?.status || "idle";
+  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const doneHubQuota = doneHub && doneHub.quota != null
+    ? new Intl.NumberFormat().format(Number(doneHub.quota || 0))
+    : "0";
   return (
     <header
       className="flex-shrink-0 z-20 px-4 h-14 flex items-center justify-between gap-3 glass-header"
@@ -217,6 +231,28 @@ export function AppHeader({
             <div className="hidden md:flex items-center gap-1">
               <ThemeToggleCompact theme={theme} onThemeChange={onThemeChange} isDark={isDark} />
             </div>
+
+            <button
+              onClick={onOpenDoneHubAuth}
+              className={classNames(
+                "hidden md:flex min-w-0 max-w-[180px] items-center gap-2 rounded-xl border px-3 py-2 transition-all glass-btn",
+                doneHubConnected
+                  ? "border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+                  : doneHubStatus === "error"
+                    ? "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                    : "text-[var(--color-text-secondary)]"
+              )}
+              title={doneHubConnected
+                ? t("doneHubBalanceTitle", { value: doneHubQuota })
+                : t(doneHubStatus === "error" ? "doneHubNeedsAttention" : "doneHubConnect")}
+            >
+              <span className="shrink-0 text-[11px] uppercase tracking-[0.22em]">hub</span>
+              <span className="min-w-0 truncate text-sm font-medium">
+                {doneHubConnected
+                  ? t("doneHubBalanceInline", { value: doneHubQuota })
+                  : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect")}
+              </span>
+            </button>
 
             <button
               onClick={onOpenSettings}

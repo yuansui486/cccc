@@ -93,5 +93,6 @@
   "copyEventId": "イベント ID をコピー",
   "openMessageContext": "メッセージコンテキストを開く",
   "closeSearchModal": "検索モーダルを閉じる",
-  "to": "To"
+  "to": "送信先",
+  "toRecipient": "{{label}} に送信"
 }

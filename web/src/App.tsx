@@ -4,6 +4,7 @@ import { TabBar } from "./components/TabBar";
 import { DropOverlay } from "./components/DropOverlay";
 import { AppModals } from "./components/AppModals";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { DoneHubLoginGate } from "./components/DoneHubLoginGate";
 import { AppHeader } from "./components/layout/AppHeader";
 import { GroupSidebar } from "./components/layout/GroupSidebar";
 import { useTheme } from "./hooks/useTheme";
@@ -28,6 +29,7 @@ import {
   useComposerStore,
   useFormStore,
   useObservabilityStore,
+  useDoneHubStore,
 } from "./stores";
 import * as api from "./services/api";
 import type { Actor, ChatMessageData, LedgerEvent } from "./types";
@@ -84,6 +86,11 @@ export default function App() {
   const sseStatus = useUIStore((s) => s.sseStatus);
 
   const { openModal } = useModalStore();
+  const doneHubStatus = useDoneHubStore((state) => state.status);
+  const doneHubSession = useDoneHubStore((state) => state.session);
+  const doneHubErrorMessage = useDoneHubStore((state) => state.errorMessage);
+  const doneHubInitialized = useDoneHubStore((state) => state.initialized);
+  const initializeDoneHub = useDoneHubStore((state) => state.initialize);
 
   const {
     activeGroupId,
@@ -416,6 +423,7 @@ export default function App() {
     parseUrlDeepLink();
 
     refreshGroups();
+    void initializeDoneHub();
     void fetchRuntimes();
     void fetchDirSuggestions();
     void useObservabilityStore.getState().load();
@@ -444,11 +452,25 @@ export default function App() {
     }
   }
 
+  const doneHub = useMemo(() => ({
+    status: doneHubStatus,
+    displayName: doneHubSession?.display_name || doneHubSession?.username || "",
+    quota: doneHubSession?.quota ?? null,
+    usedQuota: doneHubSession?.used_quota ?? null,
+    errorMessage: doneHubErrorMessage,
+  }), [doneHubErrorMessage, doneHubSession?.display_name, doneHubSession?.quota, doneHubSession?.used_quota, doneHubSession?.username, doneHubStatus]);
+
+  const doneHubConnected = doneHubStatus === "connected";
+
   // ============ Actions ============
 
   // ============ Computed for ChatTab ============
 
   // ============ Render ============
+
+  if (!doneHubInitialized || !doneHubConnected) {
+    return <DoneHubLoginGate isDark={isDark} />;
+  }
 
   return (
     <div
@@ -533,6 +555,7 @@ export default function App() {
             actors={actors}
             sseStatus={sseStatus}
             busy={busy}
+            doneHub={doneHub}
             onOpenSidebar={() => setSidebarOpen(true)}
             onOpenGroupEdit={canManageGroups ? () => {
               if (groupDoc) {
@@ -550,6 +573,7 @@ export default function App() {
             onStopGroup={handleStopGroup}
             onSetGroupState={handleSetGroupState}
             onOpenSettings={() => openModal("settings")}
+            onOpenDoneHubAuth={() => openModal("doneHubAuth")}
             onOpenMobileMenu={() => openModal("mobileMenu")}
           />
 

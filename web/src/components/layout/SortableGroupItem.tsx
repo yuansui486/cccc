@@ -2,6 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GroupMeta } from "../../types";
 import { classNames } from "../../utils/classNames";
+import { getGroupStatusLabel } from "../../utils/displayText";
 import { GripIcon } from "../Icons";
 
 interface SortableGroupItemProps {
@@ -18,15 +19,15 @@ type StatusKey = "run" | "paused" | "idle" | "stop";
 
 function getStatusInfo(running: boolean, state?: string): { label: string; key: StatusKey; dotClass: string } {
   if (!running) {
-    return { label: "STOP", key: "stop", dotClass: "bg-gray-400 dark:bg-slate-500" };
+    return { label: getGroupStatusLabel("stop"), key: "stop", dotClass: "bg-gray-400 dark:bg-slate-500" };
   }
   switch (state) {
     case "paused":
-      return { label: "PAUSED", key: "paused", dotClass: "bg-amber-500 dark:bg-amber-400" };
+      return { label: getGroupStatusLabel("paused"), key: "paused", dotClass: "bg-amber-500 dark:bg-amber-400" };
     case "idle":
-      return { label: "IDLE", key: "idle", dotClass: "bg-blue-500 dark:bg-blue-400" };
+      return { label: getGroupStatusLabel("idle"), key: "idle", dotClass: "bg-blue-500 dark:bg-blue-400" };
     default:
-      return { label: "RUN", key: "run", dotClass: "bg-emerald-500 dark:bg-emerald-400 run-indicator-glow" };
+      return { label: getGroupStatusLabel("run"), key: "run", dotClass: "bg-emerald-500 dark:bg-emerald-400 run-indicator-glow" };
   }
 }
 

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Actor } from "../types";
+import { getRecipientDisplayLabel } from "../utils/displayText";
 
 /**
  * Creates a lookup map from actor ID to display name (title or id).
@@ -26,8 +27,5 @@ export function getRecipientDisplayName(
   token: string,
   displayNameMap: Map<string, string>
 ): string {
-  if (token.startsWith("@") || token === "user") {
-    return token;
-  }
-  return displayNameMap.get(token) || token;
+  return getRecipientDisplayLabel(token, displayNameMap);
 }

@@ -1,20 +1,20 @@
 {
-  "name": "CCCC",
-  "short_name": "CCCC",
+  "name": "一号同事",
+  "short_name": "一号同事",
   "display": "standalone",
   "theme_color": "#0f172a",
   "background_color": "#0f172a",
   "start_url": "/ui/",
   "icons": [
     {
-      "src": "/ui/logo.svg",
+      "src": "/ui/onecolleague-logo.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/ui/logo.png",
-      "sizes": "512x512",
+      "src": "/ui/onecolleague-logo.png",
+      "sizes": "1490x1370",
       "type": "image/png",
       "purpose": "any maskable"
     }

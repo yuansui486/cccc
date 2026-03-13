@@ -392,6 +392,7 @@ def create_app() -> FastAPI:
     from .routes.groups import register_group_routes
     from .routes.messaging import create_routers as create_messaging_routers
     from .routes.actors import create_routers as create_actor_routers
+    from .routes.done_hub import create_routers as create_done_hub_routers
     from .routes.im import register_im_routes
     from .routes.access_tokens import create_routers as create_access_token_routers
 
@@ -415,6 +416,8 @@ def create_app() -> FastAPI:
     for router in create_messaging_routers(route_ctx):
         app.include_router(router)
     for router in create_actor_routers(route_ctx):
+        app.include_router(router)
+    for router in create_done_hub_routers(route_ctx):
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)
     for router in create_access_token_routers(route_ctx):

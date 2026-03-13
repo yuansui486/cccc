@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { GroupMeta } from "../../types";
 import { classNames } from "../../utils/classNames";
+import { getAppBrandName, getAppLogoPath } from "../../utils/displayText";
 import { CloseIcon, FolderIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "../Icons";
 import { SortableGroupItem } from "./SortableGroupItem";
 
@@ -52,6 +53,8 @@ export function GroupSidebar({
   onReorder,
 }: GroupSidebarProps) {
   const { t } = useTranslation('layout');
+  const appBrandName = getAppBrandName();
+  const appLogoPath = getAppLogoPath();
 
   // Memoize sortable item IDs to avoid unnecessary re-renders
   const sortableIds = useMemo(
@@ -111,10 +114,10 @@ export function GroupSidebar({
                 "w-11 h-11 rounded-xl flex items-center justify-center glass-btn",
                 "text-cyan-600 dark:text-cyan-400"
               )}>
-                <img src="/ui/logo.svg" alt="CCCC Logo" className="w-6 h-6 object-contain" />
+                <img src={appLogoPath} alt={`${appBrandName} Logo`} className="w-6 h-6 object-contain" />
               </div>
               {!isCollapsed && (
-                <span className="text-lg font-bold tracking-tight text-[var(--color-text-primary)]">CCCC</span>
+                <span className="text-lg font-bold tracking-tight text-[var(--color-text-primary)]">{appBrandName}</span>
               )}
             </div>
 

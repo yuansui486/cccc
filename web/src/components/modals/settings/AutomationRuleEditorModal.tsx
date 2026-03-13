@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AutomationRule, AutomationRuleStatus } from "../../../types";
+import { getRecipientDisplayLabel } from "../../../utils/displayText";
 import {
   ACTOR_OPERATION_COPY,
   Chip,
@@ -468,7 +469,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   {recipients.map((token) => (
                     <Chip
                       key={token}
-                      label={token}
+                      label={getRecipientDisplayLabel(token)}
                       isDark={isDark}
                       onRemove={() => onRulePatch(ruleId, { to: recipients.filter((x) => x !== token) })}
                     />
@@ -613,7 +614,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   {actorTargets.map((token) => (
                     <Chip
                       key={token}
-                      label={token}
+                      label={getRecipientDisplayLabel(token)}
                       isDark={isDark}
                       onRemove={() =>
                         onRulePatch(ruleId, {

@@ -449,6 +449,32 @@ export type WebAccessSession = {
   can_access_global_settings?: boolean;
 };
 
+export type DoneHubStatus =
+  | "idle"
+  | "authenticating"
+  | "connected"
+  | "refreshing"
+  | "error";
+
+export type DoneHubSession = {
+  base_url: string;
+  access_token: string;
+  username: string;
+  display_name: string;
+  group: string;
+  quota: number;
+  used_quota: number;
+  role: number;
+  status: number;
+};
+
+export type DoneHubSavedLogin = {
+  base_url: string;
+  username: string;
+  password: string;
+  remember_password: boolean;
+};
+
 export type GroupSpaceProviderState = {
   provider: "notebooklm" | string;
   enabled: boolean;

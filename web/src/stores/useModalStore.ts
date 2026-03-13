@@ -19,6 +19,7 @@ interface ModalState {
     groupEdit: boolean;
     inbox: boolean;
     mobileMenu: boolean;
+    doneHubAuth: boolean;
   };
   recipientsEventId: string | null;
   relayEventId: string | null;
@@ -44,6 +45,7 @@ export const useModalStore = create<ModalState>((set) => ({
     groupEdit: false,
     inbox: false,
     mobileMenu: false,
+    doneHubAuth: false,
   },
   recipientsEventId: null,
   relayEventId: null,
