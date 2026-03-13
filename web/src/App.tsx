@@ -468,10 +468,11 @@ export default function App() {
   const doneHub = useMemo(() => ({
     status: doneHubStatus,
     displayName: doneHubSession?.display_name || doneHubSession?.username || "",
+    group: doneHubSession?.group || "",
     quota: doneHubSession?.quota ?? null,
     usedQuota: doneHubSession?.used_quota ?? null,
     errorMessage: doneHubErrorMessage,
-  }), [doneHubErrorMessage, doneHubSession?.display_name, doneHubSession?.quota, doneHubSession?.used_quota, doneHubSession?.username, doneHubStatus]);
+  }), [doneHubErrorMessage, doneHubSession?.display_name, doneHubSession?.group, doneHubSession?.quota, doneHubSession?.used_quota, doneHubSession?.username, doneHubStatus]);
 
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
 

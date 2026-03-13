@@ -32,6 +32,7 @@ export interface AppHeaderProps {
   doneHub?: {
     status: DoneHubStatus;
     displayName: string;
+    group?: string;
     quota: number | null;
     errorMessage: string;
   };
@@ -73,6 +74,7 @@ export function AppHeader({
   const { t } = useTranslation('layout');
   const doneHubStatus = doneHub?.status || "idle";
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
   const doneHubQuota = doneHub && doneHub.quota != null
     ? formatDoneHubQuota(doneHub.quota)
     : formatDoneHubQuota(0);
@@ -247,6 +249,11 @@ export function AppHeader({
                 ? t("doneHubBalanceTitle", { value: doneHubQuota })
                 : t(doneHubStatus === "error" ? "doneHubNeedsAttention" : "doneHubConnect")}
             >
+              {doneHubIsPro ? (
+                <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-700 shadow-[0_0_0_1px_rgba(245,158,11,0.18)] dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
+                  PRO
+                </span>
+              ) : null}
               <span className="min-w-0 truncate text-sm font-medium">
                 {doneHubConnected
                   ? t("doneHubBalanceInline", { value: doneHubQuota })

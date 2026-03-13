@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from typing import Any, Dict, Tuple
 from urllib.parse import urlsplit
 
@@ -9,6 +12,14 @@ from fastapi import APIRouter, HTTPException
 from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, RouteContext
 
 _DONE_HUB_TIMEOUT = 15.0
+_TOKEN_PAGE_SIZE = 100
+_CODEX_BASE_URL = "https://peer.shierkeji.com/v1"
+_GEMINI_BASE_URL = "https://peer.shierkeji.com/gemini"
+_CLIENT_CONFIG_ERROR_MESSAGE = "登录成功，但本机客户端配置写入失败，请稍后重试或联系管理员。"
+
+
+class _DoneHubClientConfigError(Exception):
+    pass
 
 
 def _normalize_base_url(raw: str) -> str:
@@ -82,6 +93,262 @@ def _normalize_profile(base_url: str, payload: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+def _auth_headers(access_token: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {access_token}"}
+
+
+def _extract_token_rows(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    data = payload.get("data")
+    record = data if isinstance(data, dict) else {}
+    rows = record.get("data")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _find_named_token(rows: list[Dict[str, Any]], name: str) -> Dict[str, Any] | None:
+    target = str(name or "").strip()
+    if not target:
+        return None
+    matches: list[Dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("name") or "").strip() == target:
+            matches.append(row)
+    if not matches:
+        return None
+    matches.sort(key=lambda row: int(row.get("id") or 0), reverse=True)
+    return matches[0]
+
+
+def _extract_token_key(row: Dict[str, Any] | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("key") or "").strip()
+
+
+async def _fetch_token_rows(client: httpx.AsyncClient, *, base_url: str, access_token: str) -> list[Dict[str, Any]]:
+    out: list[Dict[str, Any]] = []
+    page = 1
+    total_count: int | None = None
+    while True:
+        resp = await client.get(
+            f"{base_url}/api/token/",
+            params={"page": page, "size": _TOKEN_PAGE_SIZE, "keyword": "", "order": "-id"},
+            headers=_auth_headers(access_token),
+        )
+        ok, payload, error = _parse_json_response(resp)
+        if not ok or payload is None:
+            raise _DoneHubClientConfigError(error or _CLIENT_CONFIG_ERROR_MESSAGE)
+        rows = _extract_token_rows(payload)
+        out.extend(rows)
+        data = payload.get("data")
+        record = data if isinstance(data, dict) else {}
+        if total_count is None:
+            total_count = int(record.get("total_count") or 0)
+        if not rows or len(rows) < _TOKEN_PAGE_SIZE:
+            break
+        if total_count > 0 and len(out) >= total_count:
+            break
+        page += 1
+    return out
+
+
+async def _create_named_token(
+    client: httpx.AsyncClient,
+    *,
+    base_url: str,
+    access_token: str,
+    name: str,
+    quota: int,
+) -> None:
+    remain_quota = max(int(quota or 0), 0)
+    resp = await client.post(
+        f"{base_url}/api/token/",
+        json={
+            "name": name,
+            "expired_time": -1,
+            "remain_quota": remain_quota,
+            "unlimited_quota": True,
+        },
+        headers=_auth_headers(access_token),
+    )
+    ok, _payload, error = _parse_json_response(resp)
+    if not ok:
+        raise _DoneHubClientConfigError(error or _CLIENT_CONFIG_ERROR_MESSAGE)
+
+
+async def _ensure_named_token(
+    client: httpx.AsyncClient,
+    *,
+    base_url: str,
+    access_token: str,
+    name: str,
+    quota: int,
+) -> str:
+    rows = await _fetch_token_rows(client, base_url=base_url, access_token=access_token)
+    row = _find_named_token(rows, name)
+    key = _extract_token_key(row)
+    if key:
+        return key
+    await _create_named_token(client, base_url=base_url, access_token=access_token, name=name, quota=quota)
+    rows = await _fetch_token_rows(client, base_url=base_url, access_token=access_token)
+    row = _find_named_token(rows, name)
+    key = _extract_token_key(row)
+    if key:
+        return key
+    raise _DoneHubClientConfigError(f"missing {name} token key")
+
+
+async def _fetch_available_models(client: httpx.AsyncClient, *, base_url: str) -> Dict[str, Any]:
+    resp = await client.get(f"{base_url}/api/available_model")
+    ok, payload, error = _parse_json_response(resp)
+    if not ok or payload is None:
+        raise _DoneHubClientConfigError(error or _CLIENT_CONFIG_ERROR_MESSAGE)
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise _DoneHubClientConfigError("available_model response missing data")
+    return data
+
+
+def _pick_first_model_name(models: Dict[str, Any], prefix: str) -> str:
+    wanted = str(prefix or "").strip().lower()
+    for name in models.keys():
+        candidate = str(name or "").strip()
+        if candidate.lower().startswith(wanted):
+            return candidate
+    raise _DoneHubClientConfigError(f"missing model with prefix {prefix}")
+
+
+def _codex_auth_content(raw_key: str) -> str:
+    api_key = str(raw_key or "").strip()
+    if not api_key:
+        raise _DoneHubClientConfigError("missing codex token key")
+    if not api_key.startswith("sk-"):
+        api_key = f"sk-{api_key}"
+    return json.dumps({"OPENAI_API_KEY": api_key}, ensure_ascii=False, indent=2) + "\n"
+
+
+def _codex_config_prefix(model_name: str) -> str:
+    model = str(model_name or "").strip()
+    if not model:
+        raise _DoneHubClientConfigError("missing gpt model name")
+    return (
+        f'model_provider = "custom"\n'
+        f'model = "{model}"\n'
+        'model_reasoning_effort = "high"\n'
+        "disable_response_storage = true\n"
+        "\n"
+        "[model_providers.custom]\n"
+        'name = "custom"\n'
+        'wire_api = "responses"\n'
+        "requires_openai_auth = true\n"
+        f'base_url = "{_CODEX_BASE_URL}"\n'
+    )
+
+
+def _merge_codex_config(existing: str, model_name: str) -> str:
+    prefix = _codex_config_prefix(model_name)
+    text = str(existing or "")
+    match = re.search(r"(?m)^\[projects\b", text)
+    if not match:
+        return prefix
+    suffix = text[match.start():]
+    return f"{prefix}\n{suffix}"
+
+
+def _gemini_env_content(raw_key: str, model_name: str) -> str:
+    api_key = str(raw_key or "").strip()
+    model = str(model_name or "").strip()
+    if not api_key:
+        raise _DoneHubClientConfigError("missing gemini token key")
+    if not model:
+        raise _DoneHubClientConfigError("missing gemini model name")
+    return (
+        f"GOOGLE_GEMINI_BASE_URL={_GEMINI_BASE_URL}\n"
+        f"GEMINI_API_KEY={api_key}\n"
+        f"GEMINI_MODEL={model}\n"
+    )
+
+
+def _gemini_settings_content() -> str:
+    return (
+        "{\n"
+        '  "ide": {\n'
+        '    "enabled": true\n'
+        "  },\n"
+        '  "security": {\n'
+        '    "auth": {\n'
+        '      "selectedType": "gemini-api-key"\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(content, encoding="utf-8", newline="\n")
+    tmp_path.replace(path)
+
+
+def _sync_local_client_files(*, codex_key: str, codex_model: str, gemini_key: str, gemini_model: str) -> None:
+    home_dir = Path.home()
+    codex_dir = home_dir / ".codex"
+    gemini_dir = home_dir / ".gemini"
+    codex_auth_path = codex_dir / "auth.json"
+    codex_config_path = codex_dir / "config.toml"
+    gemini_env_path = gemini_dir / ".env"
+    gemini_settings_path = gemini_dir / "settings.json"
+
+    existing_codex_config = ""
+    if codex_config_path.exists():
+        existing_codex_config = codex_config_path.read_text(encoding="utf-8")
+
+    _write_text_atomic(codex_auth_path, _codex_auth_content(codex_key))
+    _write_text_atomic(codex_config_path, _merge_codex_config(existing_codex_config, codex_model))
+    _write_text_atomic(gemini_env_path, _gemini_env_content(gemini_key, gemini_model))
+    _write_text_atomic(gemini_settings_path, _gemini_settings_content())
+
+
+async def _configure_local_clients(client: httpx.AsyncClient, *, base_url: str, session: Dict[str, Any]) -> None:
+    group = str(session.get("group") or "").strip().lower()
+    if group == "pro":
+        return
+
+    access_token = str(session.get("access_token") or "").strip()
+    if not access_token:
+        raise _DoneHubClientConfigError("missing access token")
+    quota = int(session.get("quota") or 0)
+
+    codex_key = await _ensure_named_token(
+        client,
+        base_url=base_url,
+        access_token=access_token,
+        name="codex",
+        quota=quota,
+    )
+    gemini_key = await _ensure_named_token(
+        client,
+        base_url=base_url,
+        access_token=access_token,
+        name="gemini",
+        quota=quota,
+    )
+    models = await _fetch_available_models(client, base_url=base_url)
+    codex_model = _pick_first_model_name(models, "gpt")
+    gemini_model = _pick_first_model_name(models, "gemini")
+    try:
+        _sync_local_client_files(
+            codex_key=codex_key,
+            codex_model=codex_model,
+            gemini_key=gemini_key,
+            gemini_model=gemini_model,
+        )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        raise _DoneHubClientConfigError(_CLIENT_CONFIG_ERROR_MESSAGE) from None
+
+
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     router = APIRouter(prefix="/api/v1/done_hub")
 
@@ -115,10 +382,20 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 self_ok, self_payload, self_error = _parse_json_response(self_resp)
                 if not self_ok or self_payload is None:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
+                session = _normalize_profile(base_url, self_payload)
+                await _configure_local_clients(client, base_url=base_url, session=session)
+        except _DoneHubClientConfigError:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "done_hub_client_config_failed",
+                    "message": _CLIENT_CONFIG_ERROR_MESSAGE,
+                },
+            }
         except httpx.HTTPError as exc:
             return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
 
-        return {"ok": True, "result": {"session": _normalize_profile(base_url, self_payload)}}
+        return {"ok": True, "result": {"session": session}}
 
     @router.post("/self")
     async def done_hub_self(req: DoneHubSelfRequest) -> Dict[str, Any]:

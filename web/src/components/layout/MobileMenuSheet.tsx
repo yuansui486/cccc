@@ -29,6 +29,7 @@ export interface MobileMenuSheetProps {
   doneHub?: {
     status: DoneHubStatus;
     displayName: string;
+    group?: string;
     quota: number | null;
     errorMessage: string;
   };
@@ -68,6 +69,7 @@ export function MobileMenuSheet({
   const { t } = useTranslation('layout');
   const doneHubStatus = doneHub?.status || "idle";
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
   const doneHubQuota = doneHub && doneHub.quota != null
     ? formatDoneHubQuota(doneHub.quota)
     : formatDoneHubQuota(0);
@@ -193,10 +195,17 @@ export function MobileMenuSheet({
             }}
           >
             <span>{t("doneHubEntry")}</span>
-            <span className="text-xs font-semibold">
-              {doneHubConnected
-                ? t("doneHubBalanceInline", { value: doneHubQuota })
-                : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect")}
+            <span className="flex items-center gap-2">
+              {doneHubIsPro ? (
+                <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-700 shadow-[0_0_0_1px_rgba(245,158,11,0.18)] dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
+                  PRO
+                </span>
+              ) : null}
+              <span className="text-xs font-semibold">
+                {doneHubConnected
+                  ? t("doneHubBalanceInline", { value: doneHubQuota })
+                  : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect")}
+              </span>
             </span>
           </button>
 

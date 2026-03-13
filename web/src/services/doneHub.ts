@@ -125,5 +125,11 @@ export function sanitizeDoneHubErrorMessage(message: string | null | undefined):
   const raw = String(message || "").trim();
   if (!raw) return "登录失败，请稍后重试。";
   if (/missing session/i.test(raw)) return "登录信息已失效，请重新登录。";
+  if (
+    /客户端配置写入失败/.test(raw)
+    || /auth\.json|config\.toml|settings\.json|\.gemini|\.codex|userprofile|path\.home/i.test(raw)
+  ) {
+    return "登录成功，但本机客户端配置写入失败，请稍后重试或联系管理员。";
+  }
   return raw.replace(/done-hub/gi, "一号同事");
 }
