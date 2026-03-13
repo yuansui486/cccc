@@ -1,17 +1,19 @@
 import { create } from "zustand";
 import type { DoneHubSavedLogin, DoneHubSession, DoneHubStatus } from "../types";
 import {
+  DONE_HUB_BASE_URL,
   extractDoneHubSession,
   loginDoneHub,
   normalizeDoneHubBaseUrl,
   refreshDoneHubSession,
+  sanitizeDoneHubErrorMessage,
 } from "../services/doneHub";
 
 const DONE_HUB_STORAGE_KEY = "cccc_done_hub_session";
 const DONE_HUB_LOGIN_KEY = "cccc_done_hub_login";
 
 const EMPTY_SAVED_LOGIN: DoneHubSavedLogin = {
-  base_url: "",
+  base_url: DONE_HUB_BASE_URL,
   username: "",
   password: "",
   remember_password: false,
@@ -27,7 +29,6 @@ type DoneHubState = {
   initialized: boolean;
   initialize: () => Promise<void>;
   connect: (
-    baseUrl: string,
     username: string,
     password: string,
     rememberPassword?: boolean,
@@ -46,7 +47,7 @@ function loadStoredSession(): DoneHubSession | null {
     if (!parsed || typeof parsed !== "object") return null;
     const record = parsed as Record<string, unknown>;
     const accessToken = String(record.access_token || "").trim();
-    const baseUrl = String(record.base_url || "").trim();
+    const baseUrl = normalizeDoneHubBaseUrl(String(record.base_url || "")) || DONE_HUB_BASE_URL;
     if (!accessToken || !baseUrl) return null;
     return {
       base_url: baseUrl,
@@ -72,7 +73,7 @@ function loadSavedLogin(): DoneHubSavedLogin {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return EMPTY_SAVED_LOGIN;
     const record = parsed as Record<string, unknown>;
-    const normalizedBaseUrl = normalizeDoneHubBaseUrl(String(record.base_url || ""));
+    const normalizedBaseUrl = normalizeDoneHubBaseUrl(String(record.base_url || "")) || DONE_HUB_BASE_URL;
     const username = String(record.username || "").trim();
     const rememberPassword = Boolean(record.remember_password);
     const password = rememberPassword ? String(record.password || "") : "";
@@ -113,7 +114,7 @@ function persistSavedLogin(savedLogin: DoneHubSavedLogin): void {
     remember_password: rememberPassword,
   };
   try {
-    if (!nextValue.base_url && !nextValue.username && !nextValue.password && !nextValue.remember_password) {
+    if (!nextValue.username && !nextValue.password && !nextValue.remember_password) {
       localStorage.removeItem(DONE_HUB_LOGIN_KEY);
       return;
     }
@@ -157,7 +158,6 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
 
       if (
         savedLogin.remember_password &&
-        savedLogin.base_url &&
         savedLogin.username &&
         savedLogin.password
       ) {
@@ -169,7 +169,6 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
           errorMessage: "",
         }));
         const connected = await get().connect(
-          savedLogin.base_url,
           savedLogin.username,
           savedLogin.password,
           true,
@@ -190,8 +189,8 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
     return initializePromise;
   },
 
-  connect: async (baseUrl: string, username: string, password: string, rememberPassword = false) => {
-    const normalizedBaseUrl = normalizeDoneHubBaseUrl(baseUrl);
+  connect: async (username: string, password: string, rememberPassword = false) => {
+    const normalizedBaseUrl = normalizeDoneHubBaseUrl(DONE_HUB_BASE_URL);
     const savedLogin: DoneHubSavedLogin = {
       base_url: normalizedBaseUrl,
       username: String(username || "").trim(),
@@ -206,7 +205,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       }));
     }
     set({ status: "authenticating", errorMessage: "" });
-    const resp = await loginDoneHub(baseUrl, username, password);
+    const resp = await loginDoneHub(username, password);
     const session = extractDoneHubSession(resp);
     if (!resp.ok || !session) {
       persistSession(null);
@@ -214,7 +213,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
         status: "error",
         session: null,
         initialized: true,
-        errorMessage: resp.ok ? "done-hub response missing session" : resp.error.message,
+        errorMessage: sanitizeDoneHubErrorMessage(resp.ok ? "missing session" : resp.error.message),
       });
       return false;
     }
@@ -240,7 +239,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       status: "refreshing",
       errorMessage: "",
     }));
-    const resp = await refreshDoneHubSession(session.base_url, session.access_token);
+    const resp = await refreshDoneHubSession(session.access_token);
     const nextSession = extractDoneHubSession(resp);
     if (!resp.ok || !nextSession) {
       persistSession(null);
@@ -249,7 +248,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
         status: "error",
         session: null,
         initialized: true,
-        errorMessage: resp.ok ? "done-hub response missing session" : resp.error.message,
+        errorMessage: sanitizeDoneHubErrorMessage(resp.ok ? "missing session" : resp.error.message),
       }));
       return false;
     }

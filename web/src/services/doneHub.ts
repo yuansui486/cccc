@@ -8,7 +8,8 @@ type DoneHubSessionResult = {
   session?: DoneHubSession | null;
 };
 
-const DONE_HUB_BASE_URL_ERROR = "Base URL must be an absolute http(s) URL.";
+export const DONE_HUB_BASE_URL = "https://peer.shierkeji.com";
+const DONE_HUB_BASE_URL_ERROR = "Login service URL is invalid.";
 
 function makeError<T>(code: string, message: string): DoneHubApiResponse<T> {
   return { ok: false, error: { code, message } };
@@ -28,6 +29,10 @@ export function normalizeDoneHubBaseUrl(raw: string): string {
   } catch {
     return "";
   }
+}
+
+function getFixedDoneHubBaseUrl(): string {
+  return normalizeDoneHubBaseUrl(DONE_HUB_BASE_URL);
 }
 
 function normalizeSession(value: unknown): DoneHubSession | null {
@@ -77,11 +82,10 @@ async function request<T>(path: string, body: Record<string, unknown>): Promise<
 }
 
 export async function loginDoneHub(
-  baseUrl: string,
   username: string,
   password: string,
 ): Promise<DoneHubApiResponse<DoneHubSessionResult>> {
-  const normalizedBaseUrl = normalizeDoneHubBaseUrl(baseUrl);
+  const normalizedBaseUrl = getFixedDoneHubBaseUrl();
   if (!normalizedBaseUrl) return makeError("invalid_base_url", DONE_HUB_BASE_URL_ERROR);
   return request<DoneHubSessionResult>("/api/v1/done_hub/login", {
     base_url: normalizedBaseUrl,
@@ -91,10 +95,9 @@ export async function loginDoneHub(
 }
 
 export async function refreshDoneHubSession(
-  baseUrl: string,
   accessToken: string,
 ): Promise<DoneHubApiResponse<DoneHubSessionResult>> {
-  const normalizedBaseUrl = normalizeDoneHubBaseUrl(baseUrl);
+  const normalizedBaseUrl = getFixedDoneHubBaseUrl();
   if (!normalizedBaseUrl) return makeError("invalid_base_url", DONE_HUB_BASE_URL_ERROR);
   return request<DoneHubSessionResult>("/api/v1/done_hub/self", {
     base_url: normalizedBaseUrl,
@@ -109,6 +112,18 @@ export function extractDoneHubSession(resp: DoneHubApiResponse<DoneHubSessionRes
 
 export function formatDoneHubQuota(value: number | null | undefined): string {
   const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) return "0";
-  return new Intl.NumberFormat().format(amount);
+  if (!Number.isFinite(amount)) return "0元";
+  const rmb = amount / 500000;
+  const formatted = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  }).format(rmb);
+  return `${formatted}元`;
+}
+
+export function sanitizeDoneHubErrorMessage(message: string | null | undefined): string {
+  const raw = String(message || "").trim();
+  if (!raw) return "登录失败，请稍后重试。";
+  if (/missing session/i.test(raw)) return "登录信息已失效，请重新登录。";
+  return raw.replace(/done-hub/gi, "一号同事");
 }

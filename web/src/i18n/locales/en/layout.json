@@ -88,10 +88,10 @@
   "recoveryRemoteTitle": "If you are on a remote URL",
   "recoveryRemoteBody": "Use a local terminal on the machine running 一号同事, then back up or remove {{path}} (or CCCC_HOME/access_tokens.yaml if customized). After that, reload this page and create a new Admin Access Token.",
   "recoverySecurityNote": "This is a local administrator recovery path. It does not provide any in-page reset action.",
-  "doneHubConnect": "Connect",
-  "doneHubEntry": "done-hub",
+  "doneHubConnect": "Sign in",
+  "doneHubEntry": "Account",
   "doneHubBalanceInline": "Balance {{value}}",
-  "doneHubBalanceTitle": "done-hub balance {{value}}",
-  "doneHubNeedsAttention": "done-hub needs attention",
-  "doneHubErrorShort": "Needs attention"
+  "doneHubBalanceTitle": "Account balance {{value}}",
+  "doneHubNeedsAttention": "Sign in again",
+  "doneHubErrorShort": "Sign in"
 }

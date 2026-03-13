@@ -4,6 +4,7 @@ import { getGroupStatusUnified } from "../../utils/groupStatus";
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { LanguageSwitcher } from "../LanguageSwitcher";
+import { formatDoneHubQuota } from "../../services/doneHub";
 import {
   SearchIcon,
   ClipboardIcon,
@@ -68,8 +69,8 @@ export function MobileMenuSheet({
   const doneHubStatus = doneHub?.status || "idle";
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
   const doneHubQuota = doneHub && doneHub.quota != null
-    ? new Intl.NumberFormat().format(Number(doneHub.quota || 0))
-    : "0";
+    ? formatDoneHubQuota(doneHub.quota)
+    : formatDoneHubQuota(0);
   if (!isOpen) return null;
 
   return (

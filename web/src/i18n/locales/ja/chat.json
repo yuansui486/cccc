@@ -1,6 +1,7 @@
 {
   "nextSteps": "次のステップ",
   "noMessagesYet": "まだメッセージはありません。",
+  "noMoreMessages": "これ以上メッセージはありません。",
   "viewingMessage": "メッセージを表示中",
   "loadingContext": "コンテキストを読み込み中…",
   "contextTruncated": "コンテキストが省略されています。",

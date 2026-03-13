@@ -38,7 +38,7 @@
   "appName": "一号同事",
   "userLabel": "User",
   "recipientAll": "@Everyone",
-  "recipientForeman": "@Manager",
+  "recipientForeman": "@Lead",
   "recipientPeers": "@Collaborators",
   "groupStatusRun": "Running",
   "groupStatusPaused": "Paused",

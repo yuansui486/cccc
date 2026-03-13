@@ -4,6 +4,7 @@ import { getGroupStatusUnified } from "../../utils/groupStatus";
 import { classNames } from "../../utils/classNames";
 import { ThemeToggleCompact } from "../ThemeToggle";
 import { LanguageSwitcher } from "../LanguageSwitcher";
+import { formatDoneHubQuota } from "../../services/doneHub";
 import {
   ClipboardIcon,
   SearchIcon,
@@ -73,8 +74,8 @@ export function AppHeader({
   const doneHubStatus = doneHub?.status || "idle";
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
   const doneHubQuota = doneHub && doneHub.quota != null
-    ? new Intl.NumberFormat().format(Number(doneHub.quota || 0))
-    : "0";
+    ? formatDoneHubQuota(doneHub.quota)
+    : formatDoneHubQuota(0);
   return (
     <header
       className="flex-shrink-0 z-20 px-4 h-14 flex items-center justify-between gap-3 glass-header"
@@ -246,7 +247,6 @@ export function AppHeader({
                 ? t("doneHubBalanceTitle", { value: doneHubQuota })
                 : t(doneHubStatus === "error" ? "doneHubNeedsAttention" : "doneHubConnect")}
             >
-              <span className="shrink-0 text-[11px] uppercase tracking-[0.22em]">hub</span>
               <span className="min-w-0 truncate text-sm font-medium">
                 {doneHubConnected
                   ? t("doneHubBalanceInline", { value: doneHubQuota })

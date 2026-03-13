@@ -1,6 +1,7 @@
 {
   "nextSteps": "下一步",
   "noMessagesYet": "还没有消息。",
+  "noMoreMessages": "没有更多消息了。",
   "viewingMessage": "正在查看消息",
   "loadingContext": "加载上下文中…",
   "contextTruncated": "上下文已截断。",
@@ -39,7 +40,7 @@
   "attachFile": "添加附件",
   "removeAttachment": "移除附件 {{name}}",
   "untitledGroup": "未命名工作组",
-  "teamReady": "团队已就绪，和你的智能体打个招呼吧。",
+  "teamReady": "和你的智能体团队开始对话吧。",
   "attachProjectFolder": "关联项目文件夹",
   "addAgent": "添加智能体",
   "addForemanFirst": "先添加一个领班，再添加协作者。",

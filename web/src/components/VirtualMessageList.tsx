@@ -1,6 +1,7 @@
 import { memo, useRef, useEffect, useCallback, useMemo } from "react";
 import type { MutableRefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useTranslation } from "react-i18next";
 import { LedgerEvent, Actor, AgentState } from "../types";
 import { MessageBubble } from "./MessageBubble";
 import { useActorDisplayNameMap } from "../hooks/useActorDisplayName";
@@ -68,6 +69,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   onLoadMore,
   resetKey,
 }: VirtualMessageListInnerProps) {
+  const { t } = useTranslation(["chat", "common"]);
   const parentRef = useRef<HTMLDivElement | null>(null);
 
   const agentStateById = useMemo(() => {
@@ -536,17 +538,17 @@ const VirtualMessageListInner = function VirtualMessageListInner({
                 }`}
             >
               <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-              <span className="text-xs">Loading...</span>
+              <span className="text-xs">{t("common:loading")}</span>
             </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center pb-20 opacity-50">
             <div className="text-4xl mb-4 grayscale">💬</div>
             <p className={`text-sm font-medium ${isDark ? "text-slate-400" : "text-gray-500"}`}>
-              No messages yet
+              {t("chat:noMessagesYet")}
             </p>
             <p className={`text-xs mt-1 ${isDark ? "text-slate-600" : "text-gray-400"}`}>
-              Start the conversation with your AI team.
+              {t("chat:teamReady")}
             </p>
           </div>
         )
@@ -558,7 +560,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full shadow-md ${isDark ? "bg-slate-800 text-slate-300" : "bg-white text-gray-600"
                 }`}>
                 <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                <span className="text-xs">Loading...</span>
+                <span className="text-xs">{t("common:loading")}</span>
               </div>
             </div>
           )}
@@ -566,7 +568,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
           {/* No more history indicator */}
           {!hasMoreHistory && !isLoadingHistory && (
             <div className={`text-center py-4 text-sm ${isDark ? "text-slate-500" : "text-gray-400"}`}>
-              No more messages
+              {t("chat:noMoreMessages")}
             </div>
           )}
 

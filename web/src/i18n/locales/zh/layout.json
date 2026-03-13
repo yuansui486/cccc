@@ -88,10 +88,10 @@
   "recoveryRemoteTitle": "如果你当前是远程访问",
   "recoveryRemoteBody": "请到运行一号同事的那台机器上使用本地终端，备份或移除 {{path}}（若自定义了 CCCC_HOME，则处理 CCCC_HOME/access_tokens.yaml）。之后刷新当前页面，并重新创建一个管理员访问令牌。",
   "recoverySecurityNote": "这是本机管理员恢复路径，不提供任何网页内的一键重置能力。",
-  "doneHubConnect": "连接",
-  "doneHubEntry": "done-hub",
+  "doneHubConnect": "登录",
+  "doneHubEntry": "账户",
   "doneHubBalanceInline": "余额 {{value}}",
-  "doneHubBalanceTitle": "done-hub 余额 {{value}}",
-  "doneHubNeedsAttention": "done-hub 需要处理",
-  "doneHubErrorShort": "需处理"
+  "doneHubBalanceTitle": "账户余额 {{value}}",
+  "doneHubNeedsAttention": "请重新登录",
+  "doneHubErrorShort": "需登录"
 }

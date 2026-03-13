@@ -23,7 +23,7 @@ export function getRecipientTokenLabel(token: string): string {
     case "@all":
       return tr("common:recipientAll", "@所有人");
     case "@foreman":
-      return tr("common:recipientForeman", "@管理者");
+      return tr("common:recipientForeman", "@领班");
     case "@peers":
       return tr("common:recipientPeers", "@协作者");
     case "user":

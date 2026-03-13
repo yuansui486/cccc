@@ -88,10 +88,10 @@
   "recoveryRemoteTitle": "リモート URL から見ている場合",
   "recoveryRemoteBody": "一号同事を実行しているマシン上でローカル端末を使い、{{path}}（カスタム CCCC_HOME の場合は CCCC_HOME/access_tokens.yaml）を退避または削除してください。その後このページを再読み込みし、新しい Admin Access Token を作成します。",
   "recoverySecurityNote": "これはローカル管理者向けの復旧手順であり、ページ内リセット機能は提供しません。",
-  "doneHubConnect": "接続",
-  "doneHubEntry": "done-hub",
+  "doneHubConnect": "ログイン",
+  "doneHubEntry": "アカウント",
   "doneHubBalanceInline": "残高 {{value}}",
-  "doneHubBalanceTitle": "done-hub 残高 {{value}}",
-  "doneHubNeedsAttention": "done-hub の確認が必要です",
-  "doneHubErrorShort": "要確認"
+  "doneHubBalanceTitle": "アカウント残高 {{value}}",
+  "doneHubNeedsAttention": "再ログインが必要です",
+  "doneHubErrorShort": "要ログイン"
 }

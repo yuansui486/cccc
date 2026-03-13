@@ -1,6 +1,7 @@
 {
   "nextSteps": "Next steps",
   "noMessagesYet": "No messages yet.",
+  "noMoreMessages": "No more messages.",
   "viewingMessage": "Viewing a message",
   "loadingContext": "Loading context…",
   "contextTruncated": "Context is truncated.",

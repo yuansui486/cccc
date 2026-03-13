@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModalFrame } from "./ModalFrame";
 import { useModalA11y } from "../../hooks/useModalA11y";
-import { formatDoneHubQuota, normalizeDoneHubBaseUrl } from "../../services/doneHub";
+import { formatDoneHubQuota } from "../../services/doneHub";
 import { useDoneHubStore } from "../../stores";
 
 interface DoneHubAuthModalProps {
@@ -16,29 +16,30 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
   const { modalRef } = useModalA11y(isOpen, onClose);
   const status = useDoneHubStore((state) => state.status);
   const session = useDoneHubStore((state) => state.session);
+  const savedLogin = useDoneHubStore((state) => state.savedLogin);
   const errorMessage = useDoneHubStore((state) => state.errorMessage);
   const connect = useDoneHubStore((state) => state.connect);
   const refresh = useDoneHubStore((state) => state.refresh);
   const disconnect = useDoneHubStore((state) => state.disconnect);
   const clearError = useDoneHubStore((state) => state.clearError);
 
-  const [baseUrl, setBaseUrl] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberPassword, setRememberPassword] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setBaseUrl(session?.base_url || "");
-    setUsername(session?.username || "");
-    setPassword("");
+    setUsername(session?.username || savedLogin.username || "");
+    setPassword(savedLogin.password || "");
+    setRememberPassword(savedLogin.remember_password || Boolean(savedLogin.password));
     clearError();
-  }, [clearError, isOpen, session?.base_url, session?.username]);
+  }, [clearError, isOpen, savedLogin.password, savedLogin.remember_password, savedLogin.username, session?.username]);
 
   const connected = status === "connected" || status === "refreshing";
   const hasSession = !!session;
   const showConnectedView = connected && hasSession;
   const busy = status === "authenticating" || status === "refreshing";
-  const submitDisabled = busy || !normalizeDoneHubBaseUrl(baseUrl) || !username.trim() || !password;
+  const submitDisabled = busy || !username.trim() || !password;
   const title = showConnectedView ? t("modals:doneHub.connectedTitle") : t("modals:doneHub.connectTitle");
   const quotaValue = useMemo(() => formatDoneHubQuota(session?.quota), [session?.quota]);
   const usedQuotaValue = useMemo(() => formatDoneHubQuota(session?.used_quota), [session?.used_quota]);
@@ -49,7 +50,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
     <ModalFrame
       isDark={_isDark}
       onClose={onClose}
-      titleId="done-hub-auth-title"
+      titleId="account-auth-title"
       title={title}
       closeAriaLabel={t("common:close")}
       panelClassName="w-full sm:max-w-xl min-h-[420px] max-h-[min(88dvh,720px)]"
@@ -59,10 +60,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
         <div className="rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-muted)]">
-                done-hub
-              </div>
-              <div className="mt-2 text-lg font-semibold text-[var(--color-text-primary)]">
+              <div className="text-lg font-semibold text-[var(--color-text-primary)]">
                 {showConnectedView ? t("modals:doneHub.connectedState") : t("modals:doneHub.idleState")}
               </div>
               <div className="mt-1 text-sm text-[var(--color-text-secondary)]">
@@ -98,10 +96,6 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
                 <div className="mt-2 text-sm font-medium text-[var(--color-text-primary)]">
                   {session.display_name || session.username || t("modals:doneHub.unknownUser")}
                 </div>
-                <div className="mt-1 text-xs text-[var(--color-text-secondary)] break-all">{session.base_url}</div>
-                <div className="mt-3 text-xs text-[var(--color-text-muted)]">
-                  {t("modals:doneHub.groupInline", { value: session.group || "default" })}
-                </div>
               </div>
             </div>
           ) : null}
@@ -118,8 +112,8 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
             className="mt-4 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              void connect(baseUrl, username, password).then((ok) => {
-                if (ok) {
+              void connect(username, password, rememberPassword).then((ok) => {
+                if (ok && !rememberPassword) {
                   setPassword("");
                 }
               });
@@ -127,45 +121,38 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
           >
             <div>
               <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                {t("modals:doneHub.baseUrl")}
+                {t("modals:doneHub.username")}
               </label>
               <input
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder="https://peer.example.com"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder={t("modals:doneHub.usernamePlaceholder")}
                 className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
               />
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                  {t("modals:doneHub.username")}
-                </label>
-                <input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder={t("modals:doneHub.usernamePlaceholder")}
-                  className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                  {t("modals:doneHub.password")}
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder={t("modals:doneHub.passwordPlaceholder")}
-                  className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
-                />
-              </div>
+            <div>
+              <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+                {t("modals:doneHub.password")}
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={t("modals:doneHub.passwordPlaceholder")}
+                className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
+              />
             </div>
 
-            <div className="rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-3 text-xs leading-6 text-[var(--color-text-secondary)]">
-              {t("modals:doneHub.scopeHint")}
-            </div>
+            <label className="flex items-center gap-3 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-3 text-sm text-[var(--color-text-primary)]">
+              <input
+                type="checkbox"
+                checked={rememberPassword}
+                onChange={(event) => setRememberPassword(event.target.checked)}
+                className="h-4 w-4 rounded border border-[var(--glass-border-subtle)]"
+              />
+              <span>{t("modals:doneHub.rememberPassword")}</span>
+            </label>
 
             <div className="flex flex-wrap justify-end gap-2">
               <button
