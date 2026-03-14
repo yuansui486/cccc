@@ -79,7 +79,7 @@ export function SortableGroupItem({
             className={classNames(
               "text-sm font-semibold",
               isActive
-                ? "text-cyan-700 dark:text-cyan-300"
+                ? "text-sky-700 dark:text-sky-300"
                 : "text-[var(--color-text-secondary)]"
             )}
           >
@@ -108,7 +108,7 @@ export function SortableGroupItem({
       <button
         className={classNames(
           "w-full text-left px-3 py-3 rounded-xl transition-all min-h-[48px] flex items-center gap-2 relative",
-          isDragging && "opacity-70 shadow-lg ring-2 ring-cyan-500/30",
+          isDragging && "opacity-70 shadow-lg ring-2 ring-sky-500/25",
           isActive
             ? "glass-group-item-active glow-pulse"
             : "glass-group-item"
@@ -144,7 +144,7 @@ export function SortableGroupItem({
               className={classNames(
                 "text-sm font-medium truncate",
                 isActive
-                  ? "text-cyan-700 dark:text-cyan-300"
+                  ? "text-sky-700 dark:text-sky-300"
                   : "text-[var(--color-text-primary)] group-hover/item:text-[var(--color-text-primary)]"
               )}
             >

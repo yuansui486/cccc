@@ -180,13 +180,13 @@ export function AppHeader({
                 disabled={!selectedGroupId || busy === "group-start" || actors.length === 0}
                 className={classNames(
                   "p-2 rounded-xl transition-all glass-btn border shadow-sm hover:-translate-y-px active:translate-y-0",
-                  "border-emerald-200/70 bg-emerald-50/75 text-emerald-700 shadow-emerald-100/80 hover:bg-emerald-100/80 hover:shadow-emerald-200/70",
-                  "dark:border-emerald-400/15 dark:bg-emerald-500/12 dark:text-emerald-300 dark:shadow-[0_8px_24px_-16px_rgba(16,185,129,0.45)] dark:hover:bg-emerald-500/18"
+                  "border-sky-200/80 bg-sky-50/80 text-sky-700 shadow-sky-100/80 hover:bg-sky-100/85 hover:shadow-sky-200/70",
+                  "dark:border-sky-400/20 dark:bg-sky-500/12 dark:text-sky-300 dark:shadow-[0_8px_24px_-16px_rgba(56,189,248,0.45)] dark:hover:bg-sky-500/18"
                 )}
                 title={t('launchAllAgents')}
               >
                 <span className="sr-only">{t('launchAllAgents')}</span>
-                <RocketIcon size={18} className="drop-shadow-[0_1px_3px_rgba(16,185,129,0.22)]" />
+                <RocketIcon size={18} className="drop-shadow-[0_1px_3px_rgba(56,189,248,0.22)]" />
               </button>
 
               {groupDoc?.state === "paused" ? (
@@ -240,7 +240,7 @@ export function AppHeader({
               className={classNames(
                 "hidden md:flex min-w-0 max-w-[180px] items-center gap-2 rounded-xl border px-3 py-2 transition-all glass-btn",
                 doneHubConnected
-                  ? "border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+                  ? "border-sky-300/45 bg-sky-400/12 text-sky-700 dark:border-sky-400/20 dark:bg-sky-500/12 dark:text-sky-300"
                   : doneHubStatus === "error"
                     ? "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
                     : "text-[var(--color-text-secondary)]"

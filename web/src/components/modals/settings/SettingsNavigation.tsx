@@ -49,7 +49,7 @@ export function SettingsNavigation({
               disabled={!groupId}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left font-semibold transition-colors ${
                 scope === "group"
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30"
+                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
                   : "hover:bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-tertiary)]"
               } disabled:opacity-40`}
             >
@@ -83,7 +83,7 @@ export function SettingsNavigation({
               disabled={!globalEnabled}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left font-semibold transition-colors ${
                 scope === "global"
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30"
+                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
                   : "hover:bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-tertiary)]"
               } disabled:opacity-40`}
             >
@@ -118,7 +118,7 @@ export function SettingsNavigation({
               onClick={() => onTabChange(tab.id)}
               className={`w-full flex items-center px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
                 activeTab === tab.id
-                  ? "glass-tab-active text-emerald-600 dark:text-emerald-400"
+                  ? "glass-tab-active text-sky-700 dark:text-sky-300"
                   : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
               }`}
             >
@@ -137,7 +137,7 @@ export function SettingsNavigation({
               disabled={!groupId}
               className={`flex-1 relative flex items-center justify-center px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors ${
                 scope === "group"
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30"
+                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
                   : "glass-btn text-[var(--color-text-secondary)]"
               } disabled:opacity-40`}
             >
@@ -173,7 +173,7 @@ export function SettingsNavigation({
               disabled={!globalEnabled}
               className={`flex-1 relative flex items-center justify-center px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors ${
                 scope === "global"
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30"
+                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
                   : "glass-btn text-[var(--color-text-secondary)]"
               } disabled:opacity-40`}
             >
@@ -212,7 +212,7 @@ export function SettingsNavigation({
               onClick={() => onTabChange(tab.id)}
               className={`flex-shrink-0 px-4 py-2.5 text-xs font-medium transition-colors whitespace-nowrap ${
                 activeTab === tab.id
-                  ? "text-emerald-600 dark:text-emerald-400 border-b-2 border-emerald-600 dark:border-emerald-400"
+                  ? "text-sky-700 dark:text-sky-300 border-b-2 border-sky-600 dark:border-sky-300"
                   : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
               }`}
             >

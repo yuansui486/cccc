@@ -184,7 +184,7 @@ export function MobileMenuSheet({
             className={classNames(
               "w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] glass-btn border",
               doneHubConnected
-                ? "border-cyan-400/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+                ? "border-sky-300/45 bg-sky-400/12 text-sky-700 dark:border-sky-400/20 dark:bg-sky-500/12 dark:text-sky-300"
                 : doneHubStatus === "error"
                   ? "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
                   : "border-[var(--glass-border-subtle)] text-[var(--color-text-primary)]"
@@ -249,12 +249,7 @@ export function MobileMenuSheet({
 
           <div className="grid grid-cols-2 gap-2">
             <button
-              className="w-full flex flex-col items-center justify-center gap-2 px-2 py-3 rounded-2xl text-sm font-medium transition-all min-h-[64px] disabled:opacity-50 glass-btn-accent text-emerald-700 dark:text-emerald-300"
-              style={{
-                '--glass-accent-bg': 'var(--glass-accent-emerald-bg, rgba(16, 185, 129, 0.1))',
-                '--glass-accent-border': 'var(--glass-accent-emerald-border, rgba(16, 185, 129, 0.2))',
-                '--glass-accent-glow': 'var(--glass-accent-emerald-glow, 0 0 16px rgba(16, 185, 129, 0.1))',
-              } as React.CSSProperties}
+              className="w-full flex flex-col items-center justify-center gap-2 px-2 py-3 rounded-2xl text-sm font-medium transition-all min-h-[64px] disabled:opacity-50 glass-btn-accent text-[var(--color-accent-primary)]"
               onClick={() => {
                 onClose();
                 onStartGroup();

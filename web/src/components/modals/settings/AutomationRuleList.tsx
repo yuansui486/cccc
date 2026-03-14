@@ -183,7 +183,7 @@ export function AutomationRuleList({
               {t("ruleList.lastShort")}: {lastFireAt || "—"} • {t("ruleList.nextShort")}: {nextFireAt || "—"}
             </div>
             {completed ? (
-              <div className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300">
+              <div className="mt-1 text-[11px] text-sky-700 dark:text-sky-300">
                 {t("ruleList.completedAt")} {completedAt || lastFireAt || "—"}
               </div>
             ) : null}

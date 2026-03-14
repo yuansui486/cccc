@@ -32,7 +32,7 @@ function applyTheme(theme: Theme) {
   if (metaThemeColor) {
     metaThemeColor.setAttribute(
       "content",
-      effectiveTheme === "dark" ? "#020617" : "#f8fafc"
+      effectiveTheme === "dark" ? "#0b1530" : "#7dd3fc"
     );
   }
 }

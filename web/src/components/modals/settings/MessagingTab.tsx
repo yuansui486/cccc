@@ -43,7 +43,7 @@ export function MessagingTab(props: MessagingTabProps) {
 
       <div className={cardClass()}>
         <div className="flex items-center gap-2 mb-1">
-          <div className="p-1.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+          <div className="p-1.5 rounded-md bg-sky-500/15 text-sky-700 dark:text-sky-300">
             <MessageSquareIcon className="w-4 h-4" />
           </div>
           <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("messaging.defaultRecipient")}</h3>
@@ -82,4 +82,3 @@ export function MessagingTab(props: MessagingTabProps) {
     </div>
   );
 }
-

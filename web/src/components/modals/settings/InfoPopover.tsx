@@ -76,7 +76,7 @@ export function InfoPopover({
               isPositioned ? "opacity-100" : "opacity-0"
             } text-[var(--color-text-secondary)]`}
           >
-            <div className="font-semibold mb-1 text-emerald-500">{title}</div>
+            <div className="font-semibold mb-1 text-sky-500">{title}</div>
             {content}
           </div>
         )}

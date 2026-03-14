@@ -44,9 +44,9 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
       )}
     >
       <div className="pointer-events-none absolute inset-0 hidden md:block">
-        <div className="absolute -top-24 left-8 h-72 w-72 rounded-full bg-emerald-400/12 blur-3xl" />
-        <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-blue-500/12 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="absolute -top-24 left-8 h-72 w-72 rounded-full bg-sky-300/18 blur-3xl" />
+        <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-blue-400/14 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-indigo-300/12 blur-3xl" />
       </div>
 
       <div className="relative z-10 w-full max-w-md">
@@ -61,7 +61,7 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
           <div className="rounded-[28px] border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] px-5 py-6 md:px-6">
           {busy ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
-              <div className="h-12 w-12 animate-spin rounded-full border-2 border-emerald-400/25 border-t-blue-500" />
+              <div className="h-12 w-12 animate-spin rounded-full border-2 border-sky-300/35 border-t-blue-500" />
             </div>
           ) : (
             <>

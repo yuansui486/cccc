@@ -20,7 +20,7 @@ export const labelClass = (_isDark?: boolean) =>
   `block text-xs mb-1 text-[var(--color-text-secondary)]`;
 
 export const primaryButtonClass = (_busy?: boolean) =>
-  `px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg disabled:opacity-50 min-h-[44px] transition-colors font-medium`;
+  `px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white text-sm rounded-lg disabled:opacity-50 min-h-[44px] transition-colors font-medium`;
 
 export const cardClass = (_isDark?: boolean) =>
   `glass-panel rounded-lg p-3`;

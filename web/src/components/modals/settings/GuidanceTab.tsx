@@ -236,8 +236,8 @@ export function GuidanceTab({ isDark, groupId }: {
   const helpBadge =
     helpSource === "home"
       ? isDark
-        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-        : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+        ? "bg-sky-500/15 text-sky-300 border border-sky-500/30"
+        : "bg-sky-50 text-sky-700 border border-sky-200"
       : isDark
         ? "bg-slate-800 text-slate-300 border border-slate-700"
         : "bg-gray-100 text-gray-700 border border-gray-200";
@@ -246,8 +246,8 @@ export function GuidanceTab({ isDark, groupId }: {
   const preambleBadge =
     preambleSource === "home"
       ? isDark
-        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-        : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+        ? "bg-sky-500/15 text-sky-300 border border-sky-500/30"
+        : "bg-sky-50 text-sky-700 border border-sky-200"
       : isDark
         ? "bg-slate-800 text-slate-300 border border-slate-700"
         : "bg-gray-100 text-gray-700 border border-gray-200";

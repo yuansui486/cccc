@@ -105,7 +105,7 @@ const ToggleRow = ({
           relative inline-flex h-6 w-11 items-center rounded-full transition-colors
           focus:outline-none focus:ring-2 focus:ring-offset-2
           ${checked
-            ? "bg-emerald-500 focus:ring-emerald-500"
+            ? "bg-sky-500 focus:ring-sky-500"
             : "bg-gray-300 dark:bg-slate-600 focus:ring-gray-400 dark:focus:ring-slate-500"
           }
           focus:ring-offset-white dark:focus:ring-offset-slate-900

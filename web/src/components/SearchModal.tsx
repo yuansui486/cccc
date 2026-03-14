@@ -240,7 +240,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
                 disabled={busy}
                 className={classNames(
                   "px-4 py-2 rounded-lg text-sm font-medium min-h-[44px] disabled:opacity-50",
-                  "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  "bg-sky-600 hover:bg-sky-500 text-white"
                 )}
               >
                 {busy ? "…" : t('common:search')}

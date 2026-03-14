@@ -534,22 +534,22 @@ export default function App() {
       <div className="pointer-events-none absolute inset-0 overflow-hidden hidden md:block">
         <div
           className={`absolute -top-32 -left-32 w-96 h-96 rounded-full liquid-blob ${isDark
-              ? "bg-gradient-to-br from-emerald-500/10 via-sky-600/5 to-transparent"
-              : "bg-gradient-to-br from-emerald-400/15 via-sky-500/5 to-transparent"
+              ? "bg-gradient-to-br from-sky-400/12 via-blue-500/6 to-transparent"
+              : "bg-gradient-to-br from-sky-300/20 via-blue-400/8 to-transparent"
             }`}
           style={{ opacity: 0.75 }}
         />
         <div
           className={`absolute top-1/4 -right-24 w-80 h-80 rounded-full liquid-blob ${isDark
-              ? "bg-gradient-to-bl from-sky-500/10 via-blue-600/5 to-transparent"
-              : "bg-gradient-to-bl from-sky-400/10 via-blue-500/5 to-transparent"
+              ? "bg-gradient-to-bl from-blue-400/12 via-indigo-500/6 to-transparent"
+              : "bg-gradient-to-bl from-blue-300/16 via-indigo-400/7 to-transparent"
             }`}
           style={{ animationDelay: "-3s", opacity: 0.65 }}
         />
         <div
           className={`absolute -bottom-20 left-1/3 w-72 h-72 rounded-full liquid-blob ${isDark
-              ? "bg-gradient-to-tr from-emerald-500/10 via-sky-600/5 to-transparent"
-              : "bg-gradient-to-tr from-emerald-400/10 via-sky-500/5 to-transparent"
+              ? "bg-gradient-to-tr from-sky-500/10 via-cyan-400/6 to-transparent"
+              : "bg-gradient-to-tr from-sky-300/14 via-cyan-300/8 to-transparent"
             }`}
           style={{ animationDelay: "-5s", opacity: 0.6 }}
         />

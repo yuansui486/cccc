@@ -107,7 +107,7 @@ export function TabBar({ actors, activeTab, onTabChange, unreadChatCount, isDark
       ref={addButtonRef}
       onClick={onAddAgent}
       disabled={!canAddAgent}
-      className="glass-btn flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-lg text-sm font-medium transition-all disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50 border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+      className="glass-btn flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-lg text-sm font-medium transition-all disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
       title={actors.length === 0 ? t("addFirstAgent") : t("addAgent")}
       aria-label={t("addAgent")}
     >

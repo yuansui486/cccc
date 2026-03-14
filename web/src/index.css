@@ -52,22 +52,22 @@
   --glass-panel-bg: rgba(255, 255, 255, 0.78);
   --glass-panel-border: rgba(226, 232, 240, 0.58);
 
-  /* Enhanced Accent System (Less Intense Cyber Cyan) */
-  --glass-accent-bg: rgba(16, 185, 129, 0.07);
-  --glass-accent-bg-hover: rgba(14, 165, 233, 0.12);
-  --glass-accent-border: rgba(14, 165, 233, 0.22);
-  --glass-accent-glow: 0 0 16px rgba(14, 165, 233, 0.12);
-  --glass-accent-shadow: 0 4px 12px rgba(14, 165, 233, 0.16);
+  /* Enhanced Accent System — Light Blue */
+  --glass-accent-bg: rgba(125, 211, 252, 0.1);
+  --glass-accent-bg-hover: rgba(96, 165, 250, 0.16);
+  --glass-accent-border: rgba(96, 165, 250, 0.26);
+  --glass-accent-glow: 0 0 18px rgba(96, 165, 250, 0.14);
+  --glass-accent-shadow: 0 4px 12px rgba(96, 165, 250, 0.18);
 
   /* Gradient Colors */
-  --gradient-primary: linear-gradient(135deg, #10b981 0%, #0ea5e9 58%, #3b82f6 100%);
-  --gradient-accent: linear-gradient(135deg, #34d399 0%, #38bdf8 52%, #3b82f6 100%);
-  --gradient-subtle: linear-gradient(180deg, rgba(14, 165, 233, 0.08) 0%, transparent 100%);
+  --gradient-primary: linear-gradient(135deg, #dbeafe 0%, #7dd3fc 52%, #60a5fa 100%);
+  --gradient-accent: linear-gradient(135deg, #e0f2fe 0%, #93c5fd 48%, #818cf8 100%);
+  --gradient-subtle: linear-gradient(180deg, rgba(125, 211, 252, 0.12) 0%, transparent 100%);
   --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
 
   --color-border-primary: #e2e8f0;
   --color-border-secondary: #cbd5e1;
-  --color-border-focus: #0ea5e9;
+  --color-border-focus: #60a5fa;
 
   --color-text-primary: #0f172a;
   --color-text-secondary: #475569;
@@ -75,8 +75,8 @@
   --color-text-muted: #94a3b8;
   --color-text-inverse: #ffffff;
 
-  --color-accent-primary: #0ea5e9;
-  --color-accent-secondary: #10b981;
+  --color-accent-primary: #60a5fa;
+  --color-accent-secondary: #7dd3fc;
   --color-accent-warning: #f59e0b;
   --color-accent-danger: #ef4444;
   
@@ -148,21 +148,21 @@
   --glass-panel-border: rgba(255, 255, 255, 0.05);
 
   /* Enhanced Accent System */
-  --glass-accent-bg: rgba(14, 165, 233, 0.12);
-  --glass-accent-bg-hover: rgba(59, 130, 246, 0.16);
-  --glass-accent-border: rgba(14, 165, 233, 0.24);
-  --glass-accent-glow: 0 0 20px rgba(14, 165, 233, 0.12);
+  --glass-accent-bg: rgba(96, 165, 250, 0.14);
+  --glass-accent-bg-hover: rgba(129, 140, 248, 0.18);
+  --glass-accent-border: rgba(125, 211, 252, 0.26);
+  --glass-accent-glow: 0 0 20px rgba(96, 165, 250, 0.16);
   --glass-accent-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 
   /* Gradient Colors */
-  --gradient-primary: linear-gradient(135deg, #10b981 0%, #0ea5e9 58%, #3b82f6 100%);
-  --gradient-accent: linear-gradient(135deg, #34d399 0%, #38bdf8 52%, #60a5fa 100%);
-  --gradient-subtle: linear-gradient(180deg, rgba(14, 165, 233, 0.08) 0%, transparent 100%);
+  --gradient-primary: linear-gradient(135deg, #38bdf8 0%, #60a5fa 58%, #818cf8 100%);
+  --gradient-accent: linear-gradient(135deg, #7dd3fc 0%, #93c5fd 48%, #818cf8 100%);
+  --gradient-subtle: linear-gradient(180deg, rgba(96, 165, 250, 0.1) 0%, transparent 100%);
   --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 50%);
 
   --color-border-primary: #1f1f1f;
   --color-border-secondary: #2a2a2a;
-  --color-border-focus: #38bdf8;
+  --color-border-focus: #7dd3fc;
 
   --color-text-primary: #ffffff;
   --color-text-secondary: #a1a1aa; /* Zinc-400 */
@@ -170,8 +170,8 @@
   --color-text-muted: #52525b;    /* Zinc-600 */
   --color-text-inverse: #000000;
 
-  --color-accent-primary: #38bdf8;
-  --color-accent-secondary: #10b981;
+  --color-accent-primary: #7dd3fc;
+  --color-accent-secondary: #93c5fd;
   --color-accent-warning: #f59e0b;
   --color-accent-danger: #ef4444;
   
@@ -220,7 +220,7 @@
     --color-text-inverse: #0f172a;
     
     --color-accent-primary: #60a5fa;
-    --color-accent-secondary: #34d399;
+    --color-accent-secondary: #93c5fd;
     --color-accent-warning: #fbbf24;
     --color-accent-danger: #f87171;
     

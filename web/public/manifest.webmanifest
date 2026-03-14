@@ -2,8 +2,8 @@
   "name": "一号同事",
   "short_name": "一号同事",
   "display": "standalone",
-  "theme_color": "#10b981",
-  "background_color": "#08111f",
+  "theme_color": "#7dd3fc",
+  "background_color": "#0b1530",
   "start_url": "/ui/",
   "icons": [
     {

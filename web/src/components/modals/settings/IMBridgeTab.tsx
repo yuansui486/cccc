@@ -299,7 +299,7 @@ export function IMBridgeTab({
       {imStatus && (
         <div className={cardClass()}>
           <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${imStatus.running ? "bg-emerald-500" : "bg-gray-400"}`} />
+            <span className={`w-2 h-2 rounded-full ${imStatus.running ? "bg-sky-500" : "bg-gray-400"}`} />
             <span className="text-sm text-[var(--color-text-secondary)]">
               {imStatus.running ? t("imBridge.running") : t("imBridge.stopped")}
             </span>
@@ -562,7 +562,7 @@ export function IMBridgeTab({
                       <button
                         onClick={() => handleApprovePending(request)}
                         disabled={actionBusy}
-                        className="px-3 py-1 text-xs rounded-lg transition-colors font-medium bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 disabled:opacity-50"
+                        className="px-3 py-1 text-xs rounded-lg transition-colors font-medium bg-sky-500/15 hover:bg-sky-500/25 text-sky-700 dark:text-sky-300 disabled:opacity-50"
                       >
                         {pendingActionKey === approveKey ? "..." : t("imBridge.approve", "Approve")}
                       </button>
@@ -683,7 +683,7 @@ export function IMBridgeTab({
             <p className="text-xs text-red-500">{authError}</p>
           )}
           {!authError && authInfo && (
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">{authInfo}</p>
+            <p className="text-xs text-sky-700 dark:text-sky-300">{authInfo}</p>
           )}
 
           {!authLoading && authChats.length === 0 && !authError && (

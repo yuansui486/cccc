@@ -690,7 +690,7 @@ export function AgentTab({
               {t('headlessDescription')}
             </div>
             {isRunning && (
-              <div className={classNames("mt-4 px-3 py-1.5 rounded text-sm", "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300")}>
+              <div className={classNames("mt-4 px-3 py-1.5 rounded text-sm", "bg-sky-500/15 text-sky-700 dark:text-sky-300")}>
                 {t('statusRunning')}
               </div>
             )}
@@ -727,7 +727,7 @@ export function AgentTab({
                       actorNotRunningRef.current = false;
                       setReconnectTrigger((n) => n + 1);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium min-h-[44px] transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium min-h-[44px] transition-colors"
                   >
                     <RefreshIcon size={16} />
                     {t('reconnect')}
@@ -748,7 +748,7 @@ export function AgentTab({
               <button
                 onClick={onLaunch}
                 disabled={isBusy}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50 min-h-[44px] transition-colors"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium disabled:opacity-50 min-h-[44px] transition-colors"
                 aria-label={t('launchAgentLabel')}
               >
                 <PlayIcon size={16} />
@@ -825,7 +825,7 @@ export function AgentTab({
               <button
                 onClick={onLaunch}
                 disabled={isBusy}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm disabled:opacity-50 min-h-[44px] transition-colors flex-shrink-0 whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-sm disabled:opacity-50 min-h-[44px] transition-colors flex-shrink-0 whitespace-nowrap"
                 aria-label={t('launchAgentLabel')}
               >
                 <PlayIcon size={16} />
