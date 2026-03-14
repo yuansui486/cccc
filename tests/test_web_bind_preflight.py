@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import errno
 import io
+import os
 import socket
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +14,9 @@ class _DeniedBindSocket:
         exc = OSError(errno.EACCES, "forbidden")
         exc.winerror = 10013  # type: ignore[attr-defined]
         raise exc
+
+    def setsockopt(self, *args) -> None:
+        pass
 
     def close(self) -> None:
         return None
@@ -33,6 +38,21 @@ class _CaptureSocket:
 
 
 class TestWebBindPreflight(unittest.TestCase):
+    def _with_home(self):
+        old_home = os.environ.get("CCCC_HOME")
+        td_ctx = tempfile.TemporaryDirectory()
+        td = td_ctx.__enter__()
+        os.environ["CCCC_HOME"] = td
+
+        def cleanup() -> None:
+            td_ctx.__exit__(None, None, None)
+            if old_home is None:
+                os.environ.pop("CCCC_HOME", None)
+            else:
+                os.environ["CCCC_HOME"] = old_home
+
+        return td, cleanup
+
     def test_in_use_port_reports_clear_message(self) -> None:
         from cccc.ports.web.bind_preflight import ensure_tcp_port_bindable
 
@@ -118,6 +138,32 @@ class TestWebBindPreflight(unittest.TestCase):
         mock_config.assert_called_once()
         self.assertEqual(mock_config.call_args.kwargs.get("timeout_graceful_shutdown"), 0.2)
         mock_server.assert_called_once()
+        server_instance.run.assert_called_once_with()
+
+    def test_web_main_uses_shared_binding_defaults(self) -> None:
+        from cccc.kernel.settings import update_remote_access_settings
+        from cccc.ports.web import main as web_main
+
+        _, cleanup = self._with_home()
+        server_instance = unittest.mock.Mock()
+        try:
+            update_remote_access_settings({"web_host": "127.0.0.1", "web_port": 9001})
+            with patch.object(web_main, "_check_daemon_running", return_value=True), patch.object(
+                web_main,
+                "ensure_tcp_port_bindable",
+                return_value=None,
+            ), patch.object(web_main.uvicorn, "Config") as mock_config, patch.object(
+                web_main.uvicorn,
+                "Server",
+                return_value=server_instance,
+            ):
+                rc = web_main.main([])
+        finally:
+            cleanup()
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_config.call_args.kwargs.get("host"), "127.0.0.1")
+        self.assertEqual(mock_config.call_args.kwargs.get("port"), 9001)
         server_instance.run.assert_called_once_with()
 
 

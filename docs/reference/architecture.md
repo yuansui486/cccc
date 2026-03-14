@@ -167,32 +167,24 @@ class ChatMessageData:
 
 ## MCP Server
 
-MCP is exposed as capability groups (tool count is intentionally not hardcoded):
+MCP is exposed as an action-oriented surface. Tool count is intentionally not hardcoded, because optional capability packs can add more tools when enabled.
 
-### Collaboration Control (`cccc_*`)
+The surface is best understood as capability groups instead of a fixed namespace/tool count. Each group can expose one or more MCP tools, and some groups use action-style wrappers rather than one-tool-per-operation naming.
 
-- Inbox and bootstrap: `cccc_inbox_*`, `cccc_bootstrap`
-- Messaging and files: `cccc_message_*`, `cccc_file_send`, `cccc_blob_path`
-- Group/actor operations: `cccc_group_*`, `cccc_actor_*`, `cccc_runtime_list`
-- Automation: `cccc_automation_state`, `cccc_automation_manage`
-- Project/help info: `cccc_project_info`, `cccc_help`
+### Core Collaboration Capability Groups
 
-### Context Sync (`cccc_context_*` and related, v2)
+- Session and guidance: `cccc_bootstrap`, `cccc_help`, `cccc_project_info`
+- Messaging and files: `cccc_inbox_list`, `cccc_inbox_mark_read`, `cccc_message_send`, `cccc_message_reply`, `cccc_file`
+- Group and actor control: `cccc_group`, `cccc_actor`
+- Coordination and state: `cccc_context_get`, `cccc_coordination`, `cccc_task`, `cccc_agent_state`, `cccc_context_sync`
+- Automation and memory: `cccc_automation`, `cccc_automation_manage`, `cccc_memory`, `cccc_memory_admin`
 
-- Context batch operations: `cccc_context_get`, `cccc_context_sync`
-- Vision/overview: `cccc_vision_update`, `cccc_overview_manual_update`
-- Tasks (tree): `cccc_task_list`, `cccc_task_create`, `cccc_task_update`, `cccc_task_status`, `cccc_task_move`, `cccc_task_restore`
-- Agent state: `cccc_context_agent`
+### Capability-Managed and Optional Groups
 
-### Headless and Notifications
-
-- Headless runner: `cccc_headless_*`
-- System notifications: `cccc_notify_*`
-
-### Diagnostics and Transcript
-
-- Terminal transcript: `cccc_terminal_tail`
-- Developer diagnostics: `cccc_debug_*`
+- These capability groups expand the surface without hardcoding a fixed namespace count. The current grouped tools include lifecycle and pack control (`cccc_capability_search`, `cccc_capability_enable`, `cccc_capability_block`, `cccc_capability_state`, `cccc_capability_import`, `cccc_capability_uninstall`, `cccc_capability_use`).
+- Space / notebook integrations: `cccc_space`
+- Terminal and diagnostics: `cccc_terminal`, `cccc_terminal_tail`, `cccc_debug_*`
+- IM binding: `cccc_im_bind`
 
 ## Tech Stack
 

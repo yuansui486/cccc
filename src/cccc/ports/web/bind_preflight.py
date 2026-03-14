@@ -82,6 +82,12 @@ def ensure_tcp_port_bindable(*, host: str, port: int) -> None:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
                 except OSError:
                     pass
+            else:
+                # Allow binding to a port in TIME_WAIT state (e.g. after Ctrl+C).
+                # The actual web server (uvicorn) sets SO_REUSEADDR by default,
+                # so the preflight check should match that behavior to avoid
+                # false-positive "port unavailable" errors.
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(sockaddr)
             return
         except OSError as exc:

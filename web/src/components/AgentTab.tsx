@@ -65,6 +65,8 @@ export function AgentTab({
   const effectiveRunner = String(actor.runner_effective || actor.runner || "pty").trim() || "pty";
   const isHeadless = effectiveRunner === "headless";
   const canControl = !readOnly;
+  const observabilityLoaded = useObservabilityStore((s) => s.loaded);
+  const loadObservability = useObservabilityStore((s) => s.load);
   const terminalScrollbackLines = useObservabilityStore((s) => s.terminalScrollbackLines);
 
   const termRef = useRef<HTMLDivElement>(null);
@@ -105,6 +107,11 @@ export function AgentTab({
   useEffect(() => {
     if (isVisible) setActivated(true);
   }, [isVisible]);
+
+  useEffect(() => {
+    if (!activated || observabilityLoaded) return;
+    void loadObservability();
+  }, [activated, loadObservability, observabilityLoaded]);
 
   const copyToClipboard = async (text: string): Promise<boolean> => {
     const t = (text || "").toString();

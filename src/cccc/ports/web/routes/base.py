@@ -56,16 +56,18 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         raise HTTPException(status_code=404)
 
     @global_router.get("/api/v1/ping")
-    async def ping() -> Dict[str, Any]:
+    async def ping(include_home: bool = False) -> Dict[str, Any]:
         resp = await ctx.daemon({"op": "ping"})
+        result: Dict[str, Any] = {
+            "daemon": resp.get("result", {}),
+            "version": ctx.version,
+            "web": {"mode": ctx.web_mode, "read_only": ctx.read_only},
+        }
+        if include_home:
+            result["home"] = str(ctx.home)
         return {
             "ok": True,
-            "result": {
-                "home": str(ctx.home),
-                "daemon": resp.get("result", {}),
-                "version": ctx.version,
-                "web": {"mode": ctx.web_mode, "read_only": ctx.read_only},
-            },
+            "result": result,
         }
 
     @global_router.get("/api/v1/health")
@@ -128,7 +130,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         check_group(request, group_id)
         return await ctx.daemon({"op": "debug_snapshot", "args": {"group_id": group_id, "by": "user"}})
 
-    @global_router.get("/api/v1/observability", dependencies=[Depends(require_user)])
+    @global_router.get("/api/v1/observability", dependencies=[Depends(require_admin)])
     async def observability_get() -> Dict[str, Any]:
         """Get global observability settings (developer mode, log level)."""
         return await ctx.daemon({"op": "observability_get"})
@@ -375,11 +377,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     {
                         "name": rt.name,
                         "display_name": rt.display_name,
-                        "command": rt.command,
                         "recommended_command": " ".join(get_runtime_command_with_flags(rt.name)),
                         "available": rt.available,
-                        "path": rt.path,
-                        "capabilities": rt.capabilities,
                     }
                     for rt in all_runtimes
                 ],
@@ -430,7 +429,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         except Exception as e:
             return {"ok": False, "error": {"code": "ERROR", "message": str(e)}}
 
-    @global_router.get("/api/v1/fs/recent", dependencies=[Depends(require_user)])
+    @global_router.get("/api/v1/fs/recent", dependencies=[Depends(require_admin)])
     async def fs_recent() -> Dict[str, Any]:
         """Get recent/common directories for quick selection."""
         if ctx.read_only:

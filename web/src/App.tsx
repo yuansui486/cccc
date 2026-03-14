@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { TabBar } from "./components/TabBar";
 import { DropOverlay } from "./components/DropOverlay";
-import { AppModals } from "./components/AppModals";
+const AppModals = lazy(() => import("./components/AppModals").then((m) => ({ default: m.AppModals })));
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DoneHubLoginGate } from "./components/DoneHubLoginGate";
 import { AppHeader } from "./components/layout/AppHeader";
@@ -85,7 +85,9 @@ export default function App() {
   const setWebReadOnly = useUIStore((s) => s.setWebReadOnly);
   const sseStatus = useUIStore((s) => s.sseStatus);
 
-  const { openModal } = useModalStore();
+  const openModal = useModalStore((s) => s.openModal);
+  const modalFlags = useModalStore((s) => s.modals);
+  const editingActor = useModalStore((s) => s.editingActor);
   const doneHubStatus = useDoneHubStore((state) => state.status);
   const doneHubSession = useDoneHubStore((state) => state.session);
   const doneHubErrorMessage = useDoneHubStore((state) => state.errorMessage);
@@ -425,13 +427,12 @@ export default function App() {
 
     refreshGroups();
     void initializeDoneHub();
-    void fetchRuntimes();
+    void ensureRuntimesLoaded();
     void fetchDirSuggestions();
     void useObservabilityStore.getState().load();
     void api.fetchPing().then((resp) => {
       if (resp.ok) {
         setWebReadOnly(Boolean(resp.result?.web?.read_only));
-        setCcccHome(String(resp.result?.home || "").trim());
       }
     }).catch(() => {
       /* ignore */
@@ -451,19 +452,54 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [doneHubInitialized, doneHubStatus, refreshDoneHub]);
 
-  async function fetchRuntimes() {
-    const resp = await api.fetchRuntimes();
-    if (resp.ok) {
-      useGroupStore.getState().setRuntimes(resp.result.runtimes || []);
+  const ensureRuntimesLoaded = React.useCallback(async () => {
+    if (useGroupStore.getState().runtimes.length > 0) return;
+    try {
+      const resp = await api.fetchRuntimes();
+      if (resp.ok) {
+        useGroupStore.getState().setRuntimes(resp.result.runtimes || []);
+        return;
+      }
+      showError(resp.error?.message || "Failed to load runtimes");
+    } catch {
+      showError("Failed to load runtimes");
     }
-  }
+  }, [showError]);
 
-  async function fetchDirSuggestions() {
-    const resp = await api.fetchDirSuggestions();
-    if (resp.ok) {
-      setDirSuggestions(resp.result.suggestions || []);
+  const fetchDirSuggestions = React.useCallback(async () => {
+    try {
+      const resp = await api.fetchDirSuggestions();
+      if (resp.ok) {
+        setDirSuggestions(resp.result.suggestions || []);
+        return;
+      }
+      showError(resp.error?.message || "Failed to load directories");
+    } catch {
+      showError("Failed to load directories");
     }
-  }
+  }, [setDirSuggestions, showError]);
+
+  const loadCcccHome = React.useCallback(async () => {
+    if (ccccHome) return;
+    try {
+      const resp = await api.fetchPing({ includeHome: true });
+      if (resp.ok) {
+        setCcccHome(String(resp.result?.home || "").trim());
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [ccccHome]);
+
+  useEffect(() => {
+    if (!modalFlags.groupEdit) return;
+    void loadCcccHome();
+  }, [loadCcccHome, modalFlags.groupEdit]);
+
+  useEffect(() => {
+    if (!modalFlags.addActor && !editingActor) return;
+    void ensureRuntimesLoaded();
+  }, [editingActor, ensureRuntimesLoaded, modalFlags.addActor]);
 
   const doneHub = useMemo(() => ({
     status: doneHubStatus,
@@ -770,19 +806,21 @@ export default function App() {
         </div>
       ) : null}
 
-      {/* Modals */}
-      <AppModals
-        isDark={isDark}
-        ccccHome={ccccHome}
-        composerRef={composerRef}
-        onStartReply={startReply}
-        onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
-        onStartGroup={handleStartGroup}
-        onStopGroup={handleStopGroup}
-        onSetGroupState={handleSetGroupState}
-        fetchContext={fetchContext}
-        canManageGroups={canManageGroups}
-      />
+      {/* Modals (lazy-loaded — not needed on first paint) */}
+      <Suspense fallback={null}>
+        <AppModals
+          isDark={isDark}
+          ccccHome={ccccHome}
+          composerRef={composerRef}
+          onStartReply={startReply}
+          onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
+          onStartGroup={handleStartGroup}
+          onStopGroup={handleStopGroup}
+          onSetGroupState={handleSetGroupState}
+          fetchContext={fetchContext}
+          canManageGroups={canManageGroups}
+        />
+      </Suspense>
 
       <DropOverlay isOpen={dropOverlayOpen} isDark={isDark} maxFileMb={WEB_MAX_FILE_MB} />
     </div>

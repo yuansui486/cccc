@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 
-import { AUTOMATION_VAR_HELP } from "./automationUtils";
+import { getAutomationVarHelp } from "./automationUtils";
 import { cardClass, inputClass } from "./types";
 
 interface AutomationSnippetModalProps {
@@ -36,6 +36,7 @@ export function AutomationSnippetModal(props: AutomationSnippetModalProps) {
   } = props;
 
   const { t } = useTranslation("settings");
+  const automationVarHelp = getAutomationVarHelp(t);
 
   if (!open) return null;
 
@@ -92,12 +93,12 @@ export function AutomationSnippetModal(props: AutomationSnippetModalProps) {
               <div className="font-semibold mb-1 text-[var(--color-text-secondary)]">{t("snippetModal.availablePlaceholders")}</div>
               <div className="space-y-1">
                 {supportedVars.map((v) => {
-                  const help = AUTOMATION_VAR_HELP[v];
+                  const help = automationVarHelp[v];
                   return (
                     <div key={v}>
                       <span className="font-mono">{`{{${v}}}`}</span>
-                      <span>{` - ${help?.description || "Built-in placeholder."}`}</span>
-                      <span className="text-[var(--color-text-muted)]">{` (example: ${help?.example || "-"})`}</span>
+                      <span>{` - ${help?.description || t("automation.placeholderBuiltIn")}`}</span>
+                      <span className="text-[var(--color-text-muted)]">{` (${t("automation.exampleLabel")}: ${help?.example || "-"})`}</span>
                     </div>
                   );
                 })}

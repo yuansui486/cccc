@@ -171,7 +171,7 @@ Notes:
 { op: "task.restore"; task_id: string }
 ```
 
-Permission: foreman or user.
+Permission: assignee / handoff target / foreman / user.
 
 Rules:
 - The task MUST currently be archived.
@@ -200,11 +200,12 @@ Agent states are keyed by `actor_id`.
 }
 ```
 
-Permission: self / foreman / user.
+Permission: self / user.
 
 Notes:
 - Partial patch.
 - Daemon stores data into `hot` (`active_task_id`, `focus`, `blockers`, `next_action`) and `warm` (the rest).
+- `agent_state` is actor-owned working state. Foreman should guide peers via tasks, coordination, or help/role-notes, not by directly rewriting a peer's `agent_state`.
 - Legacy aliases `agent_id`, `environment`, `user_profile`, and `notes` are tolerated by daemon but SHOULD NOT be used by new clients.
 
 #### `agent_state.clear`
@@ -213,7 +214,7 @@ Notes:
 { op: "agent_state.clear"; actor_id: string }
 ```
 
-Permission: self / foreman / user.
+Permission: self / user.
 
 Notes:
 - Clears both `hot` and `warm`, then refreshes `updated_at`.
@@ -226,7 +227,6 @@ Notes:
 {
   op: "meta.merge"
   data: {
-    panorama_blueprint?: Record<string, unknown> | null
     project_status?: string | null
   }
 }
@@ -235,7 +235,7 @@ Notes:
 Permission: `foreman` or `user`.
 
 Rules:
-- Only `panorama_blueprint` and `project_status` are allowed.
+- Only `project_status` is allowed.
 - Resulting `meta` payload MUST stay within daemon size limits.
 
 ## 4. Optimistic Concurrency (CAS)
@@ -285,6 +285,6 @@ Curated trigger allowlist:
 |------|------------|
 | `user` | All ops |
 | `foreman` | All ops |
-| `peer` | `coordination.note.add`, `task.create`, `task.update` (own assigned / handed-off), `task.move` (own assigned / handed-off), `agent_state.update` (self), `agent_state.clear` (self) |
+| `peer` | `coordination.note.add`, `task.create`, `task.update` (own assigned / handed-off), `task.move` (own assigned / handed-off), `task.restore` (own assigned / handed-off), `agent_state.update` (self), `agent_state.clear` (self) |
 
 Permission checks use `context_sync.args.by`.

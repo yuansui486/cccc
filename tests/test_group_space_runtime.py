@@ -147,13 +147,73 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_write_execution_is_serialized_per_remote_space(self) -> None:
-        from cccc.daemon.space.group_space_runtime import execute_space_job
-        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state
+    def test_due_worker_cancels_stale_work_job_after_unbind(self) -> None:
+        from cccc.daemon.space.group_space_runtime import process_due_space_jobs
+        from cccc.daemon.space.group_space_store import (
+            enqueue_space_job,
+            get_space_job,
+            set_space_binding_unbound,
+            set_space_provider_state,
+            upsert_space_binding,
+        )
 
         _, cleanup = self._with_home()
         try:
             set_space_provider_state("notebooklm", enabled=True, mode="active", last_error="", touch_health=True)
+            upsert_space_binding(
+                "g_stale_1",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_stale_old",
+                by="user",
+                status="bound",
+            )
+            job, _ = enqueue_space_job(
+                group_id="g_stale_1",
+                provider="notebooklm",
+                remote_space_id="nb_stale_old",
+                kind="context_sync",
+                payload={"summary": {"tasks": []}},
+                idempotency_key="stale-job-1",
+            )
+            job_id = str(job.get("job_id") or "")
+            self.assertTrue(job_id)
+
+            set_space_binding_unbound("g_stale_1", provider="notebooklm", lane="work", by="user")
+
+            with patch("cccc.daemon.space.group_space_runtime.provider_ingest") as provider_ingest:
+                tick_result = process_due_space_jobs(limit=20)
+            self.assertGreaterEqual(int(tick_result.get("processed") or 0), 1)
+            provider_ingest.assert_not_called()
+
+            post = get_space_job(job_id) or {}
+            self.assertEqual(str(post.get("state") or ""), "canceled")
+        finally:
+            cleanup()
+
+    def test_write_execution_is_serialized_per_remote_space(self) -> None:
+        from cccc.daemon.space.group_space_runtime import execute_space_job
+        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
+
+        _, cleanup = self._with_home()
+        try:
+            set_space_provider_state("notebooklm", enabled=True, mode="active", last_error="", touch_health=True)
+            upsert_space_binding(
+                "g_lock_1",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_lock",
+                by="user",
+                status="bound",
+            )
+            upsert_space_binding(
+                "g_lock_2",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_lock",
+                by="user",
+                status="bound",
+            )
             job1, _ = enqueue_space_job(
                 group_id="g_lock_1",
                 provider="notebooklm",
@@ -198,11 +258,27 @@ class TestGroupSpaceRuntime(unittest.TestCase):
 
     def test_write_execution_allows_parallelism_across_different_remotes(self) -> None:
         from cccc.daemon.space.group_space_runtime import execute_space_job
-        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state
+        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
 
         _, cleanup = self._with_home()
         try:
             set_space_provider_state("notebooklm", enabled=True, mode="active", last_error="", touch_health=True)
+            upsert_space_binding(
+                "g_lock_3",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_lock_a",
+                by="user",
+                status="bound",
+            )
+            upsert_space_binding(
+                "g_lock_4",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_lock_b",
+                by="user",
+                status="bound",
+            )
             job1, _ = enqueue_space_job(
                 group_id="g_lock_3",
                 provider="notebooklm",
@@ -247,11 +323,27 @@ class TestGroupSpaceRuntime(unittest.TestCase):
 
     def test_global_provider_write_cap_can_serialize_different_remotes(self) -> None:
         from cccc.daemon.space.group_space_runtime import execute_space_job
-        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state
+        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
 
         _, cleanup = self._with_home()
         try:
             set_space_provider_state("notebooklm", enabled=True, mode="active", last_error="", touch_health=True)
+            upsert_space_binding(
+                "g_cap_1",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_cap_a",
+                by="user",
+                status="bound",
+            )
+            upsert_space_binding(
+                "g_cap_2",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_cap_b",
+                by="user",
+                status="bound",
+            )
             job1, _ = enqueue_space_job(
                 group_id="g_cap_1",
                 provider="notebooklm",

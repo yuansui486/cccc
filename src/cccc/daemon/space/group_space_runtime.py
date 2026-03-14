@@ -14,6 +14,8 @@ from .group_space_memory_sync import (
 )
 from .group_space_provider import SpaceProviderError, provider_ingest, provider_query
 from .group_space_store import (
+    cancel_space_job,
+    get_space_binding,
     get_space_job,
     get_space_provider_state,
     list_due_space_jobs,
@@ -138,6 +140,21 @@ def _sync_projection_after_job(job_doc: Dict[str, Any]) -> None:
         pass
 
 
+def _current_work_binding_matches(job_doc: Dict[str, Any]) -> bool:
+    group_id = str(job_doc.get("group_id") or "").strip()
+    provider = str(job_doc.get("provider") or "notebooklm").strip() or "notebooklm"
+    remote_space_id = str(job_doc.get("remote_space_id") or "").strip()
+    lane = str(job_doc.get("lane") or "work").strip() or "work"
+    if lane != "work":
+        return True
+    if not group_id or not remote_space_id:
+        return False
+    binding = get_space_binding(group_id, provider=provider, lane="work") or {}
+    binding_status = str(binding.get("status") or "").strip().lower()
+    binding_remote_id = str(binding.get("remote_space_id") or "").strip()
+    return binding_status == "bound" and binding_remote_id == remote_space_id
+
+
 def execute_space_job(job_id: str) -> Dict[str, Any]:
     job = get_space_job(job_id)
     if not isinstance(job, dict):
@@ -161,6 +178,10 @@ def execute_space_job(job_id: str) -> Dict[str, Any]:
             with acquire_space_provider_write(provider, remote_space_id):
                 job_result = execute_memory_daily_sync_job(current)
         else:
+            if not _current_work_binding_matches(current):
+                out = cancel_space_job(job_id)
+                _sync_projection_after_job(out)
+                return out
             # Serialize writes per provider/remote target to avoid upstream race conditions.
             with acquire_space_provider_write(provider, remote_space_id):
                 job_result = provider_ingest(

@@ -144,6 +144,19 @@ class TestContextV2Ops(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_task_restore_requires_archived_status(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._sync(gid, [{"op": "task.create", "title": "T", "outcome": "G"}])
+            task_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+
+            restore_resp, _ = self._sync(gid, [{"op": "task.restore", "task_id": task_id}])
+            self.assertFalse(restore_resp.ok)
+            self.assertIn("archived", str(restore_resp.error.message).lower())
+        finally:
+            cleanup()
+
     def test_task_move_autosyncs_assignee_agent_state(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -331,6 +344,36 @@ class TestContextV2Ops(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_foreman_cannot_mutate_peer_agent_state(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from cccc.kernel.actors import add_actor
+            from cccc.kernel.group import load_group
+
+            gid = self._create_group()
+            group = load_group(gid)
+            assert group is not None
+            add_actor(group, actor_id="lead1", runtime="codex")
+            add_actor(group, actor_id="peer1", runtime="codex")
+
+            update_resp, _ = self._sync(
+                gid,
+                [{"op": "agent_state.update", "actor_id": "peer1", "focus": "take over peer state"}],
+                by="lead1",
+            )
+            self.assertFalse(update_resp.ok)
+            self.assertIn("permission denied", str(update_resp.error.message).lower())
+
+            clear_resp, _ = self._sync(
+                gid,
+                [{"op": "agent_state.clear", "actor_id": "peer1"}],
+                by="lead1",
+            )
+            self.assertFalse(clear_resp.ok)
+            self.assertIn("permission denied", str(clear_resp.error.message).lower())
+        finally:
+            cleanup()
+
     def test_peer_cannot_update_coordination_brief(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -358,6 +401,121 @@ class TestContextV2Ops(unittest.TestCase):
             )
             self.assertFalse(bad_resp.ok)
             self.assertIn("assigned to foreman", str(bad_resp.error.message).lower())
+        finally:
+            cleanup()
+
+    def test_peer_cannot_mutate_unassigned_task_but_can_restore_own_archived_task(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from cccc.kernel.actors import add_actor
+            from cccc.kernel.group import load_group
+
+            gid = self._create_group()
+            group = load_group(gid)
+            assert group is not None
+            add_actor(group, actor_id="lead1", runtime="codex")
+            add_actor(group, actor_id="peer1", runtime="codex")
+
+            self._sync(gid, [{"op": "task.create", "title": "Unassigned", "outcome": "Guard it"}])
+            unassigned_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+
+            update_resp, _ = self._sync(
+                gid,
+                [{"op": "task.update", "task_id": unassigned_id, "notes": "peer should not edit this"}],
+                by="peer1",
+            )
+            self.assertFalse(update_resp.ok)
+            self.assertIn("permission denied", str(update_resp.error.message).lower())
+
+            move_resp, _ = self._sync(
+                gid,
+                [{"op": "task.move", "task_id": unassigned_id, "status": "active"}],
+                by="peer1",
+            )
+            self.assertFalse(move_resp.ok)
+            self.assertIn("permission denied", str(move_resp.error.message).lower())
+
+            self._sync(gid, [{"op": "task.move", "task_id": unassigned_id, "status": "archived"}])
+            restore_denied, _ = self._sync(
+                gid,
+                [{"op": "task.restore", "task_id": unassigned_id}],
+                by="peer1",
+            )
+            self.assertFalse(restore_denied.ok)
+            self.assertIn("permission denied", str(restore_denied.error.message).lower())
+
+            self._sync(
+                gid,
+                [{"op": "task.create", "title": "Assigned", "outcome": "Peer can restore", "assignee": "peer1"}],
+            )
+            assigned_id = [
+                item["id"]
+                for item in self._tasks(gid)[0].result["tasks"]
+                if item["title"] == "Assigned"
+            ][0]
+
+            archive_resp, _ = self._sync(
+                gid,
+                [{"op": "task.move", "task_id": assigned_id, "status": "archived"}],
+                by="peer1",
+            )
+            self.assertTrue(archive_resp.ok, getattr(archive_resp, "error", None))
+
+            restore_ok, _ = self._sync(
+                gid,
+                [{"op": "task.restore", "task_id": assigned_id}],
+                by="peer1",
+            )
+            self.assertTrue(restore_ok.ok, getattr(restore_ok, "error", None))
+            assigned_task = [
+                item
+                for item in self._tasks(gid)[0].result["tasks"]
+                if item["id"] == assigned_id
+            ][0]
+            self.assertEqual(assigned_task["status"], "planned")
+            self.assertIsNone(assigned_task.get("archived_from"))
+        finally:
+            cleanup()
+
+    def test_legacy_role_notes_set_updates_help_actor_block_without_touching_persona_notes(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from cccc.kernel.actors import add_actor
+            from cccc.kernel.group import load_group
+            from cccc.kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
+
+            gid = self._create_group()
+            group = load_group(gid)
+            assert group is not None
+            add_actor(group, actor_id="lead1", runtime="codex")
+            add_actor(group, actor_id="peer1", runtime="codex")
+            seed_resp, _ = self._sync(
+                gid,
+                [{"op": "agent_state.update", "actor_id": "peer1", "focus": "seed"}],
+                by="peer1",
+            )
+            self.assertTrue(seed_resp.ok, getattr(seed_resp, "error", None))
+
+            resp, _ = self._sync(
+                gid,
+                [{
+                    "op": "role_notes.set",
+                    "actor_id": "peer1",
+                    "persona_notes": "Stay skeptical.\nUse receipts.",
+                }],
+                by="user",
+            )
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+
+            prompt_file = read_group_prompt_file(group, HELP_FILENAME)
+            self.assertTrue(prompt_file.found)
+            help_content = str(prompt_file.content or "")
+            self.assertIn("## @actor: peer1", help_content)
+            self.assertIn("Stay skeptical.\nUse receipts.", help_content)
+
+            ctx, _ = self._context(gid)
+            peer_state = [item for item in ctx.result["agent_states"] if item["id"] == "peer1"][0]
+            self.assertEqual(peer_state["warm"]["persona_notes"], "")
         finally:
             cleanup()
 

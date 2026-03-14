@@ -443,9 +443,11 @@ export async function fetchGroups() {
   return apiJson<{ groups: GroupMeta[] }>("/api/v1/groups");
 }
 
-export async function fetchPing() {
-  return apiJson<{ home: string; daemon: unknown; version: string; web?: { mode?: string; read_only?: boolean } }>(
-    "/api/v1/ping"
+export async function fetchPing(options?: { includeHome?: boolean }) {
+  const includeHome = Boolean(options?.includeHome);
+  const suffix = includeHome ? "?include_home=1" : "";
+  return apiJson<{ home?: string; daemon: unknown; version: string; web?: { mode?: string; read_only?: boolean } }>(
+    `/api/v1/ping${suffix}`
   );
 }
 

@@ -4,10 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { AutomationRule, AutomationRuleStatus } from "../../../types";
 import { getRecipientDisplayLabel } from "../../../utils/displayText";
 import {
-  ACTOR_OPERATION_COPY,
   Chip,
-  GROUP_STATE_COPY,
-  WEEKDAY_OPTIONS,
   buildCronFromPreset,
   clampInt,
   defaultActorControlAction,
@@ -15,6 +12,9 @@ import {
   defaultNotifyAction,
   formatDuration,
   formatTimeInput,
+  getActorOperationCopy,
+  getGroupStateCopy,
+  getWeekdayOptions,
   isoToLocalDatetimeInput,
   localDatetimeInputToIso,
   localTimeZone,
@@ -60,6 +60,9 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
   } = props;
 
   const { t } = useTranslation("settings");
+  const actorOperationCopy = getActorOperationCopy(t);
+  const groupStateCopy = getGroupStateCopy(t);
+  const weekdayOptions = getWeekdayOptions(t);
 
   if (!editingRule) return null;
 
@@ -138,7 +141,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 checked={enabled}
                 onChange={(e) => onRulePatch(ruleId, { enabled: e.target.checked })}
               />
-              on
+              {t("ruleList.on")}
             </label>
             <button
               type="button"
@@ -258,7 +261,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 />
               </div>
               <div className="self-end text-[11px] text-[var(--color-text-muted)]">
-                {t("ruleEditor.currentCadence", { duration: formatDuration(everySeconds) })}
+                {t("ruleEditor.currentCadence", { duration: formatDuration(everySeconds, t) })}
               </div>
             </div>
           ) : null}
@@ -325,7 +328,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                     }}
                     className={inputClass(isDark)}
                   >
-                    {WEEKDAY_OPTIONS.map((day) => (
+                    {weekdayOptions.map((day) => (
                       <option key={day.value} value={String(day.value)}>
                         {day.label}
                       </option>
@@ -572,13 +575,13 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 }
                 className={inputClass(isDark)}
               >
-                <option value="active">{GROUP_STATE_COPY.active.label}</option>
-                <option value="idle">{GROUP_STATE_COPY.idle.label}</option>
-                <option value="paused">{GROUP_STATE_COPY.paused.label}</option>
-                <option value="stopped">{GROUP_STATE_COPY.stopped.label}</option>
+                <option value="active">{groupStateCopy.active.label}</option>
+                <option value="idle">{groupStateCopy.idle.label}</option>
+                <option value="paused">{groupStateCopy.paused.label}</option>
+                <option value="stopped">{groupStateCopy.stopped.label}</option>
               </select>
               <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                {GROUP_STATE_COPY[(groupStateValue as "active" | "idle" | "paused" | "stopped") || "paused"].hint}
+                {groupStateCopy[(groupStateValue as "active" | "idle" | "paused" | "stopped") || "paused"].hint}
               </div>
             </div>
           ) : null}
@@ -600,12 +603,12 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   }
                   className={inputClass(isDark)}
                 >
-                  <option value="start">{ACTOR_OPERATION_COPY.start.label}</option>
-                  <option value="stop">{ACTOR_OPERATION_COPY.stop.label}</option>
-                  <option value="restart">{ACTOR_OPERATION_COPY.restart.label}</option>
+                  <option value="start">{actorOperationCopy.start.label}</option>
+                  <option value="stop">{actorOperationCopy.stop.label}</option>
+                  <option value="restart">{actorOperationCopy.restart.label}</option>
                 </select>
                 <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                  {ACTOR_OPERATION_COPY[(actorOperation as "start" | "stop" | "restart") || "restart"].hint}
+                  {actorOperationCopy[(actorOperation as "start" | "stop" | "restart") || "restart"].hint}
                 </div>
               </div>
               <div>

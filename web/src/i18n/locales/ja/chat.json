@@ -56,10 +56,10 @@
   "sentTo": "{{label}} · {{to}} に送信",
   "updated": "更新： {{time}}",
   "noAgentStateYet": "エージェント状態はまだありません",
-  "taskShort": "task {{id}}",
-  "blockersShort": "blocked {{count}}",
-  "nextShort": "next: {{value}}",
-  "changedShort": "changed: {{value}}",
+  "taskShort": "タスク {{id}}",
+  "blockersShort": "ブロック {{count}}",
+  "nextShort": "次: {{value}}",
+  "changedShort": "変更: {{value}}",
   "reply": "返信",
   "ack": "確認",
   "needReply": "要返信",
@@ -94,6 +94,6 @@
   "copyEventId": "イベント ID をコピー",
   "openMessageContext": "メッセージコンテキストを開く",
   "closeSearchModal": "検索モーダルを閉じる",
-  "to": "送信先",
+  "to": "宛先",
   "toRecipient": "{{label}} に送信"
 }

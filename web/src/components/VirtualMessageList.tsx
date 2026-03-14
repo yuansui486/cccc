@@ -81,6 +81,11 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   // Create display name map once at the list level (not per-message)
   const displayNameMap = useActorDisplayNameMap(actors);
 
+  // Stable ref for messages — used by getEstimatedSize to avoid rebuilding
+  // the callback (and thus the virtualizer) on every messages change.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
   const prevMessageCountRef = useRef(messages.length);
   const isAtBottomRef = useRef(true);
   const didInitialScrollRef = useRef(false);
@@ -108,7 +113,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   // This reduces layout shift during scrolling by providing better initial estimates
   const getEstimatedSize = useCallback(
     (index: number): number => {
-      const message = messages[index];
+      const message = messagesRef.current[index];
       if (!message) return 100;
 
       const data = message.data as { text?: string; attachments?: unknown[] } | undefined;
@@ -158,7 +163,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
 
       return height;
     },
-    [messages]
+    [] // Stable ref — reads from messagesRef.current, no dep on messages array
   );
 
   // eslint-disable-next-line react-hooks/incompatible-library

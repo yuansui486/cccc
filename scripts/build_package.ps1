@@ -1,4 +1,4 @@
-param(
+﻿param(
   [switch]$InstallDeps,
   [string]$Python = "python"
 )

@@ -114,10 +114,16 @@ def _load_manifest(group_id: str, *, remote_space_id: str = "") -> Tuple[Path, D
     path = _manifest_path(group_id)
     raw = read_json(path)
     base = _new_manifest(group_id, remote_space_id=remote_space_id)
+    requested_remote_id = str(remote_space_id or "").strip()
+    if not requested_remote_id:
+        return path, base
     if not isinstance(raw, dict):
         return path, base
+    stored_remote_id = str(raw.get("remote_space_id") or "").strip()
+    if stored_remote_id and stored_remote_id != requested_remote_id:
+        return path, base
     doc = dict(base)
-    doc["remote_space_id"] = str(raw.get("remote_space_id") or remote_space_id or "")
+    doc["remote_space_id"] = str(stored_remote_id or requested_remote_id)
     doc["last_scan_at"] = str(raw.get("last_scan_at") or "") or None
     doc["last_success_at"] = str(raw.get("last_success_at") or "") or None
     files_raw = raw.get("files") if isinstance(raw.get("files"), dict) else {}

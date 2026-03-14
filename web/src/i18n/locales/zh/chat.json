@@ -94,6 +94,6 @@
   "copyEventId": "复制事件 ID",
   "openMessageContext": "打开消息上下文",
   "closeSearchModal": "关闭搜索窗口",
-  "to": "发送给",
+  "to": "收件人",
   "toRecipient": "发送给 {{label}}"
 }

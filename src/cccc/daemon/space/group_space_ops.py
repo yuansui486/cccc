@@ -577,8 +577,20 @@ def _release_query_slot(*, lane_key: str) -> None:
 
 
 def _latest_context_sync_at(*, group_id: str, provider: str) -> str:
+    binding = get_space_binding(group_id, provider=provider, lane="work") or {}
+    binding_status = str(binding.get("status") or "").strip().lower()
+    bound_remote_id = str(binding.get("remote_space_id") or "").strip()
+    if binding_status != "bound" or not bound_remote_id:
+        return ""
     fallback = ""
-    for item in list_space_jobs(group_id=group_id, provider=provider, lane="work", state="", limit=20):
+    for item in list_space_jobs(
+        group_id=group_id,
+        provider=provider,
+        lane="work",
+        state="",
+        remote_space_id=bound_remote_id,
+        limit=20,
+    ):
         if not isinstance(item, dict):
             continue
         if str(item.get("kind") or "").strip() != "context_sync":
@@ -631,6 +643,104 @@ def _explicit_source_basis_hint(*, requested_source_ids: List[str], referenced_s
     return ""
 
 
+def _neutral_work_sync_state(
+    *,
+    group_id: str,
+    provider: str,
+    raw_state: Dict[str, Any],
+    remote_space_id: str,
+    reason: str,
+) -> Dict[str, Any]:
+    state = dict(raw_state) if isinstance(raw_state, dict) else {}
+    return {
+        "available": bool(state.get("available")),
+        "reason": str(reason or "").strip(),
+        "space_root": str(state.get("space_root") or ""),
+        "group_id": str(state.get("group_id") or group_id or ""),
+        "provider": str(state.get("provider") or provider or "notebooklm"),
+        "remote_space_id": str(remote_space_id or ""),
+        "last_run_at": "",
+        "converged": False,
+        "unsynced_count": 0,
+        "failed_count": 0,
+        "failed_items": [],
+        "uploaded": 0,
+        "updated": 0,
+        "deleted": 0,
+        "reused": 0,
+        "remote_sources": 0,
+        "materialized_sources": 0,
+        "remote_artifacts": 0,
+        "downloaded_artifacts": 0,
+        "pruned_artifacts": 0,
+        "last_error": "",
+        "failure_signature": "",
+        "last_fingerprint": {},
+        "errors": [],
+    }
+
+
+def _live_work_sync_state(*, group_id: str, provider: str, binding: Dict[str, Any]) -> Dict[str, Any]:
+    raw_state = read_group_space_sync_state(group_id)
+    if not bool(raw_state.get("available")):
+        return raw_state
+
+    binding_status = str(binding.get("status") or "").strip().lower()
+    bound_remote_id = str(binding.get("remote_space_id") or "").strip()
+    if binding_status != "bound" or not bound_remote_id:
+        return _neutral_work_sync_state(
+            group_id=group_id,
+            provider=provider,
+            raw_state=raw_state,
+            remote_space_id="",
+            reason="work_lane_unbound",
+        )
+
+    raw_remote_id = str(raw_state.get("remote_space_id") or "").strip()
+    if raw_remote_id != bound_remote_id:
+        return _neutral_work_sync_state(
+            group_id=group_id,
+            provider=provider,
+            raw_state=raw_state,
+            remote_space_id=bound_remote_id,
+            reason=("sync_state_not_ready" if not raw_remote_id else "binding_remote_mismatch"),
+        )
+    return raw_state
+
+
+def _live_work_queue_summary(*, group_id: str, provider: str, binding: Dict[str, Any]) -> Dict[str, Any]:
+    binding_status = str(binding.get("status") or "").strip().lower()
+    bound_remote_id = str(binding.get("remote_space_id") or "").strip()
+    if binding_status != "bound" or not bound_remote_id:
+        return {"pending": 0, "running": 0, "failed": 0}
+    return space_queue_summary(
+        group_id=group_id,
+        provider=provider,
+        lane="work",
+        remote_space_id=bound_remote_id,
+    )
+
+
+def _cancel_stale_pending_work_jobs(*, group_id: str, provider: str, current_remote_space_id: str = "") -> int:
+    keep_remote_id = str(current_remote_space_id or "").strip()
+    canceled = 0
+    for item in list_space_jobs(group_id=group_id, provider=provider, lane="work", state="pending", limit=500):
+        if not isinstance(item, dict):
+            continue
+        remote_space_id = str(item.get("remote_space_id") or "").strip()
+        if keep_remote_id and remote_space_id == keep_remote_id:
+            continue
+        job_id = str(item.get("job_id") or "").strip()
+        if not job_id:
+            continue
+        try:
+            cancel_space_job(job_id)
+            canceled += 1
+        except Exception:
+            continue
+    return canceled
+
+
 def _build_space_query_diagnostics(
     *,
     group_id: str,
@@ -659,7 +769,7 @@ def _build_space_query_diagnostics(
     )
     if lane == "work":
         latest_context_sync_at = _latest_context_sync_at(group_id=group_id, provider=provider)
-        sync_state = read_group_space_sync_state(group_id)
+        sync_state = _live_work_sync_state(group_id=group_id, provider=provider, binding=binding)
         has_sync_state = bool(sync_state.get("available")) or any(
             key in sync_state for key in ("remote_sources", "materialized_sources")
         )
@@ -1199,8 +1309,10 @@ def handle_group_space_status(args: Dict[str, Any]) -> DaemonResponse:
         provider_state = get_space_provider_state(provider)
         provider_state.update(_provider_runtime_readiness(provider))
         bindings = get_space_bindings(group.group_id, provider=provider)
+        work_binding = bindings.get("work") if isinstance(bindings.get("work"), dict) else {}
         summary = space_queue_summaries(group_id=group.group_id, provider=provider)
-        sync_state = read_group_space_sync_state(group.group_id)
+        summary["work"] = _live_work_queue_summary(group_id=group.group_id, provider=provider, binding=work_binding)
+        sync_state = _live_work_sync_state(group_id=group.group_id, provider=provider, binding=work_binding)
         memory_binding = bindings.get("memory") if isinstance(bindings.get("memory"), dict) else {}
         return DaemonResponse(
             ok=True,
@@ -1299,6 +1411,11 @@ def handle_group_space_bind(args: Dict[str, Any]) -> DaemonResponse:
                 status="bound",
             )
             if lane == "work":
+                _cancel_stale_pending_work_jobs(
+                    group_id=group.group_id,
+                    provider=provider,
+                    current_remote_space_id=remote_space_id,
+                )
                 provider_state = set_space_provider_state(
                     provider,
                     enabled=True,
@@ -1359,6 +1476,8 @@ def handle_group_space_bind(args: Dict[str, Any]) -> DaemonResponse:
                     )
         else:
             binding = set_space_binding_unbound(group.group_id, provider=provider, lane=lane, by=by)
+            if lane == "work":
+                _cancel_stale_pending_work_jobs(group_id=group.group_id, provider=provider)
             has_any_bound = any(
                 str(item.get("status") or "") == "bound" and str(item.get("remote_space_id") or "").strip()
                 for item in list_space_bindings(provider)
@@ -1374,9 +1493,11 @@ def handle_group_space_bind(args: Dict[str, Any]) -> DaemonResponse:
                     touch_health=True,
                 )
         bindings = get_space_bindings(group.group_id, provider=provider)
+        work_binding = bindings.get("work") if isinstance(bindings.get("work"), dict) else {}
         summary = space_queue_summaries(group_id=group.group_id, provider=provider)
+        summary["work"] = _live_work_queue_summary(group_id=group.group_id, provider=provider, binding=work_binding)
         _sync_projection_best_effort(group.group_id, provider)
-        sync_state = read_group_space_sync_state(group.group_id)
+        sync_state = _live_work_sync_state(group_id=group.group_id, provider=provider, binding=work_binding)
         memory_binding = bindings.get("memory") if isinstance(bindings.get("memory"), dict) else {}
         return DaemonResponse(
             ok=True,
@@ -2123,13 +2244,14 @@ def handle_group_space_sync(args: Dict[str, Any]) -> DaemonResponse:
         action = _sync_action_or_error(action_raw)
         if action == "status":
             if lane == "work":
+                binding = get_space_binding(group.group_id, provider=provider, lane="work") or {}
                 return DaemonResponse(
                     ok=True,
                     result={
                         "group_id": group.group_id,
                         "provider": provider,
                         "lane": lane,
-                        "sync": read_group_space_sync_state(group.group_id),
+                        "sync": _live_work_sync_state(group_id=group.group_id, provider=provider, binding=binding),
                     },
                 )
             binding = get_space_binding(group.group_id, provider=provider, lane="memory") or {}
@@ -2161,8 +2283,8 @@ def handle_group_space_sync(args: Dict[str, Any]) -> DaemonResponse:
                 str(result.get("message") or "group space sync failed"),
                 details=result,
             )
-        binding = get_space_binding(group.group_id, provider=provider, lane="memory") or {}
-        sync_payload = read_group_space_sync_state(group.group_id) if lane == "work" else read_memory_notebooklm_sync_state(
+        binding = get_space_binding(group.group_id, provider=provider, lane=("work" if lane == "work" else "memory")) or {}
+        sync_payload = _live_work_sync_state(group_id=group.group_id, provider=provider, binding=binding) if lane == "work" else read_memory_notebooklm_sync_state(
             group.group_id,
             remote_space_id=str(binding.get("remote_space_id") or ""),
         )

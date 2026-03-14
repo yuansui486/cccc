@@ -227,62 +227,62 @@ export function AutomationTab(props: AutomationTabProps) {
     const seen = new Set<string>();
     for (const r of draft.rules) {
       const id = String(r.id || "").trim();
-      if (!id) return "Each rule needs a name (ID).";
-      if (!isValidId(id)) return `Invalid rule name: ${id}`;
-      if (seen.has(id)) return `Duplicate rule name: ${id}`;
+      if (!id) return t("automation.validationRuleNameRequired");
+      if (!isValidId(id)) return t("automation.validationRuleNameInvalid", { id });
+      if (seen.has(id)) return t("automation.validationRuleNameDuplicate", { id });
       seen.add(id);
       const triggerKind = String(r.trigger?.kind || "interval");
       if (triggerKind === "interval") {
         const every = Number(r.trigger && "every_seconds" in r.trigger ? r.trigger.every_seconds : 0);
-        if (!Number.isFinite(every) || every < 1) return `Rule "${id}": repeat interval must be at least 1 second.`;
+        if (!Number.isFinite(every) || every < 1) return t("automation.validationIntervalMin", { id });
       } else if (triggerKind === "cron") {
         const cronExpr = String(r.trigger && "cron" in r.trigger ? r.trigger.cron : "").trim();
-        if (!cronExpr) return `Rule "${id}": schedule is required.`;
+        if (!cronExpr) return t("automation.validationScheduleRequired", { id });
       } else if (triggerKind === "at") {
         const atRaw = String(r.trigger && "at" in r.trigger ? r.trigger.at : "").trim();
-        if (!atRaw) return `Rule "${id}": one-time send time is required.`;
+        if (!atRaw) return t("automation.validationOneTimeRequired", { id });
         const atMillis = Date.parse(atRaw);
-        if (!Number.isFinite(atMillis)) return `Rule "${id}": invalid date/time format.`;
+        if (!Number.isFinite(atMillis)) return t("automation.validationDateTimeInvalid", { id });
       } else {
-        return `Rule "${id}": unsupported schedule type "${triggerKind}".`;
+        return t("automation.validationTriggerUnsupported", { id, kind: triggerKind });
       }
       const scope = String(r.scope || "group");
-      if (scope !== "group" && scope !== "personal") return `Rule "${id}": scope must be group or personal.`;
+      if (scope !== "group" && scope !== "personal") return t("automation.validationScopeInvalid", { id });
       if (scope === "personal" && !String(r.owner_actor_id || "").trim()) {
-        return `Rule "${id}": personal rules require an owner.`;
+        return t("automation.validationOwnerRequired", { id });
       }
       const to = Array.isArray(r.to) ? r.to.map((x) => String(x || "").trim()).filter(Boolean) : [];
       const kind = actionKind(r.action);
       if (kind === "notify") {
-        if (to.length === 0) return `Rule "${id}": please select at least one recipient.`;
+        if (to.length === 0) return t("automation.validationRecipientRequired", { id });
         const snippetRef = String(r.action && "snippet_ref" in r.action ? r.action.snippet_ref || "" : "").trim();
         const msg = String(r.action && "message" in r.action ? r.action.message || "" : "").trim();
         if (snippetRef && draft.snippets[snippetRef] === undefined) {
-          return `Rule "${id}": message snippet "${snippetRef}" does not exist.`;
+          return t("automation.validationSnippetMissing", { id, snippet: snippetRef });
         }
-        if (!snippetRef && !msg) return `Rule "${id}": choose a message snippet or enter message text.`;
+        if (!snippetRef && !msg) return t("automation.validationMessageRequired", { id });
       } else if (kind === "group_state") {
-        if (triggerKind !== "at") return `Rule "${id}": Set Group Status only supports One-Time schedule.`;
+        if (triggerKind !== "at") return t("automation.validationGroupStateOneTimeOnly", { id });
         const targetState = String(r.action && "state" in r.action ? r.action.state || "" : "").trim();
         if (!["active", "idle", "paused", "stopped"].includes(targetState)) {
-          return `Rule "${id}": group state action requires active/idle/paused/stopped.`;
+          return t("automation.validationGroupStateTargetRequired", { id });
         }
       } else if (kind === "actor_control") {
-        if (triggerKind !== "at") return `Rule "${id}": Control Actor Runtimes only supports One-Time schedule.`;
+        if (triggerKind !== "at") return t("automation.validationActorControlOneTimeOnly", { id });
         const operation = String(r.action && "operation" in r.action ? r.action.operation || "" : "").trim();
         if (!["start", "stop", "restart"].includes(operation)) {
-          return `Rule "${id}": actor control requires start/stop/restart.`;
+          return t("automation.validationActorControlOperationRequired", { id });
         }
         const targets = Array.isArray(r.action && "targets" in r.action ? r.action.targets : [])
           ? (r.action as { targets?: string[] }).targets?.map((x) => String(x || "").trim()).filter(Boolean) || []
           : [];
-        if (targets.length === 0) return `Rule "${id}": actor control requires at least one target.`;
+        if (targets.length === 0) return t("automation.validationActorControlTargetRequired", { id });
       }
     }
     for (const k of Object.keys(draft.snippets || {})) {
       const id = String(k || "").trim();
-      if (!id) return "Snippet name cannot be empty.";
-      if (!isValidId(id)) return `Invalid snippet name: ${id}`;
+      if (!id) return t("automation.validationSnippetNameRequired");
+      if (!isValidId(id)) return t("automation.validationRuleNameInvalid", { id });
     }
     return null;
   };

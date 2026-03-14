@@ -40,6 +40,13 @@ from ...kernel.context import (
 from ...kernel.actors import get_effective_role, list_actors
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
+from ...kernel.prompt_files import (
+    HELP_FILENAME,
+    delete_group_prompt_file,
+    load_builtin_help_markdown,
+    read_group_prompt_file,
+    write_group_prompt_file,
+)
 from ...util.conv import coerce_bool
 from ...util.fs import atomic_write_json, read_json
 from ..space.group_space_projection import sync_group_space_projection
@@ -401,9 +408,11 @@ def _check_permission(
             return None
         assignee = str(task.assignee or "").strip()
         handoff_to = str(task.handoff_to or "").strip()
-        if assignee and assignee != by and handoff_to != by:
+        if assignee == by or handoff_to == by:
+            return None
+        if assignee:
             return f"Permission denied: {op_name} on {task.id} (assigned to {assignee}, caller is {by})"
-        return None
+        return f"Permission denied: {op_name} on {task.id} (task is not assigned or handed off to {by})"
 
     return None
 
@@ -418,6 +427,26 @@ def _get_or_create_agent(agents_state: AgentsData, agent_id: str) -> AgentState:
     created = AgentState(id=canonical)
     agents_state.agents.append(created)
     return created
+
+
+def _group_actor_ids(group: Any) -> List[str]:
+    return [
+        str(item.get("id") or "").strip()
+        for item in list_actors(group)
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ]
+
+
+def _canonical_actor_id(actor_ids: List[str], target_actor_id: str) -> str:
+    target = str(target_actor_id or "").strip()
+    if not target:
+        return ""
+    target_fold = target.casefold()
+    for candidate in list(actor_ids or []):
+        normalized = str(candidate or "").strip()
+        if normalized.casefold() == target_fold:
+            return normalized
+    return target
 
 
 def _record_note(notes: List[CoordinationNote], *, by: str, summary: str, task_id: Optional[str]) -> None:
@@ -937,7 +966,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 if perm_err:
                     raise ValueError(perm_err)
                 if task.status != TaskStatus.ARCHIVED:
-                    continue
+                    raise ValueError(f"op[{idx}] task.restore requires archived task")
                 restore_to = str(task.archived_from or TaskStatus.PLANNED.value).strip().lower() or TaskStatus.PLANNED.value
                 try:
                     task.status = TaskStatus(restore_to)
@@ -1049,15 +1078,35 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 perm_err = _check_permission(by, op_name, group_id)
                 if perm_err:
                     raise ValueError(perm_err)
-                agent = _get_or_create_agent(agents_state, actor_id)
-                warm = agent.warm if isinstance(agent.warm, AgentStateWarm) else AgentStateWarm()
-                value = _normalize_text(raw.get("persona_notes"), max_len=600)
-                if warm.persona_notes != value:
-                    warm.persona_notes = value
-                    agent.warm = warm
-                    agent.updated_at = _utc_now_iso()
-                    agents_dirty = True
-                    _mark_change(idx, op_name, f"Set role notes for {actor_id}")
+                group = load_group(group_id)
+                if group is None:
+                    raise ValueError(f"group not found: {group_id}")
+                actor_ids = _group_actor_ids(group)
+                target_actor_id = _canonical_actor_id(actor_ids, actor_id)
+                if target_actor_id not in actor_ids:
+                    raise ValueError(f"op[{idx}] role_notes.set actor not found: {actor_id}")
+
+                from ...ports.mcp.utils.help_markdown import update_actor_help_note
+
+                prompt_file = read_group_prompt_file(group, HELP_FILENAME)
+                builtin_help = str(load_builtin_help_markdown() or "")
+                current_content = builtin_help if not prompt_file.found else str(prompt_file.content or "")
+                source = raw.get("content")
+                if source is None:
+                    source = raw.get("persona_notes") if "persona_notes" in raw else raw.get("notes")
+                value = _normalize_text(source, max_len=600)
+                next_content = update_actor_help_note(
+                    current_content,
+                    target_actor_id,
+                    value,
+                    actor_order=actor_ids,
+                )
+                if next_content != current_content:
+                    if not next_content.strip() or next_content == builtin_help:
+                        delete_group_prompt_file(group, HELP_FILENAME)
+                    else:
+                        write_group_prompt_file(group, HELP_FILENAME, next_content)
+                    _mark_change(idx, op_name, f"Set role notes for {target_actor_id}")
                 continue
 
             if op_name == "meta.merge":

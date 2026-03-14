@@ -680,7 +680,11 @@ class ContextStorage:
         for agent in agents_state.agents:
             if agent.id != canonical_id:
                 continue
+            agent.hot.active_task_id = None
             agent.hot.focus = ""
+            agent.hot.next_action = ""
+            agent.hot.blockers = []
+            agent.warm.what_changed = ""
             agent.updated_at = _utc_now_iso()
             self.save_agents(agents_state)
             return True

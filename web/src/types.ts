@@ -255,11 +255,8 @@ export type AgentState = {
 export type RuntimeInfo = {
   name: string;
   display_name: string;
-  command: string;
   recommended_command?: string;
   available: boolean;
-  path?: string;
-  capabilities: string;
 };
 
 export type ReplyTarget = {

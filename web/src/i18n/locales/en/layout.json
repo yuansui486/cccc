@@ -74,6 +74,8 @@
   "panoramaHudNext": "Next",
   "panoramaHudNoFocus": "None yet",
   "panoramaHudNoNextAction": "None yet",
+  "panoramaHudExpand": "Show details",
+  "panoramaHudCollapse": "Hide details",
   "forgotTokenCta": "Can't sign in?",
   "hideRecovery": "Hide recovery help",
   "recoveryTitle": "Recovery options",

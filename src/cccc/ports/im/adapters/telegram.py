@@ -365,7 +365,14 @@ class TelegramAdapter(IMAdapter):
             self._log(f"[send_file] failed: {e}")
             return False
 
-    def send_message(self, chat_id: str, text: str, thread_id: Optional[int] = None) -> bool:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
         """
         Send a message to a chat.
 
@@ -374,6 +381,7 @@ class TelegramAdapter(IMAdapter):
         - Message length limits
         - Retry on failure
         """
+        _ = mention_user_ids
         if not text:
             return True
 

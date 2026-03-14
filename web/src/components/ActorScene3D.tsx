@@ -253,10 +253,17 @@ function buildHudSummary(agents: AgentState[], actors?: Actor[]) {
 export function ActorScene3D({ agents, actors, tasks, tasksSummary, projectStatus, isDark, isSmallScreen = false, groupId, className }: ActorScene3DProps) {
   const { t } = useTranslation("layout");
   const [followTarget, setFollowTarget] = useState<string | null>(null);
+  const [hudExpanded, setHudExpanded] = useState(false);
 
   const handleCharacterClick = useCallback((agentId: string) => {
     setFollowTarget((prev) => (prev === agentId ? null : agentId));
   }, []);
+
+  useEffect(() => {
+    if (isSmallScreen) {
+      setHudExpanded(false);
+    }
+  }, [isSmallScreen]);
 
   const camZ = useMemo(() => {
     return Math.max(5, SEMANTIC_MAP_SCENE_EXTENT * 2 + 1);
@@ -271,6 +278,7 @@ export function ActorScene3D({ agents, actors, tasks, tasksSummary, projectStatu
     ],
     [hudSummary.activeAgents, hudSummary.blockedAgents, hudSummary.waitingAgents, t]
   );
+  const visibleHudItems = hudSummary.items.slice(0, isSmallScreen ? 4 : 5);
 
   // Phase 1: detect WebGPU + dynamically load three/webgpu module
   const [renderMode, setRenderMode] = useState<RenderMode>("loading");
@@ -389,86 +397,113 @@ export function ActorScene3D({ agents, actors, tasks, tasksSummary, projectStatu
 
   return (
     <div className={className} style={{ minHeight: 280, position: "relative" }}>
-      <div className="pointer-events-none absolute inset-x-3 bottom-3 z-[2] flex justify-center sm:inset-x-4 sm:bottom-4">
+      <div
+        className={`pointer-events-none absolute z-[2] ${
+          isSmallScreen
+            ? "inset-x-3 bottom-3"
+            : "right-4 top-4 w-[24rem] max-w-[calc(100%-2rem)]"
+        }`}
+      >
         <section
           aria-label={t("panoramaHudTitle", "Agent State")}
-          className={`w-full max-w-4xl rounded-2xl border px-3 py-3 shadow-xl backdrop-blur-md sm:px-4 ${
+          className={`pointer-events-auto w-full rounded-2xl border px-3 py-3 shadow-xl backdrop-blur-md sm:px-4 ${
             isDark
               ? "border-slate-700/60 bg-slate-950/82 text-slate-100 shadow-black/40"
               : "border-slate-300/70 bg-white/90 text-slate-900 shadow-slate-300/40"
           }`}
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-sm font-semibold sm:text-base">
                 {t("panoramaHudTitle", "Agent State")}
               </div>
-              <div className={`mt-1 text-[11px] sm:text-xs ${isDark ? "text-slate-100" : "text-slate-700"}`}>
-                {t("panoramaHudHint", "Quick snapshot of who is active, blocked, or waiting in the panorama scene.")}
+              {hudExpanded ? (
+                <div className={`mt-1 text-[11px] sm:text-xs ${isDark ? "text-slate-100" : "text-slate-700"}`}>
+                  {t("panoramaHudHint", "Quick snapshot of who is active, blocked, or waiting in the panorama scene.")}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              aria-expanded={hudExpanded}
+              onClick={() => setHudExpanded((prev) => !prev)}
+              className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors sm:text-xs ${
+                isDark
+                  ? "border-slate-600/80 bg-white/[0.08] text-slate-100 hover:bg-white/[0.14]"
+                  : "border-slate-300 bg-white/80 text-slate-700 hover:bg-white"
+              }`}
+            >
+              {hudExpanded
+                ? t("panoramaHudCollapse", "Hide details")
+                : t("panoramaHudExpand", "Show details")}
+            </button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {hudBadges.map((badge) => (
+              <span
+                key={badge.key}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${badge.tint}`}
+              >
+                <span>{badge.label}</span>
+                <span>{badge.value}</span>
+              </span>
+            ))}
+          </div>
+
+          {hudExpanded ? (
+            <div className="mt-3 max-h-[min(48vh,24rem)] overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 gap-2">
+                {visibleHudItems.map((item) => {
+                  const statusTone =
+                    item.statusKey === "blocked"
+                      ? "text-rose-600 bg-rose-500/10 border-rose-500/20 dark:text-rose-300"
+                      : item.statusKey === "active"
+                        ? "text-sky-600 bg-sky-500/10 border-sky-500/20 dark:text-sky-300"
+                        : item.statusKey === "thinking"
+                          ? "text-violet-600 bg-violet-500/10 border-violet-500/20 dark:text-violet-300"
+                          : "text-emerald-700 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-300";
+                  const statusLabel =
+                    item.statusKey === "blocked"
+                      ? t("panoramaHudBlocked", "Blocked")
+                      : item.statusKey === "active"
+                        ? t("panoramaHudActive", "Active")
+                        : item.statusKey === "thinking"
+                          ? t("panoramaHudThinking", "Thinking")
+                          : t("panoramaHudWaiting", "Waiting");
+
+                  return (
+                    <article
+                      key={item.id}
+                      className={`rounded-xl border px-3 py-2.5 ${
+                        isDark ? "border-slate-800/80 bg-white/[0.06]" : "border-slate-200 bg-slate-50/80"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold">{item.title}</div>
+                          <div className={`mt-1 text-[11px] ${isDark ? "text-slate-200" : "text-slate-600"}`}>ID: {item.id}</div>
+                        </div>
+                        <span className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold sm:text-[11px] ${statusTone}`}>
+                          {statusLabel}
+                        </span>
+                      </div>
+                      <div className={`mt-3 space-y-1.5 text-[11px] sm:text-xs ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                        <div className="line-clamp-2 break-words">
+                          <span className={isDark ? "text-slate-300" : "text-slate-600"}>{t("panoramaHudFocus", "Focus")}:</span>{" "}
+                          {item.focus || t("panoramaHudNoFocus", "None yet")}
+                        </div>
+                        <div className="line-clamp-2 break-words">
+                          <span className={isDark ? "text-slate-300" : "text-slate-600"}>{t("panoramaHudNext", "Next")}:</span>{" "}
+                          {item.next || t("panoramaHudNoNextAction", "None yet")}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {hudBadges.map((badge) => (
-                <span
-                  key={badge.key}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:text-xs ${badge.tint}`}
-                >
-                  <span>{badge.label}</span>
-                  <span>{badge.value}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {hudSummary.items.map((item) => {
-              const statusTone =
-                item.statusKey === "blocked"
-                  ? "text-rose-600 bg-rose-500/10 border-rose-500/20 dark:text-rose-300"
-                  : item.statusKey === "active"
-                    ? "text-sky-600 bg-sky-500/10 border-sky-500/20 dark:text-sky-300"
-                    : item.statusKey === "thinking"
-                      ? "text-violet-600 bg-violet-500/10 border-violet-500/20 dark:text-violet-300"
-                      : "text-emerald-700 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-300";
-              const statusLabel =
-                item.statusKey === "blocked"
-                  ? t("panoramaHudBlocked", "Blocked")
-                  : item.statusKey === "active"
-                    ? t("panoramaHudActive", "Active")
-                    : item.statusKey === "thinking"
-                      ? t("panoramaHudThinking", "Thinking")
-                      : t("panoramaHudWaiting", "Waiting");
-
-              return (
-                <article
-                  key={item.id}
-                  className={`rounded-xl border px-3 py-2.5 ${
-                    isDark ? "border-slate-800/80 bg-white/[0.06]" : "border-slate-200 bg-slate-50/80"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{item.title}</div>
-                      <div className={`mt-1 text-[11px] ${isDark ? "text-slate-200" : "text-slate-600"}`}>ID: {item.id}</div>
-                    </div>
-                    <span className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold sm:text-[11px] ${statusTone}`}>
-                      {statusLabel}
-                    </span>
-                  </div>
-                  <div className={`mt-3 space-y-1.5 text-[11px] sm:text-xs ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                    <div className="truncate">
-                      <span className={isDark ? "text-slate-300" : "text-slate-600"}>{t("panoramaHudFocus", "Focus")}:</span>{" "}
-                      {item.focus || t("panoramaHudNoFocus", "None yet")}
-                    </div>
-                    <div className="truncate">
-                      <span className={isDark ? "text-slate-300" : "text-slate-600"}>{t("panoramaHudNext", "Next")}:</span>{" "}
-                      {item.next || t("panoramaHudNoNextAction", "None yet")}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          ) : null}
         </section>
       </div>
       <Canvas

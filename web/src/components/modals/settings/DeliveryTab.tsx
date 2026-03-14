@@ -53,9 +53,9 @@ const ClockIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-const formatDuration = (secondsRaw: number): string => {
+const formatDuration = (secondsRaw: number, offLabel: string): string => {
   const seconds = Number.isFinite(secondsRaw) ? Math.max(0, Math.trunc(secondsRaw)) : 0;
-  if (seconds <= 0) return "Off";
+  if (seconds <= 0) return offLabel;
   const parts: string[] = [];
   let rem = seconds;
   const units: Array<[number, string]> = [
@@ -135,6 +135,7 @@ const NumberInputRow = ({
   min = 0,
   helperText,
   onAutoSave,
+  offLabel,
 }: {
   label: string;
   value: number;
@@ -143,6 +144,7 @@ const NumberInputRow = ({
   min?: number;
   helperText?: React.ReactNode;
   onAutoSave?: () => void;
+  offLabel: string;
 }) => (
   <div className="w-full">
     <label className={labelClass(isDark)}>{label}</label>
@@ -158,7 +160,7 @@ const NumberInputRow = ({
       <div
         className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono pointer-events-none transition-opacity duration-200 text-[var(--color-text-muted)]"
       >
-        {formatDuration(value)}
+        {formatDuration(value, offLabel)}
       </div>
     </div>
     {helperText && (
@@ -222,6 +224,7 @@ export function DeliveryTab(props: DeliveryTabProps) {
           onChange={props.setDeliveryInterval}
           helperText={t("delivery.deliveryIntervalHelp")}
           onAutoSave={() => autoSave("min_interval_seconds", () => props.deliveryInterval)}
+          offLabel={t("ruleList.off")}
         />
         <ToggleRow
           isDark={isDark}

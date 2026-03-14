@@ -164,6 +164,9 @@ def handle_send(
     src_event_id = str(args.get("src_event_id") or "").strip()
     dst_group_id = str(args.get("dst_group_id") or "").strip()
     client_id = str(args.get("client_id") or "").strip()
+    source_platform = str(args.get("source_platform") or "").strip()
+    source_user_name = str(args.get("source_user_name") or "").strip()
+    source_user_id = str(args.get("source_user_id") or "").strip()
     dst_to_raw = args.get("dst_to")
     dst_to: list[str] = []
     if isinstance(dst_to_raw, list):
@@ -277,6 +280,9 @@ def handle_send(
             reply_required=reply_required,
             to=to,
             attachments=attachments,
+            source_platform=source_platform or None,
+            source_user_name=source_user_name or None,
+            source_user_id=source_user_id or None,
             src_group_id=src_group_id or None,
             src_event_id=src_event_id or None,
             dst_group_id=dst_group_id or None,
@@ -322,6 +328,9 @@ def handle_send(
                 by=by,
                 to=effective_to,
                 text=delivery_text,
+                source_platform=source_platform or None,
+                source_user_name=source_user_name or None,
+                source_user_id=source_user_id or None,
                 ts=event_ts,
             )
 

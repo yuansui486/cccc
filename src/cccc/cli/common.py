@@ -421,44 +421,35 @@ def _default_entry() -> int:
         print("[cccc] Daemon failed to start in time", file=sys.stderr)
         return False
     
-    def _monitor_daemon() -> None:
-        """Background thread to monitor daemon and report crashes."""
-        nonlocal daemon_process, shutdown_requested
-        while not shutdown_requested and daemon_process is not None:
-            ret = daemon_process.poll()
-            if ret is not None and not shutdown_requested:
-                print(f"\n[cccc] Daemon crashed (exit code {ret})! Check log: {log_path}", file=sys.stderr)
-                try:
-                    lines = log_path.read_text().strip().split("\n")[-15:]
-                    for line in lines:
-                        print(f"  {line}", file=sys.stderr)
-                except Exception:
-                    pass
-                break
-            time.sleep(1.0)
-    
+    # Lifecycle helper — real logic lives in daemon_lifecycle.py so tests
+    # can import and drive it directly with injectable deps.
+    from .daemon_lifecycle import DaemonLifecycle
+
+    def _read_log_tail(n: int) -> list[str]:
+        try:
+            return log_path.read_text().strip().split("\n")[-n:]
+        except Exception:
+            return []
+
+    def _start_daemon_for_lifecycle() -> bool:
+        """Wraps _start_daemon and syncs process ref to lifecycle."""
+        ok = _start_daemon()
+        # _start_daemon sets daemon_process via nonlocal; sync to lifecycle.
+        _lifecycle.process = daemon_process
+        return ok
+
+    _lifecycle = DaemonLifecycle(
+        call_daemon=lambda req, timeout: call_daemon(req, timeout_s=timeout),
+        start_daemon=_start_daemon_for_lifecycle,
+        is_shutdown_requested=lambda: shutdown_requested,
+        log=lambda msg: print(f"[cccc] {msg}", file=sys.stderr),
+        read_log_tail=_read_log_tail,
+    )
+
     def _stop_daemon() -> None:
         nonlocal daemon_process
-        # Send shutdown command (works even if we didn't start the daemon)
-        try:
-            call_daemon({"op": "shutdown"}, timeout_s=2.0)
-        except Exception:
-            pass
-
-        # Wait for our subprocess to exit (if we started it)
-        if daemon_process is not None:
-            try:
-                daemon_process.wait(timeout=10.0)
-            except subprocess.TimeoutExpired:
-                try:
-                    daemon_process.terminate()
-                    daemon_process.wait(timeout=2.0)
-                except Exception:
-                    try:
-                        daemon_process.kill()
-                    except Exception:
-                        pass
-            daemon_process = None
+        _lifecycle.stop_daemon()
+        daemon_process = _lifecycle.process
     
     # Keep runtime binding aligned with remote_access settings/UI.
     host, port = _resolve_web_server_binding()
@@ -476,10 +467,12 @@ def _default_entry() -> int:
     if not _start_daemon():
         print("[cccc] Error: Could not start daemon", file=sys.stderr)
         return 1
+    # Sync initial process reference to lifecycle helper.
+    _lifecycle.process = daemon_process
     print("[cccc] Daemon started", file=sys.stderr)
 
     # Start daemon monitor thread
-    monitor_thread = threading.Thread(target=_monitor_daemon, daemon=True)
+    monitor_thread = threading.Thread(target=_lifecycle.monitor_daemon, daemon=True)
     monitor_thread.start()
 
     # Run web. Keep shutdown nearly immediate so Ctrl+C releases the port fast,

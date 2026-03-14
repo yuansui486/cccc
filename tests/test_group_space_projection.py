@@ -189,6 +189,154 @@ class TestGroupSpaceProjection(unittest.TestCase):
             project_ctx.__exit__(None, None, None)
             cleanup()
 
+    def test_unbind_neutralizes_projection_sync_state(self) -> None:
+        _, cleanup = self._with_home()
+        project_ctx = tempfile.TemporaryDirectory()
+        project_dir = Path(project_ctx.__enter__()).resolve()
+        try:
+            from cccc.daemon.space.group_space_paths import resolve_space_root, space_state_path
+            from cccc.kernel.group import load_group
+
+            gid = self._create_group("space-projection-unbind-sync")
+            attach_resp, _ = self._call(
+                "attach",
+                {"path": str(project_dir), "group_id": gid, "by": "user"},
+            )
+            self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
+
+            bind_resp, _ = self._call(
+                "group_space_bind",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "action": "bind",
+                    "remote_space_id": "nb_projection_old",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(bind_resp.ok, getattr(bind_resp, "error", None))
+
+            space_root = resolve_space_root(gid, create=False)
+            self.assertIsNotNone(space_root)
+            state_path = space_state_path(space_root or project_dir)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "remote_space_id": "nb_projection_old",
+                        "last_run_at": "2026-03-13T00:00:00Z",
+                        "converged": True,
+                        "unsynced_count": 0,
+                        "failed_count": 0,
+                        "remote_sources": 4,
+                        "materialized_sources": 4,
+                        "last_error": "",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            unbind_resp, _ = self._call(
+                "group_space_bind",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "action": "unbind",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(unbind_resp.ok, getattr(unbind_resp, "error", None))
+
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            scopes = group.doc.get("scopes") if isinstance(group.doc.get("scopes"), list) else []
+            scope_root = Path(str((scopes[0] if scopes else {}).get("url") or "")).resolve()
+            manifest = self._projection_path(scope_root, gid)
+            doc = json.loads(manifest.read_text(encoding="utf-8"))
+
+            sync_state = doc.get("sync") if isinstance(doc.get("sync"), dict) else {}
+            self.assertEqual(str(sync_state.get("reason") or ""), "work_lane_unbound")
+            self.assertEqual(str(sync_state.get("last_run_at") or ""), "")
+            self.assertEqual(bool(sync_state.get("converged")), False)
+
+            latest = doc.get("latest_context_sync") if isinstance(doc.get("latest_context_sync"), dict) else {}
+            self.assertEqual(latest, {})
+        finally:
+            project_ctx.__exit__(None, None, None)
+            cleanup()
+
+    def test_unbind_hides_stale_work_queue_and_latest_context_sync(self) -> None:
+        _, cleanup = self._with_home()
+        project_ctx = tempfile.TemporaryDirectory()
+        project_dir = Path(project_ctx.__enter__()).resolve()
+        try:
+            from cccc.kernel.group import load_group
+
+            gid = self._create_group("space-projection-unbind-queue")
+            attach_resp, _ = self._call(
+                "attach",
+                {"path": str(project_dir), "group_id": gid, "by": "user"},
+            )
+            self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
+
+            bind_resp, _ = self._call(
+                "group_space_bind",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "action": "bind",
+                    "remote_space_id": "nb_projection_queue",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(bind_resp.ok, getattr(bind_resp, "error", None))
+
+            sync_resp, _ = self._call(
+                "context_sync",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "ops": [{"op": "task.create", "title": "projection stale", "goal": "test"}],
+                },
+            )
+            self.assertTrue(sync_resp.ok, getattr(sync_resp, "error", None))
+
+            unbind_resp, _ = self._call(
+                "group_space_bind",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "action": "unbind",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(unbind_resp.ok, getattr(unbind_resp, "error", None))
+
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            scopes = group.doc.get("scopes") if isinstance(group.doc.get("scopes"), list) else []
+            scope_root = Path(str((scopes[0] if scopes else {}).get("url") or "")).resolve()
+            manifest = self._projection_path(scope_root, gid)
+            doc = json.loads(manifest.read_text(encoding="utf-8"))
+
+            latest = doc.get("latest_context_sync") if isinstance(doc.get("latest_context_sync"), dict) else {}
+            self.assertEqual(latest, {})
+
+            queue = (((doc.get("queue_summary") or {}).get("work")) if isinstance(doc.get("queue_summary"), dict) else {})
+            self.assertEqual(int(queue.get("pending") or 0), 0)
+            self.assertEqual(int(queue.get("running") or 0), 0)
+            self.assertEqual(int(queue.get("failed") or 0), 0)
+        finally:
+            project_ctx.__exit__(None, None, None)
+            cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -160,6 +160,41 @@ def cmd_im_unset(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {group_id}"}})
         return 2
 
+    state_dir = group.path / "state"
+    killed: set[int] = set()
+
+    # 1. Stop bridge via pid file (same pattern as cmd_im_stop)
+    pid_path = state_dir / "im_bridge.pid"
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+            if pid > 0:
+                best_effort_signal_pid(pid, SOFT_TERMINATE_SIGNAL, include_group=True)
+                killed.add(pid)
+        except Exception:
+            pass
+        try:
+            pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # 1b. Scan for orphan bridge processes (reuse existing helper)
+    for orphan_pid in _im_find_bridge_pids_by_script(group_id):
+        if orphan_pid not in killed:
+            try:
+                best_effort_signal_pid(orphan_pid, SOFT_TERMINATE_SIGNAL, include_group=True)
+            except Exception:
+                pass
+            killed.add(orphan_pid)
+
+    # 2. Clean up IM state files (graceful — ignore missing files)
+    for fname in ("im_subscribers.json", "im_authorized_chats.json", "im_pending_keys.json"):
+        try:
+            (state_dir / fname).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # 3. Remove IM config from group doc
     if "im" in group.doc:
         del group.doc["im"]
         group.save()

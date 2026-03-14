@@ -3,13 +3,35 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ....kernel.actors import find_actor
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ....kernel.group import load_group
 from ....util.conv import coerce_bool
 from ..common import MCPError, _call_daemon_or_raise
+
+
+def _normalize_runtime_escaped_text(*, group_id: str, actor_id: str, text: str) -> str:
+    """Normalize double-escaped control characters only for codex actor runtimes."""
+    raw = str(text or "")
+    group = load_group(str(group_id or "").strip())
+    if group is None:
+        return raw
+    actor = find_actor(group, str(actor_id or "").strip())
+    runtime = str(actor.get("runtime") or "").strip().lower() if isinstance(actor, dict) else ""
+    if runtime != "codex":
+        return raw
+    normalized = raw
+    for pattern, replacement in (
+        (r"(?<!\\)\\n", "\n"),
+        (r"(?<!\\)\\r", "\r"),
+        (r"(?<!\\)\\t", "\t"),
+    ):
+        normalized = re.sub(pattern, replacement, normalized)
+    return normalized
 
 
 def message_send(
@@ -23,6 +45,7 @@ def message_send(
     reply_required: bool = False,
 ) -> Dict[str, Any]:
     """Send a message to the group (or cross-group)."""
+    text = _normalize_runtime_escaped_text(group_id=group_id, actor_id=actor_id, text=text)
     prio = str(priority or "normal").strip() or "normal"
     if prio not in ("normal", "attention"):
         raise MCPError(code="invalid_priority", message="priority must be 'normal' or 'attention'")
@@ -74,6 +97,7 @@ def message_reply(
     """Reply to a message."""
     if not str(reply_to or "").strip():
         raise MCPError(code="missing_event_id", message="missing event_id (reply target)")
+    text = _normalize_runtime_escaped_text(group_id=group_id, actor_id=actor_id, text=text)
     prio = str(priority or "normal").strip() or "normal"
     if prio not in ("normal", "attention"):
         raise MCPError(code="invalid_priority", message="priority must be 'normal' or 'attention'")

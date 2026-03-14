@@ -6,44 +6,7 @@ from typing import Any, Dict, List
 from ..util.conv import coerce_bool
 from .actors import get_effective_role, list_actors
 from .group import Group
-from .group_space import get_group_space_prompt_state
 from .prompt_files import DEFAULT_PREAMBLE_BODY, PREAMBLE_FILENAME, read_group_prompt_file
-
-
-def _group_space_policy_lines(group_id: str) -> List[str]:
-    gid = str(group_id or "").strip()
-    if not gid:
-        return []
-    try:
-        state = get_group_space_prompt_state(gid, provider="notebooklm")
-        if not isinstance(state, dict):
-            return []
-        provider = str(state.get("provider") or "notebooklm")
-        mode = str(state.get("mode") or "disabled")
-        work_bound = bool(state.get("work_bound"))
-        memory_bound = bool(state.get("memory_bound"))
-        if not (work_bound or memory_bound):
-            return []
-        lines = [
-            "Group Space:",
-            f"- NotebookLM provider: {provider} ({mode}); work_bound={str(work_bound).lower()} memory_bound={str(memory_bound).lower()}.",
-        ]
-        if work_bound:
-            lines.append(
-                '- `cccc_space(action="query", lane="work")` is available for shared/project knowledge lookup.'
-            )
-            lines.append(
-                "- Long NotebookLM artifact jobs that return pending/queued complete via a later system.notify; do not poll. Continue other work or standby, and only set one one-shot reminder if the result blocks delivery and nothing else can proceed."
-            )
-        if memory_bound:
-            lines.append(
-                '- Recall order: local memory first; use `cccc_space(action="query", lane="memory")` only as a deeper recall fallback.'
-            )
-        if mode != "active":
-            lines.append("- If the provider is degraded, continue with Context + local memory and report the fallback explicitly.")
-        return lines
-    except Exception:
-        return []
 
 
 def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
@@ -158,21 +121,21 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
         lines.append("scopes (* = active):")
         lines.extend(scope_lines)
     
-    # Minimal platform invariants. Keep this stable and short; group-specific details belong in cccc_help / repo files.
+    # Keep this stable and short. Long-lived playbook details belong in cccc_help.
     core_lines = [
-        "Non-negotiables:",
+        "Working Style:",
+        "- Work like a sharp teammate, not a customer-service script.",
+        "- For simple exchanges, use normal sentences; use structure when complexity warrants it.",
+        "- Skip empty ceremony; say the actual state, risk, or next move.",
+        "",
+        "Platform Invariants:",
         "- No fabrication. Verify before claiming done.",
         "- Visible replies must go through MCP: cccc_message_send / cccc_message_reply.",
         "- Terminal output is not delivery.",
-        "- Cold start or resume: call cccc_bootstrap first.",
-        "- Need the full playbook or refreshed scoped guidance: run cccc_help.",
+        "- Cold start or resume: call cccc_bootstrap first, then cccc_help.",
         "- At key transitions, sync shared control-plane state and your cccc_agent_state.",
         "- For strategy or scope discussion, align first; implement only after explicit action intent.",
     ]
-
-    group_space_lines = _group_space_policy_lines(group_id)
-    if group_space_lines:
-        core_lines.extend(["", *group_space_lines])
 
     # Group override: CCCC_PREAMBLE.md under CCCC_HOME.
     pf = read_group_prompt_file(group, PREAMBLE_FILENAME)

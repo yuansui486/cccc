@@ -20,13 +20,27 @@ export default defineConfig({
         chunkFileNames: "assets/chunk-[name].js",
         assetFileNames: "assets/[name][extname]",
         // Split large deps into dedicated chunks to avoid oversized bundles.
-        manualChunks: {
-          // xterm (~400KB): keep separate to avoid bloating AgentTab.
-          xterm: ["@xterm/xterm", "@xterm/addon-fit"],
-          // React core
-          "react-vendor": ["react", "react-dom"],
-          // Three.js 3D scene: keep separate, loaded on demand.
-          "three-vendor": ["three", "@react-three/fiber", "@react-three/drei"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          // React core + libs that import react (must stay in the same chunk
+          // to avoid circular cross-chunk dependencies during initialisation)
+          if (/[\\/]node_modules[\\/](react|react-dom|zustand|@tanstack|scheduler)[\\/]/.test(id)) return "react-vendor";
+          // Three.js WebGPU renderer (heavy, split from core three)
+          if (/[\\/]node_modules[\\/]three[\\/].*webgpu/i.test(id)) return "three-webgpu";
+          // @react-three bindings (loaded on demand with 3D scene)
+          if (/[\\/]node_modules[\\/]@react-three[\\/]/.test(id)) return "three-react";
+          // Three.js core (loaded on demand via lazy ActorScene3D)
+          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) return "three-core";
+          // xterm terminal
+          if (/[\\/]node_modules[\\/]@xterm[\\/]/.test(id)) return "xterm";
+          // Markdown rendering
+          if (/[\\/]node_modules[\\/](markdown-it|mdurl|uc\.micro|entities|linkify-it)[\\/]/.test(id)) return "markdown";
+          // i18n
+          if (/[\\/]node_modules[\\/](i18next|react-i18next)[\\/]/.test(id)) return "i18n";
+          // Drag-and-drop + floating UI
+          if (/[\\/]node_modules[\\/](@dnd-kit|@floating-ui)[\\/]/.test(id)) return "ui-utils";
+          // Remaining third-party deps
+          return "vendor";
         },
       },
     },

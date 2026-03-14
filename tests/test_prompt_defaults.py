@@ -9,12 +9,13 @@ class TestPromptDefaults(unittest.TestCase):
 
         body = str(DEFAULT_PREAMBLE_BODY or "")
         self.assertIn("Startup routes:", body)
+        self.assertIn("Working stance:", body)
         self.assertIn("cccc_bootstrap", body)
         self.assertIn("context_hygiene", body)
         self.assertIn("cccc_help", body)
         self.assertIn("cccc_context_get", body)
         self.assertIn("cccc_project_info", body)
-        self.assertLessEqual(len(body.split()), 80)
+        self.assertLessEqual(len(body.split()), 90)
 
     def test_default_preamble_avoids_long_rule_duplication(self) -> None:
         from cccc.kernel.prompt_files import DEFAULT_PREAMBLE_BODY
@@ -31,7 +32,9 @@ class TestPromptDefaults(unittest.TestCase):
 
         body = str(load_builtin_help_markdown() or "")
         self.assertLessEqual(len(body.split()), 1300)
-        self.assertIn("Use this playbook in the group.", body)
+        self.assertIn("This is your working playbook for this group.", body)
+        self.assertIn("## Working Stance", body)
+        self.assertIn("## Communication Patterns", body)
         self.assertIn("## Core Routes", body)
         self.assertIn("## Control Plane", body)
         self.assertIn("## Memory and Recall", body)
@@ -45,6 +48,7 @@ class TestPromptDefaults(unittest.TestCase):
         self.assertNotIn("### Capsule Skill Boundary", body)
         self.assertNotIn("### Terminal Transcript", body)
         self.assertNotIn("### Automation Tools", body)
+        self.assertNotIn("## Quick Card", body)
 
     def test_mcp_reminder_line_stays_single_purpose(self) -> None:
         from cccc.daemon.messaging.delivery import MCP_REMINDER_LINE

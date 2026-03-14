@@ -245,12 +245,20 @@ class SlackAdapter(IMAdapter):
 
         return messages
 
-    def send_message(self, chat_id: str, text: str, thread_id: Optional[int] = None) -> bool:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
         """
         Send a message to a Slack channel.
 
         chat_id is actually a channel ID string in Slack.
         """
+        _ = mention_user_ids
         _ = thread_id  # Slack threads not wired yet (future work).
         if not self._connected or not self._web_client:
             return False

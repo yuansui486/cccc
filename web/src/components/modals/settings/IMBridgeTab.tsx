@@ -139,10 +139,10 @@ export function IMBridgeTab({
       if (resp.ok) {
         setAuthChats(resp.result?.authorized ?? []);
       } else {
-        setAuthError(resp.error?.message || "Failed to load authorized chats");
+        setAuthError(resp.error?.message || t("imBridge.loadAuthorizedFailed"));
       }
     } catch {
-      setAuthError("Failed to load authorized chats");
+      setAuthError(t("imBridge.loadAuthorizedFailed"));
     } finally {
       setAuthLoading(false);
     }
@@ -161,12 +161,12 @@ export function IMBridgeTab({
         setPendingRequests(resp.result?.pending ?? []);
       } else {
         if (!silent) {
-          setPendingError(resp.error?.message || "Failed to load pending requests");
+          setPendingError(resp.error?.message || t("imBridge.loadPendingFailed"));
         }
       }
     } catch {
       if (!silent) {
-        setPendingError("Failed to load pending requests");
+        setPendingError(t("imBridge.loadPendingFailed"));
       }
     } finally {
       if (!silent) {
@@ -656,7 +656,7 @@ export function IMBridgeTab({
                       setAuthError(
                         code === "invalid_key"
                           ? t("imBridge.bindError", "Key does not exist or has expired")
-                          : (resp.error?.message || "Bind failed"),
+                          : (resp.error?.message || t("imBridge.bindFailed")),
                       );
                     }
                   } catch {

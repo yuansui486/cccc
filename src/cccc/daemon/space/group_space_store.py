@@ -832,12 +832,14 @@ def list_space_jobs(
     provider: str = "notebooklm",
     lane: str = "",
     state: str = "",
+    remote_space_id: str = "",
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
     gid = _safe_id(group_id, field="group_id")
     pid = _provider_or_raise(provider)
     lane_filter = _lane_or_raise(lane) if str(lane or "").strip() else ""
     wanted_state = str(state or "").strip()
+    wanted_remote = str(remote_space_id or "").strip()
     max_items = max(1, min(int(limit or 50), 500))
     _, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
@@ -856,6 +858,8 @@ def list_space_jobs(
         if lane_filter and model.lane != lane_filter:
             continue
         if wanted_state and model.state != wanted_state:
+            continue
+        if wanted_remote and model.remote_space_id != wanted_remote:
             continue
         out.append(model.model_dump(exclude_none=True))
     out.sort(key=lambda it: str(it.get("updated_at") or ""), reverse=True)
@@ -893,10 +897,17 @@ def list_due_space_jobs(*, limit: int = 50) -> List[Dict[str, Any]]:
     return out[:max_items]
 
 
-def space_queue_summary(*, group_id: str, provider: str = "notebooklm", lane: str = "") -> Dict[str, Any]:
+def space_queue_summary(
+    *,
+    group_id: str,
+    provider: str = "notebooklm",
+    lane: str = "",
+    remote_space_id: str = "",
+) -> Dict[str, Any]:
     gid = _safe_id(group_id, field="group_id")
     pid = _provider_or_raise(provider)
     lane_filter = _lane_or_raise(lane) if str(lane or "").strip() else ""
+    wanted_remote = str(remote_space_id or "").strip()
     _, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
     pending = 0
@@ -912,6 +923,8 @@ def space_queue_summary(*, group_id: str, provider: str = "notebooklm", lane: st
         if model.group_id != gid or model.provider != pid:
             continue
         if lane_filter and model.lane != lane_filter:
+            continue
+        if wanted_remote and model.remote_space_id != wanted_remote:
             continue
         if model.state == "pending":
             pending += 1

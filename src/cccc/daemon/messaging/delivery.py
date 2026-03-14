@@ -230,6 +230,9 @@ class PendingMessage:
     text: str
     reply_to: Optional[str] = None
     quote_text: Optional[str] = None
+    source_platform: Optional[str] = None
+    source_user_name: Optional[str] = None
+    source_user_id: Optional[str] = None
     ts: str = ""
     kind: str = "chat.message"  # chat.message or system.notify
     notify_kind: str = ""  # For system.notify: nudge, keepalive, etc.
@@ -279,6 +282,9 @@ class DeliveryThrottle:
         text: str,
         reply_to: Optional[str] = None,
         quote_text: Optional[str] = None,
+        source_platform: Optional[str] = None,
+        source_user_name: Optional[str] = None,
+        source_user_id: Optional[str] = None,
         ts: str = "",
         kind: str = "chat.message",
         notify_kind: str = "",
@@ -296,6 +302,9 @@ class DeliveryThrottle:
                 text=text,
                 reply_to=reply_to,
                 quote_text=quote_text,
+                source_platform=source_platform,
+                source_user_name=source_user_name,
+                source_user_id=source_user_id,
                 ts=ts or utc_now_iso(),
                 kind=kind,
                 notify_kind=notify_kind,
@@ -488,6 +497,15 @@ def render_single_message(msg: PendingMessage) -> str:
     who = str(msg.by or "user").strip() or "user"
     targets = ", ".join([str(x).strip() for x in (msg.to or []) if str(x).strip()]) or "@all"
     body = (msg.text or "").rstrip("\n")
+    source_bits: List[str] = []
+    if msg.source_platform:
+        source_bits.append(str(msg.source_platform).strip())
+    if msg.source_user_name:
+        source_bits.append(str(msg.source_user_name).strip())
+    if msg.source_user_id:
+        source_bits.append(str(msg.source_user_id).strip())
+    if source_bits:
+        who = f"{who}[{' / '.join([bit for bit in source_bits if bit])}]"
 
     # Build header
     head = f"[cccc] {who} → {targets}"
@@ -707,6 +725,9 @@ def queue_chat_message(
     text: str,
     reply_to: Optional[str] = None,
     quote_text: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    source_user_name: Optional[str] = None,
+    source_user_id: Optional[str] = None,
     ts: str = "",
 ) -> None:
     """Queue a chat message for throttled delivery."""
@@ -719,6 +740,9 @@ def queue_chat_message(
         text=text,
         reply_to=reply_to,
         quote_text=quote_text,
+        source_platform=source_platform,
+        source_user_name=source_user_name,
+        source_user_id=source_user_id,
         ts=ts,
         kind="chat.message",
     )

@@ -86,7 +86,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_non_admin_can_access_read_only_global_endpoints(self) -> None:
+    def test_non_admin_observability_and_fs_recent_are_denied(self) -> None:
         from cccc.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
@@ -97,13 +97,84 @@ class TestWebPrincipalGuards(unittest.TestCase):
                 headers = {"Authorization": f"Bearer {token}"}
 
                 resp = client.get("/api/v1/observability", headers=headers)
-                self.assertEqual(resp.status_code, 200)
-                self.assertTrue(bool(resp.json().get("ok")))
+                self.assertEqual(resp.status_code, 403)
+                self.assertEqual(str((resp.json().get("error") or {}).get("code") or ""), "permission_denied")
 
                 resp = client.get("/api/v1/fs/recent", headers=headers)
+                self.assertEqual(resp.status_code, 403)
+                self.assertEqual(str((resp.json().get("error") or {}).get("code") or ""), "permission_denied")
+        finally:
+            cleanup()
+
+    def test_admin_can_access_fs_recent(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            token = str(create_access_token("admin-a", allowed_groups=[], is_admin=True).get("token") or "")
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+                client = self._create_client()
+                resp = client.get("/api/v1/fs/recent", headers={"Authorization": f"Bearer {token}"})
                 self.assertEqual(resp.status_code, 200)
                 self.assertTrue(bool(resp.json().get("ok")))
                 self.assertIsInstance((resp.json().get("result") or {}).get("suggestions"), list)
+        finally:
+            cleanup()
+
+    def test_ping_omits_home_by_default_and_includes_it_on_demand(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+                client = self._create_client()
+
+                default_resp = client.get("/api/v1/ping")
+                self.assertEqual(default_resp.status_code, 200)
+                default_result = default_resp.json().get("result") or {}
+                self.assertNotIn("home", default_result)
+
+                detailed_resp = client.get("/api/v1/ping?include_home=1")
+                self.assertEqual(detailed_resp.status_code, 200)
+                detailed_result = detailed_resp.json().get("result") or {}
+                self.assertTrue(bool(str(detailed_result.get("home") or "").strip()))
+        finally:
+            cleanup()
+
+    def test_runtimes_response_is_trimmed_to_ui_fields(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+        from cccc.kernel.runtime import RuntimeInfo
+
+        _, cleanup = self._with_home()
+        try:
+            token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
+            runtime = RuntimeInfo(
+                name="codex",
+                display_name="Codex CLI",
+                command="codex",
+                available=True,
+                path="/usr/bin/codex",
+                capabilities="MCP; MCP setup: auto",
+                mcp_add_command=["codex", "mcp", "add"],
+            )
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
+                "cccc.kernel.runtime.detect_all_runtimes",
+                return_value=[runtime],
+            ), patch(
+                "cccc.kernel.runtime.get_runtime_command_with_flags",
+                return_value=["codex", "--mcp-config", "cccc"],
+            ):
+                client = self._create_client()
+                resp = client.get("/api/v1/runtimes", headers={"Authorization": f"Bearer {token}"})
+                self.assertEqual(resp.status_code, 200)
+                runtimes = ((resp.json().get("result") or {}).get("runtimes") or [])
+                self.assertEqual(len(runtimes), 1)
+                row = runtimes[0]
+                self.assertEqual(row.get("name"), "codex")
+                self.assertEqual(row.get("display_name"), "Codex CLI")
+                self.assertEqual(row.get("recommended_command"), "codex --mcp-config cccc")
+                self.assertEqual(row.get("available"), True)
+                self.assertNotIn("command", row)
+                self.assertNotIn("path", row)
+                self.assertNotIn("capabilities", row)
         finally:
             cleanup()
 

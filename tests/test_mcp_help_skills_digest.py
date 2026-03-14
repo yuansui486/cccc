@@ -52,6 +52,8 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
             out = handle_tool_call("cccc_help", {})
 
         markdown = str(out.get("markdown") or "")
+        self.assertIn("## Working Stance", markdown)
+        self.assertIn("## Communication Patterns", markdown)
         self.assertIn("## Core Routes", markdown)
         self.assertIn("## Control Plane", markdown)
         self.assertIn("## Memory and Recall", markdown)
@@ -203,6 +205,53 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                 self.assertIn('use `cccc_space(action="query", lane="memory")` only as a deeper recall fallback.', memory_only_markdown)
         finally:
             cleanup()
+
+    def test_runtime_help_addenda_replace_stale_reserved_sections(self) -> None:
+        from cccc.ports.mcp.handlers.cccc_core import _append_runtime_help_addenda
+
+        base = (
+            "## Core Routes\n"
+            "- base content\n\n"
+            "## Group Space (Runtime)\n"
+            "- stale work_bound=false memory_bound=false\n\n"
+            "## Active Skills (Runtime)\n"
+            "- stale skill digest\n\n"
+            "## Role Notes\n"
+            "- keep this\n"
+        )
+
+        with patch(
+            "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+            return_value={
+                "enabled_capabilities": [],
+                "active_capsule_skills": [
+                    {
+                        "capability_id": "skill:test:triage",
+                        "name": "triage",
+                        "description_short": "Issue triage checklist",
+                    }
+                ],
+                "autoload_skills": [],
+            },
+        ), patch(
+            "cccc.ports.mcp.handlers.cccc_core.get_group_space_prompt_state",
+            return_value={
+                "provider": "notebooklm",
+                "mode": "active",
+                "work_bound": True,
+                "memory_bound": False,
+            },
+        ):
+            markdown = _append_runtime_help_addenda(base, group_id="g1", actor_id="peer-1")
+
+        self.assertEqual(markdown.count("## Group Space (Runtime)"), 1)
+        self.assertEqual(markdown.count("## Active Skills (Runtime)"), 1)
+        self.assertIn("work_bound=true memory_bound=false", markdown)
+        self.assertIn("triage", markdown)
+        self.assertNotIn("stale work_bound=false memory_bound=false", markdown)
+        self.assertNotIn("stale skill digest", markdown)
+        self.assertIn("## Role Notes", markdown)
+        self.assertIn("- keep this", markdown)
 
     def test_cccc_help_includes_context_hygiene(self) -> None:
         from cccc.ports.mcp.server import handle_tool_call

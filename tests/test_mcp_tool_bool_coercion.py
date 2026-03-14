@@ -154,6 +154,153 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertFalse(bool(args.get("reply_required")))
 
+    def test_message_send_normalizes_double_escaped_newlines(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        captured = {}
+
+        def _fake_call(req):
+            captured["req"] = req
+            return {"ok": True, "event_id": "ev_test"}
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            cccc_messaging, "load_group", return_value=_FakeGroup()
+        ), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
+        ):
+            mcp_server.message_send(
+                group_id="g_test",
+                actor_id="peer1",
+                text="line1\\nline2\\tindent",
+                to=["user"],
+            )
+
+        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
+        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual(args.get("text"), "line1\nline2\tindent")
+
+    def test_message_reply_keeps_normal_newlines_idempotent(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        captured = {}
+
+        def _fake_call(req):
+            captured["req"] = req
+            return {"ok": True, "event_id": "ev_test"}
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            cccc_messaging, "load_group", return_value=_FakeGroup()
+        ), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
+        ):
+            mcp_server.message_reply(
+                group_id="g_test",
+                actor_id="peer1",
+                reply_to="ev_1",
+                text="line1\nline2",
+                to=["user"],
+            )
+
+        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
+        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual(args.get("text"), "line1\nline2")
+
+    def test_message_send_keeps_windows_path_for_non_codex_runtime(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        captured = {}
+
+        def _fake_call(req):
+            captured["req"] = req
+            return {"ok": True, "event_id": "ev_test"}
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            cccc_messaging, "load_group", return_value=_FakeGroup()
+        ), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
+        ):
+            mcp_server.message_send(
+                group_id="g_test",
+                actor_id="peer1",
+                text=r"C:\\temp\\new",
+                to=["user"],
+            )
+
+        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
+        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual(args.get("text"), r"C:\\temp\\new")
+
+    def test_message_send_keeps_literal_backslash_n_for_codex_runtime(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        captured = {}
+
+        def _fake_call(req):
+            captured["req"] = req
+            return {"ok": True, "event_id": "ev_test"}
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            cccc_messaging, "load_group", return_value=_FakeGroup()
+        ), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
+        ):
+            mcp_server.message_send(
+                group_id="g_test",
+                actor_id="peer1",
+                text=r"literal \\n path C:\\temp\\new",
+                to=["user"],
+            )
+
+        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
+        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual(args.get("text"), r"literal \\n path C:\\temp\\new")
+
+    def test_message_reply_keeps_literal_backslash_t_for_codex_runtime(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        captured = {}
+
+        def _fake_call(req):
+            captured["req"] = req
+            return {"ok": True, "event_id": "ev_test"}
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            cccc_messaging, "load_group", return_value=_FakeGroup()
+        ), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
+        ):
+            mcp_server.message_reply(
+                group_id="g_test",
+                actor_id="peer1",
+                reply_to="ev_1",
+                text=r"regex \\t token",
+                to=["user"],
+            )
+
+        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
+        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual(args.get("text"), r"regex \\t token")
+
     def test_group_list_running_string_false(self) -> None:
         from cccc.ports.mcp import server as mcp_server
         from cccc.ports.mcp.handlers import cccc_group_actor

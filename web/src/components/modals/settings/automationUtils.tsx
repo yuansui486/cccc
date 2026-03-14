@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- utility + component mixed file */
 import React from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 import type { AutomationRule, AutomationRuleAction } from "../../../types";
 import { cardClass, inputClass, labelClass } from "./types";
@@ -39,9 +41,9 @@ export const SparkIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export const formatDuration = (secondsRaw: number): string => {
+export const formatDuration = (secondsRaw: number, t?: TFunction): string => {
   const seconds = Number.isFinite(secondsRaw) ? Math.max(0, Math.trunc(secondsRaw)) : 0;
-  if (seconds <= 0) return "Off";
+  if (seconds <= 0) return t ? t("automation.durationOff") : "Off";
   const parts: string[] = [];
   let rem = seconds;
   const units: Array<[number, string]> = [
@@ -103,33 +105,36 @@ export const NumberInputRow = ({
   helperText?: React.ReactNode;
   formatValue?: boolean;
   onAutoSave?: () => void;
-}) => (
-  <div className="w-full">
-    <label className={labelClass(isDark)}>{label}</label>
-    <div className="relative">
-      <input
-        type="number"
-        min={min}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onBlur={() => onAutoSave?.()}
-        className={inputClass(isDark)}
-      />
-      {formatValue ? (
-        <div
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono pointer-events-none transition-opacity duration-200 text-[var(--color-text-muted)]"
-        >
-          {formatDuration(value)}
-        </div>
-      ) : null}
-    </div>
-    {helperText && (
-      <div className="mt-1.5 text-[11px] leading-snug text-[var(--color-text-muted)]">
-        {helperText}
+}) => {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="w-full">
+      <label className={labelClass(isDark)}>{label}</label>
+      <div className="relative">
+        <input
+          type="number"
+          min={min}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          onBlur={() => onAutoSave?.()}
+          className={inputClass(isDark)}
+        />
+        {formatValue ? (
+          <div
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono pointer-events-none transition-opacity duration-200 text-[var(--color-text-muted)]"
+          >
+            {formatDuration(value, t)}
+          </div>
+        ) : null}
       </div>
-    )}
-  </div>
-);
+      {helperText && (
+        <div className="mt-1.5 text-[11px] leading-snug text-[var(--color-text-muted)]">
+          {helperText}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const Chip = ({
   label,
@@ -139,23 +144,26 @@ export const Chip = ({
   label: string;
   onRemove?: () => void;
   isDark?: boolean;
-}) => (
-  <span
-    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]"
-  >
-    <span className="font-mono">{label}</span>
-    {onRemove ? (
-      <button
-        type="button"
-        onClick={onRemove}
-        className="ml-0.5 rounded-full w-4 h-4 flex items-center justify-center hover:bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-tertiary)]"
-        aria-label={`Remove ${label}`}
-      >
-        ×
-      </button>
-    ) : null}
-  </span>
-);
+}) => {
+  const { t } = useTranslation();
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]"
+    >
+      <span className="font-mono">{label}</span>
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-0.5 rounded-full w-4 h-4 flex items-center justify-center hover:bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-tertiary)]"
+          aria-label={`${t("common:remove")} ${label}`}
+        >
+          ×
+        </button>
+      ) : null}
+    </span>
+  );
+};
 
 export function clampInt(v: number, min: number, max: number) {
   const n = Number.isFinite(v) ? Math.trunc(v) : min;
@@ -188,18 +196,43 @@ export function actionKind(action: AutomationRule["action"] | undefined): "notif
   return "notify";
 }
 
-export const GROUP_STATE_COPY: Record<"active" | "idle" | "paused" | "stopped", { label: string; hint: string }> = {
-  active: { label: "Activate Group", hint: "Start runners if needed, then resume active automation." },
-  idle: { label: "Set Idle", hint: "Keep sessions running but disable proactive automation." },
-  paused: { label: "Pause Delivery", hint: "Pause automation and notification delivery." },
-  stopped: { label: "Stop Group", hint: "Stop all actor runtimes for this group." },
-};
+export function getGroupStateCopy(t: TFunction): Record<"active" | "idle" | "paused" | "stopped", { label: string; hint: string }> {
+  return {
+    active: {
+      label: t("automation.groupStateActiveLabel"),
+      hint: t("automation.groupStateActiveHint"),
+    },
+    idle: {
+      label: t("automation.groupStateIdleLabel"),
+      hint: t("automation.groupStateIdleHint"),
+    },
+    paused: {
+      label: t("automation.groupStatePausedLabel"),
+      hint: t("automation.groupStatePausedHint"),
+    },
+    stopped: {
+      label: t("automation.groupStateStoppedLabel"),
+      hint: t("automation.groupStateStoppedHint"),
+    },
+  };
+}
 
-export const ACTOR_OPERATION_COPY: Record<"start" | "stop" | "restart", { label: string; hint: string }> = {
-  start: { label: "Start Runtimes", hint: "Start selected actor runtimes." },
-  stop: { label: "Stop Runtimes", hint: "Stop selected actor runtimes." },
-  restart: { label: "Restart Runtimes", hint: "Restart selected actor runtimes." },
-};
+export function getActorOperationCopy(t: TFunction): Record<"start" | "stop" | "restart", { label: string; hint: string }> {
+  return {
+    start: {
+      label: t("automation.actorOpStartLabel"),
+      hint: t("automation.actorOpStartHint"),
+    },
+    stop: {
+      label: t("automation.actorOpStopLabel"),
+      hint: t("automation.actorOpStopHint"),
+    },
+    restart: {
+      label: t("automation.actorOpRestartLabel"),
+      hint: t("automation.actorOpRestartHint"),
+    },
+  };
+}
 
 export function localTimeZone(): string {
   try {
@@ -211,34 +244,38 @@ export function localTimeZone(): string {
 
 export type SchedulePreset = "daily" | "weekly" | "monthly";
 
-export const WEEKDAY_OPTIONS: Array<{ value: number; label: string }> = [
-  { value: 1, label: "Mon" },
-  { value: 2, label: "Tue" },
-  { value: 3, label: "Wed" },
-  { value: 4, label: "Thu" },
-  { value: 5, label: "Fri" },
-  { value: 6, label: "Sat" },
-  { value: 0, label: "Sun" },
-];
+export function getWeekdayOptions(t: TFunction): Array<{ value: number; label: string }> {
+  return [
+    { value: 1, label: t("automation.weekdayMon") },
+    { value: 2, label: t("automation.weekdayTue") },
+    { value: 3, label: t("automation.weekdayWed") },
+    { value: 4, label: t("automation.weekdayThu") },
+    { value: 5, label: t("automation.weekdayFri") },
+    { value: 6, label: t("automation.weekdaySat") },
+    { value: 0, label: t("automation.weekdaySun") },
+  ];
+}
 
-export const AUTOMATION_VAR_HELP: Record<string, { description: string; example: string }> = {
-  interval_minutes: {
-    description: "Minutes for interval schedules (0 when not interval based).",
-    example: "15",
-  },
-  group_title: {
-    description: "Current group name.",
-    example: "Riichi Arena Ops",
-  },
-  actor_names: {
-    description: "Comma-separated enabled member names.",
-    example: "foreman, peer1, peer2",
-  },
-  scheduled_at: {
-    description: "Planned send time in UTC (ISO).",
-    example: "2026-02-10T12:00:00Z",
-  },
-};
+export function getAutomationVarHelp(t: TFunction): Record<string, { description: string; example: string }> {
+  return {
+    interval_minutes: {
+      description: t("automation.varHelpIntervalMinutes"),
+      example: "15",
+    },
+    group_title: {
+      description: t("automation.varHelpGroupTitle"),
+      example: "Riichi Arena Ops",
+    },
+    actor_names: {
+      description: t("automation.varHelpActorNames"),
+      example: "foreman, peer1, peer2",
+    },
+    scheduled_at: {
+      description: t("automation.varHelpScheduledAt"),
+      example: "2026-02-10T12:00:00Z",
+    },
+  };
+}
 
 export function parseCronToPreset(
   cronExpr: string

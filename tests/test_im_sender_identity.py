@@ -1,0 +1,258 @@
+import os
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from cccc.contracts.v1 import DaemonRequest
+from cccc.daemon.messaging.delivery import PendingMessage, render_single_message
+from cccc.daemon.server import handle_request
+from cccc.kernel.actors import add_actor
+from cccc.kernel.group import Group, load_group
+from cccc.ports.im.adapters.base import IMAdapter
+from cccc.ports.im.bridge import IMBridge
+
+
+class _FakeDingTalkAdapter(IMAdapter):
+    platform = "dingtalk"
+
+    def __init__(self, messages: List[Dict[str, Any]]):
+        self._messages = list(messages)
+        self._connected = False
+        self.sent_messages: List[Dict[str, Any]] = []
+
+    def connect(self) -> bool:
+        self._connected = True
+        return True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def poll(self) -> List[Dict[str, Any]]:
+        if not self._connected:
+            return []
+        out = list(self._messages)
+        self._messages = []
+        return out
+
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
+        self.sent_messages.append(
+            {
+                "chat_id": chat_id,
+                "text": text,
+                "thread_id": thread_id,
+                "mention_user_ids": mention_user_ids,
+            }
+        )
+        return True
+
+    def get_chat_title(self, chat_id: str) -> str:
+        return str(chat_id)
+
+    def download_attachment(self, attachment: Dict[str, Any]) -> bytes:
+        _ = attachment
+        return b""
+
+
+class TestImSenderIdentity(unittest.TestCase):
+    def _with_home(self):
+        old_home = os.environ.get("CCCC_HOME")
+        td_ctx = tempfile.TemporaryDirectory()
+        td = td_ctx.__enter__()
+        os.environ["CCCC_HOME"] = td
+
+        def cleanup() -> None:
+            td_ctx.__exit__(None, None, None)
+            if old_home is None:
+                os.environ.pop("CCCC_HOME", None)
+            else:
+                os.environ["CCCC_HOME"] = old_home
+
+        return td, cleanup
+
+    def _create_group_with_peer(self) -> tuple[Group, str]:
+        resp, _ = handle_request(
+            DaemonRequest.model_validate(
+                {"op": "group_create", "args": {"title": "t", "topic": "", "by": "user"}}
+            )
+        )
+        self.assertTrue(resp.ok, getattr(resp, "error", None))
+        group_id = str((resp.result or {}).get("group_id") or "").strip()
+        self.assertTrue(group_id)
+
+        group = load_group(group_id)
+        self.assertIsNotNone(group)
+        assert group is not None
+        add_actor(group, actor_id="peer1", runtime="codex", runner="pty", enabled=True)
+        return group, group_id
+
+    def test_bridge_inbound_send_persists_source_identity(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeDingTalkAdapter(
+                [
+                    {
+                        "chat_id": "cid_g1",
+                        "chat_title": "ops",
+                        "chat_type": "group",
+                        "routed": True,
+                        "thread_id": 0,
+                        "text": "你知道我是谁吗",
+                        "from_user": "Alice",
+                        "from_user_id": "staff_001",
+                        "message_id": "msg_001",
+                        "timestamp": time.time(),
+                    }
+                ]
+            )
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+
+            captured: List[Dict[str, Any]] = []
+
+            def _daemon(req: Dict[str, Any]) -> Dict[str, Any]:
+                resp, _ = handle_request(DaemonRequest.model_validate(req))
+                payload: Dict[str, Any] = {"ok": bool(resp.ok)}
+                if resp.ok:
+                    payload["result"] = resp.result
+                else:
+                    payload["error"] = resp.error.model_dump() if resp.error else {}
+                captured.append(payload)
+                return payload
+
+            bridge._daemon = _daemon  # type: ignore[method-assign]
+            bridge._process_inbound()
+
+            self.assertEqual(len(captured), 1)
+            event = ((captured[0].get("result") or {}).get("event") or {})
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            self.assertEqual(str(data.get("source_platform") or ""), "dingtalk")
+            self.assertEqual(str(data.get("source_user_name") or ""), "Alice")
+            self.assertEqual(str(data.get("source_user_id") or ""), "staff_001")
+            self.assertEqual(str(event.get("by") or ""), "user")
+        finally:
+            cleanup()
+
+    def test_render_single_message_includes_source_identity(self) -> None:
+        rendered = render_single_message(
+            PendingMessage(
+                event_id="evt1",
+                by="user",
+                to=["@foreman"],
+                text="请看一下",
+                source_platform="dingtalk",
+                source_user_name="Alice",
+                source_user_id="staff_001",
+            )
+        )
+        self.assertIn("[cccc] user[dingtalk / Alice / staff_001] → @foreman", rendered)
+
+    def test_render_single_message_without_source_identity_keeps_legacy_header(self) -> None:
+        rendered = render_single_message(
+            PendingMessage(
+                event_id="evt2",
+                by="user",
+                to=["@foreman"],
+                text="普通消息",
+            )
+        )
+        self.assertEqual(rendered, "[cccc] user → @foreman: 普通消息")
+
+    def test_plain_send_without_im_source_keeps_legacy_event_shape(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            _group, group_id = self._create_group_with_peer()
+
+            resp, _ = handle_request(
+                DaemonRequest.model_validate(
+                    {
+                        "op": "send",
+                        "args": {
+                            "group_id": group_id,
+                            "text": "普通消息",
+                            "by": "user",
+                            "to": ["peer1"],
+                        },
+                    }
+                )
+            )
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            event = (resp.result or {}).get("event") or {}
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            self.assertIsNone(data.get("source_platform"))
+            self.assertIsNone(data.get("source_user_name"))
+            self.assertIsNone(data.get("source_user_id"))
+            self.assertEqual(str(event.get("by") or ""), "user")
+        finally:
+            cleanup()
+
+    def test_bridge_forward_passes_explicit_mention_targets(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeDingTalkAdapter([])
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+            bridge.subscribers.subscribe("cid_g1", "ops", platform="dingtalk")
+            bridge._remember_mention_targets("cid_g1", 0, {"mention_user_ids": ["staff_001"]})
+
+            bridge._forward_event(
+                {
+                    "kind": "chat.message",
+                    "by": "claude-1",
+                    "data": {
+                        "text": "reply",
+                        "to": ["user"],
+                        "attachments": [],
+                    },
+                }
+            )
+
+            self.assertEqual(len(adapter.sent_messages), 1)
+            self.assertEqual(adapter.sent_messages[0]["mention_user_ids"], ["staff_001"])
+        finally:
+            cleanup()
+
+    def test_bridge_forward_does_not_promote_source_user_id_to_mention_target(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeDingTalkAdapter([])
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+            bridge.subscribers.subscribe("cid_g1", "ops", platform="dingtalk")
+
+            bridge._forward_event(
+                {
+                    "kind": "chat.message",
+                    "by": "claude-1",
+                    "data": {
+                        "text": "reply",
+                        "to": ["user"],
+                        "attachments": [],
+                        "source_platform": "dingtalk",
+                        "source_user_id": "union_or_sender_id",
+                    },
+                }
+            )
+
+            self.assertEqual(len(adapter.sent_messages), 1)
+            self.assertIsNone(adapter.sent_messages[0]["mention_user_ids"])
+        finally:
+            cleanup()
+
+
+if __name__ == "__main__":
+    unittest.main()

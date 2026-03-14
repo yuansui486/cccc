@@ -82,6 +82,7 @@ class DingTalkAdapter(IMAdapter):
     """
 
     platform = "dingtalk"
+    _LAST_SENDER_MAX = 256
 
     def __init__(
         self,
@@ -129,6 +130,11 @@ class DingTalkAdapter(IMAdapter):
         # Persistent AI Card client (lazy init) — shared across stream calls
         # so throttle state survives across begin/update/end invocations.
         self._card_client: Optional[Any] = None
+
+        # Cache: last inbound mentionable sender per conversation (for backward-compatible
+        # outbound @mention fallback). Only senderStaffId is safe to reuse here.
+        # conversation_id -> (staff_id, nick)   — bounded to _LAST_SENDER_MAX entries
+        self._last_sender: Dict[str, tuple[str, str]] = {}
 
         # Inbound health tracking: timestamp of last successfully enqueued message
         self._last_enqueue_ts: float = 0.0
@@ -562,8 +568,11 @@ class DingTalkAdapter(IMAdapter):
             # DingTalk event structure varies by type
             # Robot callback format
             msg_type = event.get("msgtype", "")
-            conversation_id = event.get("conversationId", "")
-            sender_id = event.get("senderStaffId", "") or event.get("senderId", "")
+            conversation_id = str(event.get("conversationId", "") or "").strip()
+            sender_staff_id = str(event.get("senderStaffId", "") or "").strip()
+            sender_id = str(event.get("senderId", "") or "").strip()
+            sender_display_id = sender_staff_id or sender_id
+            mention_user_ids = [sender_staff_id] if sender_staff_id else []
             sender_nick = event.get("senderNick", "user")
             msg_id = event.get("msgId", "")
 
@@ -674,6 +683,20 @@ class DingTalkAdapter(IMAdapter):
                 self._session_webhook_cache[conversation_id] = (session_webhook, expires_at)
                 self._log(f"[webhook] Cached: id={conversation_id}, expires_raw={session_expires}, expires_at={expires_at:.0f}")
 
+            # Cache sender for outbound @mention fallback (group chats only).
+            # senderId is not necessarily a valid atUserIds target, so only keep staffId.
+            if sender_staff_id and conversation_id:
+                # Evict oldest entries when cache is full
+                if len(self._last_sender) >= self._LAST_SENDER_MAX:
+                    try:
+                        oldest_key = next(iter(self._last_sender))
+                        del self._last_sender[oldest_key]
+                    except StopIteration:
+                        pass
+                self._last_sender[conversation_id] = (sender_staff_id, sender_nick)
+            elif conversation_id:
+                self._last_sender.pop(conversation_id, None)
+
             # Normalize message
             normalized = {
                 "chat_id": conversation_id,
@@ -683,7 +706,9 @@ class DingTalkAdapter(IMAdapter):
                 "thread_id": 0,  # DingTalk doesn't have threading like this
                 "text": text,
                 "attachments": attachments,
-                "from_user": sender_nick or sender_id,
+                "from_user": sender_nick or sender_display_id,
+                "from_user_id": sender_display_id,
+                "mention_user_ids": mention_user_ids,
                 "message_id": msg_id,
                 "timestamp": self._parse_event_time(event.get("createAt")),
                 # Keep sessionWebhook for potential reply use
@@ -753,16 +778,27 @@ class DingTalkAdapter(IMAdapter):
         self._conversation_cache[conversation_id] = title
         return title
 
-    def _send_via_webhook(self, webhook_url: str, text: str) -> bool:
-        """Send message via sessionWebhook (most reliable for groups)."""
-        title = text[:20] if len(text) > 20 else text
-        body = {
-            "msgtype": "markdown",
-            "markdown": {
-                "title": title,
-                "text": text,
-            }
+    def _build_markdown_payload(self, text: str, at_user_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Build a DingTalk markdown payload with optional real-mention metadata."""
+        payload: Dict[str, Any] = {
+            "title": text[:20] if len(text) > 20 else text,
+            "text": text,
         }
+        cleaned_at_user_ids = [str(x).strip() for x in (at_user_ids or []) if str(x).strip()]
+        if cleaned_at_user_ids:
+            payload["at"] = {"atUserIds": cleaned_at_user_ids}
+        return payload
+
+    def _send_via_webhook(self, webhook_url: str, text: str,
+                          at_user_ids: Optional[List[str]] = None) -> bool:
+        """Send message via sessionWebhook (most reliable for groups)."""
+        body: Dict[str, Any] = {
+            "msgtype": "markdown",
+            "markdown": self._build_markdown_payload(text),
+        }
+        cleaned_at_user_ids = [str(x).strip() for x in (at_user_ids or []) if str(x).strip()]
+        if cleaned_at_user_ids:
+            body["at"] = {"atUserIds": cleaned_at_user_ids}
         data = json.dumps(body, ensure_ascii=False).encode('utf-8')
 
         req = urllib.request.Request(webhook_url, data=data, method="POST")
@@ -780,7 +816,14 @@ class DingTalkAdapter(IMAdapter):
             self._log(f"[webhook] Error: {e}")
             return False
 
-    def send_message(self, chat_id: str, text: str, thread_id: Optional[int] = None) -> bool:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
         """
         Send a text message to a conversation.
 
@@ -800,6 +843,18 @@ class DingTalkAdapter(IMAdapter):
         # Ensure message fits limit
         safe_text = self._compose_safe(text)
 
+        # Resolve @mention targets for group conversations
+        at_user_ids: Optional[List[str]]
+        if mention_user_ids is not None:
+            cleaned_explicit_ids = [str(x).strip() for x in mention_user_ids if str(x).strip()]
+            at_user_ids = cleaned_explicit_ids or None
+        else:
+            at_user_ids = None
+            if chat_id.startswith("cid") and chat_id in self._last_sender:
+                staff_id, _nick = self._last_sender[chat_id]
+                if staff_id:
+                    at_user_ids = [staff_id]
+
         # Rate limit
         self._rate_limiter.wait_and_acquire(chat_id)
 
@@ -808,7 +863,7 @@ class DingTalkAdapter(IMAdapter):
             webhook_url, expires_at = self._session_webhook_cache[chat_id]
             current_time = time.time()
             if current_time < expires_at:
-                if self._send_via_webhook(webhook_url, safe_text):
+                if self._send_via_webhook(webhook_url, safe_text, at_user_ids=at_user_ids):
                     return True
                 self._log("[send] Webhook failed, falling back to API...")
             else:
@@ -820,18 +875,16 @@ class DingTalkAdapter(IMAdapter):
         if not self.robot_code:
             if chat_id.startswith("cid"):
                 self._log("[send] Missing robot_code; cannot use new API fallback. Trying legacy API.")
-                return self._send_message_legacy(chat_id, safe_text)
+                return self._send_message_legacy(chat_id, safe_text, at_user_ids=at_user_ids)
             self._log("[send] Missing robot_code; cannot send via API fallback. Configure DINGTALK_ROBOT_CODE.")
             return False
 
         # Use robot message API
+        markdown_payload = self._build_markdown_payload(safe_text, at_user_ids=at_user_ids)
         body: Dict[str, Any] = {
             "robotCode": self.robot_code,
             "msgKey": "sampleMarkdown",
-            "msgParam": json.dumps({
-                "title": safe_text[:20] if len(safe_text) > 20 else safe_text,
-                "text": safe_text,
-            }, ensure_ascii=False),
+            "msgParam": json.dumps(markdown_payload, ensure_ascii=False),
         }
 
         # Determine if group or 1:1
@@ -851,24 +904,28 @@ class DingTalkAdapter(IMAdapter):
 
         # Try alternative API for older bots
         if "code" in resp or "errcode" in resp:
-            return self._send_message_legacy(chat_id, safe_text)
+            return self._send_message_legacy(chat_id, safe_text, at_user_ids=at_user_ids)
 
         self._log(f"[send] Failed to chat {chat_id}: {resp}")
         return False
 
-    def _send_message_legacy(self, chat_id: str, text: str) -> bool:
+    def _send_message_legacy(
+        self,
+        chat_id: str,
+        text: str,
+        at_user_ids: Optional[List[str]] = None,
+    ) -> bool:
         """Send message using legacy API (for older bot types)."""
-        title = text[:20] if len(text) > 20 else text
         body = {
             "chatid": chat_id,
             "msg": {
                 "msgtype": "markdown",
-                "markdown": {
-                    "title": title,
-                    "text": text,
-                },
+                "markdown": self._build_markdown_payload(text),
             },
         }
+        cleaned_at_user_ids = [str(x).strip() for x in (at_user_ids or []) if str(x).strip()]
+        if cleaned_at_user_ids:
+            body["msg"]["at"] = {"atUserIds": cleaned_at_user_ids}
 
         resp = self._api_old("POST", "/chat/send", body)
 

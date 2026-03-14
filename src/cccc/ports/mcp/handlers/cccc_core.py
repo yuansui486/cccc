@@ -18,6 +18,10 @@ from . import context as _context_mod
 
 
 _CCCC_HELP_BUILTIN = _load_builtin_help_markdown().strip()
+_RUNTIME_HELP_SECTION_HEADERS = {
+    "## Active Skills (Runtime)",
+    "## Group Space (Runtime)",
+}
 
 def _trim_text(value: Any, *, max_chars: int) -> str:
     text = str(value or "").strip()
@@ -26,6 +30,37 @@ def _trim_text(value: Any, *, max_chars: int) -> str:
     if max_chars <= 3:
         return text[:max_chars]
     return text[: max_chars - 3].rstrip() + "..."
+
+
+def _strip_reserved_runtime_help_sections(markdown: str) -> str:
+    raw = str(markdown or "")
+    if not raw:
+        return raw
+    keep_trailing_newline = raw.endswith("\n")
+    lines = raw.splitlines()
+    out: List[str] = []
+    current: List[str] = []
+    skip_current = False
+
+    def _flush() -> None:
+        nonlocal current
+        if current and not skip_current:
+            out.extend(current)
+        current = []
+
+    for line in lines:
+        stripped = str(line or "").strip()
+        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
+        if is_h2:
+            _flush()
+            skip_current = stripped in _RUNTIME_HELP_SECTION_HEADERS
+        current.append(line)
+    _flush()
+
+    result = "\n".join(out)
+    if keep_trailing_newline:
+        result += "\n"
+    return result
 
 
 def _find_actor_state(*, context: Dict[str, Any], actor_id: str) -> Optional[Dict[str, Any]]:
@@ -476,10 +511,8 @@ def _build_bootstrap_inbox_preview(*, inbox: Dict[str, Any], limit: int) -> Dict
 
 
 def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str) -> str:
-    base = str(markdown or "")
+    base = _strip_reserved_runtime_help_sections(markdown)
     if not base.strip():
-        return base
-    if "## Active Skills (Runtime)" in base or "## Group Space (Runtime)" in base:
         return base
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()

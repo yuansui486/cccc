@@ -85,11 +85,19 @@ class IMAdapter(ABC):
         pass
 
     @abstractmethod
-    def send_message(self, chat_id: str, text: str, thread_id: Optional[int] = None) -> bool:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
         """
         Send a message to a chat.
         Returns True if successful.
         """
+        _ = mention_user_ids
         pass
 
     @abstractmethod
