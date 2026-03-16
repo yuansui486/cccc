@@ -6,10 +6,11 @@
 
 ## 1. 基线与范围
 
-- 基线提交：`07e624695317108a811870d4656ae7e1c83badf1`
+- 基线分支：`main`
+- 基线提交：`1bf054f373cb8e8325208d08c1ba91ac1de671bb`
 - 当前分支：`OneColleague`
-- 当前 HEAD：`3d3c9edcfe62783cb955eff339129325fb849041`
-- 对照范围：`07e624695317108a811870d4656ae7e1c83badf1..HEAD`
+- 当前 HEAD：`ee9d541c2243ab07e99a391967c1ec92540a7e51`
+- 对照范围：`main...OneColleague`（当前等价于 `1bf054f373cb8e8325208d08c1ba91ac1de671bb..ee9d541c2243ab07e99a391967c1ec92540a7e51`）
 
 这段范围内，一号同事定制的主提交为：
 
@@ -18,6 +19,8 @@
 - `74db549 feat(web): polish onecolleague account ui`
 - `9d7bc18 feat(web): refine account access ui`
 - `3d3c9ed feat(done-hub): provision local client configs`
+- `68abef9 fix(web): align im bridge locale copy`
+- `ee9d541 style(web): shift UI theme to light blue`
 
 后续 merge 最新 CCCC 时，本文只关注“一号同事相对原版 CCCC 的必保留行为”，不关注上游普通演进本身。
 
@@ -38,7 +41,8 @@
 - 品牌名统一由 `getAppBrandName()` 返回“一号同事”。
 - 品牌 logo 统一由 `getAppLogoPath()` 返回 `/ui/onecolleague-logo.svg`。
 - 浏览器标签页标题、favicon、apple-touch-icon、PWA manifest 名称与图标都保持一号同事。
-- 浏览器壳层主题色保持绿色系：`theme-color = #10b981`。
+- 浏览器壳层主题色保持浅蓝系：`theme-color = #7dd3fc`。
+- PWA manifest 背景色保持当前深蓝值：`background_color = #0b1530`。
 
 merge 风险：
 
@@ -160,12 +164,18 @@ merge 风险：
 
 - `web/src/components/modals/settings/IMBridgeTab.tsx`
 - `web/src/i18n/locales/zh/settings.json`
+- `web/src/i18n/locales/en/settings.json`
+- `web/src/i18n/locales/ja/settings.json`
 
 必须保留的行为：
 
 - 平台下拉中继续显示 `飞书`、`钉钉`。
 - 状态卡片展示平台时，继续通过映射函数把 `feishu` / `dingtalk` 转成人类可读中文，不直接显示原始 token。
 - 中文 locale 中和飞书/钉钉相关的说明继续保持当前写法，不回退到混用 `Lark` 的旧文案。
+- 英文和日文 locale 里也继续统一使用 `Feishu` 命名：
+  - `description` 不回退成 `Feishu/Lark`
+  - `larkGlobal` 标签保持 `Feishu (Global)` / `Feishu (グローバル)`
+  - region hint 继续强调“Feishu 在不同区域使用不同域名”，而不是“Feishu/Lark 共享 API”
 
 ### 2.8 品牌配色与通用文案收口
 
@@ -186,11 +196,12 @@ merge 风险：
 
 必须保留的行为：
 
-- 全局主色和氛围色仍是当前的一号同事绿色/天空蓝体系，不回退到原始 CCCC 风格。
+- 全局主色和氛围色仍是当前的一号同事浅蓝/天空蓝体系，不回退到更早的绿色主导方案，也不回退到原始 CCCC 风格。
 - `common.appName` 在中英日都保持为“一号同事”。
 - 账户入口、余额文案、退出登录、算力中心等相关文案继续保留当前多语言收口。
 - `formatDoneHubQuota()` 继续统一保留两位小数。
 - `sanitizeDoneHubErrorMessage()` 继续把涉及本地文件和路径的报错收敛成产品化文案，不向用户暴露 `.codex`、`.gemini`、`auth.json`、`config.toml`、`settings.json`、`USERPROFILE`、`Path.home()` 等细节。
+- Header、Mobile、Settings、Guidance 等高频交互入口的强调色继续使用当前 sky/blue token，不回退到早期 emerald token。
 
 ## 3. 必须保留的 DoneHub/一号同事账号接入
 
@@ -426,6 +437,7 @@ merge 风险：
 - 收件人显示使用当前中文化标签，而不是退回原始 token 或旧英文标签
 - 群组状态、时间相关展示继续走当前 helper/i18n 收口
 - done-hub 相关新增文案在中英日三套 locale 保持同步
+- IM Bridge 的英文/日文文案继续统一使用 `Feishu` 命名，不重新混入 `Feishu/Lark` 或 `Lark (Global)` 旧写法
 
 ## 5. 测试锚点
 
@@ -458,6 +470,7 @@ merge 风险：
 
 - [ ] `web/index.html` 仍是“一号同事”标题与一号同事图标
 - [ ] `web/public/manifest.webmanifest` 仍是“一号同事”名称与一号同事图标
+- [ ] `web/index.html` 和 `web/public/manifest.webmanifest` 的主题色仍是 `#7dd3fc`
 - [ ] `web/src/utils/displayText.ts` 仍是品牌名/logo 的中心入口
 - [ ] `App.tsx` 仍在未登录时显示 `DoneHubLoginGate`
 - [ ] `DoneHubLoginGate` 品牌头仍在登录框外部上方
@@ -468,6 +481,7 @@ merge 风险：
 - [ ] Group tabs 仍只剩 `guidance` / `automation` / `im` / `blueprint`
 - [ ] Guidance 页面仍只显示 Actor Notes
 - [ ] IM Bridge 下拉和状态卡片仍显示“飞书/钉钉”
+- [ ] IM Bridge 的英文/日文 locale 仍统一使用 `Feishu` 命名，不回退到 `Feishu/Lark` / `Lark (Global)`
 - [ ] 账户弹层仍保留“跳转至算力中心 / 刷新余额 / 退出登录”
 
 ### 6.3 DoneHub 接入链
@@ -487,6 +501,7 @@ merge 风险：
 - [ ] `DoneHubSession` 仍带 `group`
 - [ ] Header 与 Mobile 仍都显示余额入口
 - [ ] `group === "pro"` 时 Header 与 Mobile 仍都显示金色 `PRO`
+- [ ] Header、Mobile、Settings、Guidance 的强调色仍是当前 sky/blue token，不回退到旧 emerald token
 - [ ] 余额仍统一保留两位小数
 - [ ] 错误文案仍不会直出 `.codex/.gemini` 路径、文件名或原始写盘异常
 
