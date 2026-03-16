@@ -142,7 +142,7 @@ export function LanguageSwitcher({ isDark: _isDark, showLabel = false, className
           "transition-all font-semibold tracking-wide select-none",
           showLabel
             ? "w-full flex items-center justify-center gap-2 px-3 py-3 text-sm rounded-2xl min-h-[52px] glass-btn"
-            : "flex items-center justify-center w-9 h-9 rounded-xl text-xs glass-btn",
+            : "flex items-center justify-center w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl text-xs shrink-0 glass-btn",
           "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
           className
         )}

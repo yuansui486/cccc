@@ -474,7 +474,17 @@ class IMBridge:
                 self._handle_help(chat_id, thread_id=thread_id)
             elif parsed.type == CommandType.SEND:
                 attachments = msg.get("attachments") if isinstance(msg.get("attachments"), list) else []
-                self._handle_message(chat_id, parsed, from_user, attachments=attachments, thread_id=thread_id, message_id=message_id, from_user_id=from_user_id)
+                mention_user_ids = msg.get("mention_user_ids") if isinstance(msg.get("mention_user_ids"), list) else []
+                self._handle_message(
+                    chat_id,
+                    parsed,
+                    from_user,
+                    attachments=attachments,
+                    mention_user_ids=mention_user_ids,
+                    thread_id=thread_id,
+                    message_id=message_id,
+                    from_user_id=from_user_id,
+                )
             elif parsed.type == CommandType.MESSAGE:
                 routed = coerce_bool(msg.get("routed"), default=False)
 
@@ -488,6 +498,7 @@ class IMBridge:
                 # When routed (@bot or DM), treat plain text as implicit /send.
                 if routed or chat_type in ("private",):
                     attachments = msg.get("attachments") if isinstance(msg.get("attachments"), list) else []
+                    mention_user_ids = msg.get("mention_user_ids") if isinstance(msg.get("mention_user_ids"), list) else []
                     # Build a SEND-like ParsedCommand so _handle_message can extract @targets from args.
                     implicit_args = parsed.text.split() if parsed.text else []
                     implicit_send = ParsedCommand(
@@ -496,7 +507,16 @@ class IMBridge:
                         mentions=parsed.mentions,
                         args=implicit_args,
                     )
-                    self._handle_message(chat_id, implicit_send, from_user, attachments=attachments, thread_id=thread_id, message_id=message_id, from_user_id=from_user_id)
+                    self._handle_message(
+                        chat_id,
+                        implicit_send,
+                        from_user,
+                        attachments=attachments,
+                        mention_user_ids=mention_user_ids,
+                        thread_id=thread_id,
+                        message_id=message_id,
+                        from_user_id=from_user_id,
+                    )
                     continue
 
                 # Non-routed messages are ignored.
@@ -784,6 +804,11 @@ class IMBridge:
                 if str(t or "").strip()
             ]
             formatted = self.adapter.format_outbound(display_by, display_to, text, is_system) if text else ""
+            mention_user_ids = self._resolve_outbound_mention_targets(
+                event=event,
+                sub=sub,
+                is_user_facing=is_user_facing,
+            )
 
             # Try file delivery first (if any attachments)
             sent_any_file = False
@@ -822,7 +847,16 @@ class IMBridge:
                     cap = formatted if (i == 0 and formatted and not skip_text_due_to_stream) else ""
                     ok = False
                     try:
-                        ok = bool(self.adapter.send_file(sub.chat_id, file_path=abs_path, filename=title, caption=cap, thread_id=sub.thread_id))
+                        ok = bool(
+                            self.adapter.send_file(
+                                sub.chat_id,
+                                file_path=abs_path,
+                                filename=title,
+                                caption=cap,
+                                thread_id=sub.thread_id,
+                                mention_user_ids=mention_user_ids,
+                            )
+                        )
                     except Exception:
                         ok = False
                     if ok:
@@ -832,11 +866,6 @@ class IMBridge:
 
             # If we didn't send any files, or if there's text with no files, send message.
             if formatted and not sent_any_file and not skip_text_due_to_stream:
-                mention_user_ids = self._resolve_outbound_mention_targets(
-                    event=event,
-                    sub=sub,
-                    is_user_facing=is_user_facing,
-                )
                 if mention_user_ids is None:
                     sent_msg = bool(self.adapter.send_message(sub.chat_id, formatted, thread_id=sub.thread_id))
                 else:
@@ -1088,6 +1117,7 @@ class IMBridge:
         from_user: str,
         *,
         attachments: List[Dict[str, Any]],
+        mention_user_ids: Optional[List[str]] = None,
         thread_id: int = 0,
         message_id: str = "",
         from_user_id: str = "",
@@ -1260,6 +1290,8 @@ class IMBridge:
             # Nothing left to send (all attachments were ignored / failed).
             return
 
+        cleaned_mention_user_ids = [str(item).strip() for item in (mention_user_ids or []) if str(item).strip()]
+
         resp = self._daemon({
             "op": "send",
             "args": {
@@ -1272,6 +1304,7 @@ class IMBridge:
                 "source_platform": str(getattr(self.adapter, "platform", "") or "").strip() or None,
                 "source_user_name": from_user or None,
                 "source_user_id": from_user_id or None,
+                "mention_user_ids": cleaned_mention_user_ids or None,
             },
         })
 

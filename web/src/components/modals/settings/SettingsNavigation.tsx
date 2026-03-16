@@ -111,7 +111,7 @@ export function SettingsNavigation({
 
         <div className="mx-3 border-b border-[var(--glass-border-subtle)]" />
 
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        <nav className="flex-1 overflow-y-auto scrollbar-subtle p-3 pb-4 space-y-1 [scrollbar-gutter:stable]">
           {tabs.map((tab) => (
             <button
               key={tab.id}

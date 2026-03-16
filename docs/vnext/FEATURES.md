@@ -163,15 +163,15 @@ Ledger (完整记忆)
 | 机制 | 配置项 | 默认值 | 说明 |
 |------|--------|--------|------|
 | Nudge | `nudge_after_seconds` | 300s | 未读消息超时提醒 |
-| Actor idle | `actor_idle_timeout_seconds` | 600s | Actor 空闲通知 foreman |
+| Actor idle | `actor_idle_timeout_seconds` | 0s | 可选的 Actor 空闲通知 foreman，默认关闭 |
 | Keepalive | `keepalive_delay_seconds` | 120s | Next: 声明后提醒 |
 | 静默复核 | `silence_timeout_seconds` | 0s | 可选启发式检查；群组长时间静默时提醒 foreman 复核是否应转为空闲，`0` 表示关闭 |
 
-### 4.2 投递限流
+### 4.2 投递策略
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `min_interval_seconds` | 60s | 连续投递最小间隔 |
+| `auto_mark_on_delivery` | `false` | PTY 成功收到消息后是否自动推进已读光标 |
 
 ### 4.3 已移除的机制
 

@@ -46,6 +46,21 @@ def _slug_filename(value: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip()).strip("-").lower()
     return s or "group"
 
+
+def _normalize_capability_id_list(raw: Any) -> List[str]:
+    out: List[str] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[str] = set()
+    for item in raw:
+        cap_id = str(item or "").strip()
+        if not cap_id or cap_id in seen:
+            continue
+        seen.add(cap_id)
+        out.append(cap_id)
+    return out
+
+
 def _remove_runner_state_files(group_id: str, actor_id: str) -> None:
     home = ensure_home()
     gid = str(group_id or "").strip()
@@ -98,6 +113,14 @@ def group_template_export(args: Dict[str, Any]) -> DaemonResponse:
             actor_tpl.runner = str(profile.get("runner") or actor_tpl.runner)  # type: ignore[assignment]
             actor_tpl.command = list(profile.get("command") or [])
             actor_tpl.submit = str(profile.get("submit") or actor_tpl.submit)  # type: ignore[assignment]
+            actor_autoload = _normalize_capability_id_list(actor_doc.get("capability_autoload"))
+            defaults = profile.get("capability_defaults") if isinstance(profile.get("capability_defaults"), dict) else {}
+            profile_autoload = []
+            # Templates materialize linked actors as portable custom actors. Snapshot only
+            # actor-scoped profile defaults here; session-scoped autoload remains runtime-specific.
+            if str(defaults.get("default_scope") or "actor").strip().lower() == "actor":
+                profile_autoload = _normalize_capability_id_list(defaults.get("autoload_capabilities"))
+            actor_tpl.capability_autoload = [*profile_autoload, *[cap for cap in actor_autoload if cap not in profile_autoload]]
     except Exception as e:
         return _error("template_export_failed", str(e))
     text = dump_group_template(tpl)
@@ -151,6 +174,7 @@ def group_template_preview(args: Dict[str, Any]) -> DaemonResponse:
             "runner": a.runner,
             "command": a.command,
             "submit": a.submit,
+            "capability_autoload": list(a.capability_autoload or []),
             "enabled": bool(a.enabled),
         }
         for a in tpl.actors
@@ -268,6 +292,12 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
             n = 20
         patch["terminal_transcript_notify_lines"] = max(1, min(80, n))
 
+    # Group feature toggles
+    if "panorama_enabled" in settings:
+        patch["panorama_enabled"] = coerce_bool(settings.get("panorama_enabled"), default=False)
+    if "desktop_pet_enabled" in settings:
+        patch["desktop_pet_enabled"] = coerce_bool(settings.get("desktop_pet_enabled"), default=False)
+
     delivery_keys = {"min_interval_seconds", "auto_mark_on_delivery"}
     automation_keys = {
         "nudge_after_seconds",
@@ -285,6 +315,7 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
         "help_nudge_min_messages",
     }
     messaging_keys = {"default_send_to"}
+    feature_keys = {"panorama_enabled", "desktop_pet_enabled"}
 
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
@@ -304,6 +335,12 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
     group.doc["delivery"] = delivery
     group.doc["automation"] = automation
     group.doc["messaging"] = messaging
+    if feature_keys & set(patch.keys()):
+        features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
+        for k in feature_keys:
+            if k in patch:
+                features[k] = coerce_bool(patch.get(k), default=False)
+        group.doc["features"] = features
 
     tt_patch: Dict[str, Any] = {}
     if "terminal_transcript_visibility" in patch:
@@ -462,6 +499,7 @@ def group_template_import_replace(args: Dict[str, Any]) -> DaemonResponse:
             "enabled": bool(actor_tpl.enabled),
             "submit": str(actor_tpl.submit or "enter"),
             "command": _normalize_template_actor_command(actor_tpl),
+            "capability_autoload": _normalize_capability_id_list(actor_tpl.capability_autoload),
         }
 
         existing = find_actor(group, aid)
@@ -484,6 +522,7 @@ def group_template_import_replace(args: Dict[str, Any]) -> DaemonResponse:
                     env={},
                     default_scope_key="",
                     submit=str(patch.get("submit") or "enter"),  # type: ignore[arg-type]
+                    capability_autoload=list(patch.get("capability_autoload") or []),
                     enabled=bool(patch.get("enabled", True)),
                     runner=str(patch.get("runner") or "pty"),  # type: ignore[arg-type]
                     runtime=str(patch.get("runtime") or "codex"),  # type: ignore[arg-type]

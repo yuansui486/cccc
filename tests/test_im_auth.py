@@ -336,8 +336,16 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
             self.formatted_calls.append((str(by), to_list, str(text or ""), bool(is_system)))
             return str(text or "")
 
-        def send_file(self, chat_id: str, file_path: Path, filename: str, caption: str = "", thread_id: int = 0) -> bool:
-            _ = (chat_id, file_path, filename, caption, thread_id)
+        def send_file(
+            self,
+            chat_id: str,
+            file_path: Path,
+            filename: str,
+            caption: str = "",
+            thread_id: int = 0,
+            mention_user_ids=None,
+        ) -> bool:
+            _ = (chat_id, file_path, filename, caption, thread_id, mention_user_ids)
             return False
 
         def send_message(self, chat_id: str, text: str, thread_id: int = 0) -> bool:
@@ -438,8 +446,25 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
                 super().__init__()
                 self.file_calls: list[tuple[str, str, str, str, int]] = []
 
-            def send_file(self, chat_id: str, file_path: Path, filename: str, caption: str = "", thread_id: int = 0) -> bool:
-                self.file_calls.append((str(chat_id), str(file_path), str(filename), str(caption), int(thread_id or 0)))
+            def send_file(
+                self,
+                chat_id: str,
+                file_path: Path,
+                filename: str,
+                caption: str = "",
+                thread_id: int = 0,
+                mention_user_ids=None,
+            ) -> bool:
+                self.file_calls.append(
+                    (
+                        str(chat_id),
+                        str(file_path),
+                        str(filename),
+                        str(caption),
+                        int(thread_id or 0),
+                        tuple(mention_user_ids or []),
+                    )
+                )
                 return True
 
         km = KeyManager(self.state_dir)

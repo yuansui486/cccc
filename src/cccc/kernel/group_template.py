@@ -40,6 +40,20 @@ def _as_int(v: Any, default: int) -> int:
         return int(default)
 
 
+def _normalize_capability_id_list(raw: Any) -> List[str]:
+    out: List[str] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[str] = set()
+    for item in raw:
+        cap_id = str(item or "").strip()
+        if not cap_id or cap_id in seen:
+            continue
+        seen.add(cap_id)
+        out.append(cap_id)
+    return out
+
+
 def parse_group_template(text: str) -> GroupTemplate:
     raw = str(text or "").strip()
     if not raw:
@@ -80,12 +94,14 @@ def build_group_template_from_group(group: Group, *, cccc_version: str = "") -> 
                 "runner": str(a.get("runner") or "pty"),
                 "command": list(a.get("command") or []) if isinstance(a.get("command"), list) else [],
                 "submit": str(a.get("submit") or "enter"),
+                "capability_autoload": _normalize_capability_id_list(a.get("capability_autoload")),
                 "enabled": coerce_bool(a.get("enabled"), default=True),
             }
         )
 
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+    features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
     tt = get_terminal_transcript_settings(group.doc)
     default_send_to = get_default_send_to(group.doc)
 
@@ -99,7 +115,7 @@ def build_group_template_from_group(group: Group, *, cccc_version: str = "") -> 
         "nudge_max_repeats_per_obligation": _as_int(automation.get("nudge_max_repeats_per_obligation", 3), 3),
         "nudge_escalate_after_repeats": _as_int(automation.get("nudge_escalate_after_repeats", 2), 2),
         "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
-        "actor_idle_timeout_seconds": _as_int(automation.get("actor_idle_timeout_seconds", 600), 600),
+        "actor_idle_timeout_seconds": _as_int(automation.get("actor_idle_timeout_seconds", 0), 0),
         "keepalive_delay_seconds": _as_int(automation.get("keepalive_delay_seconds", 120), 120),
         "keepalive_max_per_actor": _as_int(automation.get("keepalive_max_per_actor", 3), 3),
         "silence_timeout_seconds": _as_int(automation.get("silence_timeout_seconds", 0), 0),
@@ -109,6 +125,8 @@ def build_group_template_from_group(group: Group, *, cccc_version: str = "") -> 
         "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
         "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=True),
         "terminal_transcript_notify_lines": _as_int(tt.get("notify_lines", 20), 20),
+        "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
+        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
     }
 
     def _prompt_value(filename: str) -> Optional[str]:
@@ -190,6 +208,10 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
             changed = True
         if str(cur.get("submit") or "enter") != str(a.submit or "enter"):
             changed = True
+        cur_autoload = _normalize_capability_id_list(cur.get("capability_autoload"))
+        new_autoload = _normalize_capability_id_list(a.capability_autoload)
+        if cur_autoload != new_autoload:
+            changed = True
         cur_cmd = cur.get("command")
         cur_cmd_list = [str(x).strip() for x in cur_cmd] if isinstance(cur_cmd, list) else []
         new_cmd_list = _normalize_command(a.command)
@@ -201,6 +223,7 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
     # Settings diff (we only compare keys we export/import).
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+    features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
     tt = get_terminal_transcript_settings(group.doc)
     default_send_to = get_default_send_to(group.doc)
     current_settings: Dict[str, Any] = {
@@ -213,7 +236,7 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
         "nudge_max_repeats_per_obligation": _as_int(automation.get("nudge_max_repeats_per_obligation", 3), 3),
         "nudge_escalate_after_repeats": _as_int(automation.get("nudge_escalate_after_repeats", 2), 2),
         "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
-        "actor_idle_timeout_seconds": _as_int(automation.get("actor_idle_timeout_seconds", 600), 600),
+        "actor_idle_timeout_seconds": _as_int(automation.get("actor_idle_timeout_seconds", 0), 0),
         "keepalive_delay_seconds": _as_int(automation.get("keepalive_delay_seconds", 120), 120),
         "keepalive_max_per_actor": _as_int(automation.get("keepalive_max_per_actor", 3), 3),
         "silence_timeout_seconds": _as_int(automation.get("silence_timeout_seconds", 0), 0),
@@ -223,6 +246,8 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
         "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
         "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=True),
         "terminal_transcript_notify_lines": _as_int(tt.get("notify_lines", 20), 20),
+        "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
+        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
     }
     desired_settings = template.settings.model_dump()
     settings_changed: Dict[str, Tuple[Any, Any]] = {}

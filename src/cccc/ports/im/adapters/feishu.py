@@ -727,8 +727,10 @@ class FeishuAdapter(IMAdapter):
         filename: str,
         caption: str = "",
         thread_id: Optional[int] = None,
+        mention_user_ids: Optional[List[str]] = None,
     ) -> bool:
         """Send a file to a chat."""
+        _ = mention_user_ids
         if not self._connected:
             return False
 

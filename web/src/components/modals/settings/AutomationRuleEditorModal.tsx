@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import type { AutomationRule, AutomationRuleStatus } from "../../../types";
@@ -22,41 +23,54 @@ import {
   parseTimeInput,
 } from "./automationUtils";
 import type { SchedulePreset } from "./automationUtils";
-import { inputClass, labelClass } from "./types";
+import {
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsDialogBodyClass,
+  settingsDialogFooterClass,
+  settingsDialogHeaderClass,
+  settingsDialogPanelClass,
+} from "./types";
 
 interface AutomationRuleEditorModalProps {
   isDark: boolean;
-  editingRule: AutomationRule | null;
-  editingRuleStatus: AutomationRuleStatus;
-  rulesErr: string;
+  ruleDraft: AutomationRule | null;
+  ruleStatus: AutomationRuleStatus;
+  isNewRule: boolean;
+  errorMessage: string;
+  saveBusy: boolean;
   snippetIds: string[];
   actorTargetOptions: Array<{ value: string; label: string }>;
-  oneShotModeByRule: Record<string, "after" | "exact">;
-  oneShotAfterMinutesByRule: Record<string, number>;
-  onRulePatch: (ruleId: string, patch: Partial<AutomationRule>) => void;
-  onRuleRemove: (ruleId: string) => void;
-  onSetEditingRuleId: (ruleId: string | null) => void;
+  oneShotMode: "after" | "exact";
+  oneShotAfterMinutes: number;
+  onRuleChange: (next: AutomationRule | null) => void;
+  onClose: () => void;
   onSetRulesErr: (message: string) => void;
-  onSetOneShotMode: (ruleId: string, mode: "after" | "exact") => void;
-  onSetOneShotAfterMinutes: (ruleId: string, minutes: number) => void;
+  onSetOneShotMode: (mode: "after" | "exact") => void;
+  onSetOneShotAfterMinutes: (minutes: number) => void;
+  onSave: () => void | Promise<void>;
 }
 
 export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps) {
   const {
     isDark,
-    editingRule,
-    editingRuleStatus,
-    rulesErr,
+    ruleDraft,
+    ruleStatus,
+    isNewRule,
+    errorMessage,
+    saveBusy,
     snippetIds,
     actorTargetOptions,
-    oneShotModeByRule,
-    oneShotAfterMinutesByRule,
-    onRulePatch,
-    onRuleRemove,
-    onSetEditingRuleId,
+    oneShotMode,
+    oneShotAfterMinutes,
+    onRuleChange,
+    onClose,
     onSetRulesErr,
     onSetOneShotMode,
     onSetOneShotAfterMinutes,
+    onSave,
   } = props;
 
   const { t } = useTranslation("settings");
@@ -64,74 +78,68 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
   const groupStateCopy = getGroupStateCopy(t);
   const weekdayOptions = getWeekdayOptions(t);
 
-  if (!editingRule) return null;
+  if (!ruleDraft) return null;
 
-  const ruleId = String(editingRule.id || "").trim();
-  const ruleStatus = editingRuleStatus || {};
-  const recipients = Array.isArray(editingRule.to) ? editingRule.to.map((x) => String(x || "").trim()).filter(Boolean) : [];
-  const triggerKind = String(editingRule.trigger?.kind || "interval");
+  const patchRule = (patch: Partial<AutomationRule>) => {
+    onRuleChange({ ...ruleDraft, ...patch });
+  };
+
+  const ruleId = String(ruleDraft.id || "").trim();
+  const status = ruleStatus || {};
+  const recipients = Array.isArray(ruleDraft.to) ? ruleDraft.to.map((item) => String(item || "").trim()).filter(Boolean) : [];
+  const triggerKind = String(ruleDraft.trigger?.kind || "interval");
   const everySeconds = clampInt(
-    Number(triggerKind === "interval" && editingRule.trigger && "every_seconds" in editingRule.trigger ? editingRule.trigger.every_seconds : 0),
+    Number(triggerKind === "interval" && ruleDraft.trigger && "every_seconds" in ruleDraft.trigger ? ruleDraft.trigger.every_seconds : 0),
     1,
     365 * 24 * 3600
   );
-  const cronExpr = String(triggerKind === "cron" && editingRule.trigger && "cron" in editingRule.trigger ? editingRule.trigger.cron : "").trim();
-  const atRaw = String(triggerKind === "at" && editingRule.trigger && "at" in editingRule.trigger ? editingRule.trigger.at : "").trim();
-  const kind = String(editingRule.action?.kind || "notify").trim() as "notify" | "group_state" | "actor_control";
+  const cronExpr = String(triggerKind === "cron" && ruleDraft.trigger && "cron" in ruleDraft.trigger ? ruleDraft.trigger.cron : "").trim();
+  const atRaw = String(triggerKind === "at" && ruleDraft.trigger && "at" in ruleDraft.trigger ? ruleDraft.trigger.at : "").trim();
+  const kind = String(ruleDraft.action?.kind || "notify").trim() as "notify" | "group_state" | "actor_control";
   const scheduleLockedToOneTime = kind !== "notify";
   const scheduleSelectValue = scheduleLockedToOneTime ? "at" : triggerKind;
   const activeTriggerKind = scheduleLockedToOneTime ? "at" : triggerKind;
   const operationalActionsEnabled = activeTriggerKind === "at";
-  const snippetRef = String(kind === "notify" && editingRule.action && "snippet_ref" in editingRule.action ? editingRule.action.snippet_ref || "" : "").trim();
-  const message = String(kind === "notify" && editingRule.action && "message" in editingRule.action ? editingRule.action.message || "" : "");
+  const snippetRef = String(kind === "notify" && ruleDraft.action && "snippet_ref" in ruleDraft.action ? ruleDraft.action.snippet_ref || "" : "").trim();
+  const message = String(kind === "notify" && ruleDraft.action && "message" in ruleDraft.action ? ruleDraft.action.message || "" : "");
   const contentMode: "snippet" | "custom" = snippetRef ? "snippet" : "custom";
   const groupStateValue = String(
-    kind === "group_state" && editingRule.action && "state" in editingRule.action ? editingRule.action.state || "paused" : "paused"
+    kind === "group_state" && ruleDraft.action && "state" in ruleDraft.action ? ruleDraft.action.state || "paused" : "paused"
   );
   const actorOperation = String(
-    kind === "actor_control" && editingRule.action && "operation" in editingRule.action ? editingRule.action.operation || "restart" : "restart"
+    kind === "actor_control" && ruleDraft.action && "operation" in ruleDraft.action ? ruleDraft.action.operation || "restart" : "restart"
   );
-  const actorTargets = Array.isArray(kind === "actor_control" && editingRule.action && "targets" in editingRule.action ? editingRule.action.targets : [])
-    ? (editingRule.action as { targets?: string[] }).targets?.map((x) => String(x || "").trim()).filter(Boolean) || []
+  const actorTargets = Array.isArray(kind === "actor_control" && ruleDraft.action && "targets" in ruleDraft.action ? ruleDraft.action.targets : [])
+    ? (ruleDraft.action as { targets?: string[] }).targets?.map((item) => String(item || "").trim()).filter(Boolean) || []
     : [];
   const notifyAction =
-    kind === "notify" && editingRule.action && editingRule.action.kind === "notify" ? editingRule.action : defaultNotifyAction();
-  const enabled = editingRule.enabled !== false;
-  const scope = String(editingRule.scope || "group") === "personal" ? "personal" : "group";
-  const ownerActorId = String(editingRule.owner_actor_id || "").trim();
+    kind === "notify" && ruleDraft.action && ruleDraft.action.kind === "notify" ? ruleDraft.action : defaultNotifyAction();
+  const enabled = ruleDraft.enabled !== false;
+  const scope = String(ruleDraft.scope || "group") === "personal" ? "personal" : "group";
+  const ownerActorId = String(ruleDraft.owner_actor_id || "").trim();
   const localTz = localTimeZone();
   const schedule = parseCronToPreset(cronExpr);
   const scheduleTime = formatTimeInput(schedule.hour, schedule.minute);
   const atInput = isoToLocalDatetimeInput(atRaw);
-  const oneShotMode = oneShotModeByRule[ruleId] || "exact";
-  const oneShotAfterMinutes = clampInt(oneShotAfterMinutesByRule[ruleId] ?? 30, 1, 7 * 24 * 60);
 
-  return (
-    <div
-      className="fixed inset-0 z-[1000]"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onSetEditingRuleId(null);
-      }}
-    >
-      <div className="absolute inset-0 bg-black/50" />
-      <div
-        className="glass-modal absolute inset-2 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[min(840px,calc(100vw-20px))] sm:h-[min(78vh,760px)] sm:-translate-x-1/2 sm:-translate-y-1/2 rounded-xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-      >
-        <div className="px-4 py-3 border-b border-[var(--glass-border-subtle)] flex items-start gap-3">
+  const title = isNewRule ? t("automation.newRule") : t("ruleEditor.editRule");
+
+  const content = (
+    <div className="fixed inset-0 z-[1000]" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 glass-overlay" onPointerDown={onClose} />
+      <div className={settingsDialogPanelClass("xl")}>
+        <div className={settingsDialogHeaderClass}>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-              {t("ruleEditor.editRule")} <span className="font-mono">{ruleId || t("ruleEditor.unnamed")}</span>
+              {title} <span className="font-mono">{ruleId || t("ruleEditor.unnamed")}</span>
             </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              {t("ruleEditor.last")} {ruleStatus.last_fired_at || "—"} • {t("ruleEditor.next")} {ruleStatus.next_fire_at || "—"}{" "}
-              {ruleStatus.completed ? `• ${t("ruleEditor.completed")} ${ruleStatus.completed_at || ruleStatus.last_fired_at || "—"}` : ""}{" "}
-              {ruleStatus.last_error ? `• ${t("ruleEditor.error")} ${ruleStatus.last_error_at || "—"}` : ""}
-            </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-              {t("automation.draftHint")}
-            </div>
+            {!isNewRule ? (
+              <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                {t("ruleEditor.last")} {status.last_fired_at || "—"} • {t("ruleEditor.next")} {status.next_fire_at || "—"}{" "}
+                {status.completed ? `• ${t("ruleEditor.completed")} ${status.completed_at || status.last_fired_at || "—"}` : ""}{" "}
+                {status.last_error ? `• ${t("ruleEditor.error")} ${status.last_error_at || "—"}` : ""}
+              </div>
+            ) : null}
           </div>
 
           <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
@@ -139,101 +147,83 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
               <input
                 type="checkbox"
                 checked={enabled}
-                onChange={(e) => onRulePatch(ruleId, { enabled: e.target.checked })}
+                onChange={(e) => patchRule({ enabled: e.target.checked })}
               />
               {t("ruleList.on")}
             </label>
-            <button
-              type="button"
-              className="glass-btn px-3 py-2 rounded-lg text-sm min-h-[44px] transition-colors text-[var(--color-text-secondary)]"
-              onClick={() => {
-                onRuleRemove(ruleId);
-                onSetEditingRuleId(null);
-              }}
-            >
-              {t("common:delete")}
-            </button>
-            <button
-              type="button"
-              className="glass-btn px-3 py-2 rounded-lg text-sm min-h-[44px] transition-colors text-[var(--color-text-secondary)]"
-              onClick={() => onSetEditingRuleId(null)}
-            >
+            <button type="button" className={secondaryButtonClass("sm")} onClick={onClose}>
               {t("common:close")}
             </button>
           </div>
         </div>
 
-        {rulesErr ? <div className="px-4 pt-3 text-xs text-rose-600 dark:text-rose-300">{rulesErr}</div> : null}
-        {ruleStatus.last_error ? <div className="px-4 pt-1 text-xs text-rose-600 dark:text-rose-300">{ruleStatus.last_error}</div> : null}
+        {errorMessage ? <div className="px-4 pt-3 text-xs text-rose-600 dark:text-rose-300">{errorMessage}</div> : null}
+        {status.last_error && !isNewRule ? <div className="px-4 pt-1 text-xs text-rose-600 dark:text-rose-300">{status.last_error}</div> : null}
 
-        <div className="p-3 sm:p-4 flex-1 overflow-auto space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass(isDark)}>{t("ruleEditor.ruleName")}</label>
-              <input
-                value={ruleId}
-                onChange={(e) => {
-                  const nextId = e.target.value;
-                  onRulePatch(ruleId, { id: nextId });
-                  if (nextId.trim()) onSetEditingRuleId(nextId.trim());
-                }}
-                className={`${inputClass(isDark)} font-mono`}
-                placeholder="daily_checkin"
-                spellCheck={false}
-              />
-              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                {t("ruleEditor.ruleNameHint")}
+        <div className={settingsDialogBodyClass}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass(isDark)}>{t("ruleEditor.ruleName")}</label>
+                <input
+                  value={ruleId}
+                  onChange={(e) => patchRule({ id: e.target.value })}
+                  className={`${inputClass(isDark)} font-mono`}
+                  placeholder="daily_checkin"
+                  spellCheck={false}
+                />
+                <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  {t("ruleEditor.ruleNameHint")}
+                </div>
+              </div>
+              <div>
+                <label className={labelClass(isDark)}>{t("ruleEditor.scheduleType")}</label>
+                <select
+                  value={scheduleSelectValue}
+                  disabled={scheduleLockedToOneTime}
+                  onChange={(e) => {
+                    const nextKind = String(e.target.value || "interval");
+                    if (nextKind === "cron") {
+                      const nextCron = buildCronFromPreset({
+                        preset: schedule.preset,
+                        hour: schedule.hour,
+                        minute: schedule.minute,
+                        weekday: schedule.weekday,
+                        dayOfMonth: schedule.dayOfMonth,
+                      });
+                      patchRule({
+                        trigger: {
+                          kind: "cron",
+                          cron: cronExpr || nextCron,
+                          timezone: localTz,
+                        },
+                      });
+                      return;
+                    }
+                    if (nextKind === "at") {
+                      onSetOneShotMode("after");
+                      patchRule({ trigger: { kind: "at", at: atRaw || new Date(Date.now() + 30 * 60 * 1000).toISOString() } });
+                      return;
+                    }
+                    patchRule({ trigger: { kind: "interval", every_seconds: everySeconds } });
+                  }}
+                  className={inputClass(isDark)}
+                >
+                  {kind === "notify" ? <option value="interval">{t("ruleEditor.intervalSchedule")}</option> : null}
+                  {kind === "notify" ? <option value="cron">{t("ruleEditor.recurringSchedule")}</option> : null}
+                  <option value="at">{t("ruleEditor.oneTimeSchedule")}</option>
+                </select>
+                <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  {scheduleLockedToOneTime
+                    ? t("ruleEditor.oneTimeOnly")
+                    : activeTriggerKind === "interval"
+                      ? t("ruleEditor.intervalHint")
+                      : activeTriggerKind === "cron"
+                        ? t("ruleEditor.recurringHint")
+                        : t("ruleEditor.oneTimeHint")}
+                </div>
               </div>
             </div>
-            <div>
-              <label className={labelClass(isDark)}>{t("ruleEditor.scheduleType")}</label>
-              <select
-                value={scheduleSelectValue}
-                disabled={scheduleLockedToOneTime}
-                onChange={(e) => {
-                  const nextKind = String(e.target.value || "interval");
-                  if (nextKind === "cron") {
-                    const presetCron = buildCronFromPreset({
-                      preset: schedule.preset,
-                      hour: schedule.hour,
-                      minute: schedule.minute,
-                      weekday: schedule.weekday,
-                      dayOfMonth: schedule.dayOfMonth,
-                    });
-                    onRulePatch(ruleId, {
-                      trigger: {
-                        kind: "cron",
-                        cron: cronExpr || presetCron,
-                        timezone: localTz,
-                      },
-                    });
-                    return;
-                  }
-                  if (nextKind === "at") {
-                    onSetOneShotMode(ruleId, "after");
-                    const defaultAt = atRaw || new Date(Date.now() + 30 * 60 * 1000).toISOString();
-                    onRulePatch(ruleId, { trigger: { kind: "at", at: defaultAt } });
-                    return;
-                  }
-                  onRulePatch(ruleId, { trigger: { kind: "interval", every_seconds: everySeconds } });
-                }}
-                className={inputClass(isDark)}
-              >
-                {kind === "notify" ? <option value="interval">{t("ruleEditor.intervalSchedule")}</option> : null}
-                {kind === "notify" ? <option value="cron">{t("ruleEditor.recurringSchedule")}</option> : null}
-                <option value="at">{t("ruleEditor.oneTimeSchedule")}</option>
-              </select>
-              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                {scheduleLockedToOneTime
-                  ? t("ruleEditor.oneTimeOnly")
-                  : activeTriggerKind === "interval"
-                    ? t("ruleEditor.intervalHint")
-                    : activeTriggerKind === "cron"
-                      ? t("ruleEditor.recurringHint")
-                      : t("ruleEditor.oneTimeHint")}
-              </div>
-            </div>
-          </div>
 
           {scope === "personal" ? (
             <div className="text-[11px] text-amber-700 dark:text-amber-300">
@@ -250,7 +240,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   min={1}
                   value={Math.max(1, Math.round(everySeconds / 60))}
                   onChange={(e) =>
-                    onRulePatch(ruleId, {
+                    patchRule({
                       trigger: {
                         kind: "interval",
                         every_seconds: Math.max(1, Number(e.target.value || 1)) * 60,
@@ -275,14 +265,19 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                     value={schedule.preset}
                     onChange={(e) => {
                       const preset = String(e.target.value || "daily") as SchedulePreset;
-                      const nextCron = buildCronFromPreset({
-                        preset,
-                        hour: schedule.hour,
-                        minute: schedule.minute,
-                        weekday: schedule.weekday,
-                        dayOfMonth: schedule.dayOfMonth,
+                      patchRule({
+                        trigger: {
+                          kind: "cron",
+                          cron: buildCronFromPreset({
+                            preset,
+                            hour: schedule.hour,
+                            minute: schedule.minute,
+                            weekday: schedule.weekday,
+                            dayOfMonth: schedule.dayOfMonth,
+                          }),
+                          timezone: localTz,
+                        },
                       });
-                      onRulePatch(ruleId, { trigger: { kind: "cron", cron: nextCron, timezone: localTz } });
                     }}
                     className={inputClass(isDark)}
                   >
@@ -298,34 +293,45 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                     value={scheduleTime}
                     onChange={(e) => {
                       const parsed = parseTimeInput(e.target.value);
-                      const nextCron = buildCronFromPreset({
-                        preset: schedule.preset,
-                        hour: parsed.hour,
-                        minute: parsed.minute,
-                        weekday: schedule.weekday,
-                        dayOfMonth: schedule.dayOfMonth,
+                      patchRule({
+                        trigger: {
+                          kind: "cron",
+                          cron: buildCronFromPreset({
+                            preset: schedule.preset,
+                            hour: parsed.hour,
+                            minute: parsed.minute,
+                            weekday: schedule.weekday,
+                            dayOfMonth: schedule.dayOfMonth,
+                          }),
+                          timezone: localTz,
+                        },
                       });
-                      onRulePatch(ruleId, { trigger: { kind: "cron", cron: nextCron, timezone: localTz } });
                     }}
                     className={inputClass(isDark)}
                   />
                 </div>
               </div>
+
               {schedule.preset === "weekly" ? (
                 <div>
                   <label className={labelClass(isDark)}>{t("ruleEditor.weekday")}</label>
                   <select
                     value={String(schedule.weekday)}
-                    onChange={(e) => {
-                      const nextCron = buildCronFromPreset({
-                        preset: "weekly",
-                        hour: schedule.hour,
-                        minute: schedule.minute,
-                        weekday: Number(e.target.value || 1),
-                        dayOfMonth: schedule.dayOfMonth,
-                      });
-                      onRulePatch(ruleId, { trigger: { kind: "cron", cron: nextCron, timezone: localTz } });
-                    }}
+                    onChange={(e) =>
+                      patchRule({
+                        trigger: {
+                          kind: "cron",
+                          cron: buildCronFromPreset({
+                            preset: "weekly",
+                            hour: schedule.hour,
+                            minute: schedule.minute,
+                            weekday: Number(e.target.value || 1),
+                            dayOfMonth: schedule.dayOfMonth,
+                          }),
+                          timezone: localTz,
+                        },
+                      })
+                    }
                     className={inputClass(isDark)}
                   >
                     {weekdayOptions.map((day) => (
@@ -336,6 +342,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   </select>
                 </div>
               ) : null}
+
               {schedule.preset === "monthly" ? (
                 <div>
                   <label className={labelClass(isDark)}>{t("ruleEditor.dayOfMonth")}</label>
@@ -344,16 +351,21 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                     min={1}
                     max={31}
                     value={schedule.dayOfMonth}
-                    onChange={(e) => {
-                      const nextCron = buildCronFromPreset({
-                        preset: "monthly",
-                        hour: schedule.hour,
-                        minute: schedule.minute,
-                        weekday: schedule.weekday,
-                        dayOfMonth: Number(e.target.value || 1),
-                      });
-                      onRulePatch(ruleId, { trigger: { kind: "cron", cron: nextCron, timezone: localTz } });
-                    }}
+                    onChange={(e) =>
+                      patchRule({
+                        trigger: {
+                          kind: "cron",
+                          cron: buildCronFromPreset({
+                            preset: "monthly",
+                            hour: schedule.hour,
+                            minute: schedule.minute,
+                            weekday: schedule.weekday,
+                            dayOfMonth: Number(e.target.value || 1),
+                          }),
+                          timezone: localTz,
+                        },
+                      })
+                    }
                     className={inputClass(isDark)}
                   />
                 </div>
@@ -367,7 +379,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 <label className={labelClass(isDark)}>{t("ruleEditor.oneTimeMode")}</label>
                 <select
                   value={oneShotMode}
-                  onChange={(e) => onSetOneShotMode(ruleId, String(e.target.value || "after") as "after" | "exact")}
+                  onChange={(e) => onSetOneShotMode(String(e.target.value || "after") as "after" | "exact")}
                   className={inputClass(isDark)}
                 >
                   <option value="after">{t("ruleEditor.afterCountdown")}</option>
@@ -378,14 +390,14 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
               {oneShotMode === "after" ? (
                 <div className="space-y-2">
                   <div className="flex flex-wrap gap-2">
-                    {[5, 10, 30, 60, 120].map((mins) => (
+                    {[5, 10, 30, 60, 120].map((minutes) => (
                       <button
-                        key={mins}
+                        key={minutes}
                         type="button"
-                        className="glass-btn px-2.5 py-1.5 rounded-lg text-xs transition-colors text-[var(--color-text-secondary)]"
-                        onClick={() => onSetOneShotAfterMinutes(ruleId, mins)}
+                        className={secondaryButtonClass("sm")}
+                        onClick={() => onSetOneShotAfterMinutes(minutes)}
                       >
-                        {mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`}
+                        {minutes >= 60 ? `${Math.round(minutes / 60)}h` : `${minutes}m`}
                       </button>
                     ))}
                   </div>
@@ -396,10 +408,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                       min={1}
                       max={10080}
                       value={oneShotAfterMinutes}
-                      onChange={(e) => {
-                        const minutes = clampInt(Number(e.target.value || 1), 1, 7 * 24 * 60);
-                        onSetOneShotAfterMinutes(ruleId, minutes);
-                      }}
+                      onChange={(e) => onSetOneShotAfterMinutes(clampInt(Number(e.target.value || 1), 1, 7 * 24 * 60))}
                       className={inputClass(isDark)}
                     />
                   </div>
@@ -410,7 +419,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   <input
                     type="datetime-local"
                     value={atInput}
-                    onChange={(e) => onRulePatch(ruleId, { trigger: { kind: "at", at: localDatetimeInputToIso(e.target.value) } })}
+                    onChange={(e) => patchRule({ trigger: { kind: "at", at: localDatetimeInputToIso(e.target.value) } })}
                     className={inputClass(isDark)}
                   />
                 </div>
@@ -434,33 +443,40 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 }
                 onSetRulesErr("");
                 if (next === "group_state") {
-                  const defaultAt = atRaw || new Date(Date.now() + 30 * 60 * 1000).toISOString();
-                  onSetOneShotMode(ruleId, "after");
-                  onRulePatch(ruleId, { action: defaultGroupStateAction(), trigger: { kind: "at", at: defaultAt } });
+                  onSetOneShotMode("after");
+                  patchRule({
+                    action: defaultGroupStateAction(),
+                    trigger: { kind: "at", at: atRaw || new Date(Date.now() + 30 * 60 * 1000).toISOString() },
+                  });
                   return;
                 }
                 if (next === "actor_control") {
-                  const defaultAt = atRaw || new Date(Date.now() + 30 * 60 * 1000).toISOString();
-                  onSetOneShotMode(ruleId, "after");
-                  onRulePatch(ruleId, { action: defaultActorControlAction(), trigger: { kind: "at", at: defaultAt } });
+                  onSetOneShotMode("after");
+                  patchRule({
+                    action: defaultActorControlAction(),
+                    trigger: { kind: "at", at: atRaw || new Date(Date.now() + 30 * 60 * 1000).toISOString() },
+                  });
                   return;
                 }
-                onRulePatch(ruleId, { action: defaultNotifyAction(), to: recipients.length > 0 ? recipients : ["@foreman"] });
+                patchRule({
+                  action: defaultNotifyAction(),
+                  to: recipients.length > 0 ? recipients : ["@foreman"],
+                });
               }}
               className={inputClass(isDark)}
             >
               <option value="notify">{t("ruleEditor.sendReminder")}</option>
               <option value="group_state" disabled={!operationalActionsEnabled}>
-                {t("ruleEditor.setGroupStatus")}{operationalActionsEnabled ? "" : t("automation.oneTimeOnlySuffix")}
+                {t("ruleEditor.setGroupStatus")}
+                {operationalActionsEnabled ? "" : t("automation.oneTimeOnlySuffix")}
               </option>
               <option value="actor_control" disabled={!operationalActionsEnabled}>
-                {t("ruleEditor.controlActorRuntimes")}{operationalActionsEnabled ? "" : t("automation.oneTimeOnlySuffix")}
+                {t("ruleEditor.controlActorRuntimes")}
+                {operationalActionsEnabled ? "" : t("automation.oneTimeOnlySuffix")}
               </option>
             </select>
             {!operationalActionsEnabled ? (
-              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                {t("automation.operationalActionsOnly")}
-              </div>
+              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{t("automation.operationalActionsOnly")}</div>
             ) : null}
           </div>
 
@@ -474,15 +490,15 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                       key={token}
                       label={getRecipientDisplayLabel(token)}
                       isDark={isDark}
-                      onRemove={() => onRulePatch(ruleId, { to: recipients.filter((x) => x !== token) })}
+                      onRemove={() => patchRule({ to: recipients.filter((item) => item !== token) })}
                     />
                   ))}
                   <select
                     value=""
                     onChange={(e) => {
                       const value = String(e.target.value || "").trim();
-                      if (!value) return;
-                      if (!recipients.includes(value)) onRulePatch(ruleId, { to: [...recipients, value] });
+                      if (!value || recipients.includes(value)) return;
+                      patchRule({ to: [...recipients, value] });
                     }}
                     className="glass-input px-3 py-2 rounded-lg text-sm min-h-[44px] text-[var(--color-text-primary)]"
                   >
@@ -508,14 +524,11 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                         return;
                       }
                       onSetRulesErr("");
-                      const nextSnippetRef = snippetRef || snippetIds[0] || "";
-                      onRulePatch(ruleId, {
-                        action: { ...notifyAction, snippet_ref: nextSnippetRef || null },
-                      });
+                      patchRule({ action: { ...notifyAction, snippet_ref: snippetRef || snippetIds[0] || null } });
                       return;
                     }
                     onSetRulesErr("");
-                    onRulePatch(ruleId, { action: { ...notifyAction, snippet_ref: null } });
+                    patchRule({ action: { ...notifyAction, snippet_ref: null } });
                   }}
                   className={inputClass(isDark)}
                 >
@@ -529,9 +542,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   <label className={labelClass(isDark)}>{t("ruleEditor.selectSnippet")}</label>
                   <select
                     value={snippetRef}
-                    onChange={(e) =>
-                      onRulePatch(ruleId, { action: { ...notifyAction, snippet_ref: e.target.value || null } })
-                    }
+                    onChange={(e) => patchRule({ action: { ...notifyAction, snippet_ref: e.target.value || null } })}
                     className={`${inputClass(isDark)} font-mono`}
                   >
                     <option value="">(select snippet)</option>
@@ -542,9 +553,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                     ))}
                   </select>
                   {snippetIds.length === 0 ? (
-                    <div className={`mt-1 text-[11px] text-amber-700 dark:text-amber-300`}>
-                      {t("automation.noSnippetsYet")}
-                    </div>
+                    <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t("automation.noSnippetsYet")}</div>
                   ) : null}
                 </div>
               ) : (
@@ -552,7 +561,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   <label className={labelClass(isDark)}>{t("ruleEditor.messageLabel")}</label>
                   <textarea
                     value={message}
-                    onChange={(e) => onRulePatch(ruleId, { action: { ...notifyAction, message: e.target.value } })}
+                    onChange={(e) => patchRule({ action: { ...notifyAction, message: e.target.value } })}
                     className={`${inputClass(isDark)} font-mono text-[12px]`}
                     style={{ minHeight: 140 }}
                     placeholder={t("automation.messagePlaceholder")}
@@ -569,8 +578,11 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
               <select
                 value={groupStateValue}
                 onChange={(e) =>
-                  onRulePatch(ruleId, {
-                    action: { kind: "group_state", state: String(e.target.value || "paused") as "active" | "idle" | "paused" | "stopped" },
+                  patchRule({
+                    action: {
+                      kind: "group_state",
+                      state: String(e.target.value || "paused") as "active" | "idle" | "paused" | "stopped",
+                    },
                   })
                 }
                 className={inputClass(isDark)}
@@ -593,7 +605,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 <select
                   value={actorOperation}
                   onChange={(e) =>
-                    onRulePatch(ruleId, {
+                    patchRule({
                       action: {
                         kind: "actor_control",
                         operation: String(e.target.value || "restart") as "start" | "stop" | "restart",
@@ -611,6 +623,7 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                   {actorOperationCopy[(actorOperation as "start" | "stop" | "restart") || "restart"].hint}
                 </div>
               </div>
+
               <div>
                 <label className={labelClass(isDark)}>{t("ruleEditor.targetActors")}</label>
                 <div className="flex flex-wrap gap-2">
@@ -620,11 +633,11 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                       label={getRecipientDisplayLabel(token)}
                       isDark={isDark}
                       onRemove={() =>
-                        onRulePatch(ruleId, {
+                        patchRule({
                           action: {
                             kind: "actor_control",
                             operation: actorOperation as "start" | "stop" | "restart",
-                            targets: actorTargets.filter((x) => x !== token),
+                            targets: actorTargets.filter((item) => item !== token),
                           },
                         })
                       }
@@ -634,9 +647,8 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                     value=""
                     onChange={(e) => {
                       const value = String(e.target.value || "").trim();
-                      if (!value) return;
-                      if (actorTargets.includes(value)) return;
-                      onRulePatch(ruleId, {
+                      if (!value || actorTargets.includes(value)) return;
+                      patchRule({
                         action: {
                           kind: "actor_control",
                           operation: actorOperation as "start" | "stop" | "restart",
@@ -656,9 +668,20 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                 </div>
               </div>
             </div>
-          ) : null}
+            ) : null}
+          </div>
+        </div>
+        <div className={settingsDialogFooterClass}>
+          <button type="button" className={secondaryButtonClass()} onClick={onClose} disabled={saveBusy}>
+            {t("common:cancel")}
+          </button>
+          <button type="button" className={primaryButtonClass(saveBusy)} onClick={() => void onSave()} disabled={saveBusy}>
+            {saveBusy ? t("common:saving") : t("common:save")}
+          </button>
         </div>
       </div>
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(content, document.body) : content;
 }

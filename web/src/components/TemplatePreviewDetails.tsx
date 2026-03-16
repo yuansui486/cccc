@@ -17,6 +17,7 @@ type TemplateActor = {
   runner?: string;
   command?: unknown;
   submit?: string;
+  capability_autoload?: unknown;
   enabled?: boolean;
 };
 
@@ -175,7 +176,16 @@ export function TemplatePreviewDetails({
     "terminal_transcript_visibility",
     "terminal_transcript_notify_tail",
     "terminal_transcript_notify_lines",
-  ].filter((k) => k in settings || (diff?.settings_changed && k in diff.settings_changed));
+    "panorama_enabled",
+    "desktop_pet_enabled",
+  ]
+    .filter((k) => k in settings || (diff?.settings_changed && k in diff.settings_changed))
+    .sort((a, b) => {
+      const aChanged = Boolean(diff?.settings_changed && a in diff.settings_changed);
+      const bChanged = Boolean(diff?.settings_changed && b in diff.settings_changed);
+      if (aChanged !== bChanged) return aChanged ? -1 : 1;
+      return 0;
+    });
 
   const body = (
     <>
@@ -267,6 +277,7 @@ export function TemplatePreviewDetails({
                   const runner = String(a.runner || "").trim();
                   const enabled = a.enabled === false ? "disabled" : "enabled";
                   const cmd = formatCommand(a.command);
+                  const autoload = asStringArray(a.capability_autoload);
                   return (
                     <div key={id} className="text-xs text-[var(--color-text-tertiary)]">
                       <span className="font-mono">{id}</span>
@@ -275,6 +286,11 @@ export function TemplatePreviewDetails({
                       {runner ? <span className="ml-2 font-mono">• {runner}</span> : null}
                       <span className="ml-2">• {enabled}</span>
                       {cmd ? <div className="mt-1 font-mono text-[11px] opacity-90">{cmd}</div> : null}
+                      {autoload.length ? (
+                        <div className="mt-1 text-[11px] opacity-90">
+                          autoload: <span className="font-mono">{autoload.join(", ")}</span>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -291,10 +307,10 @@ export function TemplatePreviewDetails({
             <div>
               <div className="text-xs font-medium text-[var(--color-text-secondary)]">Settings</div>
               <div className="mt-1 space-y-1">
-                {stableSettingsKeys.slice(0, 12).map((k) => formatSettingLine(k))}
-                {stableSettingsKeys.length > 12 ? (
+                {stableSettingsKeys.slice(0, 16).map((k) => formatSettingLine(k))}
+                {stableSettingsKeys.length > 16 ? (
                   <div className="text-[11px] text-[var(--color-text-muted)]">
-                    …and {stableSettingsKeys.length - 12} more
+                    …and {stableSettingsKeys.length - 16} more
                   </div>
                 ) : null}
               </div>

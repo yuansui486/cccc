@@ -258,11 +258,11 @@
   },
   "automation": {
     "title": "自动化",
-    "description": "配置自动化规则和策略。设置存储在",
+    "description": "配置内建自动化和定时规则。设置存储在",
     "configPathFallback": "CCCC_HOME/…/group.yaml",
     "openFromGroup": "请从工作组中打开此标签页。",
-    "rulesTitle": "自动化规则",
-    "rulesDescription": "定义触发条件和操作（通知、工作组状态、Actor 控制）。",
+    "rulesTitle": "规则与模板",
+    "rulesDescription": "定义定时提醒、操作动作以及可复用的消息模板。",
     "newRule": "新建规则",
     "snippets": "消息模板",
     "resetToDefaults": "恢复默认",
@@ -278,13 +278,13 @@
     "deleteSnippetConfirm": "删除消息模板 \"{{id}}\"？",
     "snippetInvalid": "模板名称无效。请使用字母/数字/_/-（最多 64 个字符）。",
     "snippetExists": "模板已存在：{{id}}",
-    "editHint": "编辑会在弹窗中打开完整设置，以保持列表简洁。消息模板在「消息模板」中管理。",
-    "draftHint": "更改会立即应用到草稿。点击自动化规则中的保存以持久化。",
+    "editHint": "编辑会在弹窗中打开完整规则设置；消息模板也在这里集中管理，供规则复用。",
+    "draftHint": "更改会立即应用到草稿。点击「规则与模板」中的保存以持久化。",
     "saving": "保存中…",
     "createRuleTitle": "创建规则",
-    "manageSnippetsTitle": "管理模板",
+    "manageSnippetsTitle": "管理消息模板",
     "resetTitle": "将规则和模板恢复为默认值",
-    "saveTitle": "保存自动化规则和模板",
+    "saveTitle": "保存规则和模板",
     "operationalActionsHint": "设置工作组状态和控制 Actor 运行时仅支持一次性调度。",
     "createSnippetFirst": "请先创建至少一个消息模板再选择。",
     "operationalActionsOnly": "操作型动作仅支持一次性调度。",
@@ -349,8 +349,8 @@
     "removeRegistryConfirm": "从注册表中移除 {{count}} 个缺失的工作组条目？"
   },
   "policies": {
-    "title": "引擎策略",
-    "description": "内置的跟进和提醒。调整数值后点击保存策略。",
+    "title": "内建自动化",
+    "description": "系统托管的跟进与协作健康回路。调整数值后点击保存。",
     "unreadFollowup": "未读跟进（秒）",
     "unreadFollowupHelp": "当未读消息停留过久时提醒成员。",
     "needReplyFollowup": "需回复跟进（秒）",
@@ -379,8 +379,8 @@
     "actorIdleAlertHelp": "当 Actor 空闲超过此时间时通知 Foreman。",
     "groupSilenceCheck": "静默转空闲超时（秒）",
     "groupSilenceCheckHelp": "两段式启发：第一次超时提醒 Foreman 复核；连续第二次超时会自动将工作组置为 idle。设为 0 即关闭。",
-    "savePolicies": "保存策略",
-    "savePoliciesTitle": "保存引擎策略设置"
+    "savePolicies": "保存内建自动化",
+    "savePoliciesTitle": "保存内建自动化设置"
   },
   "ruleEditor": {
     "editRule": "编辑规则：",
@@ -468,13 +468,9 @@
   },
   "delivery": {
     "title": "消息投递",
-    "description": "控制消息和系统通知如何注入到 PTY 运行时。",
-    "throttleTitle": "节流与策略",
-    "throttleDescription": "调节节奏和已读光标行为。设为 0 以禁用。",
-    "deliveryInterval": "投递间隔（秒）",
-    "deliveryIntervalHelp": "消息投递之间的最小延迟（节流）。",
-    "autoMarkRead": "投递时自动标记为已读",
-    "autoMarkReadHelp": "消息成功投递到 PTY 后自动推进已读光标。",
+    "description": "控制 PTY 投递成功后会发生什么。",
+    "autoMarkRead": "将已投递消息标记为已读",
+    "autoMarkReadHelp": "开启后，PTY 成功收到消息时会自动推进已读光标。关闭后，消息会保持未读，直到被显式标记为已读。",
     "saveDelivery": "保存投递设置"
   },
   "messaging": {

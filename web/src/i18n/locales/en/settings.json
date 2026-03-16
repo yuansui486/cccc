@@ -258,11 +258,11 @@
   },
   "automation": {
     "title": "Automation",
-    "description": "Configure automation rules and policies. Settings are stored in",
+    "description": "Configure built-in automation and scheduled rules. Settings are stored in",
     "configPathFallback": "CCCC_HOME/.../group.yaml",
     "openFromGroup": "Open this tab from a group.",
-    "rulesTitle": "Automation Rules",
-    "rulesDescription": "Define trigger conditions and actions (notify, group state, actor control).",
+    "rulesTitle": "Rules & Snippets",
+    "rulesDescription": "Define scheduled reminders, operational actions, and reusable message snippets.",
     "newRule": "New Rule",
     "snippets": "Snippets",
     "resetToDefaults": "Reset to Defaults",
@@ -278,13 +278,13 @@
     "deleteSnippetConfirm": "Delete snippet \"{{id}}\"?",
     "snippetInvalid": "Snippet name is invalid. Use letters/numbers/_/- (max 64 chars).",
     "snippetExists": "Snippet already exists: {{id}}",
-    "editHint": "Edit opens full settings in a modal to keep this list clean. Message snippets are managed in Snippets.",
-    "draftHint": "Changes apply to draft immediately. Click Save in Automation Rules to persist.",
+    "editHint": "Edit opens full rule settings in a modal. Snippets are managed here for reuse across rules.",
+    "draftHint": "Changes apply to draft immediately. Click Save in Rules & Snippets to persist.",
     "saving": "Saving...",
     "createRuleTitle": "Create a rule",
     "manageSnippetsTitle": "Manage snippets",
     "resetTitle": "Reset rules and snippets to defaults",
-    "saveTitle": "Save automation rules and snippets",
+    "saveTitle": "Save rules and snippets",
     "operationalActionsHint": "Set Group Status and Control Actor Runtimes are available only for One-Time schedule.",
     "createSnippetFirst": "Create at least one snippet before selecting Snippet.",
     "operationalActionsOnly": "Operational actions are available only with One-Time schedule.",
@@ -349,8 +349,8 @@
     "removeRegistryConfirm": "Remove {{count}} missing group entries from registry?"
   },
   "policies": {
-    "title": "Engine Policies",
-    "description": "Built-in follow-ups and alerts. Adjust values, then click Save Policies.",
+    "title": "Built-in Automation",
+    "description": "System-managed follow-ups and collaboration health loops. Adjust values, then save.",
     "unreadFollowup": "Unread Follow-up (sec)",
     "unreadFollowupHelp": "Remind a member when unread messages sit too long.",
     "needReplyFollowup": "Need Reply Follow-up (sec)",
@@ -379,8 +379,8 @@
     "actorIdleAlertHelp": "Alert foreman if actor is inactive for this long.",
     "groupSilenceCheck": "Silence to Idle Timeout (sec)",
     "groupSilenceCheckHelp": "Two-step heuristic. The first timeout prompts the foreman to review; the second consecutive timeout sets the group idle. Set 0 to disable.",
-    "savePolicies": "Save Policies",
-    "savePoliciesTitle": "Save engine policy settings"
+    "savePolicies": "Save Built-in Automation",
+    "savePoliciesTitle": "Save built-in automation settings"
   },
   "ruleEditor": {
     "editRule": "Edit Rule:",
@@ -468,13 +468,9 @@
   },
   "delivery": {
     "title": "Delivery",
-    "description": "Control how messages and system notifications are injected into PTY runtimes.",
-    "throttleTitle": "Throttle & Policy",
-    "throttleDescription": "Tune pacing and read-cursor behavior. Set values to 0 to disable.",
-    "deliveryInterval": "Delivery Interval (sec)",
-    "deliveryIntervalHelp": "Minimum delay between message deliveries (throttling).",
-    "autoMarkRead": "Auto-mark as read on delivery",
-    "autoMarkReadHelp": "Automatically advance read cursor after a message is successfully delivered to PTY.",
+    "description": "Control what happens after a PTY delivery succeeds.",
+    "autoMarkRead": "Mark delivered messages as read",
+    "autoMarkReadHelp": "When enabled, successful PTY delivery advances the read cursor automatically. When disabled, messages remain unread until they are marked read explicitly.",
     "saveDelivery": "Save Delivery Settings"
   },
   "messaging": {

@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { GroupMeta, RemoteAccessState, WebAccessSession } from "../../../types";
 import { InfoIcon } from "../../Icons";
 import { InfoPopover } from "./InfoPopover";
 import * as api from "../../../services/api";
-import { cardClass, inputClass, labelClass, primaryButtonClass } from "./types";
+import {
+  cardClass,
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsDialogBodyClass,
+  settingsDialogFooterClass,
+  settingsDialogHeaderClass,
+} from "./types";
 import { useModalA11y } from "../../../hooks/useModalA11y";
 
 interface WebAccessTabProps {
@@ -499,6 +509,144 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
         : "neutral";
   const remoteStatusLabel = t(`webAccess.status.${remoteState?.status || "stopped"}`);
 
+  const createDialog =
+    canAccessGlobalSettings && createDialogOpen ? (
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 animate-fade-in">
+        <button type="button" aria-label={t("webAccess.close")} onClick={() => closeCreateDialog()} className="absolute inset-0 glass-overlay" />
+        <div
+          ref={createDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={newToken ? t("webAccess.newTokenTitle") : t("webAccess.createAccessToken")}
+          className="glass-modal relative z-[1001] flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] shadow-2xl text-[var(--color-text-primary)]"
+        >
+          <div className={settingsDialogHeaderClass}>
+            <div>
+              <h5 className={`text-base font-semibold text-[var(--color-text-primary)]`}>{newToken ? t("webAccess.newTokenTitle") : t("webAccess.createAccessToken")}</h5>
+              <p className={`mt-1 text-xs leading-6 text-[var(--color-text-muted)]`}>
+                {newToken ? t("webAccess.newTokenHint") : t("webAccess.accessControlDescription")}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => closeCreateDialog()}
+              className={`${secondaryButtonClass("sm")} ml-auto`}
+            >
+              {t("webAccess.close")}
+            </button>
+          </div>
+
+          {newToken ? (
+            <>
+              <div className={`${settingsDialogBodyClass} space-y-5`}>
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/15 p-4">
+                  <div className="break-all rounded-lg border border-emerald-500/20 bg-[var(--color-bg-primary)] px-3 py-3 text-xs font-mono text-emerald-600 dark:text-emerald-400">{newToken}</div>
+                  <div className="mt-3 space-y-1 text-xs leading-6 text-emerald-600 dark:text-emerald-400">
+                    <div>{newTokenAutoBound ? t("webAccess.newTokenAutoLoginHint") : t("webAccess.newTokenNoAutoLoginHint")}</div>
+                    <div>{t("webAccess.newTokenVerifyHint")}</div>
+                  </div>
+                </div>
+              </div>
+              <div className={settingsDialogFooterClass}>
+                <button type="button" onClick={() => void copyNewToken()} className={primaryButtonClass(false)}>
+                  {copiedNewToken ? t("webAccess.copied") : t("webAccess.copyToken")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeCreateDialog()}
+                  className={secondaryButtonClass()}
+                >
+                  {t("webAccess.close")}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={`${settingsDialogBodyClass} space-y-4`}>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="space-y-3">
+                    <div>
+                      <label className={labelClass()}>{t("webAccess.userIdLabel")}</label>
+                      <input value={userId} onChange={(e) => setUserId(e.target.value)} className={inputClass()} placeholder={t("webAccess.userIdPlaceholder")} />
+                    </div>
+
+                    <div>
+                      <label className={labelClass()}>{t("webAccess.customTokenLabel")}</label>
+                      <input value={customToken} onChange={(e) => setCustomToken(e.target.value)} className={inputClass()} placeholder={t("webAccess.customTokenPlaceholder")} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className={`flex items-start gap-3 rounded-lg border px-3 py-3 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]`}>
+                      <input
+                        type="checkbox"
+                        checked={!hasAdminToken || isAdmin}
+                        onChange={(e) => setIsAdmin(e.target.checked)}
+                        disabled={!hasAdminToken}
+                        className="mt-1"
+                      />
+                      <div>
+                        <div className={`text-sm font-medium text-[var(--color-text-primary)]`}>{t("webAccess.adminTokenLabel")}</div>
+                        <div className={`mt-1 text-xs text-[var(--color-text-muted)]`}>
+                          {!hasAdminToken ? t("webAccess.firstTokenAdminHint") : t("webAccess.adminTokenHint")}
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {hasAdminToken && !isAdmin ? (
+                  <div className={`mt-4 rounded-lg border p-3 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]`}>
+                    <div className="flex flex-col gap-1">
+                      <div className={`text-sm font-medium text-[var(--color-text-primary)]`}>{t("webAccess.groupScopeTitle")}</div>
+                      <div className={`text-xs text-[var(--color-text-muted)]`}>{t("webAccess.scopedTokenGroupsHint")}</div>
+                    </div>
+                    <div className="mt-3 max-h-44 overflow-y-auto scrollbar-subtle space-y-2 pr-1">
+                      {groups.length === 0 ? (
+                        <div className={`text-xs text-[var(--color-text-muted)]`}>{t("webAccess.noGroups")}</div>
+                      ) : groups.map((group) => {
+                        const groupId = group.group_id;
+                        return (
+                          <label key={groupId} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={selectedGroups.has(groupId)}
+                              onChange={(e) => {
+                                setSelectedGroups((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(groupId); else next.delete(groupId);
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="text-[var(--color-text-primary)]">{group.title || groupId}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {createError && <div className={`mt-3 text-xs text-red-600 dark:text-red-400`}>{createError}</div>}
+              </div>
+              <div className={settingsDialogFooterClass}>
+                <button type="button" onClick={() => void handleCreateAccessToken()} disabled={createBusy} className={primaryButtonClass(createBusy)}>
+                  {createBusy ? t("webAccess.creating") : t("webAccess.createAccessToken")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeCreateDialog()}
+                  className={secondaryButtonClass()}
+                >
+                  {t("webAccess.cancel")}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -878,144 +1026,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
         </div>
       </section>
 
-      {canAccessGlobalSettings && createDialogOpen ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6">
-          <button
-            type="button"
-            aria-label={t("webAccess.close")}
-            onClick={() => closeCreateDialog()}
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-          />
-          <div
-            ref={createDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={newToken ? t("webAccess.newTokenTitle") : t("webAccess.createAccessToken")}
-            className="glass-modal relative z-[71] w-full max-w-2xl rounded-2xl border border-[var(--glass-border-subtle)] shadow-2xl text-[var(--color-text-primary)]"
-          >
-            <div className={`flex items-start justify-between gap-4 border-b px-5 py-4 border-[var(--glass-border-subtle)]`}>
-              <div>
-                <h5 className={`text-base font-semibold text-[var(--color-text-primary)]`}>{newToken ? t("webAccess.newTokenTitle") : t("webAccess.createAccessToken")}</h5>
-                <p className={`mt-1 text-xs leading-6 text-[var(--color-text-muted)]`}>
-                  {newToken ? t("webAccess.newTokenHint") : t("webAccess.accessControlDescription")}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => closeCreateDialog()}
-                className="glass-btn px-3 py-2 rounded-lg text-xs text-[var(--color-text-secondary)]"
-              >
-                {t("webAccess.close")}
-              </button>
-            </div>
-
-            {newToken ? (
-              <div className="px-5 py-5">
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/15 p-4">
-                  <div className="break-all rounded-lg border border-emerald-500/20 bg-[var(--color-bg-primary)] px-3 py-3 text-xs font-mono text-emerald-600 dark:text-emerald-400">{newToken}</div>
-                  <div className="mt-3 space-y-1 text-xs leading-6 text-emerald-600 dark:text-emerald-400">
-                    <div>{newTokenAutoBound ? t("webAccess.newTokenAutoLoginHint") : t("webAccess.newTokenNoAutoLoginHint")}</div>
-                    <div>{t("webAccess.newTokenVerifyHint")}</div>
-                  </div>
-                </div>
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => void copyNewToken()} className={primaryButtonClass(false)}>
-                    {copiedNewToken ? t("webAccess.copied") : t("webAccess.copyToken")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => closeCreateDialog()}
-                    className={`px-3 py-2 rounded-lg text-xs glass-btn text-[var(--color-text-secondary)]`}
-                  >
-                    {t("webAccess.close")}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="px-5 py-5">
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <div className="space-y-3">
-                    <div>
-                      <label className={labelClass()}>{t("webAccess.userIdLabel")}</label>
-                      <input value={userId} onChange={(e) => setUserId(e.target.value)} className={inputClass()} placeholder={t("webAccess.userIdPlaceholder")} />
-                    </div>
-
-                    <div>
-                      <label className={labelClass()}>{t("webAccess.customTokenLabel")}</label>
-                      <input value={customToken} onChange={(e) => setCustomToken(e.target.value)} className={inputClass()} placeholder={t("webAccess.customTokenPlaceholder")} />
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className={`flex items-start gap-3 rounded-lg border px-3 py-3 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]`}>
-                      <input
-                        type="checkbox"
-                        checked={!hasAdminToken || isAdmin}
-                        onChange={(e) => setIsAdmin(e.target.checked)}
-                        disabled={!hasAdminToken}
-                        className="mt-1"
-                      />
-                      <div>
-                        <div className={`text-sm font-medium text-[var(--color-text-primary)]`}>{t("webAccess.adminTokenLabel")}</div>
-                        <div className={`mt-1 text-xs text-[var(--color-text-muted)]`}>
-                          {!hasAdminToken ? t("webAccess.firstTokenAdminHint") : t("webAccess.adminTokenHint")}
-                        </div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                {hasAdminToken && !isAdmin ? (
-                  <div className={`mt-4 rounded-lg border p-3 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]`}>
-                    <div className="flex flex-col gap-1">
-                      <div className={`text-sm font-medium text-[var(--color-text-primary)]`}>{t("webAccess.groupScopeTitle")}</div>
-                      <div className={`text-xs text-[var(--color-text-muted)]`}>{t("webAccess.scopedTokenGroupsHint")}</div>
-                    </div>
-                    <div className="mt-3 max-h-44 overflow-y-auto space-y-2 pr-1">
-                      {groups.length === 0 ? (
-                        <div className={`text-xs text-[var(--color-text-muted)]`}>{t("webAccess.noGroups")}</div>
-                      ) : groups.map((group) => {
-                        const groupId = group.group_id;
-                        return (
-                          <label key={groupId} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={selectedGroups.has(groupId)}
-                              onChange={(e) => {
-                                setSelectedGroups((prev) => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.add(groupId); else next.delete(groupId);
-                                  return next;
-                                });
-                              }}
-                            />
-                            <span className="text-[var(--color-text-primary)]">{group.title || groupId}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-
-                {createError && <div className={`mt-3 text-xs text-red-600 dark:text-red-400`}>{createError}</div>}
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => void handleCreateAccessToken()} disabled={createBusy} className={primaryButtonClass(createBusy)}>
-                    {createBusy ? t("webAccess.creating") : t("webAccess.createAccessToken")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => closeCreateDialog()}
-                    className={`px-3 py-2 rounded-lg text-xs glass-btn text-[var(--color-text-secondary)]`}
-                  >
-                    {t("webAccess.cancel")}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
+      {createDialog && typeof document !== "undefined" ? createPortal(createDialog, document.body) : createDialog}
 
       <section className={cardClass()}>
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("webAccess.interactionModeTitle")}</h4>

@@ -6,7 +6,16 @@ import * as api from "../../../services/api";
 import { parsePrivateEnvSetText, parsePrivateEnvUnsetText } from "../../../utils/privateEnvInput";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../../utils/capabilityAutoload";
 import { useGroupStore } from "../../../stores";
-import { cardClass, inputClass, labelClass, primaryButtonClass } from "./types";
+import {
+  cardClass,
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsDialogBodyClass,
+  settingsDialogFooterClass,
+  settingsDialogHeaderClass,
+} from "./types";
 import { CapabilityPicker } from "../../CapabilityPicker";
 
 interface ActorProfilesTabProps {
@@ -175,22 +184,30 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
   const editorModal = editorOpen ? (
     <div
-      className="fixed inset-0 z-[1000] flex items-stretch justify-center bg-black/50 p-3 sm:items-center"
+      className="fixed inset-0 z-[1000] flex items-stretch justify-center p-3 sm:items-center"
       role="dialog"
       aria-modal="true"
-      onMouseDown={(e) => {
+      onPointerDown={(e) => {
         if (e.target === e.currentTarget) {
           closeEditor();
         }
       }}
     >
-      <div className="flex h-full w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-2rem)]">
-        <div className="shrink-0 px-5 py-4 border-b border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)]">
+      <div className="absolute inset-0 glass-overlay" />
+      <div className="glass-modal relative flex h-full w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-2rem)]">
+        <div className={settingsDialogHeaderClass}>
           <div className="text-base font-semibold text-[var(--color-text-primary)]">
             {editor.id ? t("actorProfiles.editTitle") : t("actorProfiles.newTitle")}
           </div>
+          <button
+            type="button"
+            onClick={closeEditor}
+            className={`${secondaryButtonClass("sm")} ml-auto`}
+          >
+            {t("common:close")}
+          </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5 space-y-4">
+        <div className={`${settingsDialogBodyClass} space-y-4`}>
           {editorErr ? (
             <div className="rounded-lg border px-3 py-2 text-sm border-rose-500/30 bg-rose-500/10 text-rose-400">
               {editorErr}
@@ -386,14 +403,16 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
             </label>
           </div>
         </div>
-        <div className="safe-area-inset-bottom shrink-0 px-5 py-4 border-t flex justify-end gap-2 border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)]">
+        <div className={settingsDialogFooterClass}>
           <button
+            type="button"
             onClick={closeEditor}
-            className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[44px]"
+            className={secondaryButtonClass()}
           >
             {t("common:cancel")}
           </button>
           <button
+            type="button"
             onClick={() => void handleSave()}
             disabled={editorBusy}
             className={primaryButtonClass(editorBusy)}

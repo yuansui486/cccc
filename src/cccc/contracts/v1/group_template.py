@@ -26,6 +26,7 @@ class GroupTemplateActor(BaseModel):
     runner: RunnerKind = "pty"
     command: Union[str, List[str]] = Field(default_factory=list)
     submit: ActorSubmit = "enter"
+    capability_autoload: List[str] = Field(default_factory=list)
     enabled: bool = True
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -43,7 +44,7 @@ class GroupTemplateSettings(BaseModel):
     nudge_max_repeats_per_obligation: int = 3
     nudge_escalate_after_repeats: int = 2
     auto_mark_on_delivery: bool = False
-    actor_idle_timeout_seconds: int = 600
+    actor_idle_timeout_seconds: int = 0
     keepalive_delay_seconds: int = 120
     keepalive_max_per_actor: int = 3
     silence_timeout_seconds: int = 0
@@ -54,6 +55,8 @@ class GroupTemplateSettings(BaseModel):
     terminal_transcript_visibility: TerminalTranscriptVisibility = "foreman"
     terminal_transcript_notify_tail: bool = True
     terminal_transcript_notify_lines: int = 20
+    panorama_enabled: bool = False
+    desktop_pet_enabled: bool = False
 
     model_config = ConfigDict(extra="ignore")
 

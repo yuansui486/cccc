@@ -83,7 +83,7 @@ def _cfg(group: Group) -> AutomationConfig:
         nudge_max_repeats_per_obligation=_int("nudge_max_repeats_per_obligation", 3),
         nudge_escalate_after_repeats=_int("nudge_escalate_after_repeats", 2),
         # Level 2
-        actor_idle_timeout_seconds=_int("actor_idle_timeout_seconds", 600),
+        actor_idle_timeout_seconds=_int("actor_idle_timeout_seconds", 0),
         keepalive_delay_seconds=_int("keepalive_delay_seconds", 120),
         keepalive_max_per_actor=_int("keepalive_max_per_actor", 3),
         silence_timeout_seconds=_int("silence_timeout_seconds", 0),

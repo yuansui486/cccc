@@ -22,7 +22,7 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: GroupSettings | null;
-  onUpdateSettings: (settings: Partial<GroupSettings>) => Promise<void>;
+  onUpdateSettings: (settings: Partial<GroupSettings>) => Promise<boolean | void>;
   onRegistryChanged?: () => Promise<void> | void;
   busy: boolean;
   isDark: boolean;
@@ -57,13 +57,12 @@ export function SettingsModal({
   const [nudgeDigestMinIntervalSeconds, setNudgeDigestMinIntervalSeconds] = useState(120);
   const [nudgeMaxRepeatsPerObligation, setNudgeMaxRepeatsPerObligation] = useState(3);
   const [nudgeEscalateAfterRepeats, setNudgeEscalateAfterRepeats] = useState(2);
-  const [idleSeconds, setIdleSeconds] = useState(600);
+  const [idleSeconds, setIdleSeconds] = useState(0);
   const [keepaliveSeconds, setKeepaliveSeconds] = useState(120);
   const [keepaliveMax, setKeepaliveMax] = useState(3);
   const [silenceSeconds, setSilenceSeconds] = useState(600);
   const [helpNudgeIntervalSeconds, setHelpNudgeIntervalSeconds] = useState(600);
   const [helpNudgeMinMessages, setHelpNudgeMinMessages] = useState(10);
-  const [deliveryInterval, setDeliveryInterval] = useState(0);
   const [autoMarkOnDelivery, setAutoMarkOnDelivery] = useState(false);
 
   // Messaging policy
@@ -155,7 +154,6 @@ export function SettingsModal({
       setSilenceSeconds(settings.silence_timeout_seconds);
       setHelpNudgeIntervalSeconds(settings.help_nudge_interval_seconds ?? 600);
       setHelpNudgeMinMessages(settings.help_nudge_min_messages ?? 10);
-      setDeliveryInterval(settings.min_interval_seconds);
       setAutoMarkOnDelivery(Boolean(settings.auto_mark_on_delivery));
       setDefaultSendTo(settings.default_send_to || "foreman");
       setTerminalVisibility(settings.terminal_transcript_visibility || "foreman");
@@ -318,7 +316,6 @@ export function SettingsModal({
 
   const handleSaveDeliverySettings = async () => {
     await onUpdateSettings({
-      min_interval_seconds: deliveryInterval,
       auto_mark_on_delivery: autoMarkOnDelivery,
     });
   };
@@ -786,8 +783,8 @@ export function SettingsModal({
         />
 
         {/* Main Content Area */}
-        <div className="min-h-0 flex-1 overflow-y-auto flex flex-col">
-          <div className="p-5 sm:p-8 space-y-6">
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle flex flex-col [scrollbar-gutter:stable]">
+          <div className="p-5 pb-8 sm:p-8 sm:pb-10 space-y-6">
             {scope === "global" && !globalSettingsEnabled && !currentBrowserSignedIn ? (
               <div className={`rounded-xl border p-6 ${isDark ? "border-amber-700/40 bg-amber-900/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                 <div className="text-sm font-semibold">{t("navigation.globalLockedTitle")}</div>

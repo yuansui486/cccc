@@ -21,6 +21,7 @@ class _FakeDingTalkAdapter(IMAdapter):
         self._messages = list(messages)
         self._connected = False
         self.sent_messages: List[Dict[str, Any]] = []
+        self.sent_files: List[Dict[str, Any]] = []
 
     def connect(self) -> bool:
         self._connected = True
@@ -60,6 +61,28 @@ class _FakeDingTalkAdapter(IMAdapter):
     def download_attachment(self, attachment: Dict[str, Any]) -> bytes:
         _ = attachment
         return b""
+
+    def send_file(
+        self,
+        chat_id: str,
+        *,
+        file_path: Path,
+        filename: str,
+        caption: str = "",
+        thread_id: Optional[int] = None,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
+        self.sent_files.append(
+            {
+                "chat_id": chat_id,
+                "file_path": str(file_path),
+                "filename": filename,
+                "caption": caption,
+                "thread_id": thread_id,
+                "mention_user_ids": mention_user_ids,
+            }
+        )
+        return True
 
 
 class TestImSenderIdentity(unittest.TestCase):
@@ -109,6 +132,7 @@ class TestImSenderIdentity(unittest.TestCase):
                         "text": "你知道我是谁吗",
                         "from_user": "Alice",
                         "from_user_id": "staff_001",
+                        "mention_user_ids": ["staff_001"],
                         "message_id": "msg_001",
                         "timestamp": time.time(),
                     }
@@ -139,6 +163,7 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(str(data.get("source_platform") or ""), "dingtalk")
             self.assertEqual(str(data.get("source_user_name") or ""), "Alice")
             self.assertEqual(str(data.get("source_user_id") or ""), "staff_001")
+            self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
             self.assertEqual(str(event.get("by") or ""), "user")
         finally:
             cleanup()
@@ -250,6 +275,40 @@ class TestImSenderIdentity(unittest.TestCase):
 
             self.assertEqual(len(adapter.sent_messages), 1)
             self.assertIsNone(adapter.sent_messages[0]["mention_user_ids"])
+        finally:
+            cleanup()
+
+    def test_bridge_forward_passes_explicit_mention_targets_to_file_caption(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeDingTalkAdapter([])
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+            bridge.subscribers.subscribe("cid_g1", "ops", platform="dingtalk")
+
+            sample_file = Path(group.path) / "sample.txt"
+            sample_file.write_text("ok", encoding="utf-8")
+
+            from unittest.mock import patch
+
+            with patch("cccc.ports.im.bridge.resolve_blob_attachment_path", return_value=sample_file):
+                bridge._forward_event(
+                    {
+                        "kind": "chat.message",
+                        "by": "claude-1",
+                        "data": {
+                            "text": "reply with file",
+                            "to": ["user"],
+                            "mention_user_ids": ["staff_001"],
+                            "attachments": [{"path": "state/blobs/demo.txt", "title": "demo.txt"}],
+                        },
+                    }
+                )
+
+            self.assertEqual(len(adapter.sent_files), 1)
+            self.assertEqual(adapter.sent_files[0]["mention_user_ids"], ["staff_001"])
         finally:
             cleanup()
 

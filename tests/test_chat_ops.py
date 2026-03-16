@@ -113,6 +113,68 @@ class TestChatOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_reply_preserves_im_source_identity_and_mentions(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "chat-im-reply", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            send, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "to": ["peer1"],
+                    "text": "请回复我",
+                    "source_platform": "dingtalk",
+                    "source_user_name": "Alice",
+                    "source_user_id": "staff_001",
+                    "mention_user_ids": ["staff_001"],
+                },
+            )
+            self.assertTrue(send.ok, getattr(send, "error", None))
+            original_event = (send.result or {}).get("event") if isinstance(send.result, dict) else {}
+            self.assertIsInstance(original_event, dict)
+            assert isinstance(original_event, dict)
+            original_event_id = str(original_event.get("id") or "").strip()
+            self.assertTrue(original_event_id)
+
+            reply, _ = self._call(
+                "reply",
+                {
+                    "group_id": group_id,
+                    "by": "peer1",
+                    "reply_to": original_event_id,
+                    "text": "收到",
+                },
+            )
+            self.assertTrue(reply.ok, getattr(reply, "error", None))
+            reply_event = (reply.result or {}).get("event") if isinstance(reply.result, dict) else {}
+            self.assertIsInstance(reply_event, dict)
+            assert isinstance(reply_event, dict)
+            data = reply_event.get("data") if isinstance(reply_event.get("data"), dict) else {}
+            self.assertEqual(str(data.get("source_platform") or ""), "dingtalk")
+            self.assertEqual(str(data.get("source_user_name") or ""), "Alice")
+            self.assertEqual(str(data.get("source_user_id") or ""), "staff_001")
+            self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
+        finally:
+            cleanup()
+
     def test_user_message_wakes_idle_group_and_clears_pending_auto_idle_notifications(self) -> None:
         from cccc.kernel.group import load_group
 

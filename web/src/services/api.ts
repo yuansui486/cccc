@@ -294,7 +294,6 @@ function normalizeContext(raw: unknown): GroupContext {
   const summary = normalizeTaskSummary(record.tasks_summary, tasks);
   const boardRecord = asRecord(record.board);
   const attentionRecord = asRecord(record.attention);
-  const panoramaRecord = asRecord(record.panorama);
   const metaRecord = asRecord(record.meta);
 
   return {
@@ -352,9 +351,6 @@ function normalizeContext(raw: unknown): GroupContext {
         }
       : null,
     tasks_summary: summary,
-    panorama: {
-      mermaid: asOptionalString(panoramaRecord?.mermaid),
-    },
     meta: metaRecord ? { ...metaRecord } : {},
   };
 }
@@ -1689,6 +1685,10 @@ export async function updateAccessToken(tokenId: string, updates: { allowed_grou
 
 export async function revealAccessToken(tokenId: string) {
   return apiJson<{ token: string }>(`/api/v1/access-tokens/${encodeURIComponent(tokenId)}/reveal`);
+}
+
+export async function fetchDesktopPetLaunchToken(groupId: string) {
+  return apiJson<{ token: string }>(`/api/v1/groups/${encodeURIComponent(groupId)}/desktop_pet/launch_token`);
 }
 
 export async function deleteAccessToken(tokenId: string) {

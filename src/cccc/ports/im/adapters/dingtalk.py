@@ -1198,6 +1198,7 @@ class DingTalkAdapter(IMAdapter):
         filename: str,
         caption: str = "",
         thread_id: Optional[int] = None,
+        mention_user_ids: Optional[List[str]] = None,
     ) -> bool:
         """
         Send a file to a conversation.
@@ -1229,7 +1230,7 @@ class DingTalkAdapter(IMAdapter):
             if current_time < expires_at:
                 if self._send_file_via_webhook(webhook_url, raw, safe_fn, is_image):
                     if caption:
-                        self.send_message(chat_id, caption)
+                        self.send_message(chat_id, caption, mention_user_ids=mention_user_ids)
                     return True
                 self._log("[send_file] Webhook failed, falling back to API...")
             else:
@@ -1241,7 +1242,7 @@ class DingTalkAdapter(IMAdapter):
         # Fallback to new robot API
         if self._send_file_via_api(chat_id, raw, safe_fn, is_image):
             if caption:
-                self.send_message(chat_id, caption)
+                self.send_message(chat_id, caption, mention_user_ids=mention_user_ids)
             return True
 
         self._log(f"[send_file] All methods failed for chat {chat_id}")

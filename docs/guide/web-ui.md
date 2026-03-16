@@ -39,7 +39,7 @@ Click on a group in the sidebar to switch.
 2. Configure:
    - Group title
    - Guidance (preamble/help)
-   - Automation rules and engine policies
+   - Built-in automation, rules, and snippets
    - Delivery and messaging defaults
    - IM Bridge settings
 
@@ -108,13 +108,14 @@ Access via the gear icon:
 
 ### Automation
 
-- **Rules**: Create reminders with interval / recurring schedule / one-time schedule.
+- **Built-in Automation**: Configure system-managed follow-ups and collaboration health loops such as unread / reply-required / ACK follow-ups, actor idle alerts, keepalive, silence checks, and help nudges.
+- **Rules**: Create scheduled reminders with interval / recurring schedule / one-time schedule.
 - **Actions**:
   - `Send Reminder` (normal reminder delivery)
   - `Set Group Status` (operational, one-time only)
   - `Control Actor Runtimes` (operational, one-time only)
+- **Snippets**: Reusable message templates managed alongside rules.
 - **One-time behavior**: One-time rules auto-complete after firing, then can be cleaned up from completed list.
-- **Engine Policies**: Configure built-in nudges (reply-required, attention ACK, unread), actor idle, keepalive, quiet review, and help nudges.
 
 ### IM Bridge
 

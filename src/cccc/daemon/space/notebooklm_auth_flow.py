@@ -188,17 +188,53 @@ class _AuthBrowserSession:
                 self.browser.close()
         except Exception:
             pass
-        proc = self.process
-        if proc is not None:
+        _terminate_browser_process(
+            self.process,
+            include_descendants=bool(str(self.strategy or "").startswith("system_browser_cdp:")),
+        )
+
+
+def _terminate_browser_process(
+    proc: Optional[subprocess.Popen[str]],
+    *,
+    include_descendants: bool,
+) -> None:
+    if proc is None:
+        return
+
+    pid = 0
+    try:
+        pid = int(getattr(proc, "pid", 0) or 0)
+    except Exception:
+        pid = 0
+
+    if include_descendants and os.name == "nt" and pid > 0:
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                text=True,
+                timeout=5.0,
+            )
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=1.0)
+            return
+        except Exception:
+            pass
+
+    try:
+        if proc.poll() is None:
+            proc.terminate()
             try:
-                if proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=3.0)
-                    except Exception:
-                        proc.kill()
+                proc.wait(timeout=3.0)
             except Exception:
-                pass
+                proc.kill()
+    except Exception:
+        pass
 
 
 def _ensure_dir(path: Path, mode: int = 0o700) -> None:
@@ -215,21 +251,34 @@ def _managed_browser_profile_dir() -> Path:
     return root
 
 
-def _clear_managed_browser_profile_dir() -> None:
-    root = ensure_home() / "state" / "notebooklm_auth" / "browser_profile"
+def _remove_tree_with_retries(path: Path, *, strict: bool) -> None:
     last_error: Exception | None = None
     for _ in range(6):
         try:
-            shutil.rmtree(root)
+            shutil.rmtree(path)
             return
         except FileNotFoundError:
             return
         except Exception as e:
             last_error = e
             time.sleep(0.2)
-    if root.exists():
+    if strict and path.exists():
         detail = str(last_error or "unknown error")
         raise RuntimeError(f"failed to clear NotebookLM browser profile: {detail}")
+
+
+def _clear_managed_browser_profile_dir(*, strict: bool = True) -> None:
+    root = ensure_home() / "state" / "notebooklm_auth" / "browser_profile"
+    _remove_tree_with_retries(root, strict=strict)
+
+
+def _fresh_managed_browser_profile_session_dir() -> Path:
+    root = _managed_browser_profile_dir()
+    sessions_dir = root / "sessions"
+    _ensure_dir(sessions_dir, 0o700)
+    session_dir = sessions_dir / f"run_{int(time.time() * 1000)}_{secrets.token_hex(4)}"
+    _ensure_dir(session_dir, 0o700)
+    return session_dir
 
 
 def _pick_free_port() -> int:
@@ -295,10 +344,10 @@ def _system_browser_candidates() -> list[str]:
     return out
 
 
-def _start_system_browser_over_cdp(playwright_obj: Any) -> Optional[_AuthBrowserSession]:
+def _start_system_browser_over_cdp(playwright_obj: Any, *, profile_root: Path) -> Optional[_AuthBrowserSession]:
     for binary in _system_browser_candidates():
         port = _pick_free_port()
-        profile_dir = _managed_browser_profile_dir() / "system_browser"
+        profile_dir = profile_root / "system_browser"
         _ensure_dir(profile_dir, 0o700)
         cmd = [
             binary,
@@ -337,23 +386,14 @@ def _start_system_browser_over_cdp(playwright_obj: Any) -> Optional[_AuthBrowser
                 process=proc,
             )
         except Exception:
-            if proc is not None:
-                try:
-                    if proc.poll() is None:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=2.0)
-                        except Exception:
-                            proc.kill()
-                except Exception:
-                    pass
+            _terminate_browser_process(proc, include_descendants=True)
             continue
     return None
 
 
-def _start_channel_browser(playwright_obj: Any, *, channel: str) -> Optional[_AuthBrowserSession]:
+def _start_channel_browser(playwright_obj: Any, *, channel: str, profile_root: Path) -> Optional[_AuthBrowserSession]:
     try:
-        profile_dir = _managed_browser_profile_dir() / f"playwright_{channel}"
+        profile_dir = profile_root / f"playwright_{channel}"
         _ensure_dir(profile_dir, 0o700)
         context = playwright_obj.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
@@ -369,9 +409,9 @@ def _start_channel_browser(playwright_obj: Any, *, channel: str) -> Optional[_Au
         return None
 
 
-def _start_playwright_chromium(playwright_obj: Any) -> _AuthBrowserSession:
+def _start_playwright_chromium(playwright_obj: Any, *, profile_root: Path) -> _AuthBrowserSession:
     try:
-        profile_dir = _managed_browser_profile_dir() / "playwright_chromium"
+        profile_dir = profile_root / "playwright_chromium"
         _ensure_dir(profile_dir, 0o700)
         context = playwright_obj.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir),
@@ -392,7 +432,7 @@ def _start_playwright_chromium(playwright_obj: Any) -> _AuthBrowserSession:
                 error={},
             )
             _install_playwright_chromium()
-            profile_dir = _managed_browser_profile_dir() / "playwright_chromium"
+            profile_dir = profile_root / "playwright_chromium"
             _ensure_dir(profile_dir, 0o700)
             context = playwright_obj.chromium.launch_persistent_context(
                 user_data_dir=str(profile_dir),
@@ -406,19 +446,19 @@ def _start_playwright_chromium(playwright_obj: Any) -> _AuthBrowserSession:
         raise RuntimeError(msg[:1600] or "unable to start Chromium") from e
 
 
-def _start_browser_session(playwright_obj: Any) -> _AuthBrowserSession:
+def _start_browser_session(playwright_obj: Any, *, profile_root: Path) -> _AuthBrowserSession:
     # Strategy order:
     # 1) Real system browser via CDP (best chance to satisfy Google sign-in checks)
     # 2) Playwright channel browser (chrome/msedge if available)
     # 3) Playwright-managed Chromium fallback
-    session = _start_system_browser_over_cdp(playwright_obj)
+    session = _start_system_browser_over_cdp(playwright_obj, profile_root=profile_root)
     if session is not None:
         return session
     for channel in ("chrome", "msedge"):
-        session = _start_channel_browser(playwright_obj, channel=channel)
+        session = _start_channel_browser(playwright_obj, channel=channel, profile_root=profile_root)
         if session is not None:
             return session
-    return _start_playwright_chromium(playwright_obj)
+    return _start_playwright_chromium(playwright_obj, profile_root=profile_root)
 
 
 def _page_urls(context: Any) -> list[str]:
@@ -673,8 +713,6 @@ def _connect_worker(
     try:
         if not force_reauth and _try_reuse_saved_credential():
             return
-        if force_reauth:
-            _clear_managed_browser_profile_dir()
         _update_state(
             state="running",
             phase="preparing_browser",
@@ -693,8 +731,9 @@ def _connect_worker(
             return
 
         deadline = time.time() + max(60, min(timeout_seconds, 1800))
+        profile_root = _fresh_managed_browser_profile_session_dir()
         with sync_playwright() as pw:
-            browser_session = _start_browser_session(pw)
+            browser_session = _start_browser_session(pw, profile_root=profile_root)
             try:
                 context = browser_session.context
                 saved_state = None if force_reauth else _load_saved_storage_state()
@@ -913,7 +952,7 @@ def disconnect_notebooklm_auth_flow() -> Dict[str, Any]:
         clear=True,
     )
     os.environ.pop("CCCC_NOTEBOOKLM_AUTH_JSON", None)
-    _clear_managed_browser_profile_dir()
+    _clear_managed_browser_profile_dir(strict=False)
     with _FLOW_LOCK:
         _FLOW_THREAD = None
         _FLOW_CANCEL_EVENT = None

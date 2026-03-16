@@ -7,6 +7,7 @@ interface ThemeToggleProps {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   isDark: boolean;
+  className?: string;
 }
 
 export function ThemeToggle({ theme, onThemeChange, isDark: _isDark }: ThemeToggleProps) {
@@ -41,7 +42,7 @@ export function ThemeToggle({ theme, onThemeChange, isDark: _isDark }: ThemeTogg
 }
 
 // Compact version for header
-export function ThemeToggleCompact({ theme, onThemeChange, isDark: _isDark }: ThemeToggleProps) {
+export function ThemeToggleCompact({ theme, onThemeChange, isDark: _isDark, className }: ThemeToggleProps) {
   const { t } = useTranslation('layout');
   const nextTheme = (): Theme => {
     if (theme === "light") return "dark";
@@ -56,8 +57,9 @@ export function ThemeToggleCompact({ theme, onThemeChange, isDark: _isDark }: Th
     <button
       onClick={() => onThemeChange(nextTheme())}
       className={classNames(
-        "flex items-center justify-center w-9 h-9 rounded-xl transition-all min-h-[44px] min-w-[44px] glass-btn",
-        "text-[var(--color-text-secondary)]"
+        "flex items-center justify-center w-11 h-11 rounded-xl transition-all min-h-[44px] min-w-[44px] shrink-0 glass-btn",
+        "text-[var(--color-text-secondary)]",
+        className
       )}
       title={t('themeClickToChange', { theme: label })}
       aria-label={t('currentTheme', { theme: label })}

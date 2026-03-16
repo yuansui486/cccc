@@ -1,17 +1,14 @@
-// Chat Outbox Store — manages optimistic (pending) messages before server confirmation.
-// Design: outbox entries are keyed by groupId, each entry has a localId for tracking.
-// Selectors return stable references to avoid infinite re-render loops.
+// Chat Outbox Store — manages optimistic pending messages before server confirmation.
+// Pending-only by design: failed sends roll back to the composer instead of living
+// as a second local-only message state in the chat timeline.
 
 import { create } from "zustand";
 import type { LedgerEvent } from "../types";
 
-export type OutboxStatus = "pending" | "failed";
-
 export interface OutboxEntry {
   localId: string;
   groupId: string;
-  event: LedgerEvent; // The optimistic event shape for display
-  status: OutboxStatus;
+  event: LedgerEvent; // The optimistic event shape for display while the request is in flight.
   createdAt: number;
 }
 
@@ -24,9 +21,6 @@ interface ChatOutboxState {
 
   /** Remove an entry by localId (on HTTP success or SSE reconciliation). */
   remove: (groupId: string, localId: string) => void;
-
-  /** Mark an entry as failed (on HTTP error). */
-  markFailed: (groupId: string, localId: string) => void;
 }
 
 export const useChatOutboxStore = create<ChatOutboxState>((set) => ({
@@ -39,7 +33,6 @@ export const useChatOutboxStore = create<ChatOutboxState>((set) => ({
         localId,
         groupId,
         event,
-        status: "pending",
         createdAt: Date.now(),
       };
       return {
@@ -56,22 +49,6 @@ export const useChatOutboxStore = create<ChatOutboxState>((set) => ({
       if (!prev || prev.length === 0) return state;
       const next = prev.filter((e) => e.localId !== localId);
       if (next.length === prev.length) return state; // no change
-      return {
-        entriesByGroup: {
-          ...state.entriesByGroup,
-          [groupId]: next,
-        },
-      };
-    }),
-
-  markFailed: (groupId, localId) =>
-    set((state) => {
-      const prev = state.entriesByGroup[groupId];
-      if (!prev) return state;
-      const idx = prev.findIndex((e) => e.localId === localId);
-      if (idx === -1) return state;
-      const next = prev.slice();
-      next[idx] = { ...next[idx], status: "failed" };
       return {
         entriesByGroup: {
           ...state.entriesByGroup,

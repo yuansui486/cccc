@@ -1,4 +1,4 @@
-// AutomationTab configures proactive system behaviors (nudges/alerts) and user-defined rules.
+// AutomationTab configures built-in automation loops and user-authored scheduled rules.
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -18,7 +18,7 @@ import { AutomationPoliciesSection } from "./AutomationPoliciesSection";
 import { AutomationRuleEditorModal } from "./AutomationRuleEditorModal";
 import { AutomationRuleList } from "./AutomationRuleList";
 import { AutomationSnippetModal } from "./AutomationSnippetModal";
-import { cardClass, primaryButtonClass } from "./types";
+import { cardClass, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./types";
 
 interface AutomationTabProps {
   isDark: boolean;
@@ -57,6 +57,28 @@ interface AutomationTabProps {
   onSavePolicies: () => void;
 }
 
+type PersistCopy = {
+  failureMessage: string;
+  versionConflictMessage: string;
+};
+
+function cloneRule(rule: AutomationRule): AutomationRule {
+  return JSON.parse(JSON.stringify(rule)) as AutomationRule;
+}
+
+function createRuleDraft(seed?: Partial<AutomationRule>): AutomationRule {
+  const id = String(seed?.id || nowId("rule")).trim();
+  return {
+    id,
+    enabled: seed?.enabled ?? true,
+    scope: seed?.scope ?? "group",
+    owner_actor_id: seed?.owner_actor_id ?? null,
+    to: seed?.to ?? ["@foreman"],
+    trigger: seed?.trigger ?? { kind: "interval", every_seconds: 900 },
+    action: seed?.action ?? defaultNotifyAction(),
+  };
+}
+
 export function AutomationTab(props: AutomationTabProps) {
   const { isDark } = props;
   const { t } = useTranslation("settings");
@@ -68,12 +90,18 @@ export function AutomationTab(props: AutomationTabProps) {
   const [status, setStatus] = useState<Record<string, AutomationRuleStatus>>({});
   const [configPath, setConfigPath] = useState("");
   const [supportedVars, setSupportedVars] = useState<string[]>([]);
-  const [newSnippetId, setNewSnippetId] = useState("");
+
   const [snippetManagerOpen, setSnippetManagerOpen] = useState(false);
+  const [newSnippetId, setNewSnippetId] = useState("");
   const [templateErr, setTemplateErr] = useState("");
-  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
-  const [oneShotModeByRule, setOneShotModeByRule] = useState<Record<string, "after" | "exact">>({});
-  const [oneShotAfterMinutesByRule, setOneShotAfterMinutesByRule] = useState<Record<string, number>>({});
+  const [snippetDrafts, setSnippetDrafts] = useState<Record<string, string>>({});
+
+  const [editingRuleDraft, setEditingRuleDraft] = useState<AutomationRule | null>(null);
+  const [editingRuleSourceId, setEditingRuleSourceId] = useState<string | null>(null);
+  const [editingRuleIsNew, setEditingRuleIsNew] = useState(false);
+  const [editingOneShotMode, setEditingOneShotMode] = useState<"after" | "exact">("after");
+  const [editingOneShotAfterMinutes, setEditingOneShotAfterMinutes] = useState(30);
+
   const [showCompletedRules, setShowCompletedRules] = useState(false);
 
   const loadRules = async () => {
@@ -112,9 +140,9 @@ export function AutomationTab(props: AutomationTabProps) {
       { value: "@peers", label: getRecipientTokenLabel("@peers") },
       { value: "@all", label: getRecipientTokenLabel("@all") },
     ];
-    for (const a of props.devActors || []) {
-      if (!a || !a.id || a.id === "user") continue;
-      out.push({ value: a.id, label: a.title ? `${a.id} (${a.title})` : a.id });
+    for (const actor of props.devActors || []) {
+      if (!actor || !actor.id || actor.id === "user") continue;
+      out.push({ value: actor.id, label: actor.title ? `${actor.id} (${actor.title})` : actor.id });
     }
     return out;
   }, [props.devActors]);
@@ -143,11 +171,11 @@ export function AutomationTab(props: AutomationTabProps) {
   const setDraft = (next: AutomationRuleSet) => setRuleset(next);
 
   const updateRule = (ruleId: string, patch: Partial<AutomationRule>) => {
-    const next = { ...draft, rules: draft.rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)) };
-    setDraft(next);
+    setDraft({
+      ...draft,
+      rules: draft.rules.map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
+    });
   };
-
-  const updateRuleNested = (ruleId: string, patch: Partial<AutomationRule>) => updateRule(ruleId, patch);
 
   const buildPersistedRuleset = (source: AutomationRuleSet): AutomationRuleSet => {
     const normalizedRules = source.rules.map((rule) => {
@@ -159,161 +187,252 @@ export function AutomationTab(props: AutomationTabProps) {
     return { ...source, rules: normalizedRules };
   };
 
-  const setOneShotAfterMinutes = (ruleId: string, minutes: number) => {
-    const m = clampInt(minutes, 1, 7 * 24 * 60);
-    setOneShotAfterMinutesByRule((prev) => ({ ...prev, [ruleId]: m }));
-    updateRuleNested(ruleId, { trigger: { kind: "at", at: new Date(Date.now() + m * 60 * 1000).toISOString() } });
-  };
-
-  const addRule = (seed?: Partial<AutomationRule>) => {
-    const id = String(seed?.id || nowId("rule")).trim();
-    const nextRule: AutomationRule = {
-      id,
-      enabled: seed?.enabled ?? true,
-      scope: seed?.scope ?? "group",
-      owner_actor_id: seed?.owner_actor_id ?? null,
-      to: seed?.to ?? ["@foreman"],
-      trigger: seed?.trigger ?? { kind: "interval", every_seconds: 900 },
-      action: seed?.action ?? defaultNotifyAction(),
-    };
-    setDraft({ ...draft, rules: [...draft.rules, nextRule] });
-    return id;
-  };
-
-  const removeRule = (ruleId: string) => {
-    setDraft({ ...draft, rules: draft.rules.filter((r) => r.id !== ruleId) });
-    if (editingRuleId === ruleId) setEditingRuleId(null);
-  };
-
-  const addSnippet = () => {
-    const id = newSnippetId.trim();
-    if (!id) return;
-    if (!isValidId(id)) {
-      setTemplateErr(t("automation.snippetInvalid"));
-      return;
+  const normalizeRuleForEditor = (rule: AutomationRule): AutomationRule => {
+    const next = cloneRule(rule);
+    const kind = actionKind(next.action);
+    const triggerKind = String(next.trigger?.kind || "interval");
+    if (kind !== "notify" && triggerKind !== "at") {
+      next.trigger = { kind: "at", at: new Date(Date.now() + 30 * 60 * 1000).toISOString() };
     }
-    if (draft.snippets[id] !== undefined) {
-      setTemplateErr(t("automation.snippetExists", { id }));
-      return;
-    }
-    setTemplateErr("");
-    setNewSnippetId("");
-    setDraft({ ...draft, snippets: { ...draft.snippets, [id]: "" } });
+    return next;
   };
 
-  const updateSnippet = (id: string, content: string) => {
-    setDraft({ ...draft, snippets: { ...draft.snippets, [id]: content } });
+  const openRuleEditor = (rule: AutomationRule, options: { sourceId: string | null; isNew: boolean }) => {
+    const normalized = normalizeRuleForEditor(rule);
+    setEditingRuleDraft(normalized);
+    setEditingRuleSourceId(options.sourceId);
+    setEditingRuleIsNew(options.isNew);
+    setEditingOneShotMode(String(normalized.trigger?.kind || "interval") === "at" && !options.isNew ? "exact" : "after");
+    setEditingOneShotAfterMinutes(30);
+    setRulesErr("");
   };
 
-  const deleteSnippet = (id: string) => {
-    const ok = window.confirm(t("automation.deleteSnippetConfirm", { id }));
-    if (!ok) return;
-    const next = { ...draft.snippets };
-    delete next[id];
-    setDraft({ ...draft, snippets: next });
+  const openNewRule = () => {
+    openRuleEditor(createRuleDraft(), { sourceId: null, isNew: true });
+  };
+
+  const openExistingRule = (ruleId: string) => {
+    const rule = draft.rules.find((item) => String(item.id || "").trim() === ruleId);
+    if (!rule) return;
+    openRuleEditor(rule, { sourceId: ruleId, isNew: false });
+  };
+
+  const closeRuleEditor = () => {
+    setEditingRuleDraft(null);
+    setEditingRuleSourceId(null);
+    setEditingRuleIsNew(false);
+    setEditingOneShotMode("after");
+    setEditingOneShotAfterMinutes(30);
+  };
+
+  const setEditingOneShotModeValue = (mode: "after" | "exact") => {
+    setEditingOneShotMode(mode);
+    if (mode !== "after") return;
+    setEditingRuleDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            trigger: { kind: "at", at: new Date(Date.now() + editingOneShotAfterMinutes * 60 * 1000).toISOString() },
+          }
+        : prev
+    );
+  };
+
+  const setEditingOneShotAfterMinutesValue = (minutes: number) => {
+    const nextMinutes = clampInt(minutes, 1, 7 * 24 * 60);
+    setEditingOneShotAfterMinutes(nextMinutes);
+    setEditingRuleDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            trigger: { kind: "at", at: new Date(Date.now() + nextMinutes * 60 * 1000).toISOString() },
+          }
+        : prev
+    );
   };
 
   const openSnippetManager = () => {
     setTemplateErr("");
+    setRulesErr("");
+    setNewSnippetId("");
+    setSnippetDrafts({ ...(draft.snippets || {}) });
     setSnippetManagerOpen(true);
   };
 
   const closeSnippetManager = () => {
     setTemplateErr("");
+    setNewSnippetId("");
     setSnippetManagerOpen(false);
   };
 
-  const validateBeforeSave = (): string | null => {
+  const addSnippet = () => {
+    const id = newSnippetId.trim();
+    if (!id) {
+      setTemplateErr(t("automation.validationSnippetNameRequired"));
+      return;
+    }
+    if (!isValidId(id)) {
+      setTemplateErr(t("automation.snippetInvalid"));
+      return;
+    }
+    if (snippetDrafts[id] !== undefined) {
+      setTemplateErr(t("automation.snippetExists", { id }));
+      return;
+    }
+    setTemplateErr("");
+    setNewSnippetId("");
+    setSnippetDrafts((prev) => ({ ...prev, [id]: "" }));
+  };
+
+  const updateSnippet = (id: string, content: string) => {
+    setSnippetDrafts((prev) => ({ ...prev, [id]: content }));
+  };
+
+  const deleteSnippet = (id: string) => {
+    const ok = window.confirm(t("automation.deleteSnippetConfirm", { id }));
+    if (!ok) return;
+    setSnippetDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const validateRuleset = (candidate: AutomationRuleSet): string | null => {
     const seen = new Set<string>();
-    for (const r of draft.rules) {
-      const id = String(r.id || "").trim();
+    for (const rule of candidate.rules) {
+      const id = String(rule.id || "").trim();
       if (!id) return t("automation.validationRuleNameRequired");
       if (!isValidId(id)) return t("automation.validationRuleNameInvalid", { id });
       if (seen.has(id)) return t("automation.validationRuleNameDuplicate", { id });
       seen.add(id);
-      const triggerKind = String(r.trigger?.kind || "interval");
+
+      const triggerKind = String(rule.trigger?.kind || "interval");
       if (triggerKind === "interval") {
-        const every = Number(r.trigger && "every_seconds" in r.trigger ? r.trigger.every_seconds : 0);
+        const every = Number(rule.trigger && "every_seconds" in rule.trigger ? rule.trigger.every_seconds : 0);
         if (!Number.isFinite(every) || every < 1) return t("automation.validationIntervalMin", { id });
       } else if (triggerKind === "cron") {
-        const cronExpr = String(r.trigger && "cron" in r.trigger ? r.trigger.cron : "").trim();
+        const cronExpr = String(rule.trigger && "cron" in rule.trigger ? rule.trigger.cron : "").trim();
         if (!cronExpr) return t("automation.validationScheduleRequired", { id });
       } else if (triggerKind === "at") {
-        const atRaw = String(r.trigger && "at" in r.trigger ? r.trigger.at : "").trim();
+        const atRaw = String(rule.trigger && "at" in rule.trigger ? rule.trigger.at : "").trim();
         if (!atRaw) return t("automation.validationOneTimeRequired", { id });
         const atMillis = Date.parse(atRaw);
         if (!Number.isFinite(atMillis)) return t("automation.validationDateTimeInvalid", { id });
       } else {
         return t("automation.validationTriggerUnsupported", { id, kind: triggerKind });
       }
-      const scope = String(r.scope || "group");
+
+      const scope = String(rule.scope || "group");
       if (scope !== "group" && scope !== "personal") return t("automation.validationScopeInvalid", { id });
-      if (scope === "personal" && !String(r.owner_actor_id || "").trim()) {
+      if (scope === "personal" && !String(rule.owner_actor_id || "").trim()) {
         return t("automation.validationOwnerRequired", { id });
       }
-      const to = Array.isArray(r.to) ? r.to.map((x) => String(x || "").trim()).filter(Boolean) : [];
-      const kind = actionKind(r.action);
+
+      const recipients = Array.isArray(rule.to) ? rule.to.map((item) => String(item || "").trim()).filter(Boolean) : [];
+      const kind = actionKind(rule.action);
       if (kind === "notify") {
-        if (to.length === 0) return t("automation.validationRecipientRequired", { id });
-        const snippetRef = String(r.action && "snippet_ref" in r.action ? r.action.snippet_ref || "" : "").trim();
-        const msg = String(r.action && "message" in r.action ? r.action.message || "" : "").trim();
-        if (snippetRef && draft.snippets[snippetRef] === undefined) {
+        if (recipients.length === 0) return t("automation.validationRecipientRequired", { id });
+        const snippetRef = String(rule.action && "snippet_ref" in rule.action ? rule.action.snippet_ref || "" : "").trim();
+        const message = String(rule.action && "message" in rule.action ? rule.action.message || "" : "").trim();
+        if (snippetRef && candidate.snippets[snippetRef] === undefined) {
           return t("automation.validationSnippetMissing", { id, snippet: snippetRef });
         }
-        if (!snippetRef && !msg) return t("automation.validationMessageRequired", { id });
+        if (!snippetRef && !message) return t("automation.validationMessageRequired", { id });
       } else if (kind === "group_state") {
         if (triggerKind !== "at") return t("automation.validationGroupStateOneTimeOnly", { id });
-        const targetState = String(r.action && "state" in r.action ? r.action.state || "" : "").trim();
+        const targetState = String(rule.action && "state" in rule.action ? rule.action.state || "" : "").trim();
         if (!["active", "idle", "paused", "stopped"].includes(targetState)) {
           return t("automation.validationGroupStateTargetRequired", { id });
         }
       } else if (kind === "actor_control") {
         if (triggerKind !== "at") return t("automation.validationActorControlOneTimeOnly", { id });
-        const operation = String(r.action && "operation" in r.action ? r.action.operation || "" : "").trim();
+        const operation = String(rule.action && "operation" in rule.action ? rule.action.operation || "" : "").trim();
         if (!["start", "stop", "restart"].includes(operation)) {
           return t("automation.validationActorControlOperationRequired", { id });
         }
-        const targets = Array.isArray(r.action && "targets" in r.action ? r.action.targets : [])
-          ? (r.action as { targets?: string[] }).targets?.map((x) => String(x || "").trim()).filter(Boolean) || []
+        const targets = Array.isArray(rule.action && "targets" in rule.action ? rule.action.targets : [])
+          ? (rule.action as { targets?: string[] }).targets?.map((item) => String(item || "").trim()).filter(Boolean) || []
           : [];
         if (targets.length === 0) return t("automation.validationActorControlTargetRequired", { id });
       }
     }
-    for (const k of Object.keys(draft.snippets || {})) {
-      const id = String(k || "").trim();
+
+    for (const key of Object.keys(candidate.snippets || {})) {
+      const id = String(key || "").trim();
       if (!id) return t("automation.validationSnippetNameRequired");
       if (!isValidId(id)) return t("automation.validationRuleNameInvalid", { id });
     }
     return null;
   };
 
-  const saveRules = async () => {
-    if (!props.groupId) return;
-    const err = validateBeforeSave();
+  const persistRuleset = async (nextDraft: AutomationRuleSet, copy: PersistCopy): Promise<boolean> => {
+    if (!props.groupId) return false;
+    const err = validateRuleset(nextDraft);
     if (err) {
       setRulesErr(err);
-      return;
+      return false;
     }
+
     setRulesBusy(true);
     setRulesErr("");
     try {
-      const resp = await api.updateAutomation(props.groupId, buildPersistedRuleset(draft), rulesVersion);
+      const resp = await api.updateAutomation(props.groupId, buildPersistedRuleset(nextDraft), rulesVersion);
       if (!resp.ok) {
         const code = String(resp.error?.code || "").trim();
-          if (code === "version_conflict") {
-            await loadRules();
-            setRulesErr(t("automation.versionConflict"));
-            return;
-          }
-        setRulesErr(resp.error?.message || t("automation.failedToSave"));
-        return;
+        if (code === "version_conflict") {
+          await loadRules();
+          setRulesErr(copy.versionConflictMessage);
+          return false;
+        }
+        setRulesErr(resp.error?.message || copy.failureMessage);
+        return false;
       }
       await loadRules();
+      return true;
     } catch {
-      setRulesErr(t("automation.failedToSave"));
+      setRulesErr(copy.failureMessage);
+      return false;
     } finally {
       setRulesBusy(false);
     }
+  };
+
+  const saveRules = async (): Promise<boolean> =>
+    persistRuleset(draft, {
+      failureMessage: t("automation.failedToSave"),
+      versionConflictMessage: t("automation.versionConflict"),
+    });
+
+  const saveRuleEditor = async (): Promise<void> => {
+    if (!editingRuleDraft) return;
+    const nextRules = editingRuleSourceId
+      ? draft.rules.map((rule) => (String(rule.id || "").trim() === editingRuleSourceId ? editingRuleDraft : rule))
+      : [...draft.rules, editingRuleDraft];
+    const ok = await persistRuleset(
+      { ...draft, rules: nextRules },
+      {
+        failureMessage: t("automation.failedToSave"),
+        versionConflictMessage: t("automation.versionConflict"),
+      }
+    );
+    if (ok) closeRuleEditor();
+  };
+
+  const saveSnippetManager = async (): Promise<void> => {
+    const ok = await persistRuleset(
+      { ...draft, snippets: { ...snippetDrafts } },
+      {
+        failureMessage: t("automation.failedToSave"),
+        versionConflictMessage: t("automation.versionConflict"),
+      }
+    );
+    if (ok) closeSnippetManager();
+  };
+
+  const removeRule = (ruleId: string) => {
+    setDraft({ ...draft, rules: draft.rules.filter((rule) => rule.id !== ruleId) });
+    if (editingRuleSourceId === ruleId) closeRuleEditor();
   };
 
   const clearCompletedRules = async () => {
@@ -324,31 +443,19 @@ export function AutomationTab(props: AutomationTabProps) {
     }
     const ok = window.confirm(t("automation.clearCompletedConfirm", { count: completedOneTimeRuleIds.length }));
     if (!ok) return;
+
     const removing = new Set(completedOneTimeRuleIds);
-    const nextRules = draft.rules.filter((rule) => !removing.has(String(rule.id || "").trim()));
-    const nextDraft: AutomationRuleSet = { ...draft, rules: nextRules };
-    setRulesBusy(true);
-    setRulesErr("");
-    try {
-      const resp = await api.updateAutomation(props.groupId, buildPersistedRuleset(nextDraft), rulesVersion);
-      if (!resp.ok) {
-        const code = String(resp.error?.code || "").trim();
-        if (code === "version_conflict") {
-          await loadRules();
-          setRulesErr(t("automation.versionConflictShort"));
-          return;
-        }
-        setRulesErr(resp.error?.message || t("automation.failedToClear"));
-        return;
-      }
-      if (editingRuleId && removing.has(editingRuleId)) {
-        setEditingRuleId(null);
-      }
-      await loadRules();
-    } catch {
-      setRulesErr(t("automation.failedToClear"));
-    } finally {
-      setRulesBusy(false);
+    const nextDraft: AutomationRuleSet = {
+      ...draft,
+      rules: draft.rules.filter((rule) => !removing.has(String(rule.id || "").trim())),
+    };
+
+    const persisted = await persistRuleset(nextDraft, {
+      failureMessage: t("automation.failedToClear"),
+      versionConflictMessage: t("automation.versionConflictShort"),
+    });
+    if (persisted && editingRuleSourceId && removing.has(editingRuleSourceId)) {
+      closeRuleEditor();
     }
   };
 
@@ -362,14 +469,16 @@ export function AutomationTab(props: AutomationTabProps) {
       const resp = await api.resetAutomationBaseline(props.groupId, rulesVersion);
       if (!resp.ok) {
         const code = String(resp.error?.code || "").trim();
-          if (code === "version_conflict") {
-            await loadRules();
-            setRulesErr(t("automation.versionConflictShort"));
-            return;
-          }
+        if (code === "version_conflict") {
+          await loadRules();
+          setRulesErr(t("automation.versionConflictShort"));
+          return;
+        }
         setRulesErr(resp.error?.message || t("automation.failedToReset"));
         return;
       }
+      closeRuleEditor();
+      closeSnippetManager();
       await loadRules();
     } catch {
       setRulesErr(t("automation.failedToReset"));
@@ -377,20 +486,6 @@ export function AutomationTab(props: AutomationTabProps) {
       setRulesBusy(false);
     }
   };
-
-  useEffect(() => {
-    if (!editingRuleId) return;
-    const rule = draft.rules.find((r) => String(r.id || "").trim() === editingRuleId);
-    if (!rule) return;
-    const kind = actionKind(rule.action);
-    const triggerKind = String(rule.trigger?.kind || "interval");
-    if (kind === "notify" || triggerKind === "at") return;
-    const defaultAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    setOneShotModeByRule((prev) => ({ ...prev, [editingRuleId]: "after" }));
-    setOneShotAfterMinutesByRule((prev) => ({ ...prev, [editingRuleId]: prev[editingRuleId] ?? 30 }));
-    updateRuleNested(editingRuleId, { trigger: { kind: "at", at: defaultAt } });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- normalize edited rule only
-  }, [editingRuleId, draft.rules]);
 
   if (!props.groupId) {
     return (
@@ -400,8 +495,8 @@ export function AutomationTab(props: AutomationTabProps) {
     );
   }
 
-  const editingRule = editingRuleId ? draft.rules.find((rule) => String(rule.id || "").trim() === editingRuleId) || null : null;
-  const editingRuleStatus = editingRule ? status[String(editingRule.id || "").trim()] || {} : {};
+  const editingRuleStatus =
+    editingRuleSourceId && status[editingRuleSourceId] ? status[editingRuleSourceId] : {};
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -412,103 +507,6 @@ export function AutomationTab(props: AutomationTabProps) {
           <span className="font-mono break-all">{configPath || t("automation.configPathFallback")}</span>.
         </p>
       </div>
-
-      <Section
-        isDark={isDark}
-        icon={SparkIcon}
-        title={t("automation.rulesTitle")}
-        description={t("automation.rulesDescription")}
-      >
-        {rulesErr ? <div className="text-xs text-rose-600 dark:text-rose-300">{rulesErr}</div> : null}
-
-        <div className="space-y-2">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-              <button
-                type="button"
-                className="glass-btn w-full sm:w-auto whitespace-nowrap px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors text-[var(--color-text-primary)] disabled:opacity-50"
-                onClick={() => {
-                  const rid = addRule();
-                  setEditingRuleId(rid);
-                  setRulesErr("");
-                }}
-                disabled={rulesBusy}
-                title={t("automation.createRuleTitle")}
-              >
-                {t("automation.newRule")}
-              </button>
-              <button
-                type="button"
-                className="glass-btn w-full sm:w-auto whitespace-nowrap px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors text-[var(--color-text-primary)] disabled:opacity-50"
-                onClick={openSnippetManager}
-                disabled={rulesBusy}
-                title={t("automation.manageSnippetsTitle")}
-              >
-                {t("automation.snippets")}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-              <button
-                type="button"
-                className="w-full sm:w-auto whitespace-nowrap px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors bg-rose-500/15 hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border border-rose-500/30 disabled:opacity-50"
-                onClick={resetToBaseline}
-                disabled={rulesBusy}
-                title={t("automation.resetTitle")}
-              >
-                {t("automation.resetToDefaults")}
-              </button>
-              <button
-                type="button"
-                className={`${primaryButtonClass(rulesBusy)} w-full sm:w-auto whitespace-nowrap`}
-                onClick={saveRules}
-                disabled={rulesBusy}
-                title={t("automation.saveTitle")}
-              >
-                {rulesBusy ? t("automation.saving") : t("common:save")}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <AutomationRuleList
-          isDark={isDark}
-          visibleRules={visibleRules}
-          status={status}
-          rulesBusy={rulesBusy}
-          showCompletedRules={showCompletedRules}
-          completedOneTimeRuleIds={completedOneTimeRuleIds}
-          onToggleShowCompleted={setShowCompletedRules}
-          onClearCompleted={clearCompletedRules}
-          onToggleRuleEnabled={(ruleId, enabled) => updateRuleNested(ruleId, { enabled })}
-          onEditRule={(ruleId) => {
-            setEditingRuleId(ruleId);
-            setRulesErr("");
-          }}
-          onDeleteRule={removeRule}
-        />
-
-        <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          {t("automation.editHint")}
-        </div>
-      </Section>
-
-      <AutomationRuleEditorModal
-        isDark={isDark}
-        editingRule={editingRule}
-        editingRuleStatus={editingRuleStatus}
-        rulesErr={rulesErr}
-        snippetIds={snippetIds}
-        actorTargetOptions={actorTargetOptions}
-        oneShotModeByRule={oneShotModeByRule}
-        oneShotAfterMinutesByRule={oneShotAfterMinutesByRule}
-        onRulePatch={updateRuleNested}
-        onRuleRemove={removeRule}
-        onSetEditingRuleId={setEditingRuleId}
-        onSetRulesErr={setRulesErr}
-        onSetOneShotMode={(ruleId, mode) => setOneShotModeByRule((prev) => ({ ...prev, [ruleId]: mode }))}
-        onSetOneShotAfterMinutes={setOneShotAfterMinutes}
-      />
 
       <AutomationPoliciesSection
         isDark={isDark}
@@ -542,19 +540,114 @@ export function AutomationTab(props: AutomationTabProps) {
         onSavePolicies={props.onSavePolicies}
       />
 
+      <Section
+        isDark={isDark}
+        icon={SparkIcon}
+        title={t("automation.rulesTitle")}
+        description={t("automation.rulesDescription")}
+      >
+        {rulesErr ? <div className="text-xs text-rose-600 dark:text-rose-300">{rulesErr}</div> : null}
+
+        <div className="space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+              <button
+                type="button"
+                className={`${secondaryButtonClass()} w-full sm:w-auto whitespace-nowrap`}
+                onClick={openNewRule}
+                disabled={rulesBusy}
+                title={t("automation.createRuleTitle")}
+              >
+                {t("automation.newRule")}
+              </button>
+              <button
+                type="button"
+                className={`${secondaryButtonClass()} w-full sm:w-auto whitespace-nowrap`}
+                onClick={openSnippetManager}
+                disabled={rulesBusy}
+                title={t("automation.manageSnippetsTitle")}
+              >
+                {t("automation.snippets")}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+              <button
+                type="button"
+                className={`${dangerButtonClass()} w-full sm:w-auto whitespace-nowrap`}
+                onClick={resetToBaseline}
+                disabled={rulesBusy}
+                title={t("automation.resetTitle")}
+              >
+                {t("automation.resetToDefaults")}
+              </button>
+              <button
+                type="button"
+                className={`${primaryButtonClass(rulesBusy)} w-full sm:w-auto whitespace-nowrap`}
+                onClick={() => void saveRules()}
+                disabled={rulesBusy}
+                title={t("automation.saveTitle")}
+              >
+                {rulesBusy ? t("automation.saving") : t("common:save")}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <AutomationRuleList
+          isDark={isDark}
+          visibleRules={visibleRules}
+          status={status}
+          rulesBusy={rulesBusy}
+          showCompletedRules={showCompletedRules}
+          completedOneTimeRuleIds={completedOneTimeRuleIds}
+          onToggleShowCompleted={setShowCompletedRules}
+          onClearCompleted={clearCompletedRules}
+          onToggleRuleEnabled={(ruleId, enabled) => updateRule(ruleId, { enabled })}
+          onEditRule={openExistingRule}
+          onDeleteRule={removeRule}
+        />
+
+        <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+          {t("automation.editHint")}
+        </div>
+      </Section>
+
+      <AutomationRuleEditorModal
+        isDark={isDark}
+        ruleDraft={editingRuleDraft}
+        ruleStatus={editingRuleStatus}
+        isNewRule={editingRuleIsNew}
+        errorMessage={rulesErr}
+        saveBusy={rulesBusy}
+        snippetIds={snippetIds}
+        actorTargetOptions={actorTargetOptions}
+        oneShotMode={editingOneShotMode}
+        oneShotAfterMinutes={editingOneShotAfterMinutes}
+        onRuleChange={setEditingRuleDraft}
+        onClose={closeRuleEditor}
+        onSetRulesErr={setRulesErr}
+        onSetOneShotMode={setEditingOneShotModeValue}
+        onSetOneShotAfterMinutes={setEditingOneShotAfterMinutesValue}
+        onSave={saveRuleEditor}
+      />
+
       <AutomationSnippetModal
         open={snippetManagerOpen}
         isDark={isDark}
         templateErr={templateErr}
+        saveErr={rulesErr}
+        saveBusy={rulesBusy}
         newSnippetId={newSnippetId}
         supportedVars={supportedVars}
-        snippetIds={snippetIds}
-        snippets={draft.snippets || {}}
+        snippetIds={Object.keys(snippetDrafts).sort()}
+        snippets={snippetDrafts}
         onClose={closeSnippetManager}
         onNewSnippetIdChange={setNewSnippetId}
         onAddSnippet={addSnippet}
         onDeleteSnippet={deleteSnippet}
         onUpdateSnippet={updateSnippet}
+        onSave={saveSnippetManager}
       />
     </div>
   );

@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
 import type { Actor } from "../../../types";
 import { buildHelpMarkdown, parseHelpMarkdown, type HelpChangedBlock, type ParsedHelpMarkdown } from "../../../utils/helpMarkdown";
-import { cardClass, inputClass, labelClass, primaryButtonClass, preClass } from "./types";
+import {
+  cardClass,
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  preClass,
+  secondaryButtonClass,
+  settingsDialogBodyClass,
+  settingsDialogPanelClass,
+} from "./types";
 
 type PromptKind = "preamble" | "help";
 type PromptInfo = api.GroupPromptInfo;
@@ -252,6 +262,16 @@ export function GuidanceTab({ isDark, groupId }: {
         ? "bg-slate-800 text-slate-300 border border-slate-700"
         : "bg-gray-100 text-gray-700 border border-gray-200";
 
+  const renderSourceBadge = (kind: PromptKind) => {
+    const badgeClass = kind === "help" ? helpBadge : preambleBadge;
+    const source = kind === "help" ? helpSource : preambleSource;
+    return (
+      <div className={`px-2 py-1 rounded-md text-[11px] ${badgeClass}`}>
+        {source === "home" ? t("guidance.overrideBadge") : t("guidance.builtinBadge")}
+      </div>
+    );
+  };
+
   const renderPreambleCard = (expanded = false) => (
     <div className={`${cardClass(isDark)} ${expanded ? "max-w-5xl mx-auto" : ""}`}>
       <div className="flex items-start justify-between gap-3">
@@ -433,34 +453,42 @@ export function GuidanceTab({ isDark, groupId }: {
   };
 
   const renderHelpCard = (expanded = false) => (
-    <div className={`${cardClass(isDark)} ${expanded ? "max-w-6xl mx-auto" : ""}`}>
+    <div className={`${expanded ? "flex h-full min-h-0 flex-col" : cardClass(isDark)}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-gray-900"}`}>{t("guidance.helpTitle")}</div>
+          <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-gray-500"}`}>{t("guidance.helpHint")}</div>
         </div>
-        {!expanded ? (
-          <button
-            type="button"
-            className={`px-2 py-1 rounded-md text-[11px] transition-colors shrink-0 ${
-              isDark ? "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800" : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-200"
-            }`}
-            onClick={() => setExpandedKind("help")}
-            disabled={busy}
-            title={t("guidance.expandTitle")}
-          >
-            {t("guidance.expand")}
-          </button>
-        ) : null}
+        <div className="flex items-center gap-2 shrink-0">
+          {!expanded ? (
+            <button
+              type="button"
+              className={secondaryButtonClass("sm")}
+              onClick={() => setExpandedKind("help")}
+              disabled={busy}
+              title={t("guidance.expandTitle")}
+            >
+              {t("guidance.expand")}
+            </button>
+          ) : null}
+          {renderSourceBadge("help")}
+        </div>
       </div>
 
-      <div className={`mt-3 rounded-xl border px-3 py-3 ${isDark ? "border-slate-800 bg-slate-950/30" : "border-gray-200 bg-white"}`}>
-        <div className={`grid grid-cols-1 ${expanded ? "xl:grid-cols-[240px_minmax(0,1fr)]" : "xl:grid-cols-[210px_minmax(0,1fr)]"} gap-4 items-start`}>
-            <div className={`rounded-xl border p-2.5 space-y-2.5 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-gray-200 bg-gray-50"}`}>
+      {help?.path ? (
+        <div className={preClass(isDark)}>
+          <span className="font-mono">{help.path}</span>
+        </div>
+      ) : null}
+
+      <div className={`${expanded ? "mt-3 min-h-0 flex flex-1 flex-col" : `mt-3 rounded-xl border px-3 py-3 ${isDark ? "border-slate-800 bg-slate-950/30" : "border-gray-200 bg-white"}`}`}>
+        <div className={`grid grid-cols-1 gap-4 ${expanded ? "min-h-0 flex-1 xl:grid-cols-[240px_minmax(0,1fr)]" : "items-start xl:grid-cols-[210px_minmax(0,1fr)]"}`}>
+            <div className={`rounded-xl border p-2.5 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-gray-200 bg-gray-50"} ${expanded ? "min-h-0 flex flex-col" : "space-y-2.5"}`}>
               <div className={`text-[11px] font-medium ${isDark ? "text-slate-400" : "text-gray-600"}`}>
                 {t("guidance.actorNotesTitle", "Actor Notes")}
               </div>
               {visibleActorScopes.length ? (
-                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                <div className={expanded ? "min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" : "space-y-2 max-h-[420px] overflow-y-auto pr-1"}>
                   {visibleActorScopes.map((item) => renderHelpScopeButton(item))}
                 </div>
               ) : (
@@ -470,7 +498,7 @@ export function GuidanceTab({ isDark, groupId }: {
               )}
             </div>
 
-            <div className={`rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-gray-200 bg-white"}`}>
+            <div className={`rounded-xl border p-3 ${isDark ? "border-slate-800 bg-slate-950/40" : "border-gray-200 bg-white"} ${expanded ? "min-h-0 flex flex-col" : ""}`}>
               {selectedHelpScopeItem ? (
                 <>
                   <div className="flex items-start gap-3 mb-3">
@@ -493,7 +521,8 @@ export function GuidanceTab({ isDark, groupId }: {
                   </div>
 
                   <textarea
-                    className={`${inputClass(isDark)} font-mono text-[12px] ${expanded ? "min-h-[440px] h-[62vh]" : "min-h-[320px] h-[44vh]"} resize-y`}
+                    className={`${inputClass(isDark)} font-mono text-[12px] resize-y ${expanded ? "min-h-[440px] flex-1" : ""}`}
+                    style={expanded ? undefined : { minHeight: 320, maxHeight: "44vh" }}
                     value={selectedHelpScopeItem.value}
                     onChange={(e) => updateSelectedHelpScopeValue(e.target.value)}
                     placeholder={selectedHelpScopeItem.placeholder}
@@ -542,38 +571,31 @@ export function GuidanceTab({ isDark, groupId }: {
       {err ? <div className={`text-sm ${isDark ? "text-rose-300" : "text-red-600"}`}>{err}</div> : null}
       {renderHelpCard()}
 
-      {expandedKind ? (
-        <div
-          className="fixed inset-0 z-[1000]"
-          role="dialog"
-          aria-modal="true"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) setExpandedKind(null);
-          }}
-        >
-          <div className="absolute inset-0 bg-black/50" />
-          <div
-            className={`absolute inset-0 sm:inset-4 md:inset-6 rounded-none sm:rounded-2xl border ${
-              isDark ? "border-slate-800 bg-slate-950" : "border-gray-200 bg-white"
-            } shadow-2xl overflow-hidden`}
-          >
-            <div className="absolute top-4 right-4 z-10">
-              <button
-                type="button"
-                className={`px-3 py-2 text-sm rounded-lg min-h-[44px] transition-colors ${
-                  isDark ? "bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800" : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-200"
-                }`}
-                onClick={() => setExpandedKind(null)}
-              >
-                {t("common:close")}
-              </button>
-            </div>
-            <div className="h-full overflow-y-auto p-4 sm:p-6 md:p-8 pt-16">
-              {renderHelpCard(true)}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {expandedKind && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[1000] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) setExpandedKind(null);
+              }}
+            >
+              <div className="absolute inset-0 glass-overlay" />
+              <div className={settingsDialogPanelClass("xl")}>
+                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                  <button type="button" className={secondaryButtonClass("sm")} onClick={() => setExpandedKind(null)}>
+                    {t("common:close")}
+                  </button>
+                </div>
+                <div className={settingsDialogBodyClass}>
+                  {renderHelpCard(true)}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

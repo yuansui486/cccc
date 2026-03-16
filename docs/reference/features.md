@@ -161,7 +161,11 @@ Ledger (complete memory)
 
 ## Automation
 
-Automation is now a rule engine (for reminders + operational actions), not only built-in nudges.
+Automation in CCCC combines built-in automation and user-defined rules.
+
+Built-in automation covers system-managed follow-ups and collaboration health loops.
+
+Rules cover scheduled reminders and operational actions, with snippets as reusable message templates.
 
 ### Rule Triggers
 
@@ -189,24 +193,26 @@ Notes:
 - Completed one-time rules are disabled (no repeated fire).
 - UI supports clearing completed items for cleanup.
 
-### Built-in Policies (separate from custom rules)
+### Built-in Automation
 
-| Policy | Config | Default | Description |
-|--------|--------|---------|-------------|
-| Nudge | `nudge_after_seconds` | 300s | Unread message timeout reminder |
+| Behavior | Config | Default | Description |
+|----------|--------|---------|-------------|
+| Nudge | `nudge_after_seconds` | 300s | Digest follow-up for pending unread or obligation items |
 | Reply-required nudge | `reply_required_nudge_after_seconds` | 300s | Follow-up for required-reply obligations |
 | Attention-ack nudge | `attention_ack_nudge_after_seconds` | 600s | Follow-up for attention messages lacking ACK |
-| Unread nudge | `unread_nudge_after_seconds` | 900s | Inbox still-unread reminder |
-| Actor idle | `actor_idle_timeout_seconds` | 600s | Actor idle notification to foreman |
-| Keepalive | `keepalive_delay_seconds` | 120s | Foreman keepalive reminder |
-| Quiet review | `silence_timeout_seconds` | 0s | Optional foreman review when the whole group stays quiet; `0` disables it |
-| Help nudge | `help_nudge_interval_seconds` / `help_nudge_min_messages` | 600s / 10 | Prompt actor to revisit `cccc_help` |
+| Unread nudge | `unread_nudge_after_seconds` | 900s | Reminder when unread backlog keeps accumulating |
+| Actor idle | `actor_idle_timeout_seconds` | 0s | Optional actor idle notification to foreman; `0` disables it by default |
+| Keepalive | `keepalive_delay_seconds` | 120s | Follow-up after an actor declares a next step and then goes quiet |
+| Silence check | `silence_timeout_seconds` | 0s | Optional group-level silence review and idle transition; `0` disables it |
+| Help nudge | `help_nudge_interval_seconds` / `help_nudge_min_messages` | 600s / 10 | Prompt actor to revisit `cccc_help` and refresh working context |
 
-### Delivery Throttling
+### Delivery Policy
 
 | Config | Default | Description |
 |--------|---------|-------------|
-| `min_interval_seconds` | 0s | Minimum interval between consecutive deliveries (`0` disables throttling) |
+| `auto_mark_on_delivery` | `false` | Automatically advance the read cursor after a PTY delivery succeeds |
+
+Low-level delivery throttling via `min_interval_seconds` remains supported in daemon/API settings for compatibility, but it is no longer exposed in the default Web settings UI.
 
 ## Runtime-Only Actor Secrets
 
@@ -229,7 +235,7 @@ cccc actor secrets <actor_id> --keys
 
 CCCC Web supports blueprint export/import for portable group setup.
 
-- Export captures actors, settings, automation rules/snippets, and guidance overrides.
+- Export captures actors, actor startup autoload baselines, group settings/feature toggles, automation rules/snippets, and guidance overrides.
 - Import uses replace semantics (applies the incoming configuration as the new group setup).
 - Ledger history is preserved (import does not rewrite historical events).
 - Environment secrets are intentionally excluded.

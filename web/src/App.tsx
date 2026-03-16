@@ -21,7 +21,6 @@ import { getChatSession } from "./stores/useUIStore";
 import { classNames } from "./utils/classNames";
 import { ActorTab } from "./pages/ActorTab";
 import { ChatTab } from "./pages/chat";
-import { PanoramaTab } from "./pages/PanoramaTab";
 import {
   useGroupStore,
   useUIStore,
@@ -133,14 +132,6 @@ export default function App() {
   const chatUnreadCount = chatSession.chatUnreadCount;
   const chatSessionAtBottom = chatSession.scrollSnapshot?.atBottom;
 
-  // Hide Panorama tab when browser lacks GPU/3D support or feature is disabled
-  const canRender3D = useMemo(() => {
-    try {
-      const canvas = document.createElement("canvas");
-      return !!(navigator.gpu || canvas.getContext("webgl2"));
-    } catch { return false; }
-  }, []);
-  const showPanorama = canRender3D && !!groupSettings?.panorama_enabled;
   const prevGroupIdRef = useRef<string | null>(null);
   // Local state
   const [showMentionMenu, setShowMentionMenu] = React.useState(false);
@@ -295,31 +286,9 @@ export default function App() {
     if (atBottom) setChatUnreadCount(selectedGroupId, 0);
   }, [activeTab, selectedGroupId, chatSessionAtBottom, setChatUnreadCount, setShowScrollButton]);
 
-  // Auto-fallback: switch away from panorama tab when feature is disabled
-  useEffect(() => {
-    if (!showPanorama && activeTab === "panorama") {
-      setActiveTab("chat");
-    }
-  }, [showPanorama, activeTab, setActiveTab]);
-
-  // BUG-1 + BUG-3: Refresh context on panorama tab activation + periodic polling fallback
-  useEffect(() => {
-    if (!showPanorama || activeTab !== "panorama" || !selectedGroupId) return;
-    // Immediate fetch on tab switch (skip if SSE debounce timer is already pending)
-    if (!contextRefreshTimerRef.current) {
-      void fetchContext(selectedGroupId);
-    }
-    // 12s polling fallback while panorama tab is active
-    const intervalId = window.setInterval(() => {
-      void fetchContext(selectedGroupId);
-    }, 12_000);
-    return () => window.clearInterval(intervalId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, selectedGroupId]);
-
   // Keep visited actor tabs mounted (sticky) so their terminal sessions do not reconnect/replay on tab switches.
   useEffect(() => {
-    if (!activeTab || activeTab === "chat" || activeTab === "panorama") return;
+    if (!activeTab || activeTab === "chat") return;
     setMountedActorIds((prev) => (prev.includes(activeTab) ? prev : [...prev, activeTab]));
   }, [activeTab]);
 
@@ -388,7 +357,7 @@ export default function App() {
   }, [hasComposerFiles, hasReplyTarget, selectedGroupId, sendGroupId, setDestGroupId]);
 
   const renderedActorIds = useMemo(() => {
-    if (activeTab !== "chat" && activeTab !== "panorama" && !mountedActorIds.includes(activeTab)) {
+    if (activeTab !== "chat" && !mountedActorIds.includes(activeTab)) {
       return [...mountedActorIds, activeTab];
     }
     return mountedActorIds;
@@ -644,7 +613,6 @@ export default function App() {
                   }
               }
               canAddAgent={!webReadOnly && !!selectedGroupId}
-              showPanorama={showPanorama}
             />
           )}
 
@@ -686,32 +654,13 @@ export default function App() {
               />
               </ErrorBoundary>
             </div>
-            {/* Panorama Tab — conditionally mounted to avoid 3D overhead on group switch */}
-            {showPanorama && activeTab === "panorama" && (
-              <div className="absolute inset-0 flex min-h-0 flex-col">
-                <ErrorBoundary>
-                  <PanoramaTab
-                    agents={(groupContext?.agent_states || []).filter(
-                      (a) => actors.some((act) => act.id === a.id)
-                    )}
-                    actors={actors}
-                    tasks={groupContext?.coordination?.tasks || []}
-                    tasksSummary={groupContext?.tasks_summary}
-                    projectStatus={groupContext?.meta?.project_status}
-                    isDark={isDark}
-                    isSmallScreen={isSmallScreen}
-                    groupId={selectedGroupId}
-                  />
-                </ErrorBoundary>
-              </div>
-            )}
             <div
-              className={`absolute inset-0 flex min-h-0 flex-col ${activeTab === "chat" || activeTab === "panorama" ? "invisible pointer-events-none" : ""}`}
-              aria-hidden={activeTab === "chat" || activeTab === "panorama"}
+              className={`absolute inset-0 flex min-h-0 flex-col ${activeTab === "chat" ? "invisible pointer-events-none" : ""}`}
+              aria-hidden={activeTab === "chat"}
             >
               {renderedActorIds.map((actorId) => {
                 const actor = actors.find((a) => a.id === actorId) || null;
-                const isVisible = activeTab === actorId && activeTab !== "chat" && activeTab !== "panorama";
+                const isVisible = activeTab === actorId && activeTab !== "chat";
                 const agentState =
                   (groupContext?.agent_states || []).find((p) => p.id === (actor?.id || "")) || null;
 

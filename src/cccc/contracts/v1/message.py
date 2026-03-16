@@ -49,6 +49,7 @@ class ChatMessageData(BaseModel):
     source_platform: Optional[str] = None  # External IM source platform, e.g. dingtalk
     source_user_name: Optional[str] = None  # External IM sender display name
     source_user_id: Optional[str] = None  # External IM sender platform user id
+    mention_user_ids: Optional[List[str]] = None  # External IM real-mention targets
 
     # Cross-group provenance (for relays/forwarding)
     src_group_id: Optional[str] = None

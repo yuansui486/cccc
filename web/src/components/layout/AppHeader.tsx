@@ -78,6 +78,8 @@ export function AppHeader({
   const doneHubQuota = doneHub && doneHub.quota != null
     ? formatDoneHubQuota(doneHub.quota)
     : formatDoneHubQuota(0);
+  const headerIconButtonClass =
+    "flex items-center justify-center w-11 h-11 rounded-xl transition-all shrink-0 glass-btn";
   return (
     <header
       className="flex-shrink-0 z-20 px-4 h-14 flex items-center justify-between gap-3 glass-header"
@@ -85,7 +87,8 @@ export function AppHeader({
       <div className="flex items-center gap-3 min-w-0">
         <button
           className={classNames(
-            "md:hidden p-2 -ml-2 rounded-xl transition-all glass-btn",
+            "md:hidden -ml-1",
+            headerIconButtonClass,
             "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           )}
           onClick={onOpenSidebar}
@@ -151,7 +154,7 @@ export function AppHeader({
                 onClick={onOpenSearch}
                 disabled={!selectedGroupId}
                 className={classNames(
-                  "p-2 rounded-xl transition-all glass-btn",
+                  headerIconButtonClass,
                   "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
                 )}
                 title={t('searchMessages')}
@@ -164,7 +167,7 @@ export function AppHeader({
                 onClick={onOpenContext}
                 disabled={!selectedGroupId}
                 className={classNames(
-                  "p-2 rounded-xl transition-all glass-btn",
+                  headerIconButtonClass,
                   "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
                 )}
                 title={t('context')}
@@ -179,7 +182,8 @@ export function AppHeader({
                 onClick={onStartGroup}
                 disabled={!selectedGroupId || busy === "group-start" || actors.length === 0}
                 className={classNames(
-                  "p-2 rounded-xl transition-all glass-btn border shadow-sm hover:-translate-y-px active:translate-y-0",
+                  headerIconButtonClass,
+                  "border shadow-sm hover:-translate-y-px active:translate-y-0",
                   "border-sky-200/80 bg-sky-50/80 text-sky-700 shadow-sky-100/80 hover:bg-sky-100/85 hover:shadow-sky-200/70",
                   "dark:border-sky-400/20 dark:bg-sky-500/12 dark:text-sky-300 dark:shadow-[0_8px_24px_-16px_rgba(56,189,248,0.45)] dark:hover:bg-sky-500/18"
                 )}
@@ -194,7 +198,7 @@ export function AppHeader({
                   onClick={() => void onSetGroupState("active")}
                   disabled={!selectedGroupId || busy === "group-state"}
                   className={classNames(
-                    "p-2 rounded-xl transition-all glass-btn",
+                    headerIconButtonClass,
                     "text-amber-600 dark:text-amber-400"
                   )}
                   title={t('resumeDelivery')}
@@ -207,7 +211,7 @@ export function AppHeader({
                   onClick={() => void onSetGroupState("paused")}
                   disabled={!selectedGroupId || busy === "group-state"}
                   className={classNames(
-                    "p-2 rounded-xl transition-all glass-btn",
+                    headerIconButtonClass,
                     "text-gray-400 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-300"
                   )}
                   title={t('pauseDelivery')}
@@ -221,7 +225,7 @@ export function AppHeader({
                 onClick={onStopGroup}
                 disabled={!selectedGroupId || busy === "group-stop"}
                 className={classNames(
-                  "p-2 rounded-xl transition-all glass-btn",
+                  headerIconButtonClass,
                   "text-gray-400 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400"
                 )}
                 title={t('stopAllAgents')}
@@ -265,7 +269,8 @@ export function AppHeader({
               onClick={onOpenSettings}
               disabled={!selectedGroupId}
               className={classNames(
-                "hidden md:flex p-2 rounded-xl transition-all glass-btn",
+                "hidden md:flex",
+                headerIconButtonClass,
                 "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
               )}
               title={t('settings')}
@@ -280,7 +285,8 @@ export function AppHeader({
 
             <button
               className={classNames(
-                "md:hidden flex items-center justify-center w-11 h-11 rounded-xl transition-all glass-btn",
+                "md:hidden",
+                headerIconButtonClass,
                 "text-[var(--color-text-muted)]"
               )}
               onClick={onOpenMobileMenu}

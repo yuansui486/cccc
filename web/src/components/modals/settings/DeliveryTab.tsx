@@ -1,39 +1,17 @@
-// DeliveryTab configures PTY message delivery behavior (throttling + read-cursor policy).
+// DeliveryTab configures PTY delivery read-cursor behavior.
 import React from "react";
 import { useTranslation } from "react-i18next";
 
-import { cardClass, inputClass, labelClass, primaryButtonClass } from "./types";
+import { labelClass, primaryButtonClass } from "./types";
 
 interface DeliveryTabProps {
   isDark: boolean;
   busy: boolean;
-  deliveryInterval: number;
-  setDeliveryInterval: (v: number) => void;
   autoMarkOnDelivery: boolean;
   setAutoMarkOnDelivery: (v: boolean) => void;
   onSave: () => void;
-  onAutoSave?: (field: string, value: number | boolean) => void;
+  onAutoSave?: (field: string, value: boolean) => void;
 }
-
-const TruckIcon = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11" />
-    <path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2" />
-    <circle cx="7" cy="18" r="2" />
-    <circle cx="17" cy="18" r="2" />
-  </svg>
-);
 
 const ClockIcon = ({ className }: { className?: string }) => (
   <svg
@@ -52,27 +30,6 @@ const ClockIcon = ({ className }: { className?: string }) => (
     <polyline points="12 6 12 12 16 14" />
   </svg>
 );
-
-const formatDuration = (secondsRaw: number, offLabel: string): string => {
-  const seconds = Number.isFinite(secondsRaw) ? Math.max(0, Math.trunc(secondsRaw)) : 0;
-  if (seconds <= 0) return offLabel;
-  const parts: string[] = [];
-  let rem = seconds;
-  const units: Array<[number, string]> = [
-    [86400, "d"],
-    [3600, "h"],
-    [60, "m"],
-    [1, "s"],
-  ];
-  for (const [unit, label] of units) {
-    if (rem < unit) continue;
-    const v = Math.floor(rem / unit);
-    rem -= v * unit;
-    parts.push(`${v}${label}`);
-    if (parts.length >= 2) break;
-  }
-  return parts.join(" ");
-};
 
 const ToggleRow = ({
   label,
@@ -127,78 +84,11 @@ const ToggleRow = ({
   </div>
 );
 
-const NumberInputRow = ({
-  label,
-  value,
-  onChange,
-  isDark,
-  min = 0,
-  helperText,
-  onAutoSave,
-  offLabel,
-}: {
-  label: string;
-  value: number;
-  onChange: (val: number) => void;
-  isDark: boolean;
-  min?: number;
-  helperText?: React.ReactNode;
-  onAutoSave?: () => void;
-  offLabel: string;
-}) => (
-  <div className="w-full">
-    <label className={labelClass(isDark)}>{label}</label>
-    <div className="relative">
-      <input
-        type="number"
-        min={min}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onBlur={() => onAutoSave?.()}
-        className={inputClass(isDark)}
-      />
-      <div
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono pointer-events-none transition-opacity duration-200 text-[var(--color-text-muted)]"
-      >
-        {formatDuration(value, offLabel)}
-      </div>
-    </div>
-    {helperText && (
-      <div className="mt-1.5 text-[11px] leading-snug text-[var(--color-text-muted)]">
-        {helperText}
-      </div>
-    )}
-  </div>
-);
-
-const DeliverySection = ({
-  isDark: _isDark,
-  title,
-  description,
-  children,
-}: {
-  isDark: boolean;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) => (
-  <div className={cardClass()}>
-    <div className="flex items-center gap-2 mb-1">
-      <div className="p-1.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
-        <TruckIcon className="w-4 h-4" />
-      </div>
-      <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</h3>
-    </div>
-    <p className="text-xs ml-9 mb-4 text-[var(--color-text-muted)]">{description}</p>
-    <div className="space-y-4 ml-1">{children}</div>
-  </div>
-);
-
 export function DeliveryTab(props: DeliveryTabProps) {
   const { isDark, busy, onSave, onAutoSave } = props;
   const { t } = useTranslation("settings");
 
-  const autoSave = (field: string, getValue: () => number | boolean) => {
+  const autoSave = (field: string, getValue: () => boolean) => {
     if (!onAutoSave) return;
     setTimeout(() => onAutoSave(field, getValue()), 0);
   };
@@ -212,29 +102,14 @@ export function DeliveryTab(props: DeliveryTabProps) {
         </p>
       </div>
 
-      <DeliverySection
+      <ToggleRow
         isDark={isDark}
-        title={t("delivery.throttleTitle")}
-        description={t("delivery.throttleDescription")}
-      >
-        <NumberInputRow
-          isDark={isDark}
-          label={t("delivery.deliveryInterval")}
-          value={props.deliveryInterval}
-          onChange={props.setDeliveryInterval}
-          helperText={t("delivery.deliveryIntervalHelp")}
-          onAutoSave={() => autoSave("min_interval_seconds", () => props.deliveryInterval)}
-          offLabel={t("ruleList.off")}
-        />
-        <ToggleRow
-          isDark={isDark}
-          label={t("delivery.autoMarkRead")}
-          checked={props.autoMarkOnDelivery}
-          onChange={props.setAutoMarkOnDelivery}
-          helperText={t("delivery.autoMarkReadHelp")}
-          onAutoSave={(newValue) => autoSave("auto_mark_on_delivery", () => newValue)}
-        />
-      </DeliverySection>
+        label={t("delivery.autoMarkRead")}
+        checked={props.autoMarkOnDelivery}
+        onChange={props.setAutoMarkOnDelivery}
+        helperText={t("delivery.autoMarkReadHelp")}
+        onAutoSave={(newValue) => autoSave("auto_mark_on_delivery", () => newValue)}
+      />
 
       <div className="pt-2">
         <button onClick={onSave} disabled={busy} className={primaryButtonClass(busy)}>

@@ -135,6 +135,7 @@ class AttachmentRecordingAdapter(IMAdapter):
         filename: str,
         caption: str = "",
         thread_id: Optional[int] = None,
+        mention_user_ids: Optional[List[str]] = None,
     ) -> bool:
         self.sent_files.append(
             {
@@ -143,6 +144,7 @@ class AttachmentRecordingAdapter(IMAdapter):
                 "filename": filename,
                 "caption": caption,
                 "thread_id": thread_id,
+                "mention_user_ids": mention_user_ids,
             }
         )
         return True

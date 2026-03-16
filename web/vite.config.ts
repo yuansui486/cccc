@@ -25,12 +25,6 @@ export default defineConfig({
           // React core + libs that import react (must stay in the same chunk
           // to avoid circular cross-chunk dependencies during initialisation)
           if (/[\\/]node_modules[\\/](react|react-dom|zustand|@tanstack|scheduler)[\\/]/.test(id)) return "react-vendor";
-          // Three.js WebGPU renderer (heavy, split from core three)
-          if (/[\\/]node_modules[\\/]three[\\/].*webgpu/i.test(id)) return "three-webgpu";
-          // @react-three bindings (loaded on demand with 3D scene)
-          if (/[\\/]node_modules[\\/]@react-three[\\/]/.test(id)) return "three-react";
-          // Three.js core (loaded on demand via lazy ActorScene3D)
-          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) return "three-core";
           // xterm terminal
           if (/[\\/]node_modules[\\/]@xterm[\\/]/.test(id)) return "xterm";
           // Markdown rendering

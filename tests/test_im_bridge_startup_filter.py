@@ -89,6 +89,7 @@ class TestImBridgeStartupFilter(unittest.TestCase):
                 from_user: str,
                 *,
                 attachments: List[Dict[str, Any]],
+                mention_user_ids: List[str] | None = None,
                 thread_id: int = 0,
                 message_id: str = "",
                 from_user_id: str = "",
@@ -97,6 +98,7 @@ class TestImBridgeStartupFilter(unittest.TestCase):
                 _ = parsed
                 _ = from_user
                 _ = attachments
+                _ = mention_user_ids
                 _ = thread_id
                 _ = message_id
                 _ = from_user_id
@@ -136,6 +138,7 @@ class TestImBridgeStartupFilter(unittest.TestCase):
                 from_user: str,
                 *,
                 attachments: List[Dict[str, Any]],
+                mention_user_ids: List[str] | None = None,
                 thread_id: int = 0,
                 message_id: str = "",
                 from_user_id: str = "",
@@ -144,6 +147,7 @@ class TestImBridgeStartupFilter(unittest.TestCase):
                 _ = parsed
                 _ = from_user
                 _ = attachments
+                _ = mention_user_ids
                 _ = thread_id
                 _ = message_id
                 _ = from_user_id

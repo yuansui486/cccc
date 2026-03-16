@@ -327,16 +327,38 @@ select:focus-visible {
 /* Smooth transitions for interactive elements */
 button,
 a,
+[role="button"] {
+  cursor: pointer;
+}
+
+button,
+a,
 input,
 textarea,
 select,
 [role="button"] {
-  cursor: pointer;
   transition: color 0.15s ease-out,
               background-color 0.15s ease-out,
               border-color 0.15s ease-out,
               box-shadow 0.15s ease-out,
               opacity 0.15s ease-out;
+}
+
+input,
+textarea {
+  cursor: text;
+}
+
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+input[type="color"],
+input[type="file"],
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+select {
+  cursor: pointer;
 }
 
 @media (display-mode: standalone) {
@@ -400,29 +422,29 @@ button[class*="bg-cyan"]:active:not(:disabled) {
   display: none;
 }
 
-/* Custom scrollbar for webkit browsers */
-::-webkit-scrollbar {
+/* Shared subtle scrollbar utility.
+   Apply this only to actual scroll regions instead of every element. */
+.scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-secondary) transparent;
+}
+
+.scrollbar-subtle::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+.scrollbar-subtle::-webkit-scrollbar-track {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
+.scrollbar-subtle::-webkit-scrollbar-thumb {
   background: var(--color-border-secondary);
   border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.scrollbar-subtle::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
-}
-
-/* Firefox scrollbar */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-secondary) transparent;
 }
 
 /* ============================================
@@ -645,12 +667,15 @@ select {
   transition: background 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:where(.glass-card-interactive, button.glass-card, a.glass-card, label.glass-card, summary.glass-card, [role="button"].glass-card) {
   cursor: pointer;
   position: relative;
   overflow: hidden;
 }
 
-.glass-card::after {
+:where(.glass-card-interactive, button.glass-card, a.glass-card, label.glass-card, summary.glass-card, [role="button"].glass-card)::after {
   content: "";
   position: absolute;
   top: 0;
@@ -663,39 +688,52 @@ select {
 }
 
 @media (hover: hover) {
-  .glass-card:hover {
+  :where(.glass-card-interactive, button.glass-card, a.glass-card, label.glass-card, summary.glass-card, [role="button"].glass-card):hover {
     background: var(--glass-bg-hover);
     box-shadow: var(--glass-shadow-lg);
     border-color: var(--glass-border);
   }
 }
 
-/* Glass button - enhanced */
-.glass-btn {
-  background: transparent;
-  border: none;
-  border-radius: 8px;
+/* Glass button - secondary action baseline */
+:where(.glass-btn) {
+  background: var(--glass-panel-bg);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), var(--glass-inner-glow);
   transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+              border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
   position: relative;
 }
 
 @media (hover: hover) {
-  .glass-btn:hover {
+  :where(.glass-btn:hover) {
     background: var(--glass-bg-hover);
+    border-color: var(--glass-border);
+    box-shadow: var(--glass-shadow), var(--glass-inner-glow);
   }
 }
 
-.glass-btn:active {
+:where(.glass-btn:active) {
   background: var(--glass-bg-active);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03), var(--glass-inner-glow);
 }
 
-/* Accent glass button - enhanced */
-.glass-btn-accent {
+:where(.glass-btn:disabled) {
+  cursor: not-allowed;
+  box-shadow: var(--glass-inner-glow);
+}
+
+/* Accent glass button - primary/prominent action */
+:where(.glass-btn-accent) {
   background: var(--glass-accent-bg);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
   border: 1px solid var(--glass-accent-border);
-  border-radius: 8px;
   box-shadow: var(--glass-accent-glow);
   transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
@@ -705,7 +743,7 @@ select {
   overflow: hidden;
 }
 
-.glass-btn-accent::before {
+:where(.glass-btn-accent)::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -715,15 +753,19 @@ select {
 }
 
 @media (hover: hover) {
-  .glass-btn-accent:hover {
+  :where(.glass-btn-accent:hover) {
     background: var(--glass-accent-bg-hover);
     box-shadow: var(--glass-accent-shadow), var(--glass-accent-glow);
     border-color: var(--color-accent-primary);
   }
 
-  .dark .glass-btn-accent:hover {
+  .dark :where(.glass-btn-accent:hover) {
     background: var(--glass-accent-bg-hover);
   }
+}
+
+:where(.glass-btn-accent:disabled) {
+  cursor: not-allowed;
 }
 
 /* Glass input - enhanced */

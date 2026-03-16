@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -2236,6 +2237,21 @@ class TestGroupSpaceOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_notebooklm_auth_browser_profile_session_dir_is_unique_under_home(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from cccc.daemon.space import notebooklm_auth_flow as auth_flow
+
+            session_a = auth_flow._fresh_managed_browser_profile_session_dir()
+            session_b = auth_flow._fresh_managed_browser_profile_session_dir()
+            self.assertNotEqual(session_a, session_b)
+            self.assertTrue(session_a.exists())
+            self.assertTrue(session_b.exists())
+            self.assertIn(str(auth_flow._managed_browser_profile_dir()), str(session_a))
+            self.assertIn(str(auth_flow._managed_browser_profile_dir()), str(session_b))
+        finally:
+            cleanup()
+
     def test_notebooklm_auth_flow_reuses_saved_credential_without_browser(self) -> None:
         from cccc.daemon.space import notebooklm_auth_flow as auth_flow
 
@@ -2282,11 +2298,15 @@ class TestGroupSpaceOps(unittest.TestCase):
             side_effect=AssertionError("saved credential reuse must be skipped for force_reauth"),
         ), patch.object(
             auth_flow,
-            "_clear_managed_browser_profile_dir",
-        ) as clear_profile_mock, patch.object(
-            auth_flow,
             "_ensure_sync_playwright",
             side_effect=RuntimeError("browser unavailable"),
+        ), patch.object(
+            auth_flow,
+            "_fresh_managed_browser_profile_session_dir",
+        ) as fresh_profile_mock, patch.object(
+            auth_flow,
+            "_start_browser_session",
+            side_effect=AssertionError("browser session should not start when browser runtime is unavailable"),
         ), patch.object(
             auth_flow,
             "get_space_provider_state",
@@ -2302,10 +2322,107 @@ class TestGroupSpaceOps(unittest.TestCase):
                 cancel_event=threading.Event(),
                 force_reauth=True,
             )
-            clear_profile_mock.assert_called_once_with()
+            fresh_profile_mock.assert_not_called()
             state = auth_flow.get_notebooklm_auth_flow_status()
             self.assertEqual(str(state.get("state") or ""), "failed")
             self.assertIn("failed to prepare browser runtime", str(state.get("message") or "").lower())
+
+    def test_notebooklm_auth_flow_disconnect_ignores_locked_browser_profile_dir(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from cccc.daemon.space import notebooklm_auth_flow as auth_flow
+            from cccc.daemon.space.group_space_store import update_space_provider_secrets
+
+            _ = update_space_provider_secrets(
+                "notebooklm",
+                set_vars={
+                    "NOTEBOOKLM_AUTH_JSON": '{"cookies":[{"name":"SID","value":"saved","domain":".google.com"}]}'
+                },
+                unset_keys=[],
+                clear=False,
+            )
+            os.environ["CCCC_NOTEBOOKLM_AUTH_JSON"] = '{"cookies":[{"name":"SID","value":"env","domain":".google.com"}]}'
+
+            profile_dir = auth_flow._managed_browser_profile_dir()
+            marker = profile_dir / "locked.txt"
+            marker.write_text("x", encoding="utf-8")
+
+            real_rmtree = shutil.rmtree
+            call_count = {"value": 0}
+
+            def _flaky_rmtree(path: str | os.PathLike[str], *args: Any, **kwargs: Any) -> None:
+                if Path(path) == profile_dir:
+                    call_count["value"] += 1
+                    raise PermissionError(32, "sharing violation", str(path))
+                real_rmtree(path, *args, **kwargs)
+
+            with patch.object(auth_flow.shutil, "rmtree", side_effect=_flaky_rmtree):
+                state = auth_flow.disconnect_notebooklm_auth_flow()
+
+            self.assertGreater(call_count["value"], 0)
+            self.assertEqual(str(state.get("state") or ""), "idle")
+            self.assertNotIn("CCCC_NOTEBOOKLM_AUTH_JSON", os.environ)
+            self.assertTrue(profile_dir.exists())
+        finally:
+            cleanup()
+
+    def test_notebooklm_auth_flow_closes_windows_system_browser_process_tree(self) -> None:
+        from cccc.daemon.space import notebooklm_auth_flow as auth_flow
+
+        class _FakeClosable:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.pid = 4321
+                self.terminated = False
+                self.killed = False
+                self.wait_calls: list[float] = []
+
+            def poll(self) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                self.wait_calls.append(float(timeout or 0.0))
+                return 0
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                self.killed = True
+
+        context = _FakeClosable()
+        browser = _FakeClosable()
+        proc = _FakeProc()
+        session = auth_flow._AuthBrowserSession(
+            browser=browser,
+            context=context,
+            strategy="system_browser_cdp:chrome.exe",
+            process=proc,
+        )
+
+        with patch.object(auth_flow.os, "name", "nt"), patch.object(
+            auth_flow.subprocess,
+            "run",
+            return_value=None,
+        ) as taskkill_mock:
+            session.close()
+
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        taskkill_mock.assert_called_once()
+        self.assertEqual(
+            taskkill_mock.call_args.args[0],
+            ["taskkill", "/PID", "4321", "/T", "/F"],
+        )
+        self.assertEqual(proc.wait_calls, [1.0])
+        self.assertFalse(proc.terminated)
+        self.assertFalse(proc.killed)
 
     def test_notebooklm_auth_flow_waits_for_notebook_before_collecting_cookies(self) -> None:
         from cccc.daemon.space import notebooklm_auth_flow as auth_flow

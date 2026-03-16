@@ -76,7 +76,7 @@ class TestWebGroupSettingsDirtyTolerance(unittest.TestCase):
             self.assertEqual(settings.get("nudge_digest_min_interval_seconds"), 120)
             self.assertEqual(settings.get("nudge_max_repeats_per_obligation"), 3)
             self.assertEqual(settings.get("nudge_escalate_after_repeats"), 0)
-            self.assertEqual(settings.get("actor_idle_timeout_seconds"), 600)
+            self.assertEqual(settings.get("actor_idle_timeout_seconds"), 0)
             self.assertEqual(settings.get("keepalive_delay_seconds"), 120)
             self.assertEqual(settings.get("keepalive_max_per_actor"), 0)
             self.assertEqual(settings.get("silence_timeout_seconds"), 0)

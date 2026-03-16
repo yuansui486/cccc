@@ -143,6 +143,10 @@ export function ChatComposer({
 
   const chipBaseClass =
     "flex-shrink-0 whitespace-nowrap text-[10px] sm:text-[11px] px-2.5 sm:px-3 rounded-full border transition-all flex items-center justify-center font-medium";
+  const composerToolButtonClass =
+    "glass-btn flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] transition-[background-color,border-color,color,transform,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-50";
+  const composerInlineToolButtonClass =
+    "glass-btn flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] transition-[background-color,border-color,color,transform,box-shadow] duration-200 sm:h-10 sm:w-10";
 
   // Get display name for reply target
   const replyByDisplayName = useMemo(() => {
@@ -449,7 +453,7 @@ export function ChatComposer({
             recipientActorsBusy ? "opacity-50 pointer-events-none" : ""
           )}>
             {/* Special tokens */}
-            {["@all", "@foreman", "@peers"].map((tok) => {
+            {["@all", "@foreman", "@peers", "@user"].map((tok) => {
               const active = toTokens.includes(tok);
               return (
                 <button
@@ -580,10 +584,8 @@ export function ChatComposer({
         {/* Attachment Button */}
         <button
           className={classNames(
-            "w-11 h-11 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all duration-300 ease-out flex-shrink-0 border group",
-            isDark
-              ? "bg-slate-900 border-white/5 text-slate-400 hover:text-white hover:bg-slate-800 active:scale-95"
-              : "bg-white border-black/5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 active:scale-95"
+            composerToolButtonClass,
+            busy !== "send" && selectedGroupId && !isCrossGroup && "hover:text-[var(--color-text-primary)] active:scale-95"
           )}
           onClick={() => fileInputRef.current?.click()}
           disabled={!selectedGroupId || busy === "send" || isCrossGroup}
@@ -619,22 +621,20 @@ export function ChatComposer({
             <button
               type="button"
               className={classNames(
-                "w-11 h-11 rounded-full transition-colors flex items-center justify-center",
+                composerInlineToolButtonClass,
                 busy === "send" || !selectedGroupId
-                  ? isDark
-                    ? "text-slate-500"
-                    : "text-gray-400"
+                  ? "text-[var(--color-text-muted)]"
                   : messageMode === "task"
                     ? isDark
-                      ? "bg-violet-500/20 text-violet-200 hover:bg-violet-500/30"
-                      : "bg-violet-100 text-violet-700 hover:bg-violet-200"
+                      ? "border-violet-400/20 bg-violet-500/20 text-violet-200 hover:bg-violet-500/28"
+                      : "border-violet-200 bg-violet-100 text-violet-700 hover:bg-violet-200"
                     : messageMode === "attention"
                       ? isDark
-                        ? "bg-amber-500/20 text-amber-200 hover:bg-amber-500/30"
-                        : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                        ? "border-amber-400/20 bg-amber-500/20 text-amber-200 hover:bg-amber-500/28"
+                        : "border-amber-200 bg-amber-100 text-amber-700 hover:bg-amber-200"
                       : isDark
-                        ? "bg-slate-800/70 text-slate-100 ring-1 ring-white/15 hover:bg-slate-700/70"
-                        : "bg-white text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50"
+                        ? "text-slate-100 hover:bg-slate-700/70"
+                        : "text-gray-700 hover:bg-gray-50"
               )}
               disabled={busy === "send" || !selectedGroupId}
               onClick={() => setShowModeMenu((v) => !v)}
@@ -655,8 +655,7 @@ export function ChatComposer({
             {showModeMenu && (
               <div
                 className={classNames(
-                  "absolute bottom-full right-0 mb-2 z-40 w-56 sm:w-64 rounded-2xl border p-1.5 shadow-2xl backdrop-blur-xl pointer-events-auto",
-                  isDark ? "bg-slate-900/95 border-white/10" : "bg-white/95 border-black/10"
+                  "glass-panel absolute bottom-full right-0 mb-2 z-40 w-56 sm:w-64 rounded-2xl border p-1.5 shadow-2xl pointer-events-auto"
                 )}
                 role="menu"
                 aria-label={t('messageTypeOptions')}
@@ -728,8 +727,7 @@ export function ChatComposer({
           {showMentionMenu && mentionSuggestions.length > 0 && (
             <div
               className={classNames(
-                "absolute bottom-full left-0 mb-3 w-64 max-h-60 overflow-auto rounded-2xl border shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-200",
-                isDark ? "border-white/10 bg-slate-900 backdrop-blur-xl" : "border-black/5 bg-white backdrop-blur-xl"
+                "glass-panel absolute bottom-full left-0 mb-3 w-64 max-h-60 overflow-auto scrollbar-subtle rounded-2xl border shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-200"
               )}
               role="listbox"
             >

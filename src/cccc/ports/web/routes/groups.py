@@ -21,6 +21,7 @@ from ....kernel.prompt_files import (
     read_group_prompt_file,
     write_group_prompt_file,
 )
+from ....kernel.access_tokens import list_access_tokens
 from ....util.conv import coerce_bool
 from ....util.fs import atomic_write_text
 from ..schemas import (
@@ -50,6 +51,15 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     # --- group-scoped router ---
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}", dependencies=[Depends(require_group)])
+
+    def _request_access_token(request: Request) -> str:
+        auth = str(request.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return str(auth[7:] or "").strip()
+        cookie_token = str(request.cookies.get("cccc_access_token") or "").strip()
+        if cookie_token:
+            return cookie_token
+        return str(request.query_params.get("token") or "").strip()
 
     # ------------------------------------------------------------------ #
     # Global routes
@@ -662,7 +672,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "nudge_digest_min_interval_seconds": _safe_int(automation.get("nudge_digest_min_interval_seconds", 120), default=120, min_value=0),
                     "nudge_max_repeats_per_obligation": _safe_int(automation.get("nudge_max_repeats_per_obligation", 3), default=3, min_value=0),
                     "nudge_escalate_after_repeats": _safe_int(automation.get("nudge_escalate_after_repeats", 2), default=2, min_value=0),
-                    "actor_idle_timeout_seconds": _safe_int(automation.get("actor_idle_timeout_seconds", 600), default=600, min_value=0),
+                    "actor_idle_timeout_seconds": _safe_int(automation.get("actor_idle_timeout_seconds", 0), default=0, min_value=0),
                     "keepalive_delay_seconds": _safe_int(automation.get("keepalive_delay_seconds", 120), default=120, min_value=0),
                     "keepalive_max_per_actor": _safe_int(automation.get("keepalive_max_per_actor", 3), default=3, min_value=0),
                     "silence_timeout_seconds": _safe_int(automation.get("silence_timeout_seconds", 0), default=0, min_value=0),
@@ -674,9 +684,23 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
                     "terminal_transcript_notify_lines": _safe_int(tt.get("notify_lines", 20), default=20, min_value=1, max_value=80),
                     "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
+                    "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
                 }
             }
         }
+
+    @group_router.get("/desktop_pet/launch_token")
+    async def group_desktop_pet_launch_token(request: Request, group_id: str) -> Dict[str, Any]:
+        token = _request_access_token(request)
+        if not token:
+            # Empty password mode: no tokens configured → allow with empty token
+            if not list_access_tokens():
+                return {"ok": True, "result": {"token": ""}}
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "permission_denied", "message": "authentication required", "details": {}},
+            )
+        return {"ok": True, "result": {"token": token}}
 
     @group_router.put("/settings")
     async def group_settings_update(group_id: str, req: GroupSettingsRequest) -> Dict[str, Any]:
@@ -725,6 +749,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         if req.panorama_enabled is not None:
             patch["panorama_enabled"] = bool(req.panorama_enabled)
+        if req.desktop_pet_enabled is not None:
+            patch["desktop_pet_enabled"] = bool(req.desktop_pet_enabled)
 
         if not patch:
             return {"ok": True, "result": {"message": "no changes"}}

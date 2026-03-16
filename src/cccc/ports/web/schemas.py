@@ -173,6 +173,7 @@ class GroupSettingsRequest(BaseModel):
 
     # Features
     panorama_enabled: Optional[bool] = None
+    desktop_pet_enabled: Optional[bool] = None
 
     by: str = Field(default="user")
 

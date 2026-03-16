@@ -333,16 +333,21 @@ export function AppModals({
   }, [modals.addActor, editingActor]);
 
   // Handlers
-  const handleUpdateSettings = async (settings: Partial<GroupSettings>) => {
-    if (!selectedGroupId) return;
+  const handleUpdateSettings = async (settings: Partial<GroupSettings>): Promise<boolean> => {
+    if (!selectedGroupId) return false;
     setBusy("settings-update");
     try {
       const resp = await api.updateSettings(selectedGroupId, settings);
-      if (!resp.ok) showError(`${resp.error.code}: ${resp.error.message}`);
+      if (!resp.ok) {
+        const msg = `${resp.error.code}: ${resp.error.message}`;
+        showError(msg);
+        return false;
+      }
       const settingsResp = await api.fetchSettings(selectedGroupId);
       if (settingsResp.ok && settingsResp.result.settings) {
         setGroupSettings(settingsResp.result.settings);
       }
+      return true;
     } finally {
       setBusy("");
     }

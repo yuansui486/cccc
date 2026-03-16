@@ -43,7 +43,7 @@ When a group appears stuck:
 2. Check group state (`active/idle/paused/stopped`).
 3. Check actor runtime status.
 4. Check message obligations (reply-required/attention ack).
-5. Check automation and delivery throttling.
+5. Check automation and delivery policy.
 
 Useful commands:
 

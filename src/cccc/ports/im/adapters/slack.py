@@ -296,8 +296,10 @@ class SlackAdapter(IMAdapter):
         filename: str,
         caption: str = "",
         thread_id: Optional[int] = None,
+        mention_user_ids: Optional[List[str]] = None,
     ) -> bool:
         _ = thread_id  # Slack threads not wired yet (future work).
+        _ = mention_user_ids
         if not self._connected or not self._web_client:
             return False
 

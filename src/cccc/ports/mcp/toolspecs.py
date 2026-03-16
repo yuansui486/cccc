@@ -437,7 +437,7 @@ MCP_TOOLS = [
                 },
                 "force_reauth": {
                     "type": "boolean",
-                    "description": "Only for provider_auth/start. Skip saved credential reuse and clear the auth browser profile first.",
+                    "description": "Only for provider_auth/start. Skip saved credential reuse and start with a fresh auth browser profile.",
                 },
                 "remote_space_id": {"type": "string"},
                 "kind": {"type": "string"},

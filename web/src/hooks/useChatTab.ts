@@ -90,7 +90,7 @@ export function useChatTab({
   const { setRecipientsModal, setRelayModal, openModal } = useModalStore();
   const { setNewActorRole } = useFormStore();
 
-  // Outbox (optimistic pending messages) — stable selector, no new array allocation
+  // Outbox (optimistic pending messages) — stable selector, no new array allocation.
   const outboxEntries = useChatOutboxStore(
     useCallback((s) => selectOutboxEntries(s, selectedGroupId), [selectedGroupId])
   );
@@ -101,7 +101,7 @@ export function useChatTab({
 
   // Valid recipient tokens
   const validRecipientSet = useMemo(() => {
-    const out = new Set<string>(["@all", "@foreman", "@peers"]);
+    const out = new Set<string>(["@all", "@foreman", "@peers", "@user", "user"]);
     for (const a of recipientActors) {
       const id = String(a.id || "").trim();
       if (id) out.add(id);
@@ -115,21 +115,22 @@ export function useChatTab({
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    const filtered = raw.filter((t) => t !== "user" && t !== "@user" && t !== "@");
     const out: string[] = [];
     const seen = new Set<string>();
-    for (const t of filtered) {
-      if (!validRecipientSet.has(t)) continue;
-      if (seen.has(t)) continue;
-      seen.add(t);
-      out.push(t);
+    for (const token of raw) {
+      if (token === "@") continue;
+      const normalized = token === "user" ? "@user" : token;
+      if (!validRecipientSet.has(normalized)) continue;
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
     }
     return out;
   }, [toText, validRecipientSet]);
 
   // Mention suggestions
   const mentionSuggestions = useMemo(() => {
-    const base = ["@all", "@foreman", "@peers"];
+    const base = ["@all", "@foreman", "@peers", "@user"];
     const actorIds = recipientActors.map((a) => String(a.id || "")).filter((id) => id);
     return [...base, ...actorIds];
   }, [recipientActors]);
@@ -170,14 +171,10 @@ export function useChatTab({
     return !!chatWindow && String(chatWindow.groupId || "") === String(selectedGroupId || "");
   }, [chatWindow, selectedGroupId]);
 
-  // Filtered live chat messages (canonical + outbox pending merged)
+  // Filtered live chat messages (canonical + optimistic pending merged)
   const liveChatMessages = useMemo(() => {
     const all = events.filter((ev) => ev.kind === "chat.message");
-
-    // Merge outbox pending messages at the end (they are optimistic, not yet confirmed)
-    const pendingEvents = outboxEntries
-      .filter((e) => e.status === "pending")
-      .map((e) => e.event);
+    const pendingEvents = outboxEntries.map((entry) => entry.event);
     const merged = pendingEvents.length > 0 ? [...all, ...pendingEvents] : all;
 
     if (chatFilter === "attention") {
@@ -358,7 +355,8 @@ export function useChatTab({
       return;
     }
 
-    // Optimistic: enqueue to outbox immediately for same-group sends
+    // Optimistic: enqueue to outbox immediately for same-group sends.
+    // If the request fails, we remove the pending entry and restore the composer.
     if (!isCrossGroup) {
       const optimisticEvent: LedgerEvent = {
         id: localId,
@@ -416,7 +414,7 @@ export function useChatTab({
         }
       }
       if (!resp.ok) {
-        // Remove optimistic entry and restore composer
+        // Pending-only outbox: failed sends roll back to the composer.
         removeOutbox(selectedGroupId, localId);
         restoreComposerState();
         showError(`${resp.error.code}: ${resp.error.message}`);
@@ -443,6 +441,7 @@ export function useChatTab({
       onMessageSent?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : "send failed";
+      // Pending-only outbox: failed sends roll back to the composer.
       removeOutbox(selectedGroupId, localId);
       restoreComposerState();
       showError(message);

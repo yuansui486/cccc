@@ -61,7 +61,7 @@ def handle_group_settings_update(args: Dict[str, Any]) -> DaemonResponse:
         "terminal_transcript_notify_tail",
         "terminal_transcript_notify_lines",
     }
-    feature_keys = {"panorama_enabled"}
+    feature_keys = {"panorama_enabled", "desktop_pet_enabled"}
     allowed = messaging_keys | delivery_keys | automation_keys | terminal_transcript_keys | feature_keys
 
     unknown = set(patch.keys()) - allowed
@@ -118,6 +118,8 @@ def handle_group_settings_update(args: Dict[str, Any]) -> DaemonResponse:
             features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
             if "panorama_enabled" in features_patch:
                 features["panorama_enabled"] = coerce_bool(features_patch["panorama_enabled"], default=False)
+            if "desktop_pet_enabled" in features_patch:
+                features["desktop_pet_enabled"] = coerce_bool(features_patch["desktop_pet_enabled"], default=False)
             group.doc["features"] = features
 
         group.save()
@@ -158,8 +160,8 @@ def handle_group_settings_update(args: Dict[str, Any]) -> DaemonResponse:
             min_value=0,
         ),
         "actor_idle_timeout_seconds": _safe_int(
-            automation.get("actor_idle_timeout_seconds", 600),
-            default=600,
+            automation.get("actor_idle_timeout_seconds", 0),
+            default=0,
             min_value=0,
         ),
         "keepalive_delay_seconds": _safe_int(automation.get("keepalive_delay_seconds", 120), default=120, min_value=0),
@@ -182,6 +184,7 @@ def handle_group_settings_update(args: Dict[str, Any]) -> DaemonResponse:
             max_value=80,
         ),
         "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
+        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
     }
 
     event = append_event(

@@ -359,9 +359,6 @@ export type GroupContext = {
   attention?: ContextAttention | null;
   board?: ContextBoard | null;
   tasks_summary?: GroupTasksSummary;
-  panorama?: {
-    mermaid?: string | null;
-  };
   meta?: {
     project_status?: string | null;
     [key: string]: unknown;
@@ -397,7 +394,7 @@ export type GroupSettings = {
   terminal_transcript_notify_tail: boolean;
   terminal_transcript_notify_lines: number;
 
-  panorama_enabled: boolean;
+  desktop_pet_enabled: boolean;
 };
 
 export type RemoteAccessState = {

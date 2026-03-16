@@ -13,7 +13,7 @@ import {
   isoToLocalDatetimeInput,
   parseCronToPreset,
 } from "./automationUtils";
-import { cardClass } from "./types";
+import { cardClass, dangerButtonClass, secondaryButtonClass } from "./types";
 
 interface AutomationRuleListProps {
   isDark: boolean;
@@ -63,7 +63,7 @@ export function AutomationRuleList({
         </label>
         <button
           type="button"
-          className="glass-btn px-2 py-1.5 rounded-md text-[11px] min-h-[32px] font-medium transition-colors text-[var(--color-text-secondary)] disabled:opacity-50"
+          className={secondaryButtonClass("sm")}
           onClick={onClearCompleted}
           disabled={rulesBusy || completedOneTimeRuleIds.length === 0}
           title={t("ruleList.clearCompletedTitle")}
@@ -160,14 +160,14 @@ export function AutomationRuleList({
                 </label>
                 <button
                   type="button"
-                  className="glass-btn px-3 py-2 rounded-lg text-xs min-h-[36px] transition-colors text-[var(--color-text-secondary)]"
+                  className={secondaryButtonClass("sm")}
                   onClick={() => onEditRule(ruleId)}
                 >
                   {t("common:edit")}
                 </button>
                 <button
                   type="button"
-                  className="glass-btn px-3 py-2 rounded-lg text-xs min-h-[36px] transition-colors text-[var(--color-text-secondary)]"
+                  className={dangerButtonClass("sm")}
                   onClick={() => onDeleteRule(ruleId)}
                   title={t("automation.deleteRuleTitle")}
                 >

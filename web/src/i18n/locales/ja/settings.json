@@ -258,11 +258,11 @@
   },
   "automation": {
     "title": "自動化",
-    "description": "自動化ルールとポリシーを構成します。設定は次の場所に保存されます",
+    "description": "組み込み自動化とスケジュール済みルールを構成します。設定は次の場所に保存されます",
     "configPathFallback": "CCCC_HOME/.../group.yaml",
     "openFromGroup": "グループからこのタブを開きます。",
-    "rulesTitle": "自動化ルール",
-    "rulesDescription": "トリガー条件とアクション（通知、グループ状態、エージェント制御）を定義します。",
+    "rulesTitle": "ルールとスニペット",
+    "rulesDescription": "スケジュールされたリマインダー、操作アクション、再利用可能なメッセージスニペットを定義します。",
     "newRule": "新しいルール",
     "snippets": "スニペット",
     "resetToDefaults": "デフォルトにリセット",
@@ -278,13 +278,13 @@
     "deleteSnippetConfirm": "スニペット「{{id}}」を削除しますか？",
     "snippetInvalid": "スニペット名が無効です。英数字/_/-（最大64文字）を使用してください。",
     "snippetExists": "スニペットはすでに存在します： {{id}}",
-    "editHint": "編集を押すとモーダルで詳細設定を開きます。メッセージスニペットは「スニペット」で管理します。",
-    "draftHint": "変更はドラフトに即時反映されます。「自動化ルールの保存」をクリックして永続化してください。",
+    "editHint": "編集ではルールの詳細をモーダルで開きます。スニペットもこのセクションで管理し、複数のルールから再利用できます。",
+    "draftHint": "変更はドラフトに即時反映されます。「ルールとスニペットの保存」をクリックして永続化してください。",
     "saving": "保存中…",
     "createRuleTitle": "ルールを作成する",
     "manageSnippetsTitle": "スニペットを管理",
     "resetTitle": "ルールとスニペットをデフォルトに戻す",
-    "saveTitle": "自動化ルールとスニペットを保存",
+    "saveTitle": "ルールとスニペットを保存",
     "operationalActionsHint": "「グループステータスの設定」および「エージェントランタイムの制御」は、1 回限りのスケジュールでのみ使用できます。",
     "createSnippetFirst": "「スニペット」を選択する前に、少なくとも1つ作成してください。",
     "operationalActionsOnly": "操作アクションは 1 回限りのスケジュールでのみ使用できます。",
@@ -349,8 +349,8 @@
     "removeRegistryConfirm": "欠損しているグループエントリを {{count}} 件レジストリから削除しますか？"
   },
   "policies": {
-    "title": "エンジンポリシー",
-    "description": "組み込みのフォローアップとアラート。値を調整し、「ポリシーの保存」をクリックします。",
+    "title": "組み込み自動化",
+    "description": "システム管理のフォローアップと協調ヘルスループです。値を調整して保存します。",
     "unreadFollowup": "未読のフォローアップ (秒)",
     "unreadFollowupHelp": "未読メッセージが長時間放置されている場合は、メンバーに通知します。",
     "needReplyFollowup": "返信のフォローアップが必要 (秒)",
@@ -379,8 +379,8 @@
     "actorIdleAlertHelp": "エージェントがこの時間非アクティブなら Foreman に通知します。",
     "groupSilenceCheck": "静黙から idle へのタイムアウト (秒)",
     "groupSilenceCheckHelp": "2 段階のヒューリスティックです。1 回目のタイムアウトで Foreman に確認を促し、連続 2 回目のタイムアウトでグループを idle にします。0 で無効化します。",
-    "savePolicies": "ポリシーの保存",
-    "savePoliciesTitle": "エンジンポリシー設定の保存"
+    "savePolicies": "組み込み自動化を保存",
+    "savePoliciesTitle": "組み込み自動化設定を保存"
   },
   "ruleEditor": {
     "editRule": "ルールの編集：",
@@ -468,13 +468,9 @@
   },
   "delivery": {
     "title": "メッセージ配信",
-    "description": "メッセージとシステム通知を PTY ランタイムへ注入する方法を制御します。",
-    "throttleTitle": "スロットルとポリシー",
-    "throttleDescription": "ペーシングと既読カーソルの動作を調整します。無効にするには値を 0 に設定します。",
-    "deliveryInterval": "配信間隔 (秒)",
-    "deliveryIntervalHelp": "メッセージ配信間の最小遅延 (スロットル)。",
-    "autoMarkRead": "配信時に自動的に既読にする",
-    "autoMarkReadHelp": "メッセージが PTY に正常に配信された後、既読カーソルを自動的に進めます。",
+    "description": "PTY 配信が成功した後の挙動を設定します。",
+    "autoMarkRead": "配信済みメッセージを既読にする",
+    "autoMarkReadHelp": "有効にすると、PTY への配信成功時に既読カーソルを自動で進めます。無効にすると、明示的に既読化されるまで未読のまま残ります。",
     "saveDelivery": "配信設定の保存"
   },
   "messaging": {

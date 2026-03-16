@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
-import { addCoordinationNote, apiJson, contextSync, updateCoordinationBrief, updateCoordinationTask } from "../services/api";
+import { addCoordinationNote, apiJson, contextSync, fetchDesktopPetLaunchToken, updateCoordinationBrief, updateCoordinationTask } from "../services/api";
 import type {
   AgentState,
   CoordinationBrief,
@@ -18,6 +18,7 @@ import type {
 } from "../types";
 import { formatFullTime, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
+import { buildDesktopPetDaemonUrl, buildDesktopPetDownloadUrl, buildDesktopPetLaunchUrl } from "../utils/desktopPetLaunch";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { ModalFrame } from "./modals/ModalFrame";
@@ -30,7 +31,7 @@ interface ContextModalProps {
   onRefreshContext: () => Promise<void>;
   isDark: boolean;
   settings?: GroupSettings | null;
-  onUpdateSettings?: (settings: Partial<GroupSettings>) => Promise<void>;
+  onUpdateSettings?: (settings: Partial<GroupSettings>) => Promise<boolean | void>;
 }
 
 interface BriefDraft {
@@ -600,7 +601,7 @@ export function ContextModal({
   const tr = useCallback((key: string, fallback: string, vars?: Record<string, unknown>) =>
     String(t(key as never, { defaultValue: fallback, ...(vars || {}) } as never)), [t]);
 
-  const [activeView, setActiveView] = useState<"coordination" | "agents">("coordination");
+  const [activeView, setActiveView] = useState<"coordination" | "agents" | "desktop_pet">("coordination");
   const [steeringTab, setSteeringTab] = useState<"summary" | "project" | "log">("summary");
   const [taskFilter, setTaskFilter] = useState<"all" | "blocked" | "waiting_user" | "handoff" | "unassigned">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("__all__");
@@ -614,7 +615,8 @@ export function ContextModal({
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [viewBusy, setViewBusy] = useState(false);
-  const [mobileViewMenuOpen, setMobileViewMenuOpen] = useState(false);
+  const [desktopPetLaunchBusy, setDesktopPetLaunchBusy] = useState(false);
+  const [desktopPetLaunchError, setDesktopPetLaunchError] = useState<React.ReactNode>("");
 
   const [projectMd, setProjectMd] = useState<ProjectMdInfo | null>(null);
   const [projectBusy, setProjectBusy] = useState(false);
@@ -630,7 +632,60 @@ export function ContextModal({
   const [activityError, setActivityError] = useState("");
 
   const brief = context?.coordination?.brief || null;
-  const panoramaEnabled = Boolean(settings?.panorama_enabled);
+  const desktopPetEnabled = Boolean(settings?.desktop_pet_enabled);
+  const desktopPetLaunchPreviewUrl = useMemo(
+    () => buildDesktopPetLaunchUrl({
+      daemonUrl: buildDesktopPetDaemonUrl(),
+      token: "",
+      groupId,
+    }),
+    [groupId]
+  );
+
+  const resolveDesktopPetLaunchToken = useCallback(async (): Promise<string | null> => {
+    const launchResp = await fetchDesktopPetLaunchToken(groupId);
+    if (!launchResp.ok) {
+      const raw = launchResp.error?.message || "";
+      const code = launchResp.error?.code || "";
+      const combined = `${code} ${raw}`;
+      const isNotFound = /not.?found/i.test(combined) || /PARSE_ERROR|EMPTY_RESPONSE/i.test(code) || /returned 4\d\d/i.test(raw);
+      const msg = isNotFound
+        ? tr("context.desktopPetLaunchNotFound", "The daemon does not support Desktop Pet yet. Please upgrade to the latest version.")
+        : raw || tr("context.desktopPetLaunchTokenFailed", "Failed to load access tokens.");
+      throw new Error(msg);
+    }
+    // Empty string token is valid in empty-password mode
+    const token = launchResp.result?.token;
+    return typeof token === "string" ? token : null;
+  }, [groupId, tr]);
+
+  const handlePrepareDesktopPetLaunch = useCallback(async () => {
+    setDesktopPetLaunchBusy(true);
+    setDesktopPetLaunchError("");
+    try {
+      const token = await resolveDesktopPetLaunchToken();
+      if (token === null) {
+        setDesktopPetLaunchError(tr("context.desktopPetLaunchNoToken", "No access token is available for this group."));
+        return;
+      }
+
+      const launchUrl = buildDesktopPetLaunchUrl({
+        daemonUrl: buildDesktopPetDaemonUrl(),
+        token,
+        groupId,
+      });
+
+      window.location.href = launchUrl;
+    } catch (error) {
+      setDesktopPetLaunchError(
+        error instanceof Error
+          ? error.message
+          : tr("context.desktopPetLaunchBlocked", "The browser blocked the Desktop Pet launch request.")
+      );
+    } finally {
+      setDesktopPetLaunchBusy(false);
+    }
+  }, [resolveDesktopPetLaunchToken, tr]);
   const tasks = useMemo(() => (Array.isArray(context?.coordination?.tasks) ? context.coordination.tasks : []), [context]);
   const agents = useMemo(() => (Array.isArray(context?.agent_states) ? context.agent_states : []), [context]);
   const board = useMemo(() => buildBoard(tasks, context?.board), [context?.board, tasks]);
@@ -767,7 +822,6 @@ export function ContextModal({
     setHandoffDraft(emptyNoteDraft());
     setActivityBusyKind(null);
     setActivityError("");
-    setMobileViewMenuOpen(false);
   }, [groupId, isOpen]);
 
   useEffect(() => {
@@ -1101,8 +1155,8 @@ export function ContextModal({
     }
   }, [confirmDiscardTaskChanges, loadProjectMd]);
 
-  const handleSwitchActiveView = useCallback((next: "coordination" | "agents") => {
-    if (next === "agents") {
+  const handleSwitchActiveView = useCallback((next: "coordination" | "agents" | "desktop_pet") => {
+    if (next !== "coordination") {
       if (!confirmDiscardTaskChanges()) return;
       setTaskEditorMode("none");
       setSelectedTaskId("");
@@ -1129,16 +1183,19 @@ export function ContextModal({
 
   const { modalRef } = useModalA11y(isOpen, handleModalClose);
 
-  const handleTogglePanorama = useCallback(async (enabled: boolean) => {
+  const handleToggleDesktopPet = useCallback(async (enabled: boolean) => {
     if (!onUpdateSettings) return;
     setViewBusy(true);
     try {
-      await onUpdateSettings({ panorama_enabled: enabled });
-      setMobileViewMenuOpen(false);
+      const ok = await onUpdateSettings({ desktop_pet_enabled: enabled });
+      if (ok === false) return; // settings update failed — don't proceed with launch
+      if (enabled) {
+        await handlePrepareDesktopPetLaunch();
+      }
     } finally {
       setViewBusy(false);
     }
-  }, [onUpdateSettings]);
+  }, [handlePrepareDesktopPetLaunch, onUpdateSettings]);
 
   const handleSaveBrief = async () => {
     if (!groupId) return;
@@ -1678,6 +1735,94 @@ export function ContextModal({
     );
   };
 
+  const renderDesktopPetView = () => {
+    if (!onUpdateSettings) {
+      return (
+        <section className={classNames(surfaceClass, "p-4")}>
+          <div className={classNames("text-sm", mutedTextClass)}>
+            {tr("context.desktopPetUnavailable", "Desktop Pet settings are unavailable in this context.")}
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <section className={classNames(surfaceClass, "p-4")}>
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className={classNames("flex items-center gap-2 text-lg font-semibold", "text-[var(--color-text-primary)]")}>
+              {tr("context.desktopPetTitle", "Desktop Pet")}
+              <span className="rounded-md bg-cyan-500/15 px-2 py-0.5 text-xs font-semibold leading-none text-cyan-400">Beta</span>
+            </div>
+            <div className={classNames("mt-1 text-sm", subtleTextClass)}>
+              {tr("context.desktopPetHint", "Show a pixel cat on your desktop that reflects this team's status.")}
+            </div>
+          </div>
+
+          {desktopPetLaunchError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{desktopPetLaunchError}</div> : null}
+
+          <div className={classNames("flex flex-col gap-4 rounded-2xl border p-4", "glass-panel")}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className={classNames("text-sm font-medium", "text-[var(--color-text-primary)]")}>
+                  {tr("context.desktopPetSwitchLabel", "Enable Desktop Pet")}
+                </div>
+                <div className={classNames("mt-1 text-xs", mutedTextClass)}>
+                  {tr("context.desktopPetTabHint", "Each enabled group opens its own Desktop Pet window.")}
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={desktopPetEnabled}
+                aria-label={tr("context.desktopPetSwitchLabel", "Enable Desktop Pet")}
+                onClick={() => void handleToggleDesktopPet(!desktopPetEnabled)}
+                disabled={viewBusy}
+                className={switchTrackClass(desktopPetEnabled)}
+              >
+                <span className={switchThumbClass(desktopPetEnabled)} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className={classNames("text-xs", mutedTextClass)}>
+                {tr("context.desktopPetLaunchHint", "Launch opens the Desktop Pet app for this group using your Web access token.")}
+              </div>
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const dl = buildDesktopPetDownloadUrl();
+                  if (!dl) return null;
+                  const label = tr("context.desktopPetDownloadFor", `Download for ${dl.label}`, { platform: dl.label });
+                  return (
+                    <a
+                      href={dl.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={classNames("text-xs underline", mutedTextClass)}
+                    >
+                      {label}
+                    </a>
+                  );
+                })()}
+                <button
+                  type="button"
+                  className={buttonSecondaryClass}
+                  title={desktopPetLaunchPreviewUrl}
+                  disabled={desktopPetLaunchBusy}
+                  onClick={() => void handlePrepareDesktopPetLaunch()}
+                >
+                  {desktopPetLaunchBusy
+                    ? tr("context.desktopPetLaunchLoading", "Preparing…")
+                    : tr("context.desktopPetLaunch", "Launch")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   if (!isOpen) return null;
 
   const viewButtonClass = (active: boolean) => classNames(
@@ -1790,59 +1935,15 @@ export function ContextModal({
             <div className={classNames("inline-flex w-fit rounded-2xl border p-1", isDark ? "border-slate-800 bg-slate-950/70" : "border-gray-200 bg-gray-100/80")}>
               <button type="button" onClick={() => handleSwitchActiveView("coordination")} className={viewButtonClass(activeView === "coordination")}>{tr("context.coordination", "Coordination")}</button>
               <button type="button" onClick={() => handleSwitchActiveView("agents")} className={viewButtonClass(activeView === "agents")}>{tr("context.agents", "Agents")}</button>
+              <button type="button" onClick={() => handleSwitchActiveView("desktop_pet")} className={viewButtonClass(activeView === "desktop_pet")}>{tr("context.desktopPetTab", "Desktop Pet")}<span className="ml-1.5 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-400">Beta</span></button>
             </div>
-
-            {onUpdateSettings ? (
-              <>
-                <div className="hidden sm:flex items-center gap-3">
-                  <div className="min-w-0 text-right">
-                    <div className={classNames("text-sm font-medium", isDark ? "text-slate-200" : "text-gray-800")}>{tr("context.panoramaToggle", "Panorama 3D")}</div>
-                    <div className={classNames("mt-1 text-xs", mutedTextClass)}>{tr("context.panoramaHint", "Show the Panorama tab for this group.")}</div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={panoramaEnabled}
-                    aria-label={tr("context.panoramaToggle", "Panorama 3D")}
-                    onClick={() => void handleTogglePanorama(!panoramaEnabled)}
-                    disabled={viewBusy}
-                    className={switchTrackClass(panoramaEnabled)}
-                  >
-                    <span className={switchThumbClass(panoramaEnabled)} />
-                  </button>
-                </div>
-
-                <div className="sm:hidden self-end relative">
-                  <button type="button" onClick={() => setMobileViewMenuOpen((open) => !open)} className={buttonSecondaryClass}>
-                    {tr("context.viewOptions", "View")}
-                  </button>
-                  {mobileViewMenuOpen ? (
-                    <div className={classNames("absolute right-0 z-20 mt-2 w-64 rounded-2xl border p-3 shadow-lg", isDark ? "border-slate-800 bg-slate-950 text-slate-200" : "border-gray-200 bg-white text-gray-900")}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium">{tr("context.panoramaToggle", "Panorama 3D")}</div>
-                          <div className={classNames("mt-1 text-xs", mutedTextClass)}>{tr("context.panoramaHint", "Show the Panorama tab for this group.")}</div>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={panoramaEnabled}
-                          aria-label={tr("context.panoramaToggle", "Panorama 3D")}
-                          onClick={() => void handleTogglePanorama(!panoramaEnabled)}
-                          disabled={viewBusy}
-                          className={switchTrackClass(panoramaEnabled)}
-                        >
-                          <span className={switchThumbClass(panoramaEnabled)} />
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
           </div>
 
-          {activeView === "coordination" ? renderCoordinationView() : renderAgentsView()}
+          {activeView === "coordination"
+            ? renderCoordinationView()
+            : activeView === "agents"
+              ? renderAgentsView()
+              : renderDesktopPetView()}
         </div>
       </div>
     </ModalFrame>
