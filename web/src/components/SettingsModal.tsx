@@ -44,7 +44,7 @@ export function SettingsModal({
   const { t } = useTranslation("settings");
   const { modalRef } = useModalA11y(isOpen, onClose);
   const [scope, setScope] = useState<SettingsScope>(groupId ? "group" : "global");
-  const [groupTab, setGroupTab] = useState<GroupTabId>("automation");
+  const [groupTab, setGroupTab] = useState<GroupTabId>("guidance");
   const [globalTab, setGlobalTab] = useState<GlobalTabId>("actorProfiles");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
