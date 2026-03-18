@@ -582,8 +582,8 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             remoteUrl: isLoopbackHost(effectiveHost)
               ? null
               : httpUrl(isWildcardHost(effectiveHost) ? "<your-lan-ip>" : effectiveHost, effectivePort),
-            restartCommand: "cccc",
-            standaloneCommand: "cccc web",
+            restartCommand: "onecolleague",
+            standaloneCommand: "onecolleague web",
           });
           pushHint(t("webAccess.restartRequired"));
         }

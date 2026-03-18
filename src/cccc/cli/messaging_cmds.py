@@ -79,7 +79,7 @@ def cmd_send(args: argparse.Namespace) -> int:
                     "error": {
                         "code": "scope_not_attached",
                         "message": f"scope not attached: {scope_key}",
-                        "details": {"hint": "cccc attach <path> --group <id>"},
+                        "details": {"hint": "onecolleague attach <path> --group <id>"},
                     },
                 }
             )

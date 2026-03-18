@@ -190,7 +190,7 @@ def cmd_group_delete(args: argparse.Namespace) -> int:
         return 2
 
     if not _ensure_daemon_running():
-        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}})
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "daemon unavailable"}})
         return 2
     resp = call_daemon({"op": "group_delete", "args": {"group_id": group_id, "by": by}})
     _print_json(resp)
@@ -215,7 +215,7 @@ def cmd_group_use(args: argparse.Namespace) -> int:
         _print_json(
             {
                 "ok": False,
-                "error": {"code": "scope_not_attached", "message": str(e), "details": {"hint": "cccc attach <path> --group <id>"}},
+                "error": {"code": "scope_not_attached", "message": str(e), "details": {"hint": "onecolleague attach <path> --group <id>"}},
             }
         )
         return 2
@@ -238,7 +238,7 @@ def cmd_group_start(args: argparse.Namespace) -> int:
     by = str(args.by or "user").strip()
 
     if not _ensure_daemon_running():
-        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}})
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "daemon unavailable"}})
         return 2
     resp = call_daemon({"op": "group_start", "args": {"group_id": group_id, "by": by}})
     _print_json(resp)
@@ -252,7 +252,7 @@ def cmd_group_stop(args: argparse.Namespace) -> int:
     by = str(args.by or "user").strip()
 
     if not _ensure_daemon_running():
-        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}})
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "daemon unavailable"}})
         return 2
     resp = call_daemon({"op": "group_stop", "args": {"group_id": group_id, "by": by}})
     _print_json(resp)
@@ -268,7 +268,7 @@ def cmd_group_set_state(args: argparse.Namespace) -> int:
     by = str(args.by or "user").strip()
 
     if not _ensure_daemon_running():
-        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}})
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "daemon unavailable"}})
         return 2
     if state == "stopped":
         resp = call_daemon({"op": "group_stop", "args": {"group_id": group_id, "by": by}})

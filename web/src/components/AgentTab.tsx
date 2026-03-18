@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Actor, AgentState, getRuntimeColor, RUNTIME_INFO } from "../types";
 import { getTerminalTheme } from "../hooks/useTheme";
 import { classNames } from "../utils/classNames";
+import { replaceRuntimeBrandingForDisplay } from "../utils/runtimeDisplayText";
 import { formatFullTime, formatTime } from "../utils/time";
 import { useObservabilityStore } from "../stores";
 import { withAuthToken, fetchTerminalTail } from "../services/api";
@@ -119,7 +120,7 @@ export function AgentTab({
       .then((resp) => {
         if (cancelled) return;
         if (resp.ok && resp.result.text?.trim()) {
-          setStoppedTerminalTail(resp.result.text.trim());
+          setStoppedTerminalTail(replaceRuntimeBrandingForDisplay(resp.result.text.trim()));
         }
       })
       .catch(() => {
@@ -409,7 +410,7 @@ export function AgentTab({
         outputFilterTailRef.current = tail;
         const safe = tail ? replaced.slice(0, -tail.length) : replaced;
         try {
-          term.write(safe);
+          term.write(replaceRuntimeBrandingForDisplay(safe));
         } catch (err) {
           console.error("terminal write failed", err);
         }

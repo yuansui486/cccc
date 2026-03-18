@@ -224,7 +224,7 @@ def handle_actor_restart(
             return _error(
                 "missing_project_root",
                 "missing project root for group (no active scope)",
-                details={"hint": "Attach a project root first (e.g. cccc attach <path> --group <id>)"},
+                details={"hint": "Attach a project root first (e.g. onecolleague attach <path> --group <id>)"},
             )
         scope_key = str(actor.get("default_scope_key") or group_scope_key).strip()
         url = find_scope_url(group, scope_key)
@@ -236,7 +236,7 @@ def handle_actor_restart(
                     "group_id": group.group_id,
                     "actor_id": actor_id,
                     "scope_key": scope_key,
-                    "hint": "Attach this scope to the group (cccc attach <path> --group <id>)",
+                    "hint": "Attach this scope to the group (onecolleague attach <path> --group <id>)",
                 },
             )
         cwd = Path(url).expanduser().resolve()
@@ -249,7 +249,7 @@ def handle_actor_restart(
                     "actor_id": actor_id,
                     "scope_key": scope_key,
                     "path": str(cwd),
-                    "hint": "Re-attach a valid project root (cccc attach <path> --group <id>)",
+                    "hint": "Re-attach a valid project root (onecolleague attach <path> --group <id>)",
                 },
             )
         cmd = actor.get("command") if isinstance(actor.get("command"), list) else []

@@ -411,8 +411,8 @@ export function AddActorModal({
                             <div className="mt-1">{t("customCommandHint").replace(/<1>|<\/1>/g, "")}</div>
                             <div className="mt-1">
                               {t("configureMcpStdio")}{" "}
-                              <code className="px-1 rounded bg-amber-500/15">cccc</code> {t("thatRuns")}{" "}
-                              <code className="px-1 rounded bg-amber-500/15">cccc mcp</code>.
+                              <code className="px-1 rounded bg-amber-500/15">onecolleague</code> {t("thatRuns")}{" "}
+                              <code className="px-1 rounded bg-amber-500/15">onecolleague mcp</code>.
                             </div>
                           </>
                         ) : null}

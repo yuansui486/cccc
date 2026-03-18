@@ -46,6 +46,7 @@ Repository = "https://github.com/ChesterRa/cccc"
 Issues = "https://github.com/ChesterRa/cccc/issues"
 
 [project.scripts]
+onecolleague = "cccc.cli:main"
 cccc = "cccc.cli:main"
 ccccd = "cccc.daemon_main:main"
 

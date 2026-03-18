@@ -728,7 +728,7 @@ def project_info(*, group_id: str) -> Dict[str, Any]:
             "found": False,
             "path": None,
             "content": None,
-            "error": "No scope attached to group. Use 'cccc attach <path>' first.",
+            "error": "No scope attached to group. Use 'onecolleague attach <path>' first.",
         }
 
     project_md_path = Path(project_root) / "PROJECT.md"

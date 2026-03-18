@@ -284,7 +284,7 @@ def cmd_im_start(args: argparse.Namespace) -> int:
     # Check IM config
     im_config = canonicalize_im_config(group.doc.get("im", {}))
     if not im_config:
-        _print_json({"ok": False, "error": {"code": "no_im_config", "message": "no IM configuration. Run: cccc im set <platform>"}})
+        _print_json({"ok": False, "error": {"code": "no_im_config", "message": "no IM configuration. Run: onecolleague im set <platform>"}})
         return 2
 
     # Persist desired run-state for restart/autostart.

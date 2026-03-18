@@ -151,7 +151,7 @@ def handle_group_use(args: Dict[str, Any]) -> DaemonResponse:
         return _error(
             "scope_not_attached",
             str(e),
-            details={"hint": "attach scope first (cccc attach <path> --group <id>)"},
+            details={"hint": "attach scope first (onecolleague attach <path> --group <id>)"},
         )
     event = append_event(
         group.ledger_path,
