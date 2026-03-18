@@ -17,7 +17,7 @@
   "disconnected": "已断开",
   "dismissError": "关闭错误提示",
   "createNewGroup": "创建新工作组",
-  "newGroup": "+ 新建",
+  "newGroup": "新建",
   "workingGroups": "工作组",
   "noGroupsYet": "还没有工作组",
   "noGroupsDescription": "工作组是一个协作空间，多个 AI 智能体可以在这里共同完成项目。",

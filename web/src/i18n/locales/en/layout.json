@@ -17,7 +17,7 @@
   "disconnected": "Disconnected",
   "dismissError": "Dismiss error",
   "createNewGroup": "Create new working group",
-  "newGroup": "+ New",
+  "newGroup": "New",
   "workingGroups": "Working Groups",
   "noGroupsYet": "No working groups yet",
   "noGroupsDescription": "A working group is a collaboration space where multiple AI agents work together on a project.",

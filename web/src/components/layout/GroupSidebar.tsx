@@ -126,8 +126,8 @@ export function GroupSidebar({
                 {!readOnly && onCreateGroup && (
                   <button
                     className={classNames(
-                      "text-xs px-4 py-2 rounded-xl font-medium transition-all min-h-[36px] glass-btn-accent",
-                        isDark ? "text-gray-300" : "text-gray-800"
+                      "text-[11px] px-3 py-1.5 rounded-lg font-medium transition-all min-h-[32px] glass-btn-accent",
+                      isDark ? "text-gray-300" : "text-gray-800"
                     )}
                     onClick={onCreateGroup}
                     title={t('createNewGroup')}

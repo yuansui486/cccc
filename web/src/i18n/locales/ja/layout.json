@@ -17,7 +17,7 @@
   "disconnected": "接続なし",
   "dismissError": "エラーを閉じる",
   "createNewGroup": "新しい作業グループを作成",
-  "newGroup": "+ 新規",
+  "newGroup": "新規",
   "workingGroups": "作業グループ",
   "noGroupsYet": "まだ作業グループがありません",
   "noGroupsDescription": "作業グループは、複数の AI エージェントがプロジェクトで協働するためのスペースです。",
