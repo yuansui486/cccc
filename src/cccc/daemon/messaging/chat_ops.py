@@ -258,7 +258,7 @@ def handle_send(
             return _error(
                 "scope_not_attached",
                 f"scope not attached: {scope_key}",
-                details={"hint": "onecolleague attach <path> --group <id>"},
+                details={"hint": "cccc attach <path> --group <id>"},
             )
     else:
         scope_key = str(group.doc.get("active_scope_key") or "").strip()

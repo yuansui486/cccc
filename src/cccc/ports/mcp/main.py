@@ -1,5 +1,5 @@
 """
-OneColleague MCP Server — entrypoint
+CCCC MCP Server — entrypoint
 
 Runs in stdio mode for agent runtimes.
 
@@ -7,7 +7,7 @@ Usage:
     python -m cccc.ports.mcp.main
 
 Or via CLI:
-    onecolleague mcp
+    cccc mcp
 """
 
 from __future__ import annotations

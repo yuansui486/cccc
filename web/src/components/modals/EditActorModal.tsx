@@ -675,7 +675,7 @@ export function EditActorModal({
                       <div className="font-medium">{t("manualMcpRequired")}</div>
                       {runtime === "custom" ? (
                         <div className="mt-1">
-                          {t("configureMcpStdio")} <code className="px-1 rounded bg-amber-500/15">onecolleague</code> {t("thatRuns")} <code className="px-1 rounded bg-amber-500/15">onecolleague mcp</code>.
+                          {t("configureMcpStdio")} <code className="px-1 rounded bg-amber-500/15">cccc</code> {t("thatRuns")} <code className="px-1 rounded bg-amber-500/15">cccc mcp</code>.
                         </div>
                       ) : null}
                       {runtime === "custom" ? (

@@ -37,7 +37,7 @@ export function SetupChecklist({
 }: SetupChecklistProps) {
   const isCompact = variant === "compact";
   const { t } = useTranslation('chat');
-  const attachCmd = `onecolleague attach . --group ${selectedGroupId}`;
+  const attachCmd = `cccc attach . --group ${selectedGroupId}`;
 
   // Nothing to show.
   if (!needsScope && !needsActors && !needsStart) {

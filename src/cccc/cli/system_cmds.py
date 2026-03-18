@@ -19,7 +19,7 @@ def cmd_version(_: argparse.Namespace) -> int:
     return 0
 
 def cmd_status(_: argparse.Namespace) -> int:
-    """Show overall OneColleague status: daemon, groups, actors."""
+    """Show overall CCCC status: daemon, groups, actors."""
     from ..kernel.runtime import detect_all_runtimes
     
     home = ensure_home()
@@ -40,8 +40,8 @@ def cmd_status(_: argparse.Namespace) -> int:
     runtimes = detect_all_runtimes(primary_only=False)
     available_runtimes = [r.name for r in runtimes if r.available]
     
-    print("OneColleague Status")
-    print("===================")
+    print(f"CCCC Status")
+    print(f"===========")
     print(f"Version:     {__version__}")
     print(f"Home:        {home}")
     print(f"Daemon:      {'running' if daemon_ok else 'stopped'}")
@@ -80,14 +80,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     from ..kernel.runtime import detect_all_runtimes
     from ..runners.platform_support import pty_support_details
     
-    print("[DOCTOR] OneColleague Environment Check")
+    print("[DOCTOR] CCCC Environment Check")
     print()
     
     # Python version
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
     
-    # OneColleague version
-    print(f"OneColleague: {__version__}")
+    # CCCC version
+    print(f"CCCC: {__version__}")
     
     # CCCC_HOME
     home = ensure_home()
@@ -140,10 +140,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"{available_count} runtime(s) available.")
         print()
         print("Quick start:")
-        print(f"  onecolleague setup --runtime {runtimes[0].name if runtimes[0].available else 'claude'}")
-        print("  onecolleague attach .")
-        print("  onecolleague actor add my-agent --runtime <name>")
-        print("  onecolleague")
+        print(f"  cccc setup --runtime {runtimes[0].name if runtimes[0].available else 'claude'}")
+        print("  cccc attach .")
+        print("  cccc actor add my-agent --runtime <name>")
+        print("  cccc")
     
     return 0
 
@@ -171,7 +171,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return int(mcp_main())
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    """Setup OneColleague MCP for agent runtimes (configure MCP, print guidance)."""
+    """Setup CCCC MCP for agent runtimes (configure MCP, print guidance)."""
     from ..daemon.mcp_install import build_mcp_add_command, ensure_mcp_installed, is_mcp_installed
     from ..kernel.runtime import detect_runtime
     from ..kernel.runtime import get_cccc_mcp_stdio_command
@@ -244,10 +244,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
         elif rt == "custom":
             results["mcp"]["custom"] = {
                 "mode": "manual",
-                "hint": f"Add an MCP stdio server named 'onecolleague' that runs: {_cmd_line(cccc_cmd)}",
+                "hint": f"Add an MCP stdio server named 'cccc' that runs: {_cmd_line(cccc_cmd)}",
             }
             results["notes"].append(
-                "custom: MCP setup depends on your runtime. Add an MCP stdio server named 'onecolleague' that runs the command in result.mcp.custom.hint."
+                "custom: MCP setup depends on your runtime. Add an MCP stdio server named 'cccc' that runs the command in result.mcp.custom.hint."
             )
 
     # Clean up empty notes
@@ -262,24 +262,24 @@ def cmd_daemon(args: argparse.Namespace) -> int:
         resp = call_daemon({"op": "ping"})
         if resp.get("ok"):
             r = resp.get("result") if isinstance(resp.get("result"), dict) else {}
-            print(f"daemon: running pid={r.get('pid')} version={r.get('version')}")
+            print(f"ccccd: running pid={r.get('pid')} version={r.get('version')}")
             return 0
-        print("daemon: not running")
+        print("ccccd: not running")
         return 1
 
     if args.action == "start":
         if _ensure_daemon_running():
-            print("daemon: running")
+            print("ccccd: running")
             return 0
-        print("daemon: failed to start")
+        print("ccccd: failed to start")
         return 1
 
     if args.action == "stop":
         resp = call_daemon({"op": "shutdown"})
         if resp.get("ok"):
-            print("daemon: shutdown requested")
+            print("ccccd: shutdown requested")
             return 0
-        print("daemon: not running")
+        print("ccccd: not running")
         return 0
 
     return 2

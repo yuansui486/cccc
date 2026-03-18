@@ -284,7 +284,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             if scopes and isinstance(scopes[0], dict):
                 project_root = str(scopes[0].get("url") or "")
         if not project_root:
-            return {"ok": True, "result": {"found": False, "path": None, "content": None, "error": "No scope attached to group. Use 'onecolleague attach <path>' first."}}
+            return {"ok": True, "result": {"found": False, "path": None, "content": None, "error": "No scope attached to group. Use 'cccc attach <path>' first."}}
 
         root = Path(project_root).expanduser()
         if not root.exists() or not root.is_dir():
@@ -326,7 +326,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             if scopes and isinstance(scopes[0], dict):
                 project_root = str(scopes[0].get("url") or "")
         if not project_root:
-            return {"ok": False, "error": {"code": "NO_SCOPE", "message": "No scope attached to group. Use 'onecolleague attach <path>' first."}}
+            return {"ok": False, "error": {"code": "NO_SCOPE", "message": "No scope attached to group. Use 'cccc attach <path>' first."}}
 
         root = Path(project_root).expanduser()
         if not root.exists() or not root.is_dir():

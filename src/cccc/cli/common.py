@@ -94,9 +94,9 @@ def _acquire_default_entry_lock(home: Path) -> tuple[Optional[Any], Optional[str
     try:
         lock_handle = acquire_lockfile(_default_entry_lock_path(home), blocking=False)
     except LockUnavailableError:
-        return None, "OneColleague is already running for this CCCC_HOME. Stop the existing `onecolleague` session with Ctrl+C, then start it again."
+        return None, "CCCC is already running for this CCCC_HOME. Stop the existing `cccc` session with Ctrl+C, then start it again."
     except Exception as e:
-        return None, f"Failed to acquire OneColleague app lock: {e}"
+        return None, f"Failed to acquire CCCC app lock: {e}"
     return lock_handle, None
 
 
@@ -398,7 +398,7 @@ def _env_flag(name: str, *, default: bool = False) -> bool:
     return coerce_bool(os.environ.get(name), default=default)
 
 def _is_first_run() -> bool:
-    """Check if this is the first time running OneColleague."""
+    """Check if this is the first time running CCCC."""
     home = ensure_home()
     marker = home / ".initialized"
     if marker.exists():
@@ -414,19 +414,19 @@ def _show_welcome() -> None:
     """Show welcome message for first-time users."""
     print()
     print("=" * 60)
-    print("  Welcome to OneColleague")
+    print("  Welcome to CCCC - Collaborative Code Coordination Center")
     print("=" * 60)
     print()
     print("Quick Start:")
-    print("  1. Create a working group:  onecolleague attach .")
-    print("  2. Add an agent:            onecolleague actor add my-agent --runtime claude")
-    print("  3. Start the group:         onecolleague group start")
+    print("  1. Create a working group:  cccc attach .")
+    print("  2. Add an agent:            cccc actor add my-agent --runtime claude")
+    print("  3. Start the group:         cccc group start")
     print("  4. Open Web UI:             http://127.0.0.1:8848")
     print()
     print("Useful Commands:")
-    print("  onecolleague status      - Show daemon, groups, and actors")
-    print("  onecolleague doctor      - Check environment and available runtimes")
-    print("  onecolleague setup       - Configure MCP for agent runtimes")
+    print("  cccc status      - Show daemon, groups, and actors")
+    print("  cccc doctor      - Check environment and available runtimes")
+    print("  cccc setup       - Configure MCP for agent runtimes")
     print()
     print("Documentation: https://github.com/ChesterRa/cccc")
     print("=" * 60)

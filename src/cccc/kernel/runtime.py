@@ -171,50 +171,24 @@ def get_runtime_command(name: str) -> List[str]:
 
 
 def get_cccc_mcp_stdio_command() -> List[str]:
-    """Return the most stable command line for launching `onecolleague mcp`.
+    """Return the most stable command line for launching `cccc mcp`.
 
-    Prefer an absolute path to the installed `onecolleague` entrypoint when
-    available, then fall back to `cccc` for compatibility. On Windows this
-    avoids relying on runtime-specific PATH inheritance for MCP child
-    processes. Fall back to the current Python interpreter otherwise.
+    Prefer an absolute path to the installed `cccc` entrypoint when available.
+    On Windows this avoids relying on runtime-specific PATH inheritance for MCP
+    child processes. Fall back to the current Python interpreter otherwise.
     """
     candidates: List[Path] = []
     is_windows = sys.platform.startswith("win")
     try:
-        bin_dirs: List[Path] = []
-        raw_bin_dir = Path(sys.executable).parent
-        resolved_bin_dir = Path(sys.executable).resolve().parent
-        for bin_dir in (raw_bin_dir, resolved_bin_dir):
-            if bin_dir not in bin_dirs:
-                bin_dirs.append(bin_dir)
-        if is_windows:
-            names = [
-                "onecolleague.exe",
-                "onecolleague.cmd",
-                "onecolleague.bat",
-                "onecolleague",
-                "onecolleague-script.py",
-                "cccc.exe",
-                "cccc.cmd",
-                "cccc.bat",
-                "cccc",
-                "cccc-script.py",
-            ]
-        else:
-            names = ["onecolleague", "cccc"]
-        for bin_dir in bin_dirs:
-            for name in names:
-                candidate = bin_dir / name
-                if candidate.exists():
-                    candidates.append(candidate)
+        bin_dir = Path(sys.executable).resolve().parent
+        names = ["cccc.exe", "cccc.cmd", "cccc.bat", "cccc", "cccc-script.py"] if is_windows else ["cccc"]
+        for name in names:
+            candidate = bin_dir / name
+            if candidate.exists():
+                candidates.append(candidate)
     except Exception:
         pass
-    for raw in (
-        shutil.which("onecolleague"),
-        shutil.which("onecolleague.exe") if is_windows else None,
-        shutil.which("cccc"),
-        shutil.which("cccc.exe") if is_windows else None,
-    ):
+    for raw in (shutil.which("cccc"), shutil.which("cccc.exe") if is_windows else None):
         if raw:
             candidates.append(Path(raw))
     seen: set[str] = set()
