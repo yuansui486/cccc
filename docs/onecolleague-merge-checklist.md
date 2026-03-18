@@ -7,10 +7,13 @@
 ## 1. 基线与范围
 
 - 基线分支：`main`
-- 基线提交：`1bf054f373cb8e8325208d08c1ba91ac1de671bb`
+- 上轮 refresh 基线提交：`c921877dd0001ab6a073ea772d6e267c9f19035e`
+- 当前需要吸收的 main 提交上界：`de07912`
 - 当前分支：`OneColleague`
-- 当前 HEAD：`ee9d541c2243ab07e99a391967c1ec92540a7e51`
-- 对照范围：`main...OneColleague`（当前等价于 `1bf054f373cb8e8325208d08c1ba91ac1de671bb..ee9d541c2243ab07e99a391967c1ec92540a7e51`）
+- 当前 HEAD：`018fa54`
+- 当前 merge-base：`c921877dd0001ab6a073ea772d6e267c9f19035e`
+- 本轮主线增量范围：`c921877..de07912`
+- 一号同事保留集对照仍以 `main...OneColleague` 为准，但不能再把它误读成 `1bf054f..ee9d541` 这段旧范围
 
 这段范围内，一号同事定制的主提交为：
 
@@ -21,8 +24,38 @@
 - `3d3c9ed feat(done-hub): provision local client configs`
 - `68abef9 fix(web): align im bridge locale copy`
 - `ee9d541 style(web): shift UI theme to light blue`
+- `79b320f merge(main): refresh OneColleague onto c921877`
+- `09ba6da docs: refresh onecolleague merge checklist`
+- `12e7efc fix(web): align group settings default tab with main`
 
 后续 merge 最新 CCCC 时，本文只关注“一号同事相对原版 CCCC 的必保留行为”，不关注上游普通演进本身。
+
+### 1.1 本轮（3/18）额外吸收框架
+
+这轮不能只按上面的 preserve 清单机械 merge，还必须额外吸收 `c921877..de07912` 这段主线新结构。当前 main 侧新增热点主要是：
+
+- `desktop/` 旧实现删除，迁到 Web 内的 `webPet` 方案
+- Web runtime / remote access / shutdown / health endpoint 加固
+
+因此本轮 merge 的正确口径不是“恢复旧的 desktop pet 形态”，而是：
+
+- 在新 main 的 `WebPet + web runtime/apply/restart/shutdown + /api/v1/health` 结构上
+- 同时保住一号同事现有的 DoneHub gate / 账户链 / 品牌 / locale 口径
+
+本轮 changed-in-both 的高风险集合主要是：
+
+- `src/cccc/ports/web/app.py`
+- `src/cccc/ports/web/schemas.py`
+- `web/src/App.tsx`
+- `web/src/components/AgentTab.tsx`
+- `web/src/components/AppModals.tsx`
+- `web/src/components/MessageBubble.tsx`
+- `web/src/components/layout/GroupSidebar.tsx`
+- `web/src/stores/index.ts`
+- `web/src/types.ts`
+- `web/src/i18n/locales/{en,ja,zh}/{modals,settings}.json`
+
+这组文件在本轮要按“先吃新 main 结构，再回填一号同事行为链”处理，不能整文件选边。
 
 ## 2. 必须保留的品牌与用户可见裁剪
 
