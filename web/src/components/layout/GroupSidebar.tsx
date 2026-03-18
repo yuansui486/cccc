@@ -109,7 +109,7 @@ export function GroupSidebar({
               isCollapsed ? "justify-center" : "justify-between"
             )}
           >
-            <div className={classNames("flex items-center", isCollapsed ? "" : "gap-3")}>
+            <div className={classNames("flex items-center min-w-0", isCollapsed ? "" : "flex-1 gap-3 pr-3")}>
               <div className={classNames(
                 "w-12 h-12 rounded-2xl flex items-center justify-center glass-btn",
                 "text-[var(--color-accent-primary)]"
@@ -117,12 +117,12 @@ export function GroupSidebar({
                 <img src={appLogoPath} alt={`${appBrandName} Logo`} className="w-8 h-8 object-contain" />
               </div>
               {!isCollapsed && (
-                <span className="text-lg font-bold tracking-tight text-[var(--color-text-primary)]">{appBrandName}</span>
+                <span className="min-w-0 truncate text-lg font-bold tracking-tight text-[var(--color-text-primary)]">{appBrandName}</span>
               )}
             </div>
 
             {!isCollapsed && (
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 {!readOnly && onCreateGroup && (
                   <button
                     className={classNames(

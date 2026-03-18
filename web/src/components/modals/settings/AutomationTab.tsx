@@ -88,7 +88,6 @@ export function AutomationTab(props: AutomationTabProps) {
   const [ruleset, setRuleset] = useState<AutomationRuleSet | null>(null);
   const [rulesVersion, setRulesVersion] = useState<number | undefined>(undefined);
   const [status, setStatus] = useState<Record<string, AutomationRuleStatus>>({});
-  const [configPath, setConfigPath] = useState("");
   const [supportedVars, setSupportedVars] = useState<string[]>([]);
 
   const [snippetManagerOpen, setSnippetManagerOpen] = useState(false);
@@ -117,7 +116,6 @@ export function AutomationTab(props: AutomationTabProps) {
       setRuleset(resp.result.ruleset);
       setRulesVersion(typeof resp.result.version === "number" ? resp.result.version : undefined);
       setStatus(resp.result.status || {});
-      setConfigPath(String(resp.result.config_path || ""));
       setSupportedVars(Array.isArray(resp.result.supported_vars) ? resp.result.supported_vars.map(String) : []);
     } catch {
       setRulesErr(t("automation.failedToLoad"));
@@ -502,10 +500,7 @@ export function AutomationTab(props: AutomationTabProps) {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div>
         <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t("automation.title")}</h3>
-        <p className="text-xs mt-1 text-[var(--color-text-muted)]">
-          {t("automation.description")}{" "}
-          <span className="font-mono break-all">{configPath || t("automation.configPathFallback")}</span>.
-        </p>
+        <p className="text-xs mt-1 text-[var(--color-text-muted)]">{t("automation.description")}</p>
       </div>
 
       <AutomationPoliciesSection

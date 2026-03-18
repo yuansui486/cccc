@@ -35,9 +35,8 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
     clearError();
   }, [clearError, isOpen, savedLogin.password, savedLogin.remember_password, savedLogin.username, session?.username]);
 
-  const connected = status === "connected" || status === "refreshing";
   const hasSession = !!session;
-  const showConnectedView = connected && hasSession;
+  const showConnectedView = hasSession;
   const busy = status === "authenticating" || status === "refreshing";
   const submitDisabled = busy || !username.trim() || !password;
   const title = showConnectedView ? t("modals:doneHub.connectedTitle") : t("modals:doneHub.connectTitle");
@@ -73,7 +72,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
                 ? status === "refreshing"
                   ? t("modals:doneHub.refreshing")
                   : t("modals:doneHub.connecting")
-                : connected
+                : showConnectedView
                   ? t("modals:doneHub.connectedBadge")
                   : t("modals:doneHub.disconnectedBadge")}
             </div>

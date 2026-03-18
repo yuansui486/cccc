@@ -94,6 +94,8 @@ export default function App() {
   const doneHubInitialized = useDoneHubStore((state) => state.initialized);
   const initializeDoneHub = useDoneHubStore((state) => state.initialize);
   const refreshDoneHub = useDoneHubStore((state) => state.refresh);
+  const doneHubHasSession = Boolean(doneHubSession);
+  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
 
   const {
     activeGroupId,
@@ -418,7 +420,7 @@ export default function App() {
 
   useEffect(() => {
     if (!doneHubInitialized) return;
-    if (!(doneHubStatus === "connected" || doneHubStatus === "refreshing")) return;
+    if (!(doneHubConnected || doneHubHasSession)) return;
     const timer = window.setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         return;
@@ -426,7 +428,7 @@ export default function App() {
       void refreshDoneHub();
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [doneHubInitialized, doneHubStatus, refreshDoneHub]);
+  }, [doneHubConnected, doneHubHasSession, doneHubInitialized, refreshDoneHub]);
 
   const ensureRuntimesLoaded = React.useCallback(async () => {
     if (useGroupStore.getState().runtimes.length > 0) return;
@@ -486,15 +488,13 @@ export default function App() {
     errorMessage: doneHubErrorMessage,
   }), [doneHubErrorMessage, doneHubSession?.display_name, doneHubSession?.group, doneHubSession?.quota, doneHubSession?.used_quota, doneHubSession?.username, doneHubStatus]);
 
-  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
-
   // ============ Actions ============
 
   // ============ Computed for ChatTab ============
 
   // ============ Render ============
 
-  if (!doneHubInitialized || !doneHubConnected) {
+  if (!doneHubInitialized || (!doneHubConnected && !doneHubHasSession)) {
     return <DoneHubLoginGate isDark={isDark} />;
   }
 

@@ -258,7 +258,7 @@
   },
   "automation": {
     "title": "自动化",
-    "description": "配置内建自动化和定时规则。设置存储在",
+    "description": "配置内建自动化和定时规则。",
     "configPathFallback": "CCCC_HOME/…/group.yaml",
     "openFromGroup": "请从工作组中打开此标签页。",
     "rulesTitle": "规则与模板",

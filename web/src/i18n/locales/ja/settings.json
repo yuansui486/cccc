@@ -258,7 +258,7 @@
   },
   "automation": {
     "title": "自動化",
-    "description": "組み込み自動化とスケジュール済みルールを構成します。設定は次の場所に保存されます",
+    "description": "組み込み自動化とスケジュール済みルールを構成します。",
     "configPathFallback": "CCCC_HOME/.../group.yaml",
     "openFromGroup": "グループからこのタブを開きます。",
     "rulesTitle": "ルールとスニペット",

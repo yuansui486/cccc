@@ -21,6 +21,19 @@ const EMPTY_SAVED_LOGIN: DoneHubSavedLogin = {
 
 let initializePromise: Promise<void> | null = null;
 
+function isDoneHubHardAuthFailure(code: string | null | undefined, message: string | null | undefined): boolean {
+  const normalizedCode = String(code || "").trim().toLowerCase();
+  const normalizedMessage = String(message || "").trim().toLowerCase();
+  if (
+    /unauthorized|forbidden|auth[_-]?failed|invalid[_-]?token|token[_-]?(invalid|expired)|session[_-]?expired/.test(normalizedCode)
+  ) {
+    return true;
+  }
+  return /(401|403|unauthorized|forbidden|invalid token|token expired|session expired|login expired|authentication failed|auth failed|重新登录|登录失效|凭证失效|认证失效|未授权|未登录)/i.test(
+    normalizedMessage,
+  );
+}
+
 type DoneHubState = {
   status: DoneHubStatus;
   session: DoneHubSession | null;
@@ -153,7 +166,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
           errorMessage: "",
         });
         const refreshed = await get().refresh();
-        if (refreshed) return;
+        if (refreshed || get().session) return;
       }
 
       if (
@@ -241,14 +254,30 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
     }));
     const resp = await refreshDoneHubSession(session.access_token);
     const nextSession = extractDoneHubSession(resp);
+    const latestSession = get().session;
+    if (!latestSession || latestSession.access_token !== session.access_token) {
+      return false;
+    }
     if (!resp.ok || !nextSession) {
-      persistSession(null);
+      const hardFailure = !resp.ok && isDoneHubHardAuthFailure(resp.error.code, resp.error.message);
+      const errorMessage = sanitizeDoneHubErrorMessage(resp.ok ? "missing session" : resp.error.message);
+      if (hardFailure) {
+        persistSession(null);
+        set((state) => ({
+          ...state,
+          status: "error",
+          session: null,
+          initialized: true,
+          errorMessage,
+        }));
+        return false;
+      }
+      persistSession(latestSession);
       set((state) => ({
         ...state,
         status: "error",
-        session: null,
         initialized: true,
-        errorMessage: sanitizeDoneHubErrorMessage(resp.ok ? "missing session" : resp.error.message),
+        errorMessage,
       }));
       return false;
     }

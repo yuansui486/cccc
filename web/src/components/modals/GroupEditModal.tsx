@@ -21,7 +21,6 @@ export function GroupEditModal({
   isOpen,
   busy,
   groupId,
-  ccccHome,
   projectRoot,
   title,
   topic,
@@ -36,12 +35,6 @@ export function GroupEditModal({
   const imeTitle = useIMEComposition({ value: title, onChange: onChangeTitle });
   const imeTopic = useIMEComposition({ value: topic, onChange: onChangeTopic });
   if (!isOpen) return null;
-
-  const homeRoot = String(ccccHome || "").trim();
-  const gid = String(groupId || "").trim();
-  const groupDataDir = homeRoot && gid ? `${homeRoot}/groups/${gid}` : "";
-  const groupConfigFile = groupDataDir ? `${groupDataDir}/group.yaml` : "";
-  const groupLedgerFile = groupDataDir ? `${groupDataDir}/ledger.jsonl` : "";
 
   async function copyToClipboard(text: string): Promise<boolean> {
     const val = String(text || "").trim();
@@ -137,60 +130,6 @@ export function GroupEditModal({
                   }}
                   disabled={!projectRoot}
                   title={t("groupEdit.copyProjectRoot")}
-                  type="button"
-                >
-                  {t("common:copy")}
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-[var(--color-text-secondary)]">{t("groupEdit.groupDataDirectory")}</div>
-                <div className="flex-1 min-w-0 font-mono text-xs truncate text-[var(--color-text-primary)]">
-                  {groupDataDir || "—"}
-                </div>
-                <button
-                  className="px-2 py-1 rounded-lg text-xs transition-colors glass-btn text-[var(--color-text-secondary)]"
-                  onClick={async () => {
-                    const ok = await copyToClipboard(groupDataDir);
-                    if (!ok) return;
-                  }}
-                  disabled={!groupDataDir}
-                  title={t("groupEdit.copyDataDir")}
-                  type="button"
-                >
-                  {t("common:copy")}
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-[var(--color-text-secondary)]">{t("groupEdit.groupConfigFile")}</div>
-                <div className="flex-1 min-w-0 font-mono text-xs truncate text-[var(--color-text-primary)]">
-                  {groupConfigFile || "—"}
-                </div>
-                <button
-                  className="px-2 py-1 rounded-lg text-xs transition-colors glass-btn text-[var(--color-text-secondary)]"
-                  onClick={async () => {
-                    const ok = await copyToClipboard(groupConfigFile);
-                    if (!ok) return;
-                  }}
-                  disabled={!groupConfigFile}
-                  title={t("groupEdit.copyConfigFile")}
-                  type="button"
-                >
-                  {t("common:copy")}
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-[var(--color-text-secondary)]">{t("groupEdit.groupLedgerFile")}</div>
-                <div className="flex-1 min-w-0 font-mono text-xs truncate text-[var(--color-text-primary)]">
-                  {groupLedgerFile || "—"}
-                </div>
-                <button
-                  className="px-2 py-1 rounded-lg text-xs transition-colors glass-btn text-[var(--color-text-secondary)]"
-                  onClick={async () => {
-                    const ok = await copyToClipboard(groupLedgerFile);
-                    if (!ok) return;
-                  }}
-                  disabled={!groupLedgerFile}
-                  title={t("groupEdit.copyLedgerFile")}
                   type="button"
                 >
                   {t("common:copy")}

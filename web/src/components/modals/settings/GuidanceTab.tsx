@@ -9,7 +9,6 @@ import {
   inputClass,
   labelClass,
   primaryButtonClass,
-  preClass,
   secondaryButtonClass,
   settingsDialogBodyClass,
   settingsDialogPanelClass,
@@ -299,12 +298,6 @@ export function GuidanceTab({ isDark, groupId }: {
         </div>
       </div>
 
-      {preamble?.path ? (
-        <div className={preClass(isDark)}>
-          <span className="font-mono">{preamble.path}</span>
-        </div>
-      ) : null}
-
       <div className="mt-3">
         <label className={labelClass(isDark)}>{t("guidance.markdown")}</label>
         <textarea
@@ -457,7 +450,6 @@ export function GuidanceTab({ isDark, groupId }: {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-gray-900"}`}>{t("guidance.helpTitle")}</div>
-          <div className={`text-[11px] ${isDark ? "text-slate-500" : "text-gray-500"}`}>{t("guidance.helpHint")}</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {!expanded ? (
@@ -474,12 +466,6 @@ export function GuidanceTab({ isDark, groupId }: {
           {renderSourceBadge("help")}
         </div>
       </div>
-
-      {help?.path ? (
-        <div className={preClass(isDark)}>
-          <span className="font-mono">{help.path}</span>
-        </div>
-      ) : null}
 
       <div className={`${expanded ? "mt-3 min-h-0 flex flex-1 flex-col" : `mt-3 rounded-xl border px-3 py-3 ${isDark ? "border-slate-800 bg-slate-950/30" : "border-gray-200 bg-white"}`}`}>
         <div className={`grid grid-cols-1 gap-4 ${expanded ? "min-h-0 flex-1 xl:grid-cols-[240px_minmax(0,1fr)]" : "items-start xl:grid-cols-[210px_minmax(0,1fr)]"}`}>

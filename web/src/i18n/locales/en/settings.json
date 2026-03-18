@@ -258,7 +258,7 @@
   },
   "automation": {
     "title": "Automation",
-    "description": "Configure built-in automation and scheduled rules. Settings are stored in",
+    "description": "Configure built-in automation and scheduled rules.",
     "configPathFallback": "CCCC_HOME/.../group.yaml",
     "openFromGroup": "Open this tab from a group.",
     "rulesTitle": "Rules & Snippets",
