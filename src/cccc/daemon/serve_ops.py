@@ -111,6 +111,35 @@ def start_space_sync_thread(
     return t
 
 
+def start_supervisor_watchdog_thread(
+    *,
+    stop_event: threading.Event,
+    supervisor_pid: int,
+    pid_alive: Callable[[int], bool],
+    interval_seconds: float = 0.5,
+) -> threading.Thread | None:
+    target_pid = int(supervisor_pid or 0)
+    if target_pid <= 0:
+        return None
+
+    def _supervisor_watchdog_loop() -> None:
+        interval = max(0.2, float(interval_seconds or 0.5))
+        while not stop_event.is_set():
+            try:
+                if not pid_alive(target_pid):
+                    stop_event.set()
+                    return
+            except Exception as e:
+                _log_loop_error("supervisor_watchdog failed", e)
+                stop_event.set()
+                return
+            stop_event.wait(interval)
+
+    t = threading.Thread(target=_supervisor_watchdog_loop, name="cccc-supervisor-watchdog", daemon=True)
+    t.start()
+    return t
+
+
 def bind_server_socket(
     *,
     transport: str,

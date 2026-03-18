@@ -13,7 +13,7 @@ from ....kernel.group import load_group
 from ....paths import ensure_home
 from ....ports.im.config_schema import canonicalize_im_config
 from ....util.conv import coerce_bool
-from ....util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive
+from ....util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive, resolve_background_python_argv, supervised_process_popen_kwargs
 from ..schemas import (
     IMActionRequest,
     IMBindRequest,
@@ -239,6 +239,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def im_start(request: Request, req: IMActionRequest) -> Dict[str, Any]:
         """Start IM bridge for a group."""
         import subprocess
+        import sys
 
         check_group(request, req.group_id)
         group = load_group(req.group_id)
@@ -340,33 +341,42 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         log_path = state_dir / "im_bridge.log"
 
         try:
-            import sys
-            log_file = log_path.open("a", encoding="utf-8")
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "cccc.ports.im.bridge", req.group_id, platform],
-                env=env,
-                stdout=log_file,
-                stderr=log_file,
-                start_new_session=True,
-            )
-            # If the process exits immediately (common for missing token/deps), report failure.
-            await asyncio.sleep(0.25)
-            exit_code = proc.poll()
-            if exit_code is not None:
-                try:
-                    proc.wait(timeout=0.1)
-                except Exception:
-                    pass
-                return {
-                    "ok": False,
-                    "error": {
-                        "code": "bridge_exited",
-                        "message": f"bridge exited early (code={exit_code}). Check log: {log_path}",
-                    },
-                }
+            popen_kwargs: Dict[str, Any] = {
+                "env": env,
+                "stdin": subprocess.DEVNULL,
+                "close_fds": True,
+                "cwd": str(ensure_home()),
+            }
+            if os.name == "nt":
+                popen_kwargs.update(supervised_process_popen_kwargs())
+            else:
+                popen_kwargs["start_new_session"] = True
 
-            pid_path.write_text(str(proc.pid), encoding="utf-8")
-            return {"ok": True, "result": {"group_id": req.group_id, "platform": platform, "pid": proc.pid}}
+            with log_path.open("a", encoding="utf-8") as log_file:
+                proc = subprocess.Popen(
+                    resolve_background_python_argv([sys.executable, "-m", "cccc.ports.im", req.group_id, platform]),
+                    stdout=log_file,
+                    stderr=log_file,
+                    **popen_kwargs,
+                )
+                # If the process exits immediately (common for missing token/deps), report failure.
+                await asyncio.sleep(0.25)
+                exit_code = proc.poll()
+                if exit_code is not None:
+                    try:
+                        proc.wait(timeout=0.1)
+                    except Exception:
+                        pass
+                    return {
+                        "ok": False,
+                        "error": {
+                            "code": "bridge_exited",
+                            "message": f"bridge exited early (code={exit_code}). Check log: {log_path}",
+                        },
+                    }
+
+                pid_path.write_text(str(proc.pid), encoding="utf-8")
+                return {"ok": True, "result": {"group_id": req.group_id, "platform": platform, "pid": proc.pid}}
         except Exception as e:
             return {"ok": False, "error": {"code": "start_failed", "message": str(e)}}
 

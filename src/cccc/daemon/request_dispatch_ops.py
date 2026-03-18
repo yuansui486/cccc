@@ -307,8 +307,10 @@ def dispatch_request(
         normalize_runtime_command=deps.normalize_runtime_command,
         prepare_pty_env=deps.prepare_pty_env,
         pty_backlog_bytes=deps.pty_backlog_bytes,
+        ensure_mcp_installed=deps.ensure_mcp_installed,
         write_headless_state=deps.write_headless_state,
         write_pty_state=deps.write_pty_state,
+        supported_runtimes=deps.supported_runtimes,
     )
     if actor_lifecycle_resp is not None:
         return actor_lifecycle_resp, False

@@ -16,6 +16,7 @@
   "statusRunning": "ステータス： 実行中",
   "agentNotRunning": "エージェントは稼働していません",
   "agentStoppedDescription": "このエージェントは現在停止しています。",
+  "lastTerminalOutput": "最後のターミナル出力",
   "launchAgent": "エージェントを起動",
   "launching": "起動中…",
   "launch": "起動",
@@ -162,5 +163,7 @@
   "roleNotes": "役割ノート",
   "roleNotesHint": "CCCC_HELP.md 内のこの actor 対応 `## @actor:` block に保存されます。臨時タスクではなく、安定したローカルガイダンスを書いてください。",
   "roleNotesPlaceholder": "この actor だけの責務・境界・望ましい振る舞いを記述します……",
-  "loadingRoleNotes": "role notes を読み込み中…"
+  "loadingRoleNotes": "role notes を読み込み中…",
+  "loadingLastTerminalOutput": "最後のターミナル出力を読み込み中…",
+  "noRecentTerminalOutput": "最近のターミナル出力はありません。"
 }

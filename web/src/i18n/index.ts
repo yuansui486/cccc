@@ -10,6 +10,7 @@ import chatEn from "./locales/en/chat.json";
 import modalsEn from "./locales/en/modals.json";
 import settingsEn from "./locales/en/settings.json";
 import actorsEn from "./locales/en/actors.json";
+import webPetEn from "./locales/en/webPet.json";
 
 // Chinese
 import commonZh from "./locales/zh/common.json";
@@ -18,6 +19,7 @@ import chatZh from "./locales/zh/chat.json";
 import modalsZh from "./locales/zh/modals.json";
 import settingsZh from "./locales/zh/settings.json";
 import actorsZh from "./locales/zh/actors.json";
+import webPetZh from "./locales/zh/webPet.json";
 
 // Japanese
 import commonJa from "./locales/ja/common.json";
@@ -26,6 +28,7 @@ import chatJa from "./locales/ja/chat.json";
 import modalsJa from "./locales/ja/modals.json";
 import settingsJa from "./locales/ja/settings.json";
 import actorsJa from "./locales/ja/actors.json";
+import webPetJa from "./locales/ja/webPet.json";
 
 const resources = {
   en: {
@@ -35,6 +38,7 @@ const resources = {
     modals: modalsEn,
     settings: settingsEn,
     actors: actorsEn,
+    webPet: webPetEn,
   },
   zh: {
     common: commonZh,
@@ -43,6 +47,7 @@ const resources = {
     modals: modalsZh,
     settings: settingsZh,
     actors: actorsZh,
+    webPet: webPetZh,
   },
   ja: {
     common: commonJa,
@@ -51,6 +56,7 @@ const resources = {
     modals: modalsJa,
     settings: settingsJa,
     actors: actorsJa,
+    webPet: webPetJa,
   },
 };
 
@@ -61,7 +67,7 @@ void i18n
     resources,
     fallbackLng: "en",
     defaultNS: "common",
-    ns: ["common", "layout", "chat", "modals", "settings", "actors"],
+    ns: ["common", "layout", "chat", "modals", "settings", "actors", "webPet"],
     interpolation: {
       escapeValue: false, // React already escapes
     },

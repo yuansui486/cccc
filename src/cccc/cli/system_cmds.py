@@ -172,6 +172,8 @@ def cmd_mcp(args: argparse.Namespace) -> int:
 
 def cmd_setup(args: argparse.Namespace) -> int:
     """Setup CCCC MCP for agent runtimes (configure MCP, print guidance)."""
+    from ..daemon.mcp_install import build_mcp_add_command, ensure_mcp_installed, is_mcp_installed
+    from ..kernel.runtime import detect_runtime
     from ..kernel.runtime import get_cccc_mcp_stdio_command
 
     runtime = str(args.runtime or "").strip()
@@ -205,157 +207,39 @@ def cmd_setup(args: argparse.Namespace) -> int:
     results: dict[str, Any] = {"mcp": {}, "notes": []}
 
     cccc_cmd = get_cccc_mcp_stdio_command()
+    auto_mcp_runtimes = tuple(name for name in SUPPORTED_RUNTIMES if name != "custom")
 
     def _cmd_line(parts: list[str]) -> str:
         return " ".join(shlex.quote(p) for p in parts)
+
+    def _manual_setup(rt: str, *, runtime_available: bool) -> None:
+        cmd = build_mcp_add_command(rt) or cccc_cmd
+        display_cmd = cmd
+        if runtime_available:
+            try:
+                display_cmd = resolve_subprocess_argv(cmd)
+            except FileNotFoundError:
+                display_cmd = cmd
+        results["mcp"][rt] = {"mode": "manual", "command": _cmd_line(display_cmd)}
+        if runtime_available:
+            results["notes"].append(f"{rt}: MCP CLI failed; run the command shown in result.mcp.{rt}.command")
+        else:
+            results["notes"].append(f"{rt}: CLI not found; run the command shown in result.mcp.{rt}.command")
+
+    def _auto_setup(rt: str) -> None:
+        runtime_info = detect_runtime(rt)
+        was_ready = is_mcp_installed(rt) if runtime_info.available else False
+        if ensure_mcp_installed(rt, project_path, auto_mcp_runtimes=auto_mcp_runtimes):
+            results["mcp"][rt] = {"mode": "auto", "status": "present" if was_ready else "added"}
+            return
+        _manual_setup(rt, runtime_available=runtime_info.available)
 
     # Runtime-specific setup
     runtimes_to_setup = [runtime] if runtime else SUPPORTED_RUNTIMES
 
     for rt in runtimes_to_setup:
-        if rt == "claude":
-            cmd = ["claude", "mcp", "add", "-s", "user", "cccc", "--", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["claude"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["claude"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("claude: MCP CLI failed; run the command shown in result.mcp.claude.command")
-            except FileNotFoundError:
-                results["mcp"]["claude"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("claude: CLI not found; run the command shown in result.mcp.claude.command")
-
-        elif rt == "codex":
-            cmd = ["codex", "mcp", "add", "cccc", "--", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["codex"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["codex"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("codex: MCP CLI failed; run the command shown in result.mcp.codex.command")
-            except FileNotFoundError:
-                results["mcp"]["codex"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("codex: CLI not found; run the command shown in result.mcp.codex.command")
-
-        elif rt == "droid":
-            cmd = ["droid", "mcp", "add", "--type", "stdio", "cccc", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["droid"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["droid"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("droid: MCP CLI failed; run the command shown in result.mcp.droid.command")
-            except FileNotFoundError:
-                results["mcp"]["droid"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("droid: CLI not found; run the command shown in result.mcp.droid.command")
-
-        elif rt == "amp":
-            cmd = ["amp", "mcp", "add", "cccc", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["amp"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["amp"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("amp: MCP CLI failed; run the command shown in result.mcp.amp.command")
-            except FileNotFoundError:
-                results["mcp"]["amp"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("amp: CLI not found; run the command shown in result.mcp.amp.command")
-
-        elif rt == "auggie":
-            cmd = ["auggie", "mcp", "add", "cccc", "--", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["auggie"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["auggie"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("auggie: MCP CLI failed; run the command shown in result.mcp.auggie.command")
-            except FileNotFoundError:
-                results["mcp"]["auggie"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("auggie: CLI not found; run the command shown in result.mcp.auggie.command")
-
-        elif rt == "neovate":
-            cmd = ["neovate", "mcp", "add", "-g", "cccc", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["neovate"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["neovate"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("neovate: MCP CLI failed; run the command shown in result.mcp.neovate.command")
-            except FileNotFoundError:
-                results["mcp"]["neovate"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("neovate: CLI not found; run the command shown in result.mcp.neovate.command")
-
-        elif rt == "gemini":
-            cmd = ["gemini", "mcp", "add", "-s", "user", "cccc", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["gemini"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["gemini"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("gemini: MCP CLI failed; run the command shown in result.mcp.gemini.command")
-            except FileNotFoundError:
-                results["mcp"]["gemini"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("gemini: CLI not found; run the command shown in result.mcp.gemini.command")
-
-        elif rt == "kimi":
-            cmd = ["kimi", "mcp", "add", "cccc", "--command", *cccc_cmd]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(project_path),
-                )
-                if result.returncode == 0:
-                    results["mcp"]["kimi"] = {"mode": "auto", "status": "added"}
-                else:
-                    results["mcp"]["kimi"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                    results["notes"].append("kimi: MCP CLI failed; run the command shown in result.mcp.kimi.command")
-            except FileNotFoundError:
-                results["mcp"]["kimi"] = {"mode": "manual", "command": _cmd_line(cmd)}
-                results["notes"].append("kimi: CLI not found; run the command shown in result.mcp.kimi.command")
+        if rt in auto_mcp_runtimes:
+            _auto_setup(rt)
 
         elif rt == "custom":
             results["mcp"]["custom"] = {

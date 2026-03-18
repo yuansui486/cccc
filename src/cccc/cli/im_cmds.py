@@ -3,7 +3,7 @@ from __future__ import annotations
 """IM bridge related CLI command handlers."""
 
 from .common import *  # noqa: F401,F403
-from ..util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive
+from ..util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive, resolve_background_python_argv, supervised_process_popen_kwargs
 
 __all__ = [
     "cmd_im_set",
@@ -363,11 +363,12 @@ def cmd_im_start(args: argparse.Namespace) -> int:
     try:
         log_file = log_path.open("a", encoding="utf-8")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "cccc.ports.im", group_id, platform],
+            resolve_background_python_argv([sys.executable, "-m", "cccc.ports.im", group_id, platform]),
             env=env,
             stdout=log_file,
             stderr=log_file,
-            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            **supervised_process_popen_kwargs(),
         )
         # Give the bridge a moment to acquire locks / validate tokens.
         time.sleep(0.25)

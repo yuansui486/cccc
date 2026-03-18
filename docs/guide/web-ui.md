@@ -12,6 +12,8 @@ cccc
 
 Open http://127.0.0.1:8848/ in your browser.
 
+`cccc` is the single owner of the default local app session: it starts the daemon and Web together, and pressing `Ctrl+C` stops both together. If another `cccc` session is already running for the same `CCCC_HOME`, a second `cccc` command will refuse to start instead of silently sharing the old daemon.
+
 ## Interface Overview
 
 The Web UI has these main areas:
@@ -152,6 +154,16 @@ The Web UI is responsive and works well on mobile:
 
 To access from outside your local network:
 
+### LAN / Private Network
+
+```bash
+CCCC_WEB_HOST=0.0.0.0 cccc
+```
+
+This keeps localhost access working while also letting other devices on the same network open `http://YOUR_LAN_IP:8848/ui/`.
+
+If CCCC is running inside WSL2's default NAT networking, this is the exception: `0.0.0.0` only opens the port inside the Linux VM. For true LAN access from other devices, enable WSL mirrored networking or add a Windows `netsh interface portproxy` rule plus matching firewall allow.
+
 ### Cloudflare Tunnel (Recommended)
 
 ```bash
@@ -167,6 +179,20 @@ CCCC_WEB_HOST=$(tailscale ip -4) cccc
 ### Security
 
 Before exposing the Web UI beyond localhost, first create an **Admin Access Token** in **Settings > Web Access**.
+
+In **Settings > Web Access**, `127.0.0.1` means local-only and `0.0.0.0` means localhost plus your LAN IP on a normal local host. On WSL2 NAT, it still stays inside the VM until Windows networking forwards it outward.
+
+`Save` stores the target binding. If Web was started by `cccc` or `cccc web`, use `Apply now` in **Settings > Web Access** to perform the short supervised restart. If Web is managed by Docker, systemd, or another external supervisor, restart that service instead.
+
+For the default local app flow, prefer restarting from the owning `cccc` session itself: `Ctrl+C` to stop the whole app, then run `cccc` again. That keeps daemon and Web on the same fresh code/runtime.
+
+`Start` / `Stop` are only for Tailscale remote access and do not rebind the already-running Web socket.
+
+CCCC keeps the token policy tiered:
+
+- localhost-only: remote token gate is not the main concern
+- LAN/private network: Access Tokens are the default and recommended posture
+- public URL / tunnel / reverse proxy: Access Tokens are mandatory
 
 Then authenticate once to bootstrap the session cookie:
 

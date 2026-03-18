@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from ..util.process import terminate_pid
+
 
 # Default backoff schedule for bounded restart.
 DEFAULT_RESTART_BACKOFFS: list[float] = [0.5, 1.0, 2.0]
@@ -146,6 +148,14 @@ class DaemonLifecycle:
     def _wait_and_kill_locked(self) -> None:
         """Wait for subprocess exit, escalate to terminate/kill. Must hold _lock."""
         import subprocess as _sp
+
+        target_pid = int(getattr(self._process, "pid", 0) or 0)
+        if target_pid > 0:
+            try:
+                if terminate_pid(target_pid, timeout_s=12.0, include_group=True, force=True):
+                    return
+            except Exception:
+                pass
 
         try:
             self._process.wait(timeout=10.0)

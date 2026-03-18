@@ -258,7 +258,13 @@ def handle_actor_update(
                             "hint": "Set actor.command (or switch runner to headless).",
                         },
                     )
-                ensure_mcp_installed(runtime, cwd)
+                if runner_effective != "headless":
+                    try:
+                        mcp_ready = bool(ensure_mcp_installed(runtime, cwd))
+                    except Exception as e:
+                        return _error("actor_update_failed", f"failed to install MCP: {e}")
+                    if not mcp_ready:
+                        return _error("actor_update_failed", f"failed to install MCP for runtime: {runtime}")
 
                 if runner_effective == "headless":
                     effective_env = merge_actor_env_with_private(group.group_id, actor_id, env)

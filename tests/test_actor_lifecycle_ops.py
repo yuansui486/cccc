@@ -356,6 +356,5 @@ class TestActorLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
-
 if __name__ == "__main__":
     unittest.main()

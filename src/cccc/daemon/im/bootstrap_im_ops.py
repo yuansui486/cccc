@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ...kernel.group import load_group
 from ...util.conv import coerce_bool
+from ...util.process import resolve_background_python_argv, supervised_process_popen_kwargs
 
 logger = logging.getLogger("cccc.daemon.server")
 
@@ -68,13 +69,13 @@ def autostart_enabled_im_bridges(home: Path) -> None:
                 env = os.environ.copy()
                 env["CCCC_HOME"] = str(home)
                 proc = subprocess.Popen(
-                    [sys.executable, "-m", "cccc.ports.im.bridge", group_id, platform],
+                    resolve_background_python_argv([sys.executable, "-m", "cccc.ports.im.bridge", group_id, platform]),
                     env=env,
                     stdout=log_file,
                     stderr=log_file,
                     stdin=subprocess.DEVNULL,
-                    start_new_session=True,
                     cwd=str(home),
+                    **supervised_process_popen_kwargs(),
                 )
                 time.sleep(0.25)
                 rc = proc.poll()

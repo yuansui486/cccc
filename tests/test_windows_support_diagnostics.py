@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -106,6 +108,61 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
 
         self.assertFalse(bool(result.get("success")))
         self.assertIn("pywinpty", str(result.get("error") or ""))
+
+    def test_windows_pty_does_not_fallback_to_spawn_without_env(self) -> None:
+        from cccc.runners import pty_win
+
+        with tempfile.TemporaryDirectory() as td:
+            spawn_calls: list[dict[str, object]] = []
+
+            def _spawn(_cmdline: str, **kwargs: object) -> object:
+                spawn_calls.append(dict(kwargs))
+                raise TypeError("spawn signature mismatch")
+
+            fake_proc = SimpleNamespace(spawn=_spawn)
+            with patch.object(pty_win, "PTY_SUPPORTED", True), patch.object(pty_win, "_WINPTY_PROCESS", fake_proc):
+                with self.assertRaisesRegex(RuntimeError, "environment forwarding"):
+                    pty_win.PtySession(
+                        group_id="g1",
+                        actor_id="peer1",
+                        cwd=Path(td),
+                        command=["codex"],
+                        env={"CCCC_HOME": td, "CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer1"},
+                    )
+
+            self.assertEqual(len(spawn_calls), 2)
+            self.assertTrue(all("env" in call for call in spawn_calls))
+
+    def test_windows_pty_stop_uses_tree_termination(self) -> None:
+        from cccc.runners import pty_win
+
+        session = object.__new__(pty_win.PtySession)
+        session._running = True
+        session._proc = SimpleNamespace(
+            pid=4321,
+            isalive=lambda: False,
+            exitstatus=0,
+            terminate=lambda *args, **kwargs: None,
+            kill=lambda *args, **kwargs: None,
+            close=lambda *args, **kwargs: None,
+        )
+        session._notify_wake = lambda: None
+        session._thread = SimpleNamespace(is_alive=lambda: False, join=lambda timeout=None: None)
+        session._reader_thread = SimpleNamespace(is_alive=lambda: False, join=lambda timeout=None: None)
+
+        with patch.object(pty_win, "terminate_pid", return_value=True) as mock_terminate:
+            session.stop()
+
+        mock_terminate.assert_called_once_with(4321, timeout_s=1.0, include_group=True, force=True)
+
+    def test_codex_windows_command_still_gets_env_inherit_flag(self) -> None:
+        from cccc.daemon import server as daemon_server
+
+        cmd = daemon_server._normalize_runtime_command("codex", [r"C:\Tools\codex.cmd", "--search"])
+
+        self.assertEqual(cmd[0], r"C:\Tools\codex.cmd")
+        self.assertEqual(cmd[1:3], ["-c", "shell_environment_policy.inherit=all"])
+        self.assertEqual(cmd[3:], ["--search"])
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
-import { addCoordinationNote, apiJson, contextSync, fetchDesktopPetLaunchToken, updateCoordinationBrief, updateCoordinationTask } from "../services/api";
+import { addCoordinationNote, apiJson, contextSync, updateCoordinationBrief, updateCoordinationTask } from "../services/api";
 import type {
   AgentState,
   CoordinationBrief,
@@ -18,10 +18,10 @@ import type {
 } from "../types";
 import { formatFullTime, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
-import { buildDesktopPetDaemonUrl, buildDesktopPetDownloadUrl, buildDesktopPetLaunchUrl } from "../utils/desktopPetLaunch";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { ModalFrame } from "./modals/ModalFrame";
+import { useWebPetStore } from "../stores";
 
 interface ContextModalProps {
   isOpen: boolean;
@@ -598,6 +598,8 @@ export function ContextModal({
   onUpdateSettings,
 }: ContextModalProps) {
   const { t } = useTranslation("modals");
+  const pendingIntent = useWebPetStore((state) => state.pendingIntent);
+  const setPendingIntent = useWebPetStore((state) => state.setPendingIntent);
   const tr = useCallback((key: string, fallback: string, vars?: Record<string, unknown>) =>
     String(t(key as never, { defaultValue: fallback, ...(vars || {}) } as never)), [t]);
 
@@ -615,8 +617,6 @@ export function ContextModal({
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [viewBusy, setViewBusy] = useState(false);
-  const [desktopPetLaunchBusy, setDesktopPetLaunchBusy] = useState(false);
-  const [desktopPetLaunchError, setDesktopPetLaunchError] = useState<React.ReactNode>("");
 
   const [projectMd, setProjectMd] = useState<ProjectMdInfo | null>(null);
   const [projectBusy, setProjectBusy] = useState(false);
@@ -633,59 +633,6 @@ export function ContextModal({
 
   const brief = context?.coordination?.brief || null;
   const desktopPetEnabled = Boolean(settings?.desktop_pet_enabled);
-  const desktopPetLaunchPreviewUrl = useMemo(
-    () => buildDesktopPetLaunchUrl({
-      daemonUrl: buildDesktopPetDaemonUrl(),
-      token: "",
-      groupId,
-    }),
-    [groupId]
-  );
-
-  const resolveDesktopPetLaunchToken = useCallback(async (): Promise<string | null> => {
-    const launchResp = await fetchDesktopPetLaunchToken(groupId);
-    if (!launchResp.ok) {
-      const raw = launchResp.error?.message || "";
-      const code = launchResp.error?.code || "";
-      const combined = `${code} ${raw}`;
-      const isNotFound = /not.?found/i.test(combined) || /PARSE_ERROR|EMPTY_RESPONSE/i.test(code) || /returned 4\d\d/i.test(raw);
-      const msg = isNotFound
-        ? tr("context.desktopPetLaunchNotFound", "The daemon does not support Desktop Pet yet. Please upgrade to the latest version.")
-        : raw || tr("context.desktopPetLaunchTokenFailed", "Failed to load access tokens.");
-      throw new Error(msg);
-    }
-    // Empty string token is valid in empty-password mode
-    const token = launchResp.result?.token;
-    return typeof token === "string" ? token : null;
-  }, [groupId, tr]);
-
-  const handlePrepareDesktopPetLaunch = useCallback(async () => {
-    setDesktopPetLaunchBusy(true);
-    setDesktopPetLaunchError("");
-    try {
-      const token = await resolveDesktopPetLaunchToken();
-      if (token === null) {
-        setDesktopPetLaunchError(tr("context.desktopPetLaunchNoToken", "No access token is available for this group."));
-        return;
-      }
-
-      const launchUrl = buildDesktopPetLaunchUrl({
-        daemonUrl: buildDesktopPetDaemonUrl(),
-        token,
-        groupId,
-      });
-
-      window.location.href = launchUrl;
-    } catch (error) {
-      setDesktopPetLaunchError(
-        error instanceof Error
-          ? error.message
-          : tr("context.desktopPetLaunchBlocked", "The browser blocked the Desktop Pet launch request.")
-      );
-    } finally {
-      setDesktopPetLaunchBusy(false);
-    }
-  }, [resolveDesktopPetLaunchToken, tr]);
   const tasks = useMemo(() => (Array.isArray(context?.coordination?.tasks) ? context.coordination.tasks : []), [context]);
   const agents = useMemo(() => (Array.isArray(context?.agent_states) ? context.agent_states : []), [context]);
   const board = useMemo(() => buildBoard(tasks, context?.board), [context?.board, tasks]);
@@ -1027,6 +974,8 @@ export function ContextModal({
     return (
       <div ref={setNodeRef} style={style} className={classNames("group/task", isDragging && "z-20 opacity-80")}>
         <div
+          id={`context-task-${task.id}`}
+          data-task-id={task.id}
           {...attributes}
           onClick={() => selectTask(task)}
           className={classNames(
@@ -1130,6 +1079,30 @@ export function ContextModal({
     setActiveView("coordination");
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (pendingIntent?.kind !== "task") return;
+
+    const task = taskMap.get(pendingIntent.taskId);
+    if (task) {
+      setActiveView("coordination");
+      setTaskFilter("all");
+      setAssigneeFilter("__all__");
+      setTaskQuery("");
+      selectTask(task);
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`context-task-${pendingIntent.taskId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    setPendingIntent(null);
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [isOpen, pendingIntent, selectTask, setPendingIntent, taskMap]);
+
   const closeTaskEditor = () => {
     if (!confirmDiscardTaskChanges()) return;
     setTaskEditorMode("none");
@@ -1187,15 +1160,11 @@ export function ContextModal({
     if (!onUpdateSettings) return;
     setViewBusy(true);
     try {
-      const ok = await onUpdateSettings({ desktop_pet_enabled: enabled });
-      if (ok === false) return; // settings update failed — don't proceed with launch
-      if (enabled) {
-        await handlePrepareDesktopPetLaunch();
-      }
+      await onUpdateSettings({ desktop_pet_enabled: enabled });
     } finally {
       setViewBusy(false);
     }
-  }, [handlePrepareDesktopPetLaunch, onUpdateSettings]);
+  }, [onUpdateSettings]);
 
   const handleSaveBrief = async () => {
     if (!groupId) return;
@@ -1740,7 +1709,7 @@ export function ContextModal({
       return (
         <section className={classNames(surfaceClass, "p-4")}>
           <div className={classNames("text-sm", mutedTextClass)}>
-            {tr("context.desktopPetUnavailable", "Desktop Pet settings are unavailable in this context.")}
+            {tr("context.desktopPetUnavailable", "Web Pet settings are unavailable in this context.")}
           </div>
         </section>
       );
@@ -1751,71 +1720,35 @@ export function ContextModal({
         <div className="flex flex-col gap-4">
           <div>
             <div className={classNames("flex items-center gap-2 text-lg font-semibold", "text-[var(--color-text-primary)]")}>
-              {tr("context.desktopPetTitle", "Desktop Pet")}
+              {tr("context.desktopPetTitle", "Web Pet")}
               <span className="rounded-md bg-cyan-500/15 px-2 py-0.5 text-xs font-semibold leading-none text-cyan-400">Beta</span>
             </div>
             <div className={classNames("mt-1 text-sm", subtleTextClass)}>
-              {tr("context.desktopPetHint", "Show a pixel cat on your desktop that reflects this team's status.")}
+              {tr("context.desktopPetHint", "Show a floating web pet in the corner that reflects this team's status.")}
             </div>
           </div>
-
-          {desktopPetLaunchError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{desktopPetLaunchError}</div> : null}
 
           <div className={classNames("flex flex-col gap-4 rounded-2xl border p-4", "glass-panel")}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className={classNames("text-sm font-medium", "text-[var(--color-text-primary)]")}>
-                  {tr("context.desktopPetSwitchLabel", "Enable Desktop Pet")}
+                  {tr("context.desktopPetSwitchLabel", "Enable Web Pet")}
                 </div>
                 <div className={classNames("mt-1 text-xs", mutedTextClass)}>
-                  {tr("context.desktopPetTabHint", "Each enabled group opens its own Desktop Pet window.")}
+                  {tr("context.desktopPetTabHint", "Each enabled group shows its own Web Pet in the web UI.")}
                 </div>
               </div>
               <button
                 type="button"
                 role="switch"
                 aria-checked={desktopPetEnabled}
-                aria-label={tr("context.desktopPetSwitchLabel", "Enable Desktop Pet")}
+                aria-label={tr("context.desktopPetSwitchLabel", "Enable Web Pet")}
                 onClick={() => void handleToggleDesktopPet(!desktopPetEnabled)}
                 disabled={viewBusy}
                 className={switchTrackClass(desktopPetEnabled)}
               >
                 <span className={switchThumbClass(desktopPetEnabled)} />
               </button>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className={classNames("text-xs", mutedTextClass)}>
-                {tr("context.desktopPetLaunchHint", "Launch opens the Desktop Pet app for this group using your Web access token.")}
-              </div>
-              <div className="flex items-center gap-3">
-                {(() => {
-                  const dl = buildDesktopPetDownloadUrl();
-                  if (!dl) return null;
-                  const label = tr("context.desktopPetDownloadFor", `Download for ${dl.label}`, { platform: dl.label });
-                  return (
-                    <a
-                      href={dl.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={classNames("text-xs underline", mutedTextClass)}
-                    >
-                      {label}
-                    </a>
-                  );
-                })()}
-                <button
-                  type="button"
-                  className={buttonSecondaryClass}
-                  title={desktopPetLaunchPreviewUrl}
-                  disabled={desktopPetLaunchBusy}
-                  onClick={() => void handlePrepareDesktopPetLaunch()}
-                >
-                  {desktopPetLaunchBusy
-                    ? tr("context.desktopPetLaunchLoading", "Preparing…")
-                    : tr("context.desktopPetLaunch", "Launch")}
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1935,7 +1868,7 @@ export function ContextModal({
             <div className={classNames("inline-flex w-fit rounded-2xl border p-1", isDark ? "border-slate-800 bg-slate-950/70" : "border-gray-200 bg-gray-100/80")}>
               <button type="button" onClick={() => handleSwitchActiveView("coordination")} className={viewButtonClass(activeView === "coordination")}>{tr("context.coordination", "Coordination")}</button>
               <button type="button" onClick={() => handleSwitchActiveView("agents")} className={viewButtonClass(activeView === "agents")}>{tr("context.agents", "Agents")}</button>
-              <button type="button" onClick={() => handleSwitchActiveView("desktop_pet")} className={viewButtonClass(activeView === "desktop_pet")}>{tr("context.desktopPetTab", "Desktop Pet")}<span className="ml-1.5 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-400">Beta</span></button>
+              <button type="button" onClick={() => handleSwitchActiveView("desktop_pet")} className={viewButtonClass(activeView === "desktop_pet")}>{tr("context.desktopPetTab", "Web Pet")}<span className="ml-1.5 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-400">Beta</span></button>
             </div>
           </div>
 

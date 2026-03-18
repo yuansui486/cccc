@@ -1,0 +1,39 @@
+{
+  "panelAria": "Web ペットパネル",
+  "closePanelAria": "パネルを閉じる",
+  "dismissReminderAria": "リマインダーを閉じる",
+  "bubbleAria": "Web ペット",
+  "bubbleAriaHint": "Web ペット。{{hint}}",
+  "teamFallback": "チーム",
+  "systemAgent": "システム",
+  "taskFallback": "このタスク",
+  "connection": {
+    "connected": "接続済み",
+    "connecting": "接続中…",
+    "disconnected": "切断済み"
+  },
+  "countWorking": "{{count}} 作業中",
+  "countBusy": "{{count}} ビジー",
+  "countNeedsYou": "{{count}} 対応が必要",
+  "noActionItems": "今すぐ対応が必要な項目はありません。",
+  "kind": {
+    "waiting_user": "ユーザー待ち",
+    "reply_required": "要返信",
+    "stalled_peer": "停滞中",
+    "mention": "メンション"
+  },
+  "action": {
+    "complete": "完了",
+    "view": "表示",
+    "reply": "返信"
+  },
+  "taskProgress": "{{done}}/{{total}} 完了",
+  "taskActive": "{{count}} 進行中",
+  "hintTaskProgress": "{{done}}/{{total}} タスク完了",
+  "hintTaskWithAction": "{{done}}/{{total}} 完了、{{count}} 件対応待ち",
+  "reminderSummary": {
+    "mention": "{{actor}} があなたにメンションしました。",
+    "replyRequired": "{{actor}} があなたの返信を待っています。",
+    "stalledPeer": "{{actor}} は {{taskId}} のまま長くアイドル状態です。"
+  }
+}

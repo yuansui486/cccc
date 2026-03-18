@@ -16,6 +16,7 @@
   "statusRunning": "Status: Running",
   "agentNotRunning": "Agent Not Running",
   "agentStoppedDescription": "This agent is currently stopped.",
+  "lastTerminalOutput": "Last terminal output",
   "launchAgent": "Launch Agent",
   "launching": "Launching...",
   "launch": "Launch",
@@ -162,5 +163,7 @@
   "roleNotes": "Role Notes",
   "roleNotesHint": "Stored in CCCC_HELP.md as this actor's `## @actor:` block. Use it for stable local guidance, not temporary tasks.",
   "roleNotesPlaceholder": "Describe only this actor's local responsibilities, boundaries, and preferred behavior…",
-  "loadingRoleNotes": "Loading role notes…"
+  "loadingRoleNotes": "Loading role notes…",
+  "loadingLastTerminalOutput": "Loading last terminal output…",
+  "noRecentTerminalOutput": "No recent terminal output was captured."
 }

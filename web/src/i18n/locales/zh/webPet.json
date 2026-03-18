@@ -1,0 +1,39 @@
+{
+  "panelAria": "Web 宠物面板",
+  "closePanelAria": "关闭面板",
+  "dismissReminderAria": "关闭提醒",
+  "bubbleAria": "Web 宠物",
+  "bubbleAriaHint": "Web 宠物：{{hint}}",
+  "teamFallback": "团队",
+  "systemAgent": "系统",
+  "taskFallback": "这条任务",
+  "connection": {
+    "connected": "已连接",
+    "connecting": "连接中…",
+    "disconnected": "已断开"
+  },
+  "countWorking": "{{count}} 工作中",
+  "countBusy": "{{count}} 忙碌",
+  "countNeedsYou": "{{count}} 需要你",
+  "noActionItems": "当前没有待处理事项。",
+  "kind": {
+    "waiting_user": "等待用户",
+    "reply_required": "等待回复",
+    "stalled_peer": "协作停滞",
+    "mention": "提及"
+  },
+  "action": {
+    "complete": "完成",
+    "view": "查看",
+    "reply": "回复"
+  },
+  "taskProgress": "{{done}}/{{total}} 已完成",
+  "taskActive": "{{count}} 进行中",
+  "hintTaskProgress": "{{done}}/{{total}} 任务已完成",
+  "hintTaskWithAction": "{{done}}/{{total}} 已完成，{{count}} 个等你处理",
+  "reminderSummary": {
+    "mention": "{{actor}} 提到了你。",
+    "replyRequired": "{{actor}} 正在等你回复。",
+    "stalledPeer": "{{actor}} 挂着 {{taskId}} 已经空闲很久了。"
+  }
+}

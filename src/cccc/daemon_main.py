@@ -8,7 +8,16 @@ from pathlib import Path
 from typing import Optional
 
 from .daemon.server import DaemonPaths, call_daemon, default_paths, read_pid, serve_forever
-from .util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive
+from .ports.web.runtime_control import clear_web_runtime_state, read_web_runtime_state, web_runtime_pid_candidates
+from .util.process import (
+    resolve_background_python_argv,
+    SOFT_TERMINATE_SIGNAL,
+    best_effort_signal_pid,
+    pid_is_alive,
+    resolve_subprocess_argv,
+    supervised_process_popen_kwargs,
+    terminate_pid,
+)
 
 
 def _spawn_daemon(paths: DaemonPaths) -> int:
@@ -17,15 +26,33 @@ def _spawn_daemon(paths: DaemonPaths) -> int:
     env["CCCC_HOME"] = str(paths.home)
     with paths.log_path.open("a", encoding="utf-8") as log_f:
         p = subprocess.Popen(
-            [sys.executable, "-m", "cccc.daemon_main", "run"],
+            resolve_background_python_argv([sys.executable, "-m", "cccc.daemon_main", "run"]),
             stdout=log_f,
             stderr=log_f,
             stdin=subprocess.DEVNULL,
             env=env,
-            start_new_session=True,
             cwd=str(paths.home),
+            **supervised_process_popen_kwargs(),
         )
     return int(p.pid)
+
+
+def _stop_supervised_web_runtime(paths: DaemonPaths) -> bool:
+    try:
+        runtime = read_web_runtime_state(home=paths.home)
+    except Exception:
+        runtime = {}
+    candidate_pids = web_runtime_pid_candidates(runtime)
+    for runtime_pid in candidate_pids:
+        if not pid_is_alive(runtime_pid):
+            continue
+        if not terminate_pid(runtime_pid, timeout_s=2.0, include_group=True, force=True):
+            return False
+    try:
+        clear_web_runtime_state(home=paths.home, pid=candidate_pids[0] if candidate_pids else None)
+    except Exception:
+        pass
+    return True
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -70,18 +97,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "stop":
         resp = call_daemon({"op": "shutdown"}, paths=paths)
         if resp.get("ok"):
+            if not _stop_supervised_web_runtime(paths):
+                print("ccccd: shutdown requested, but failed to stop supervised web runtime")
+                return 1
             print("ccccd: shutdown requested")
             return 0
         pid = read_pid(paths)
         if pid > 0:
             try:
                 if best_effort_signal_pid(pid, SOFT_TERMINATE_SIGNAL, include_group=True):
+                    if not _stop_supervised_web_runtime(paths):
+                        print("ccccd: SIGTERM sent, but failed to stop supervised web runtime")
+                        return 1
                     print("ccccd: SIGTERM sent")
                     return 0
                 raise RuntimeError("signal not delivered")
             except Exception as e:
                 print(f"ccccd: failed to signal pid={pid}: {e}")
                 return 1
+        if not _stop_supervised_web_runtime(paths):
+            print("ccccd: daemon not running, but failed to stop supervised web runtime")
+            return 1
         print("ccccd: not running")
         return 0
 

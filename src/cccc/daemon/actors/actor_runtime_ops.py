@@ -80,10 +80,13 @@ def start_actor_process(
 
     effective_cmd = normalize_runtime_command(runtime, list(command or []))
 
-    try:
-        ensure_mcp_installed(runtime, cwd)
-    except Exception as e:
-        return {"success": False, "error": f"failed to install MCP: {e}"}
+    if effective_runner != "headless":
+        try:
+            mcp_ready = bool(ensure_mcp_installed(runtime, cwd))
+        except Exception as e:
+            return {"success": False, "error": f"failed to install MCP: {e}"}
+        if not mcp_ready:
+            return {"success": False, "error": f"failed to install MCP for runtime: {runtime}"}
 
     try:
         if effective_runner == "headless":

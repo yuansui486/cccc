@@ -23,8 +23,9 @@ from cccc.cli.daemon_lifecycle import DaemonLifecycle
 class _FakeProcess:
     """Minimal subprocess.Popen stand-in."""
 
-    def __init__(self, *, exit_code: int | None = None):
+    def __init__(self, *, exit_code: int | None = None, pid: int = 4321):
         self._exit_code = exit_code
+        self.pid = pid
         self.terminate_called = False
         self.kill_called = False
 
@@ -80,6 +81,28 @@ class TestStopDaemonGuard(unittest.TestCase):
         lc.stop_daemon()
         self.assertEqual(len(call_log), 1)
         self.assertEqual(call_log[0]["op"], "shutdown")
+
+    def test_owned_daemon_prefers_tree_termination_for_pid_process(self) -> None:
+        """Owned daemon stop should use shared tree termination when a PID is available."""
+        from cccc.cli import daemon_lifecycle as lifecycle_mod
+
+        call_log: list[dict] = []
+        lc = DaemonLifecycle(
+            call_daemon=lambda req, t: (call_log.append(req), {"ok": True})[1],
+            start_daemon=lambda: True,
+            is_shutdown_requested=lambda: False,
+            log=lambda _: None,
+        )
+        proc = _FakeProcess(exit_code=None, pid=9876)
+        lc.process = proc
+
+        with unittest.mock.patch.object(lifecycle_mod, "terminate_pid", return_value=True) as mock_terminate:
+            lc.stop_daemon()
+
+        self.assertEqual(len(call_log), 1)
+        self.assertEqual(call_log[0]["op"], "shutdown")
+        mock_terminate.assert_called_once_with(9876, timeout_s=12.0, include_group=True, force=True)
+        self.assertIsNone(lc.process)
 
 
 class TestMonitorDaemon(unittest.TestCase):

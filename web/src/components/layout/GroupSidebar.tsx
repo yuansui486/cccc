@@ -95,7 +95,7 @@ export function GroupSidebar({
       <aside
         className={classNames(
           "h-full flex flex-col glass-sidebar",
-          "fixed md:relative z-40 transition-all duration-300 ease-out",
+          "fixed md:relative z-40 transition-[width,transform] duration-300 ease-out",
           isCollapsed ? "w-[60px]" : "w-[280px]",
           isOpen ? "translate-x-0" : "-translate-x-full",
           "md:translate-x-0"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.actors import list_actors, update_actor
@@ -166,11 +166,13 @@ def handle_actor_restart(
     normalize_runtime_command: Callable[[str, list[str]], list[str]],
     prepare_pty_env: Callable[[Dict[str, Any]], Dict[str, Any]],
     pty_backlog_bytes: Callable[[], int],
+    ensure_mcp_installed: Callable[[str, Path], bool],
     write_headless_state: Callable[[str, str], None],
     write_pty_state: Callable[..., None],
     get_actor_profile: Callable[[str], Optional[Dict[str, Any]]],
     load_actor_profile_secrets: Callable[[str], Dict[str, str]],
     update_actor_private_env: Callable[..., Dict[str, str]],
+    supported_runtimes: Sequence[str],
 ) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     actor_id = str(args.get("actor_id") or "").strip()
@@ -254,6 +256,37 @@ def handle_actor_restart(
         env = actor.get("env") if isinstance(actor.get("env"), dict) else {}
         runner_kind = str(actor.get("runner") or "pty").strip()
         runner_effective = effective_runner_kind(runner_kind)
+        runtime = str(actor.get("runtime") or "codex").strip() or "codex"
+        if runtime not in supported_runtimes:
+            return _error(
+                "unsupported_runtime",
+                f"unsupported runtime: {runtime}",
+                details={
+                    "group_id": group.group_id,
+                    "actor_id": actor_id,
+                    "runtime": runtime,
+                    "supported": list(supported_runtimes),
+                    "hint": "Change the actor runtime to a supported one.",
+                },
+            )
+        if runtime == "custom" and runner_effective != "headless" and not cmd:
+            return _error(
+                "missing_command",
+                "custom runtime requires a command (PTY runner)",
+                details={
+                    "group_id": group.group_id,
+                    "actor_id": actor_id,
+                    "runtime": runtime,
+                    "hint": "Set actor.command (or switch runner to headless).",
+                },
+            )
+        if runner_effective != "headless":
+            try:
+                mcp_ready = bool(ensure_mcp_installed(runtime, cwd))
+            except Exception as e:
+                return _error("actor_restart_failed", f"failed to install MCP: {e}")
+            if not mcp_ready:
+                return _error("actor_restart_failed", f"failed to install MCP for runtime: {runtime}")
         effective_env = merge_actor_env_with_private(group.group_id, actor_id, env)
 
         if runner_effective == "headless":
@@ -316,11 +349,13 @@ def try_handle_actor_lifecycle_op(
     normalize_runtime_command: Callable[[str, list[str]], list[str]],
     prepare_pty_env: Callable[[Dict[str, Any]], Dict[str, Any]],
     pty_backlog_bytes: Callable[[], int],
+    ensure_mcp_installed: Callable[[str, Path], bool],
     write_headless_state: Callable[[str, str], None],
     write_pty_state: Callable[..., None],
     get_actor_profile: Callable[[str], Optional[Dict[str, Any]]],
     load_actor_profile_secrets: Callable[[str], Dict[str, str]],
     update_actor_private_env: Callable[..., Dict[str, str]],
+    supported_runtimes: Sequence[str],
 ) -> Optional[DaemonResponse]:
     if op == "actor_start":
         return handle_actor_start(
@@ -358,10 +393,12 @@ def try_handle_actor_lifecycle_op(
             normalize_runtime_command=normalize_runtime_command,
             prepare_pty_env=prepare_pty_env,
             pty_backlog_bytes=pty_backlog_bytes,
+            ensure_mcp_installed=ensure_mcp_installed,
             write_headless_state=write_headless_state,
             write_pty_state=write_pty_state,
             get_actor_profile=get_actor_profile,
             load_actor_profile_secrets=load_actor_profile_secrets,
             update_actor_private_env=update_actor_private_env,
+            supported_runtimes=supported_runtimes,
         )
     return None

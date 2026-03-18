@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -57,6 +58,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             self.assertEqual(int(cfg.get("web_port") or 0), 8848)
             self.assertEqual(bool(cfg.get("access_token_configured")), False)
             self.assertEqual(int(cfg.get("access_token_count") or 0), 0)
+            self.assertEqual(remote.get("next_steps"), [])
         finally:
             cleanup()
 
@@ -69,14 +71,14 @@ class TestRemoteAccessOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_remote_access_start_manual_requires_access_token(self) -> None:
+    def test_remote_access_start_manual_rejects_loopback_binding_before_remote_use(self) -> None:
         _, cleanup = self._with_home()
         try:
             cfg, _ = self._call("remote_access_configure", {"by": "user", "provider": "manual"})
             self.assertTrue(cfg.ok, getattr(cfg, "error", None))
             start, _ = self._call("remote_access_start", {"by": "user"})
             self.assertFalse(start.ok)
-            self.assertEqual(str(getattr(start, "error", None).code), "remote_access_invalid_config")
+            self.assertEqual(str(getattr(start, "error", None).code), "remote_access_unreachable")
         finally:
             cleanup()
 
@@ -112,18 +114,22 @@ class TestRemoteAccessOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_remote_access_configure_blocks_insecure_by_default(self) -> None:
+    def test_remote_access_configure_allows_insecure_private_binding_by_default(self) -> None:
         _, cleanup = self._with_home()
-        cleanup_allow = self._with_env("CCCC_REMOTE_ALLOW_INSECURE", None)
         try:
-            blocked, _ = self._call(
+            allowed, _ = self._call(
                 "remote_access_configure",
-                {"by": "user", "provider": "manual", "require_access_token": False},
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "require_access_token": False,
+                    "web_host": "192.168.68.52",
+                },
             )
-            self.assertFalse(blocked.ok)
-            self.assertEqual(str(getattr(blocked, "error", None).code), "remote_access_invalid_config")
+            self.assertTrue(allowed.ok, getattr(allowed, "error", None))
+            remote = (allowed.result or {}).get("remote_access") if isinstance(allowed.result, dict) else {}
+            self.assertEqual(bool(remote.get("require_access_token")), False)
         finally:
-            cleanup_allow()
             cleanup()
 
     def test_remote_access_configure_allows_insecure_with_override(self) -> None:
@@ -139,6 +145,83 @@ class TestRemoteAccessOps(unittest.TestCase):
             self.assertEqual(bool(remote.get("require_access_token")), False)
         finally:
             cleanup_allow()
+            cleanup()
+
+    def test_remote_access_configure_allows_local_binding_without_remote_token_gate(self) -> None:
+        _, cleanup = self._with_home()
+        cleanup_allow = self._with_env("CCCC_REMOTE_ALLOW_INSECURE", None)
+        try:
+            allowed, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "require_access_token": False,
+                    "web_host": "127.0.0.1",
+                },
+            )
+            self.assertTrue(allowed.ok, getattr(allowed, "error", None))
+            remote = (allowed.result or {}).get("remote_access") if isinstance(allowed.result, dict) else {}
+            self.assertEqual(bool(remote.get("require_access_token")), False)
+            diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(str(diagnostics.get("exposure_class") or ""), "local")
+            self.assertEqual(bool(diagnostics.get("effective_require_access_token")), False)
+            self.assertEqual(bool(diagnostics.get("access_token_requirement_satisfied")), True)
+        finally:
+            cleanup_allow()
+            cleanup()
+
+    def test_remote_access_configure_marks_restart_required_when_binding_changes(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            cfg, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "web_host": "0.0.0.0",
+                    "web_port": 9001,
+                },
+            )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+            remote = (cfg.result or {}).get("remote_access") if isinstance(cfg.result, dict) else {}
+            self.assertEqual(bool(remote.get("restart_required")), True)
+        finally:
+            cleanup()
+
+    def test_remote_access_configure_blocks_insecure_public_url_even_with_override(self) -> None:
+        _, cleanup = self._with_home()
+        cleanup_allow = self._with_env("CCCC_REMOTE_ALLOW_INSECURE", "1")
+        try:
+            blocked, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "require_access_token": False,
+                    "web_public_url": "https://cccc.example.com/ui/",
+                },
+            )
+            self.assertFalse(blocked.ok)
+            self.assertEqual(str(getattr(blocked, "error", None).code), "remote_access_invalid_config")
+        finally:
+            cleanup_allow()
+            cleanup()
+
+    def test_remote_access_configure_rejects_public_url_for_tailscale(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            blocked, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "tailscale",
+                    "web_public_url": "https://cccc.example.com/ui/",
+                },
+            )
+            self.assertFalse(blocked.ok)
+            self.assertEqual(str(getattr(blocked, "error", None).code), "remote_access_invalid_config")
+        finally:
             cleanup()
 
     def test_remote_access_start_manual_rejects_loopback_binding_without_override(self) -> None:
@@ -180,10 +263,163 @@ class TestRemoteAccessOps(unittest.TestCase):
             remote = (cfg.result or {}).get("remote_access") if isinstance(cfg.result, dict) else {}
             self.assertEqual(str(remote.get("status") or ""), "misconfigured")
             diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(str(diagnostics.get("exposure_class") or ""), "local")
             self.assertEqual(bool(diagnostics.get("web_bind_loopback")), True)
             self.assertEqual(bool(diagnostics.get("access_token_present")), False)
+            self.assertEqual(bool(diagnostics.get("effective_require_access_token")), False)
+            self.assertEqual(str(remote.get("status_reason") or ""), "local_only")
             next_steps = remote.get("next_steps") if isinstance(remote.get("next_steps"), list) else []
             self.assertGreaterEqual(len(next_steps), 1)
+            self.assertFalse(any("Click Start" in step for step in next_steps))
+        finally:
+            cleanup()
+
+    def test_remote_access_state_reports_missing_access_token_reason_for_private_binding(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            cfg, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "enabled": True,
+                    "web_host": "0.0.0.0",
+                    "require_access_token": True,
+                },
+            )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+            remote = (cfg.result or {}).get("remote_access") if isinstance(cfg.result, dict) else {}
+            self.assertEqual(str(remote.get("status") or ""), "misconfigured")
+            self.assertEqual(str(remote.get("status_reason") or ""), "missing_access_token")
+            next_steps = remote.get("next_steps") if isinstance(remote.get("next_steps"), list) else []
+            self.assertTrue(any("Create an Admin Access Token" in step for step in next_steps))
+        finally:
+            cleanup()
+
+    def test_remote_access_state_uses_remote_placeholder_endpoint_for_wildcard_host(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            create_access_token("admin-user", is_admin=True)
+            cfg, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "enabled": True,
+                    "web_host": "0.0.0.0",
+                    "web_port": 8848,
+                },
+            )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+            remote = (cfg.result or {}).get("remote_access") if isinstance(cfg.result, dict) else {}
+            self.assertEqual(str(remote.get("endpoint") or ""), "http://<your-lan-ip>:8848/ui/")
+        finally:
+            cleanup()
+
+    def test_remote_access_state_mentions_wsl_private_network_requirement(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            with patch("cccc.daemon.ops.remote_access_ops._running_in_wsl", return_value=True):
+                cfg, _ = self._call(
+                    "remote_access_configure",
+                    {
+                        "by": "user",
+                        "provider": "manual",
+                        "enabled": True,
+                        "web_host": "0.0.0.0",
+                        "require_access_token": False,
+                    },
+                )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+            remote = (cfg.result or {}).get("remote_access") if isinstance(cfg.result, dict) else {}
+            diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(bool(diagnostics.get("running_in_wsl")), True)
+            next_steps = remote.get("next_steps") if isinstance(remote.get("next_steps"), list) else []
+            self.assertTrue(any("WSL2" in step and "mirrored networking" in step for step in next_steps))
+        finally:
+            cleanup()
+
+    def test_remote_access_state_surfaces_supervised_live_runtime_mismatch(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+        from cccc.ports.web.runtime_control import write_web_runtime_state
+
+        home, cleanup = self._with_home()
+        try:
+            create_access_token("admin-user", is_admin=True)
+            cfg, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "enabled": True,
+                    "web_host": "0.0.0.0",
+                    "web_port": 9001,
+                },
+            )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+            write_web_runtime_state(
+                home=Path(home),
+                pid=4321,
+                host="127.0.0.1",
+                port=8848,
+                mode="normal",
+                supervisor_managed=True,
+                supervisor_pid=1234,
+                launch_source="test",
+            )
+            state_resp, _ = self._call("remote_access_state", {"by": "user"})
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            remote = (state_resp.result or {}).get("remote_access") if isinstance(state_resp.result, dict) else {}
+            diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(bool(remote.get("restart_required")), True)
+            self.assertEqual(bool(remote.get("apply_supported")), True)
+            self.assertEqual(bool(diagnostics.get("live_runtime_present")), True)
+            self.assertEqual(str(diagnostics.get("live_runtime_host") or ""), "127.0.0.1")
+            self.assertEqual(int(diagnostics.get("live_runtime_port") or 0), 8848)
+            self.assertEqual(bool(diagnostics.get("live_runtime_matches_binding")), False)
+        finally:
+            cleanup()
+
+    def test_remote_access_state_surfaces_unsupervised_live_runtime_mismatch(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+        from cccc.ports.web.runtime_control import write_web_runtime_state
+
+        home, cleanup = self._with_home()
+        try:
+            create_access_token("admin-user", is_admin=True)
+            cfg, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "enabled": True,
+                    "web_host": "0.0.0.0",
+                    "web_port": 9001,
+                },
+            )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+            write_web_runtime_state(
+                home=Path(home),
+                pid=4321,
+                host="127.0.0.1",
+                port=8848,
+                mode="normal",
+                supervisor_managed=False,
+                supervisor_pid=None,
+                launch_source="test",
+            )
+            state_resp, _ = self._call("remote_access_state", {"by": "user"})
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            remote = (state_resp.result or {}).get("remote_access") if isinstance(state_resp.result, dict) else {}
+            diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(bool(remote.get("restart_required")), True)
+            self.assertEqual(bool(remote.get("apply_supported")), False)
+            self.assertEqual(bool(diagnostics.get("live_runtime_present")), True)
+            self.assertEqual(bool(diagnostics.get("live_runtime_matches_binding")), False)
+            next_steps = remote.get("next_steps") if isinstance(remote.get("next_steps"), list) else []
+            self.assertTrue(any("Restart the running CCCC Web service" in step for step in next_steps))
         finally:
             cleanup()
 

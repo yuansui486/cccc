@@ -253,6 +253,7 @@ class RemoteAccessConfigureRequest(BaseModel):
     by: str = Field(default="user")
     provider: Optional[Literal["off", "manual", "tailscale"]] = None
     mode: Optional[str] = None
+    enabled: Optional[bool] = None
     require_access_token: Optional[bool] = None
     web_host: Optional[str] = None
     web_port: Optional[int] = None

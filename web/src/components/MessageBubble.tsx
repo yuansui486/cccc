@@ -547,7 +547,7 @@ export const MessageBubble = memo(function MessageBubble({
                             className={classNames(
                                 "absolute -top-2 z-10 text-[10px] font-semibold px-2 py-0.5 rounded-full border shadow-sm",
                                 isUserMessage ? "left-3" : "right-3",
-                                "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/25"
+                                "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 border-amber-300 dark:border-amber-700"
                             )}
                         >
                             {t('important')}
@@ -560,7 +560,7 @@ export const MessageBubble = memo(function MessageBubble({
                             ? "bg-blue-600 text-white rounded-2xl rounded-tr-none shadow-sm"
                             : "glass-bubble rounded-2xl rounded-tl-none text-[var(--color-text-primary)]"
                         ,
-                        isAttention ? "ring-1 ring-amber-500/25" : ""
+                        isAttention ? "ring-1 ring-amber-400/40 dark:ring-amber-500/40" : ""
                         ,
                         isHighlighted ? "outline outline-2 outline-sky-500/30 outline-offset-2" : ""
                     )}
@@ -842,7 +842,7 @@ export const MessageBubble = memo(function MessageBubble({
                         <span
                             className={classNames(
                                 "text-[10px] font-semibold tracking-tight",
-                                "text-violet-500 dark:text-violet-300"
+                                "text-violet-700 dark:text-violet-300"
                             )}
                         >
                             {t('needReply')}

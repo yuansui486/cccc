@@ -17,6 +17,7 @@ import { useCrossGroupRecipients } from "./hooks/useCrossGroupRecipients";
 import { useDeepLink } from "./hooks/useDeepLink";
 import { useGlobalEvents } from "./hooks/useGlobalEvents";
 import { useViewportHeight } from "./hooks/useViewportHeight";
+import { WebPet } from "./features/webPet/WebPet";
 import { getChatSession } from "./stores/useUIStore";
 import { classNames } from "./utils/classNames";
 import { ActorTab } from "./pages/ActorTab";
@@ -286,6 +287,12 @@ export default function App() {
     if (atBottom) setChatUnreadCount(selectedGroupId, 0);
   }, [activeTab, selectedGroupId, chatSessionAtBottom, setChatUnreadCount, setShowScrollButton]);
 
+  useEffect(() => {
+    if (activeTab !== "chat") return;
+    if (isSmallScreen) return;
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [activeTab, isSmallScreen]);
+
   // Keep visited actor tabs mounted (sticky) so their terminal sessions do not reconnect/replay on tab switches.
   useEffect(() => {
     if (!activeTab || activeTab === "chat") return;
@@ -532,7 +539,7 @@ export default function App() {
         }}
       />
 
-      <div className={`relative h-full md:grid transition-all duration-300 ${
+      <div className={`relative h-full md:grid transition-[grid-template-columns] duration-300 ease-out ${
         sidebarCollapsed ? "md:grid-cols-[60px_1fr]" : "md:grid-cols-[280px_1fr]"
       }`}>
         <GroupSidebar
@@ -692,6 +699,8 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      <WebPet />
 
       {!webReadOnly && (errorMsg || notice) ? (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-[1200] flex flex-col items-center gap-3 px-4">

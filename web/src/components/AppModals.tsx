@@ -231,12 +231,17 @@ export function AppModals({
   // Compute messageMeta for RecipientsModal (moved from App.tsx)
   const messageMetaEvent = useMemo(() => {
     if (!_recipientsEventId) return null;
+    const liveHit = events.find(
+      (x) => x.kind === "chat.message" && String(x.id || "") === _recipientsEventId
+    );
+    if (liveHit) return liveHit;
+    const windowEvents = Array.isArray(chatWindow?.events) ? chatWindow.events : [];
     return (
-      events.find(
+      windowEvents.find(
         (x) => x.kind === "chat.message" && String(x.id || "") === _recipientsEventId
       ) || null
     );
-  }, [events, _recipientsEventId]);
+  }, [chatWindow?.events, events, _recipientsEventId]);
 
   const messageMeta = useMemo(() => {
     if (!messageMetaEvent) return null;

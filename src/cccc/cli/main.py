@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Optional
 
@@ -12,9 +13,51 @@ from .space_cmds import *  # noqa: F401,F403
 from .im_cmds import *  # noqa: F401,F403
 from .system_cmds import *  # noqa: F401,F403
 
+
+def _apply_invocation_web_overrides(args: argparse.Namespace) -> tuple[dict[str, Optional[str]], dict[str, str]]:
+    previous: dict[str, Optional[str]] = {}
+    applied: dict[str, str] = {}
+
+    host = str(getattr(args, "web_host", "") or "").strip()
+    port = getattr(args, "web_port", None)
+    if host:
+        previous["CCCC_WEB_HOST"] = os.environ.get("CCCC_WEB_HOST")
+        os.environ["CCCC_WEB_HOST"] = host
+        applied["CCCC_WEB_HOST"] = host
+    if port is not None:
+        previous["CCCC_WEB_PORT"] = os.environ.get("CCCC_WEB_PORT")
+        os.environ["CCCC_WEB_PORT"] = str(int(port))
+        applied["CCCC_WEB_PORT"] = str(int(port))
+    return previous, applied
+
+
+def _restore_invocation_web_overrides(previous: dict[str, Optional[str]], applied: dict[str, str]) -> None:
+    for key in applied.keys():
+        old_value = previous.get(key)
+        if old_value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old_value
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="cccc", description="CCCC vNext (working group + scopes)")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p.add_argument(
+        "--port",
+        "--web-port",
+        dest="web_port",
+        type=int,
+        default=None,
+        help="Override Web port for this invocation (default-entry friendly)",
+    )
+    p.add_argument(
+        "--host",
+        "--web-host",
+        dest="web_host",
+        default="",
+        help="Override Web host for this invocation (default-entry friendly)",
+    )
+    sub = p.add_subparsers(dest="cmd", required=False)
 
     p_attach = sub.add_parser("attach", help="Attach current path to a working group (auto-create if needed)")
     p_attach.add_argument("path", nargs="?", default=".", help="Path inside a repo/scope (default: .)")
@@ -292,13 +335,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_im_revoke.set_defaults(func=cmd_im_revoke)
 
     p_web = sub.add_parser("web", help="Run web server only (requires daemon to be running)")
-    p_web.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
-    p_web.add_argument("--port", type=int, default=8848, help="Bind port (default: 8848)")
+    p_web.add_argument("--host", default="", help="Bind host (default: use saved Web binding)")
+    p_web.add_argument("--port", type=int, default=None, help="Bind port (default: use saved Web binding)")
     p_web.add_argument(
         "--mode",
         choices=["normal", "exhibit"],
-        default="normal",
-        help="Web mode: normal (read/write) or exhibit (read-only) (default: normal)",
+        default="",
+        help="Web mode: normal (read/write) or exhibit (read-only) (default: current Web mode)",
     )
     p_web.add_argument("--exhibit", action="store_true", help="Shortcut for: --mode exhibit")
     p_web.add_argument("--reload", action="store_true", help="Enable autoreload (dev)")
@@ -475,11 +518,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    if len(argv) == 0:
-        return int(_default_entry())
     parser = build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    previous_env, applied_env = _apply_invocation_web_overrides(args)
+    try:
+        if not getattr(args, "cmd", None):
+            return int(_default_entry())
+        return int(args.func(args))
+    finally:
+        _restore_invocation_web_overrides(previous_env, applied_env)
 
 if __name__ == "__main__":
     raise SystemExit(main())

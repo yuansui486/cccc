@@ -271,5 +271,50 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
 
+    # -- /api/v1/health public path + token resolution regression (T256) --
+
+    def test_health_anonymous_returns_200_without_extended_fields(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            with patch("cccc.ports.web.app.call_daemon", return_value={"ok": True}):
+                client = self._create_client()
+                resp = client.get("/api/v1/health")
+            self.assertEqual(resp.status_code, 200)
+            result = (resp.json().get("result") or {})
+            self.assertNotIn("version", result)
+            self.assertNotIn("home", result)
+        finally:
+            cleanup()
+
+    def test_health_valid_token_returns_200_with_extended_fields(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
+            with patch("cccc.ports.web.app.call_daemon", return_value={"ok": True}):
+                client = self._create_client()
+                resp = client.get("/api/v1/health", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(resp.status_code, 200)
+            result = (resp.json().get("result") or {})
+            self.assertIn("version", result)
+            self.assertIn("home", result)
+        finally:
+            cleanup()
+
+    def test_health_invalid_token_still_returns_200(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            with patch("cccc.ports.web.app.call_daemon", return_value={"ok": True}):
+                client = self._create_client()
+                resp = client.get("/api/v1/health", headers={"Authorization": "Bearer bad-token"})
+            self.assertEqual(resp.status_code, 200)
+            result = (resp.json().get("result") or {})
+            self.assertNotIn("version", result)
+            self.assertNotIn("home", result)
+        finally:
+            cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()
