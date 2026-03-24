@@ -185,9 +185,10 @@ merge 风险：
 
 必须保留的行为：
 
-- Global 只保留：
+- Global 保留：
   - `actorProfiles`
-  - `myProfiles`
+  - `branding`
+  - `myProfiles`（仅在当前浏览器已登录且全局设置未放开时继续显示）
 - Group 只保留：
   - `guidance`
   - `automation`
@@ -542,7 +543,7 @@ merge 风险：
 
 ### 6.2 设置页与用户可见裁剪
 
-- [ ] Global tabs 仍只剩 `actorProfiles` / `myProfiles`
+- [ ] Global tabs 现态仍是 `actorProfiles` / `branding`，且仅在受登录态约束时附带 `myProfiles`
 - [ ] Group tabs 仍只剩 `guidance` / `automation` / `im` / `blueprint`
 - [ ] Guidance 页面仍只显示 Actor Notes
 - [ ] IM Bridge 下拉和状态卡片仍显示“飞书/钉钉”
