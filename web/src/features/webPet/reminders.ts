@@ -62,10 +62,6 @@ function normalizeStatus(status: string | undefined): string {
   return String(status || "").trim().toLowerCase();
 }
 
-function normalizeRecipient(recipient: string): string {
-  return recipient.trim().toLowerCase();
-}
-
 function stableTextHash(text: string): string {
   let hash = 2166136261;
   for (const char of text) {

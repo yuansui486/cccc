@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
+
 import {
-  createMentionReminder,
   projectPetReminders,
   type ProjectPetRemindersInput,
   type ReminderActorInput,
   type ReminderEventInput,
-} from "./reminders";
+} from "../../../src/features/webPet/reminders";
 
-function makeInput(
-  overrides: Partial<ProjectPetRemindersInput> = {},
-): ProjectPetRemindersInput {
+function makeInput(overrides: Partial<ProjectPetRemindersInput> = {}): ProjectPetRemindersInput {
   return {
     groupId: "g-demo",
     waitingUser: [],
@@ -20,10 +18,7 @@ function makeInput(
   };
 }
 
-function makeActor(
-  actorId: string,
-  overrides: Partial<ReminderActorInput> = {},
-): ReminderActorInput {
+function makeActor(actorId: string, overrides: Partial<ReminderActorInput> = {}): ReminderActorInput {
   return {
     actorId,
     running: false,
@@ -32,10 +27,7 @@ function makeActor(
   };
 }
 
-function makeChatEvent(
-  eventId: string,
-  overrides: Partial<ReminderEventInput> = {},
-): ReminderEventInput {
+function makeChatEvent(eventId: string, overrides: Partial<ReminderEventInput> = {}): ReminderEventInput {
   return {
     eventId,
     kind: "chat.message",
@@ -53,18 +45,8 @@ describe("projectPetReminders", () => {
   it("projects waiting_user from attention entries", () => {
     const reminders = projectPetReminders(
       makeInput({
-        waitingUser: [
-          {
-            taskId: "T249",
-            label: "Need user confirmation",
-          },
-        ],
-        tasks: [
-          {
-            taskId: "T249",
-            title: "Need user confirmation",
-          },
-        ],
+        waitingUser: [{ taskId: "T249", label: "Need user confirmation" }],
+        tasks: [{ taskId: "T249", title: "Need user confirmation" }],
       }),
     );
 
@@ -88,18 +70,8 @@ describe("projectPetReminders", () => {
     const reminders = projectPetReminders(
       makeInput({
         tasks: [
-          {
-            taskId: "T250",
-            title: "Wait for approval",
-            waitingOn: "user",
-            status: "active",
-          },
-          {
-            taskId: "T251",
-            title: "Done already",
-            waitingOn: "user",
-            status: "done",
-          },
+          { taskId: "T250", title: "Wait for approval", waitingOn: "user", status: "active" },
+          { taskId: "T251", title: "Done already", waitingOn: "user", status: "done" },
         ],
       }),
     );
@@ -117,12 +89,8 @@ describe("projectPetReminders", () => {
     const reminders = projectPetReminders(
       makeInput({
         events: [
-          makeChatEvent("evt-2", {
-            replyRequired: true,
-          }),
-          makeChatEvent("evt-1", {
-            replyRequired: true,
-          }),
+          makeChatEvent("evt-2", { replyRequired: true }),
+          makeChatEvent("evt-1", { replyRequired: true }),
         ],
       }),
     );
@@ -138,14 +106,8 @@ describe("projectPetReminders", () => {
     const reminders = projectPetReminders(
       makeInput({
         events: [
-          makeChatEvent("evt-1", {
-            replyRequired: true,
-            acked: true,
-          }),
-          makeChatEvent("evt-2", {
-            replyRequired: true,
-            replied: true,
-          }),
+          makeChatEvent("evt-1", { replyRequired: true, acked: true }),
+          makeChatEvent("evt-2", { replyRequired: true, replied: true }),
         ],
       }),
     );
@@ -157,21 +119,9 @@ describe("projectPetReminders", () => {
     const reminders = projectPetReminders(
       makeInput({
         actors: [
-          makeActor("peer-impl-2", {
-            running: true,
-            idleSeconds: 601,
-            activeTaskId: "T249",
-          }),
-          makeActor("peer-reviewer", {
-            running: true,
-            idleSeconds: 599,
-            activeTaskId: "T300",
-          }),
-          makeActor("peer-impl-1", {
-            running: false,
-            idleSeconds: 1000,
-            activeTaskId: "T301",
-          }),
+          makeActor("peer-impl-2", { running: true, idleSeconds: 601, activeTaskId: "T249" }),
+          makeActor("peer-reviewer", { running: true, idleSeconds: 599, activeTaskId: "T300" }),
+          makeActor("peer-impl-1", { running: false, idleSeconds: 1000, activeTaskId: "T301" }),
         ],
       }),
     );
@@ -194,16 +144,8 @@ describe("projectPetReminders", () => {
     const reminders = projectPetReminders(
       makeInput({
         events: [
-          makeChatEvent("evt-1", {
-            by: "peer-reviewer",
-            text: "Need you here",
-            to: ["user"],
-          }),
-          makeChatEvent("evt-2", {
-            by: "user",
-            text: "self mention",
-            to: ["user"],
-          }),
+          makeChatEvent("evt-1", { by: "peer-reviewer", text: "Need you here", to: ["user"] }),
+          makeChatEvent("evt-2", { by: "user", text: "self mention", to: ["user"] }),
         ],
       }),
     );
@@ -216,23 +158,8 @@ describe("projectPetReminders", () => {
       makeInput({
         waitingUser: [{ taskId: "T249", label: "Need approval" }],
         tasks: [{ taskId: "T249", title: "Need approval" }],
-        actors: [
-          makeActor("peer-impl-2", {
-            running: true,
-            idleSeconds: 700,
-            activeTaskId: "T249",
-          }),
-        ],
-        events: [
-          makeChatEvent("evt-mention", {
-            by: "peer-reviewer",
-            text: "ping",
-            to: ["@user"],
-          }),
-          makeChatEvent("evt-reply", {
-            replyRequired: true,
-          }),
-        ],
+        actors: [makeActor("peer-impl-2", { running: true, idleSeconds: 601, activeTaskId: "T249" })],
+        events: [makeChatEvent("evt-1", { replyRequired: true })],
       }),
     );
 
@@ -277,18 +204,5 @@ describe("projectPetReminders", () => {
       groupId: "g-demo",
     });
     expect(reminders[0]?.source.taskId).toBeUndefined();
-  });
-
-  it("does not create standalone mention reminder for agent messages", () => {
-    const reminder = createMentionReminder(
-      "g-demo",
-      makeChatEvent("evt-1", {
-        by: "peer-reviewer",
-        text: "Need you now",
-        to: ["user"],
-      }),
-    );
-
-    expect(reminder).toBeNull();
   });
 });

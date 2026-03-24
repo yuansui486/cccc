@@ -4,6 +4,20 @@
 import { useEffect, useRef } from "react";
 import * as api from "../services/api";
 
+const GLOBAL_REFRESH_EVENT_KINDS = new Set([
+  "group.created",
+  "group.updated",
+  "group.deleted",
+  "group.state_changed",
+  "actor.start",
+  "actor.stop",
+  "actor.restart",
+]);
+
+export function shouldRefreshGroupsAfterGlobalEventsOpen(_hasConnectedOnce: boolean): boolean {
+  return true;
+}
+
 interface UseGlobalEventsOptions {
   /** Callback to refresh groups when events are received */
   refreshGroups: () => void;
@@ -16,6 +30,7 @@ interface UseGlobalEventsOptions {
 export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void {
   // Use ref to avoid recreating SSE connection when refreshGroups reference changes
   const refreshGroupsRef = useRef(refreshGroups);
+  const hasConnectedOnceRef = useRef(false);
   useEffect(() => {
     refreshGroupsRef.current = refreshGroups;
   }, [refreshGroups]);
@@ -33,12 +48,17 @@ export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void
       }
     }
 
+    function invalidateAndRefreshGroups() {
+      api.invalidateGroupsRead();
+      refreshGroupsRef.current();
+    }
+
     function scheduleFallbackPoll() {
       if (fallbackTimer) return;
       fallbackTimer = window.setTimeout(() => {
         fallbackTimer = null;
         if (!document.hidden) {
-          refreshGroupsRef.current();
+          invalidateAndRefreshGroups();
           // While in polling fallback, periodically attempt to restore SSE.
           // If reconnect succeeds, onopen() clears fallback polling.
           if (!es) {
@@ -57,19 +77,24 @@ export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void
         try {
           const ev = JSON.parse((e as MessageEvent).data || "{}");
           const kind = typeof ev?.kind === "string" ? ev.kind : "";
-          // Refresh groups on group or actor events to keep sidebar status in sync
-          if (kind.startsWith("group.") || kind.startsWith("actor.")) {
-            refreshGroupsRef.current();
+          if (GLOBAL_REFRESH_EVENT_KINDS.has(kind)) {
+            invalidateAndRefreshGroups();
           }
         } catch {
           /* ignore parse errors */
         }
       });
       es.onopen = () => {
+        const shouldRefresh = shouldRefreshGroupsAfterGlobalEventsOpen(hasConnectedOnceRef.current);
         errorCount = 0; // Reset on successful connection
         fallbackDelayMs = 10000;
         clearFallbackTimer();
-        refreshGroupsRef.current(); // Re-sync after reconnects (best-effort)
+        hasConnectedOnceRef.current = true;
+        // Global event streams start from EOF, so both first connect and
+        // reconnect need a catch-up refresh to cover the open window.
+        if (shouldRefresh) {
+          invalidateAndRefreshGroups();
+        }
       };
       es.onerror = () => {
         errorCount++;
@@ -87,6 +112,7 @@ export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void
     return () => {
       es?.close();
       clearFallbackTimer();
+      hasConnectedOnceRef.current = false;
     };
   }, []); // Empty deps - only run on mount/unmount
 }

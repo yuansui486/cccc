@@ -246,6 +246,39 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_search_without_external_catalog_returns_builtin_skill_for_symptom_query(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            resp, _ = self._call(
+                "capability_search",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "query": "web startup",
+                    "kind": "skill",
+                    "include_external": False,
+                    "limit": 20,
+                },
+            )
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            result = resp.result if isinstance(resp.result, dict) else {}
+            items = result.get("items") if isinstance(result.get("items"), list) else []
+            skill = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:cccc:runtime-bootstrap"
+                ),
+                {},
+            )
+            self.assertEqual(str(skill.get("source_id") or ""), "cccc_builtin")
+            self.assertEqual(str(skill.get("kind") or ""), "skill")
+        finally:
+            cleanup()
+
     def test_search_empty_query_uses_context_signal_for_pack_ranking(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -1617,6 +1650,21 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertIsInstance(rec_v2, dict)
         self.assertEqual(str((rec_v2 or {}).get("description_short") or ""), "v2")
 
+    def test_ensure_curated_catalog_records_includes_builtin_runtime_bootstrap_skill(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        catalog = ops._new_catalog_doc()
+        policy = ops._compile_allowlist_policy({})
+        changed = ops._ensure_curated_catalog_records(catalog, policy=policy)
+        self.assertTrue(changed)
+
+        rec = catalog.get("records", {}).get("skill:cccc:runtime-bootstrap")
+        self.assertIsInstance(rec, dict)
+        self.assertEqual(str((rec or {}).get("source_id") or ""), "cccc_builtin")
+        self.assertEqual(str((rec or {}).get("kind") or ""), "skill")
+        requires = (rec or {}).get("requires_capabilities") if isinstance(rec, dict) else []
+        self.assertEqual(requires, ["pack:diagnostics", "pack:group-runtime"])
+
     def test_capability_state_reports_scope_mismatch_and_unavailable_hidden_reasons(self) -> None:
         from cccc.daemon.ops import capability_ops as ops
 
@@ -2285,6 +2333,59 @@ class TestCapabilityOps(unittest.TestCase):
             )
             skill_binding = binding_states.get("skill:anthropic:write-pr") if isinstance(binding_states, dict) else {}
             self.assertEqual(str((skill_binding or {}).get("mode") or ""), "skill")
+        finally:
+            cleanup()
+
+    def test_builtin_runtime_bootstrap_enable_applies_builtin_dependencies(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "capability_id": "skill:cccc:runtime-bootstrap",
+                    "scope": "session",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            skill_payload = enable_result.get("skill") if isinstance(enable_result.get("skill"), dict) else {}
+            self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:cccc:runtime-bootstrap")
+            applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
+            self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            enabled = set(state.get("enabled_capabilities") or [])
+            self.assertIn("skill:cccc:runtime-bootstrap", enabled)
+            self.assertIn("pack:diagnostics", enabled)
+            self.assertIn("pack:group-runtime", enabled)
+            active_capsule_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+            active_ids = {str(item.get("capability_id") or "") for item in active_capsule_skills if isinstance(item, dict)}
+            self.assertIn("skill:cccc:runtime-bootstrap", active_ids)
+            active_row = next(
+                (
+                    item
+                    for item in active_capsule_skills
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:cccc:runtime-bootstrap"
+                ),
+                {},
+            )
+            self.assertIn("Restate the exact symptom", str(active_row.get("capsule_preview") or ""))
+            self.assertIn("Gather evidence first", str(active_row.get("capsule_preview") or ""))
+            visible_tools = set(state.get("visible_tools") or [])
+            self.assertIn("cccc_terminal", visible_tools)
+            self.assertIn("cccc_actor", visible_tools)
         finally:
             cleanup()
 
@@ -3744,6 +3845,10 @@ class TestCapabilityOps(unittest.TestCase):
                         "source_id": "github_skills_curated",
                         "capsule_text": "Use triage checklist",
                         "requires_capabilities": ["pack:group-runtime"],
+                        "use_when": ["incident triage and debugging work"],
+                        "avoid_when": ["greenfield feature implementation"],
+                        "gotchas": ["capture concrete failing evidence before routing work"],
+                        "evidence_kind": "error log plus minimal repro note",
                     },
                 },
             )
@@ -3769,6 +3874,128 @@ class TestCapabilityOps(unittest.TestCase):
             _, catalog_doc = ops._load_catalog_doc()
             rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
             self.assertIn(capability_id, rows)
+            record = rows.get(capability_id) if isinstance(rows.get(capability_id), dict) else {}
+            self.assertEqual(record.get("use_when"), ["incident triage and debugging work"])
+            self.assertEqual(record.get("avoid_when"), ["greenfield feature implementation"])
+            self.assertEqual(record.get("gotchas"), ["capture concrete failing evidence before routing work"])
+            self.assertEqual(str(record.get("evidence_kind") or ""), "error log plus minimal repro note")
+        finally:
+            cleanup()
+
+    def test_capability_overview_search_matches_recommendation_fields(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:github:demo:triage"
+
+            import_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "name": "Demo Triage",
+                        "description_short": "Imported skill capsule",
+                        "source_id": "github_skills_curated",
+                        "capsule_text": "Use triage checklist",
+                        "use_when": ["incident triage and debugging work"],
+                        "avoid_when": ["greenfield feature implementation"],
+                        "gotchas": ["capture concrete failing evidence before routing work"],
+                        "evidence_kind": "error log plus minimal repro note",
+                    },
+                },
+            )
+            self.assertTrue(import_resp.ok, getattr(import_resp, "error", None))
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {
+                    "query": "minimal repro note",
+                    "limit": 50,
+                    "include_indexed": True,
+                },
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            result = overview_resp.result if isinstance(overview_resp.result, dict) else {}
+            items = result.get("items") if isinstance(result.get("items"), list) else []
+            row = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict)
+                    and str(item.get("capability_id") or "") == capability_id
+                ),
+                None,
+            )
+            self.assertIsNotNone(row)
+            item = row if isinstance(row, dict) else {}
+            self.assertEqual(item.get("use_when"), ["incident triage and debugging work"])
+            self.assertEqual(item.get("avoid_when"), ["greenfield feature implementation"])
+            self.assertEqual(item.get("gotchas"), ["capture concrete failing evidence before routing work"])
+            self.assertEqual(str(item.get("evidence_kind") or ""), "error log plus minimal repro note")
+        finally:
+            cleanup()
+
+    def test_capability_search_matches_recommendation_fields(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:github:demo:triage"
+
+            import_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "name": "Demo Triage",
+                        "description_short": "Imported skill capsule",
+                        "source_id": "github_skills_curated",
+                        "capsule_text": "Use triage checklist",
+                        "use_when": ["incident triage and debugging work"],
+                        "gotchas": ["capture concrete failing evidence before routing work"],
+                        "evidence_kind": "error log plus minimal repro note",
+                    },
+                },
+            )
+            self.assertTrue(import_resp.ok, getattr(import_resp, "error", None))
+
+            search_resp, _ = self._call(
+                "capability_search",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "query": "failing evidence",
+                    "kind": "skill",
+                    "include_external": True,
+                    "limit": 20,
+                },
+            )
+            self.assertTrue(search_resp.ok, getattr(search_resp, "error", None))
+            result = search_resp.result if isinstance(search_resp.result, dict) else {}
+            items = result.get("items") if isinstance(result.get("items"), list) else []
+            row = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict)
+                    and str(item.get("capability_id") or "") == capability_id
+                ),
+                None,
+            )
+            self.assertIsNotNone(row)
+            item = row if isinstance(row, dict) else {}
+            self.assertEqual(item.get("gotchas"), ["capture concrete failing evidence before routing work"])
+            self.assertEqual(str(item.get("evidence_kind") or ""), "error log plus minimal repro note")
         finally:
             cleanup()
 

@@ -29,19 +29,45 @@ Feishu (飞书, also known as Lark internationally) is ideal for:
 
 1. Go to **Permissions & Scopes**
 2. Click **Add permission scopes to app**
-3. Search for `im:message` in the search box
-4. Select the **Tenant token scopes** tab
-5. Click **All** to select all `im:message` related scopes
-6. Also search for `im:chat:readonly` and enable it (for displaying chat titles)
-7. Click **Confirm and Apply**
+3. Add the following scopes exactly as shown below
+4. Click **Confirm and Apply**
 
-![Feishu Permissions Configuration](/images/feishu-permissions.png)
+Copyable scope configuration:
 
+```json
+{
+  "scopes": {
+    "tenant": [
+      "application:application.app_message_stats.overview:readonly",
+      "application:application:self_manage",
+      "application:bot.menu:write",
+      "cardkit:card:read",
+      "cardkit:card:write",
+      "contact:user.employee_id:readonly",
+      "corehr:file:download",
+      "event:ip_list",
+      "im:chat.access_event.bot_p2p_chat:read",
+      "im:chat.members:bot_access",
+      "im:message",
+      "im:message.group_at_msg:readonly",
+      "im:message.p2p_msg:readonly",
+      "im:message:readonly",
+      "im:message:send_as_bot",
+      "im:resource"
+    ],
+    "user": [
+      "im:chat.access_event.bot_p2p_chat:read"
+    ]
+  }
+}
+```
 ::: tip Required Permissions
-| Permission | Purpose |
-|------------|---------|
-| `im:message` (all) | Send and receive messages |
-| `im:chat:readonly` | Display chat/group titles (optional, falls back to chat ID if missing) |
+| Scope | Purpose |
+|-------|---------|
+| `im:message*`, `im:resource`, `im:chat.members:bot_access` | Bot send/receive message flow and resource access |
+| `im:chat.access_event.bot_p2p_chat:read` | Receive bot P2P chat access events |
+| `application:*`, `cardkit:*` | Bot self-management, menus, cards, and app stats |
+| `contact:user.employee_id:readonly`, `corehr:file:download`, `event:ip_list` | Supporting identity, file, and platform event access |
 :::
 
 ## Step 3: Configure CCCC

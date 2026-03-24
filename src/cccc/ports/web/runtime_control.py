@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import os
 import subprocess
 import sys
@@ -249,7 +250,7 @@ def wait_for_web_ready(*, host: str, port: int, timeout_s: float = 6.0) -> bool:
             with urllib.request.urlopen(target, timeout=0.5) as resp:
                 if int(getattr(resp, "status", 0) or 0) == 200:
                     return True
-        except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
+        except (urllib.error.URLError, urllib.error.HTTPError, http.client.HTTPException, OSError, ValueError):
             pass
         time.sleep(0.1)
     return False

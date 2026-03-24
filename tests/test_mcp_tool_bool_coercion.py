@@ -366,6 +366,19 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(str(kwargs.get("objective") or ""), "north-star")
             self.assertEqual(str(kwargs.get("by") or ""), "peer1")
 
+    def test_task_delete_forwards_caller_identity(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+
+        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
+            mcp_server, "_resolve_self_actor_id", return_value="peer1"
+        ), patch.object(mcp_server, "task_delete", return_value={"ok": True}) as mock_task_delete:
+            mcp_server.handle_tool_call("cccc_task", {"action": "delete", "task_id": "T123"})
+            self.assertTrue(mock_task_delete.called)
+            kwargs = mock_task_delete.call_args.kwargs
+            self.assertEqual(kwargs.get("group_id"), "g_test")
+            self.assertEqual(str(kwargs.get("task_id") or ""), "T123")
+            self.assertEqual(str(kwargs.get("by") or ""), "peer1")
+
     def test_notify_send_requires_ack_string_false(self) -> None:
         from cccc.ports.mcp import server as mcp_server
 

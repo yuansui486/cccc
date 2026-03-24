@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from ....contracts.v1 import DaemonResponse
-from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS
+from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, BUILTIN_CAPSULE_SKILLS
 from ....util.time import parse_utc_iso, utc_now_iso
 
 from ._common import (
@@ -75,6 +75,48 @@ from ._search import (
 def _pkg():
     """Get parent package module for mock-compatible function lookups."""
     return sys.modules[__name__.rsplit(".", 1)[0]]
+
+
+def _normalize_recommendation_lines(raw: Any, *, max_items: int = 4, max_chars: int = 180) -> List[str]:
+    items: List[str] = []
+    if isinstance(raw, (list, tuple)):
+        items = [str(x or "").strip() for x in raw if str(x or "").strip()]
+    else:
+        single = str(raw or "").strip()
+        if single:
+            items = [single]
+    out: List[str] = []
+    seen: set[str] = set()
+    for item in items:
+        normalized = " ".join(str(item or "").split()).strip()
+        if not normalized:
+            continue
+        if len(normalized) > max_chars:
+            normalized = normalized[: max_chars - 3].rstrip() + "..."
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(normalized)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _normalize_recommendation_fields(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    payload: Dict[str, Any] = {}
+    for field in ("use_when", "avoid_when", "gotchas"):
+        rows = _normalize_recommendation_lines(raw.get(field))
+        if rows:
+            payload[field] = rows
+    evidence_kind = " ".join(str(raw.get("evidence_kind") or "").split()).strip()
+    if evidence_kind:
+        if len(evidence_kind) > 180:
+            evidence_kind = evidence_kind[:177].rstrip() + "..."
+        payload["evidence_kind"] = evidence_kind
+    return payload
 
 
 def _build_import_readiness_preview(
@@ -239,6 +281,7 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
             description_short = notes or f"Curated skill {name}"
         if not capsule_text:
             capsule_text = f"Skill: {name}\nSummary: {description_short}".strip()
+        recommendation_fields = _normalize_recommendation_fields(raw)
         out[cap_id] = {
             "capability_id": cap_id,
             "kind": "skill",
@@ -264,6 +307,53 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
             "enable_supported": qualification != _QUAL_BLOCKED,
             "capsule_text": capsule_text,
             "requires_capabilities": requires_capabilities,
+            **recommendation_fields,
+        }
+    return out
+
+
+def _build_builtin_skill_records() -> Dict[str, Dict[str, Any]]:
+    now_iso = utc_now_iso()
+    out: Dict[str, Dict[str, Any]] = {}
+    for cap_id, raw in BUILTIN_CAPSULE_SKILLS.items():
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip() or _display_name_from_capability_id(cap_id).replace(" ", "-")
+        description_short = str(raw.get("description_short") or "").strip()
+        capsule_text = str(raw.get("capsule_text") or "").strip()
+        tags = [str(x).strip() for x in (raw.get("tags") if isinstance(raw.get("tags"), (list, tuple)) else []) if str(x).strip()]
+        requires_capabilities = [
+            str(x).strip()
+            for x in (raw.get("requires_capabilities") if isinstance(raw.get("requires_capabilities"), (list, tuple)) else [])
+            if str(x).strip()
+        ]
+        recommendation_fields = _normalize_recommendation_fields(raw)
+        out[cap_id] = {
+            "capability_id": cap_id,
+            "kind": "skill",
+            "name": name,
+            "description_short": description_short,
+            "tags": ["skill", "builtin", *tags],
+            "source_id": "cccc_builtin",
+            "source_tier": "builtin",
+            "source_uri": "",
+            "source_record_id": name,
+            "source_record_version": "",
+            "updated_at_source": now_iso,
+            "last_synced_at": now_iso,
+            "sync_state": "builtin",
+            "install_mode": "builtin",
+            "install_spec": {},
+            "requirements": {},
+            "license": "",
+            "trust_tier": "builtin",
+            "qualification_status": _QUAL_QUALIFIED,
+            "qualification_reasons": [],
+            "health_status": "builtin",
+            "enable_supported": True,
+            "capsule_text": capsule_text or f"Skill: {name}\nSummary: {description_short}".strip(),
+            "requires_capabilities": requires_capabilities,
+            **recommendation_fields,
         }
     return out
 
@@ -272,7 +362,10 @@ def _ensure_curated_catalog_records(catalog_doc: Dict[str, Any], *, policy: Dict
     records = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
     if not isinstance(records, dict):
         records = {}
-    curated = _build_curated_records_from_policy(policy)
+    curated = {
+        **_build_builtin_skill_records(),
+        **_build_curated_records_from_policy(policy),
+    }
     if not curated:
         return False
 
@@ -714,6 +807,7 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         qualification = ""
     qualification_reasons = _normalize_import_reasons(raw_record.get("qualification_reasons"))
     tags = _normalize_import_tags(raw_record.get("tags"), kind=kind)
+    recommendation_fields = _normalize_recommendation_fields(raw_record)
 
     if kind == "mcp_toolpack":
         install_mode = str(raw_record.get("install_mode") or "").strip().lower()
@@ -777,6 +871,7 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         rec["enable_supported"] = bool(
             qualification != _QUAL_BLOCKED and supported
         )
+        rec.update(recommendation_fields)
         return rec
 
     capsule_text = str(raw_record.get("capsule_text") or "").strip()
@@ -810,6 +905,7 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         "enable_supported": qualification != _QUAL_BLOCKED,
         "capsule_text": capsule_text[:2400],
         "requires_capabilities": requires_capabilities,
+        **recommendation_fields,
     }
     return rec
 

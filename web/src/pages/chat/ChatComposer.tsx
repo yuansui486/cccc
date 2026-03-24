@@ -1,11 +1,12 @@
 // ChatComposer renders the chat message composer.
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Actor, GroupMeta, ReplyTarget } from "../../types";
+import { Actor, GroupMeta, PresentationMessageRef, ReplyTarget } from "../../types";
 import { classNames } from "../../utils/classNames";
 import { getRecipientDisplayLabel } from "../../utils/displayText";
 import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon } from "../../components/Icons";
 import { ScrollFade } from "../../components/ScrollFade";
+import { getPresentationRefChipLabel } from "../../utils/presentationRefs";
 import { useTranslation } from 'react-i18next';
 
 export interface ChatComposerProps {
@@ -24,6 +25,8 @@ export interface ChatComposerProps {
   // Reply
   replyTarget: ReplyTarget;
   onCancelReply: () => void;
+  quotedPresentationRef: PresentationMessageRef | null;
+  onClearQuotedPresentationRef: () => void;
 
   // Recipients
   toTokens: string[];
@@ -34,10 +37,10 @@ export interface ChatComposerProps {
   composerFiles: File[];
   onRemoveComposerFile: (index: number) => void;
   appendComposerFiles: (files: File[]) => void;
-  fileInputRef: RefObject<HTMLInputElement>;
+  fileInputRef: RefObject<HTMLInputElement | null>;
 
   // Text input
-  composerRef: RefObject<HTMLTextAreaElement>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
   composerText: string;
   setComposerText: Dispatch<SetStateAction<string>>;
   priority: "normal" | "attention";
@@ -70,6 +73,8 @@ export function ChatComposer({
   busy,
   replyTarget,
   onCancelReply,
+  quotedPresentationRef,
+  onClearQuotedPresentationRef,
   toTokens,
   onToggleRecipient,
   onClearRecipients,
@@ -144,7 +149,7 @@ export function ChatComposer({
   const chipBaseClass =
     "flex-shrink-0 whitespace-nowrap text-[10px] sm:text-[11px] px-2.5 sm:px-3 rounded-full border transition-all flex items-center justify-center font-medium";
   const composerToolButtonClass =
-    "glass-btn flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] transition-[background-color,border-color,color,transform,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-50";
+    "glass-btn flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] transition-[background-color,border-color,color,transform,box-shadow] duration-200 disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:opacity-70";
   const composerInlineToolButtonClass =
     "glass-btn flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] transition-[background-color,border-color,color,transform,box-shadow] duration-200 sm:h-10 sm:w-10";
 
@@ -155,6 +160,10 @@ export function ChatComposer({
     const actor = actors.find(a => a.id === replyTarget.by);
     return actor?.title || replyTarget.by;
   }, [replyTarget, actors]);
+  const quotedPresentationRefLabel = useMemo(
+    () => (quotedPresentationRef ? getPresentationRefChipLabel(quotedPresentationRef) : ""),
+    [quotedPresentationRef],
+  );
 
   // Handle pasted files (clipboard items).
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -289,7 +298,7 @@ export function ChatComposer({
   const isAttention = priority === "attention";
   const isCrossGroup = !!destGroupId && destGroupId !== selectedGroupId;
   const canChooseDestGroup =
-    !!selectedGroupId && busy !== "send" && !replyTarget && composerFiles.length === 0;
+    !!selectedGroupId && busy !== "send" && !replyTarget && !quotedPresentationRef && composerFiles.length === 0;
 
   type MessageMode = "normal" | "attention" | "task";
   const modeOptions: Array<{ key: MessageMode; label: string; description: string }> = [
@@ -359,7 +368,7 @@ export function ChatComposer({
   const groupSelectClass = useMemo(() => {
     if (!canChooseDestGroup || groupOptions.length === 0) {
       return isDark
-        ? "bg-slate-900 text-slate-600 border-slate-800"
+        ? "bg-white/[0.07] text-[var(--color-text-tertiary)] border-white/[0.08]"
         : "bg-white text-gray-400 border-gray-200";
     }
     if (isCrossGroup) {
@@ -369,14 +378,14 @@ export function ChatComposer({
     }
     // Match the neutral look of recipient buttons
     return isDark
-      ? "bg-white/5 text-slate-200 border-white/5 hover:border-white/10"
+      ? "bg-white/[0.08] text-[var(--color-text-secondary)] border-white/[0.1] hover:border-white/[0.16]"
       : "bg-black/5 text-gray-800 border-transparent hover:border-black/5";
   }, [canChooseDestGroup, groupOptions.length, isCrossGroup, isDark]);
 
   const groupCaretClass = useMemo(() => {
-    if (!canChooseDestGroup || groupOptions.length === 0) return isDark ? "text-slate-600" : "text-gray-400";
+    if (!canChooseDestGroup || groupOptions.length === 0) return isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400";
     if (isCrossGroup) return isDark ? "text-blue-200" : "text-blue-700";
-    return isDark ? "text-slate-400" : "text-gray-500";
+    return isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500";
   }, [canChooseDestGroup, groupOptions.length, isCrossGroup, isDark]);
 
   return (
@@ -390,7 +399,7 @@ export function ChatComposer({
       {replyTarget && (
         <div className={classNames(
           "mb-3 flex items-center gap-2 text-xs rounded-xl px-3 py-2",
-          isDark ? "text-slate-400 bg-white/5" : "text-gray-500 bg-black/5"
+          isDark ? "text-[var(--color-text-tertiary)] bg-white/[0.08] border border-white/[0.08]" : "text-gray-500 bg-black/5"
         )}>
           <ReplyIcon size={14} className="flex-shrink-0 opacity-60" />
           <span className="font-medium truncate flex-1">
@@ -403,7 +412,7 @@ export function ChatComposer({
           <button
             className={classNames(
               "p-2.5 -m-1.5 rounded-full transition-colors",
-              isDark ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-black/10 text-gray-400 hover:text-gray-600"
+              isDark ? "hover:bg-white/10 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]" : "hover:bg-black/10 text-gray-400 hover:text-gray-600"
             )}
             onClick={onCancelReply}
             title={t('cancelReply')}
@@ -414,10 +423,37 @@ export function ChatComposer({
         </div>
       )}
 
+      {quotedPresentationRef && (
+        <div
+          className={classNames(
+            "mb-3 flex items-center gap-2 text-xs rounded-xl px-3 py-2",
+            isDark ? "text-[var(--color-text-tertiary)] bg-cyan-500/12 border border-cyan-400/15" : "text-gray-600 bg-cyan-50",
+          )}
+        >
+          <span className={classNames("font-medium flex-shrink-0", isDark ? "text-cyan-100" : "text-cyan-700")}>
+            {t("presentationQuotedViewLabel", { defaultValue: "Quoted view" })}
+          </span>
+          <span className="min-w-0 flex-1 truncate" title={quotedPresentationRef.title || quotedPresentationRefLabel}>
+            {quotedPresentationRefLabel}
+          </span>
+          <button
+            className={classNames(
+              "p-2.5 -m-1.5 rounded-full transition-colors",
+              isDark ? "hover:bg-white/10 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]" : "hover:bg-black/10 text-gray-400 hover:text-gray-600",
+            )}
+            onClick={onClearQuotedPresentationRef}
+            title={t("presentationRemoveQuotedView", { defaultValue: "Remove quoted view" })}
+            aria-label={t("presentationRemoveQuotedView", { defaultValue: "Remove quoted view" })}
+          >
+            <CloseIcon size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Recipient Selector Row */}
       <div className="mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
         <ScrollFade className="-mx-4 sm:mx-0" innerClassName="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-0" fadeWidth={20}>
-          <div className={classNames("text-[10px] font-medium uppercase tracking-wide flex-shrink-0 opacity-50", isDark ? "text-slate-400" : "text-gray-500")}>{t('to', 'To')}</div>
+          <div className={classNames("text-[10px] font-medium uppercase tracking-wide flex-shrink-0", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500")}>{t('to', 'To')}</div>
 
           {/* Group Selector - Styled to match buttons */}
           <div className="relative flex-shrink-0">
@@ -464,7 +500,7 @@ export function ChatComposer({
                     active
                       ? "bg-blue-600 text-white border-blue-500 shadow-sm shadow-blue-500/20"
                       : isDark
-                        ? "bg-white/5 text-slate-400 border-white/5 hover:border-white/20 hover:text-slate-200"
+                        ? "bg-white/[0.08] text-[var(--color-text-secondary)] border-white/[0.1] hover:border-white/[0.16] hover:text-[var(--color-text-primary)]"
                         : "bg-black/5 text-gray-600 border-transparent hover:border-black/10 hover:text-gray-800"
                   )}
                 onClick={() => onToggleRecipient(tok)}
@@ -489,7 +525,7 @@ export function ChatComposer({
                     active
                       ? "bg-blue-600 text-white border-blue-500 shadow-sm shadow-blue-500/20"
                       : isDark
-                        ? "bg-white/5 text-slate-400 border-white/5 hover:border-white/20 hover:text-slate-200"
+                        ? "bg-white/[0.08] text-[var(--color-text-secondary)] border-white/[0.1] hover:border-white/[0.16] hover:text-[var(--color-text-primary)]"
                         : "bg-black/5 text-gray-600 border-transparent hover:border-black/10 hover:text-gray-800"
                   )}
                   onClick={() => onToggleRecipient(id)}
@@ -505,7 +541,7 @@ export function ChatComposer({
               <button
                 className={classNames(
                   "p-2 rounded-full transition-all flex-shrink-0 opacity-40 hover:opacity-100",
-                  isDark ? "hover:bg-white/10" : "hover:bg-black/10"
+                  isDark ? "text-[var(--color-text-tertiary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]" : "hover:bg-black/10"
                 )}
                 onClick={onClearRecipients}
                 disabled={busy === "send"}
@@ -535,7 +571,7 @@ export function ChatComposer({
               <button
                 className={classNames(
                   "flex-shrink-0 p-1.5 -mr-1 rounded-full",
-                  isDark ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-black/10 text-gray-400 hover:text-gray-700"
+                  isDark ? "text-[var(--color-text-tertiary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]" : "hover:bg-black/10 text-gray-400 hover:text-gray-700"
                 )}
                 onClick={() => onRemoveComposerFile(idx)}
                 aria-label={t('removeAttachment', { name: f.name })}
@@ -570,7 +606,7 @@ export function ChatComposer({
       {/* Main Input Area - Perfectly Centered for Better Alignment */}
       <div className="flex gap-2 sm:gap-2.5 relative items-center">
         <input
-          ref={fileInputRef}
+          ref={fileInputRef as RefObject<HTMLInputElement>}
           type="file"
           multiple
           className="hidden"
@@ -598,12 +634,12 @@ export function ChatComposer({
         {/* Text Area Wrapper */}
         <div className="flex-1 relative min-w-0">
           <textarea
-            ref={composerRef}
+            ref={composerRef as RefObject<HTMLTextAreaElement>}
             className={classNames(
-              "w-full rounded-xl sm:rounded-2xl border px-4 sm:px-5 pr-11 sm:pr-14 py-3 sm:py-3.5 text-base sm:text-sm resize-none min-h-[44px] sm:min-h-[48px] max-h-[160px] overflow-y-auto scrollbar-hide transition-all duration-300 ease-out",
-              "focus:outline-none focus:ring-2 focus:ring-offset-0 flex items-center shadow-sm",
-              isDark
-                ? "bg-white/5 border-white/5 text-slate-200 placeholder-slate-500 focus:ring-blue-500/30 focus:border-blue-500/40"
+                "w-full rounded-xl sm:rounded-2xl border px-4 sm:px-5 pr-11 sm:pr-14 py-3 sm:py-3.5 text-base sm:text-sm resize-none min-h-[44px] sm:min-h-[48px] max-h-[160px] overflow-y-auto scrollbar-hide transition-all duration-300 ease-out",
+                "focus:outline-none focus:ring-2 focus:ring-offset-0 flex items-center shadow-sm",
+                isDark
+                ? "bg-white/[0.08] border-white/[0.1] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:ring-blue-500/35 focus:border-blue-400/45"
                 : "bg-black/5 border-transparent text-gray-900 placeholder-gray-400 focus:ring-blue-400/30 focus:border-blue-400/40"
             )}
             placeholder={isSmallScreen ? t('messagePlaceholder') : t('messagePlaceholderDesktop')}
@@ -623,7 +659,7 @@ export function ChatComposer({
               className={classNames(
                 composerInlineToolButtonClass,
                 busy === "send" || !selectedGroupId
-                  ? "text-[var(--color-text-muted)]"
+                  ? "text-[var(--color-text-tertiary)]"
                   : messageMode === "task"
                     ? isDark
                       ? "border-violet-400/20 bg-violet-500/20 text-violet-200 hover:bg-violet-500/28"
@@ -711,7 +747,7 @@ export function ChatComposer({
                         <span className={classNames("block text-sm font-semibold", isDark ? "text-slate-100" : "text-gray-900")}>
                           {opt.label}
                         </span>
-                        <span className={classNames("block text-[11px]", isDark ? "text-slate-400" : "text-gray-500")}>
+                        <span className={classNames("block text-[11px]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500")}>
                           {opt.description}
                         </span>
                       </span>
@@ -758,10 +794,11 @@ export function ChatComposer({
         {/* Send button - Using icon for modern feel */}
         <button
           className={classNames(
-            "w-11 h-11 sm:min-w-[6.25rem] sm:px-3 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all duration-300 ease-out flex-shrink-0 disabled:opacity-50",
+            "w-11 h-11 sm:min-w-[6.25rem] sm:px-3 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all duration-300 ease-out flex-shrink-0",
+            "border",
             busy === "send" || !canSend
-              ? isDark ? "bg-slate-800 text-slate-500 shadow-none" : "bg-gray-100 text-gray-400 shadow-none"
-              : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/30 active:scale-95 active:shadow-sm group"
+              ? isDark ? "border-white/[0.12] bg-white/[0.08] text-[var(--color-text-tertiary)] shadow-none disabled:opacity-100" : "border-gray-200 bg-gray-100 text-gray-400 shadow-none disabled:opacity-100"
+              : "border-blue-500 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/30 active:scale-95 active:shadow-sm group"
           )}
           onClick={onSendMessage}
           disabled={busy === "send" || !canSend}

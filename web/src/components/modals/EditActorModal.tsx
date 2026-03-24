@@ -8,6 +8,7 @@ import { parsePrivateEnvSetText, parsePrivateEnvUnsetText } from "../../utils/pr
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey, actorProfileMatchesRef } from "../../utils/actorProfiles";
 import { CapabilityPicker } from "../CapabilityPicker";
+import { RolePresetPicker } from "../RolePresetPicker";
 
 type EditMode = "custom" | "profile";
 
@@ -502,7 +503,9 @@ export function EditActorModal({
           <div className="mx-auto max-w-2xl space-y-4">
             <section className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("sectionBasics", "Basics")}</div>
-              <div className={sectionHintClass}>{t("sectionBasicsHint", "Edit the actor label and stable role notes here.")}</div>
+              <div className={sectionHintClass}>
+                {t("sectionBasicsHint", "Edit the actor label, built-in role preset seed, and stable role notes here.")}
+              </div>
 
               <div className="mt-4 space-y-4">
                 <div>
@@ -517,7 +520,12 @@ export function EditActorModal({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
+                  <RolePresetPicker
+                    draftValue={roleNotes}
+                    onChangeDraft={onChangeRoleNotes}
+                    disabled={roleNotesBusy || busy === "actor-update"}
+                  />
+                  <label className="block text-xs font-medium mt-3 mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
                   <textarea
                     className="w-full rounded-xl border px-3 py-2 text-sm min-h-[144px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
                     value={roleNotes}
@@ -534,7 +542,9 @@ export function EditActorModal({
 
             <section className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("sectionRuntime", "Runtime & Profile")}</div>
-              <div className={sectionHintClass}>{t("sectionRuntimeHint", "Choose how this actor runs, then adjust only the fields that matter.")}</div>
+              <div className={sectionHintClass}>
+                {t("sectionRuntimeHint", "Choose a runtime profile or custom runtime config. Role presets above only affect role notes.")}
+              </div>
 
               <div className="mt-4">
                 <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>

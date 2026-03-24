@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Actor, DoneHubStatus, GroupDoc } from "../../types";
 import { getGroupStatusUnified } from "../../utils/groupStatus";
+import { getGroupControlVisual, getLaunchControlMode } from "../../utils/groupControls";
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { LanguageSwitcher } from "../LanguageSwitcher";
@@ -12,7 +13,7 @@ import {
   SunIcon,
   MoonIcon,
   EditIcon,
-  PlayIcon,
+  RocketIcon,
   StopIcon,
   PauseIcon,
   CloseIcon,
@@ -67,12 +68,58 @@ export function MobileMenuSheet({
 }: MobileMenuSheetProps) {
   const { modalRef } = useModalA11y(isOpen, onClose);
   const { t } = useTranslation('layout');
+  const selectedStatus = selectedGroupId ? getGroupStatusUnified(selectedGroupRunning, groupDoc?.state) : null;
+  const selectedStatusKey = selectedStatus?.key ?? null;
+  const launchMode = getLaunchControlMode(selectedStatusKey);
+  const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
+  const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
+  const stopControl = getGroupControlVisual(selectedStatusKey, "stop", busy);
+  const isGroupBusy = busy.startsWith("group-");
+  const launchHardUnavailable = !selectedGroupId || actors.length === 0;
+  const pauseHardUnavailable = !selectedGroupId || !selectedGroupRunning;
+  const stopHardUnavailable = !selectedGroupId;
+  const launchDisabled = launchHardUnavailable || isGroupBusy;
+  const pauseDisabled = pauseHardUnavailable || isGroupBusy;
+  const stopDisabled = stopHardUnavailable || isGroupBusy;
+  const themeLabel = isDark ? t('themeDark') : t('themeLight');
+  const runtimeHint = selectedStatusKey === "paused"
+    ? t('runtimeHintPaused')
+    : selectedStatusKey === "stop"
+      ? t('runtimeHintStop')
+      : selectedStatusKey === "idle"
+        ? t('runtimeHintIdle')
+        : t('runtimeHintRun');
+  const sectionCardClass = "rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-2 shadow-sm backdrop-blur-xl";
+  const sectionTitleClass = "px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]";
+  const rowButtonClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3.5 py-3 text-sm transition-all text-[var(--color-text-primary)] hover:bg-black/5 disabled:opacity-45 dark:hover:bg-white/6";
+
   const doneHubStatus = doneHub?.status || "idle";
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
   const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
-  const doneHubQuota = doneHub && doneHub.quota != null
-    ? formatDoneHubQuota(doneHub.quota)
-    : formatDoneHubQuota(0);
+  const doneHubQuota = doneHub?.quota != null ? formatDoneHubQuota(doneHub.quota) : formatDoneHubQuota(0);
+
+  const handleLaunchClick = () => {
+    if (launchDisabled || selectedStatusKey === "run") return;
+    onClose();
+    if (launchMode === "activate") {
+      void onSetGroupState("active");
+      return;
+    }
+    onStartGroup();
+  };
+
+  const handlePauseClick = () => {
+    if (pauseDisabled || selectedStatusKey === "paused") return;
+    onClose();
+    void onSetGroupState("paused");
+  };
+
+  const handleStopClick = () => {
+    if (stopDisabled || selectedStatusKey === "stop") return;
+    onClose();
+    onStopGroup();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -101,16 +148,11 @@ export function MobileMenuSheet({
             <div className={classNames("text-lg font-bold truncate", "text-[var(--color-text-primary)]")}>
               {groupDoc?.title || (selectedGroupId ? selectedGroupId : t('menu'))}
             </div>
-            {selectedGroupId && groupDoc && (
+            {selectedStatus && (
               <div className="flex items-center gap-2 mt-1">
-                {(() => {
-                  const status = getGroupStatusUnified(selectedGroupRunning, groupDoc.state);
-                  return (
-                    <span className={classNames("text-xs px-2 py-0.5 rounded-full font-medium", status.pillClass)}>
-                      {status.label}
-                    </span>
-                  );
-                })()}
+                <span className={classNames("text-xs px-2 py-0.5 rounded-full font-medium", selectedStatus.pillClass)}>
+                  {selectedStatus.label}
+                </span>
               </div>
             )}
           </div>
@@ -126,7 +168,7 @@ export function MobileMenuSheet({
           </button>
         </div>
 
-        <div className="p-4 space-y-2 safe-area-inset-bottom">
+        <div className="p-4 space-y-4 safe-area-inset-bottom">
           {!selectedGroupId && (
             <div className={classNames("text-sm px-1 pb-2", "text-[var(--color-text-tertiary)]")}>
               {t('selectGroupToEnable')}
@@ -135,7 +177,7 @@ export function MobileMenuSheet({
 
           <button
             className={classNames(
-              "w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn",
+              "w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn shadow-sm",
               "text-[var(--color-text-primary)]"
             )}
             onClick={() => {
@@ -144,41 +186,56 @@ export function MobileMenuSheet({
             }}
             disabled={!selectedGroupId}
           >
-            <SearchIcon size={18} />
-            <span>{t('searchMessagesButton')}</span>
+            <div className="flex items-center gap-3">
+              <SearchIcon size={18} />
+              <span>{t('searchMessagesButton')}</span>
+            </div>
           </button>
 
-          <div className="grid grid-cols-2 gap-2">
+          <section className={sectionCardClass}>
+            <div className={sectionTitleClass}>{t('workspaceSection')}</div>
             <button
-              className={classNames(
-                "w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn",
-                "text-[var(--color-text-primary)]"
-              )}
+              className={rowButtonClass}
               onClick={() => {
                 onClose();
                 onOpenContext();
               }}
               disabled={!selectedGroupId}
             >
-              <ClipboardIcon size={18} />
-              <span>{t('contextButton')}</span>
+              <div className="flex items-center gap-3">
+                <ClipboardIcon size={18} />
+                <span>{t('contextButton')}</span>
+              </div>
             </button>
-
             <button
-              className={classNames(
-                "w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn",
-                "text-[var(--color-text-primary)]"
-              )}
+              className={rowButtonClass}
               onClick={() => {
                 onClose();
                 onOpenSettings();
               }}
               disabled={!selectedGroupId}
             >
-              <SettingsIcon size={18} />
-              <span>{t('settingsButton')}</span>
+              <div className="flex items-center gap-3">
+                <SettingsIcon size={18} />
+                <span>{t('settingsButton')}</span>
+              </div>
             </button>
-          </div>
+            {onOpenGroupEdit ? (
+              <button
+                className={rowButtonClass}
+                onClick={() => {
+                  onClose();
+                  onOpenGroupEdit();
+                }}
+                disabled={!selectedGroupId}
+              >
+                <div className="flex items-center gap-3">
+                  <EditIcon size={18} />
+                  <span>{t('editGroupDetails')}</span>
+                </div>
+              </button>
+            ) : null}
+          </section>
 
           <button
             className={classNames(
@@ -209,106 +266,65 @@ export function MobileMenuSheet({
             </span>
           </button>
 
-          <div className="grid grid-cols-2 gap-2">
-            <LanguageSwitcher
-              isDark={isDark}
-              showLabel
-              className="text-[var(--color-text-primary)]"
-            />
-
-            <button
-              className={classNames(
-                "w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn",
-                "text-[var(--color-text-primary)]"
-              )}
-              onClick={onToggleTheme}
-            >
-              {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
-              <span>{isDark ? t('lightMode') : t('darkMode')}</span>
+          <section className={sectionCardClass}>
+            <div className={sectionTitleClass}>{t('appearanceSection')}</div>
+            <LanguageSwitcher isDark={isDark} variant="row" />
+            <button className={rowButtonClass} onClick={onToggleTheme}>
+              <div className="flex items-center gap-3">
+                {isDark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+                <span>{t('themeLabel')}</span>
+              </div>
+              <span className="text-[13px] font-medium text-[var(--color-text-tertiary)]">{themeLabel}</span>
             </button>
-          </div>
+          </section>
 
-          {onOpenGroupEdit ? (
-            <button
-              className={classNames(
-                "w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn",
-                "text-[var(--color-text-primary)]"
-              )}
-              onClick={() => {
-                onClose();
-                onOpenGroupEdit();
-              }}
-              disabled={!selectedGroupId}
-            >
-              <EditIcon size={18} />
-              <span>{t('editGroupDetails')}</span>
-            </button>
-          ) : null}
-
-          <div className="h-px my-3 mx-2 bg-[var(--glass-border-subtle)]" />
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              className="w-full flex flex-col items-center justify-center gap-2 px-2 py-3 rounded-2xl text-sm font-medium transition-all min-h-[64px] disabled:opacity-50 glass-btn-accent text-[var(--color-accent-primary)]"
-              onClick={() => {
-                onClose();
-                onStartGroup();
-              }}
-              disabled={!selectedGroupId || busy === "group-start" || actors.length === 0}
-            >
-              <PlayIcon size={20} />
-              <span>{t('launchAll')}</span>
-            </button>
-
-            <button
-              className={classNames(
-                "w-full flex flex-col items-center justify-center gap-2 px-2 py-3 rounded-2xl text-sm font-medium transition-all min-h-[64px] disabled:opacity-50 glass-btn",
-                "text-[var(--color-text-secondary)]"
-              )}
-              onClick={() => {
-                onClose();
-                onStopGroup();
-              }}
-              disabled={!selectedGroupId || busy === "group-stop"}
-            >
-              <StopIcon size={20} />
-              <span>{t('quitAll')}</span>
-            </button>
-          </div>
-
-          {groupDoc?.state === "paused" ? (
-            <button
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn-accent text-amber-700 dark:text-amber-300"
-              style={{
-                '--glass-accent-bg': 'var(--glass-accent-amber-bg, rgba(245, 158, 11, 0.1))',
-                '--glass-accent-border': 'var(--glass-accent-amber-border, rgba(245, 158, 11, 0.2))',
-                '--glass-accent-glow': 'var(--glass-accent-amber-glow, 0 0 16px rgba(245, 158, 11, 0.1))',
-              } as React.CSSProperties}
-              onClick={() => {
-                onClose();
-                void onSetGroupState("active");
-              }}
-              disabled={!selectedGroupId || busy === "group-state"}
-            >
-              <PlayIcon size={18} />
-              <span>{t('resumeMessageDelivery')}</span>
-            </button>
-          ) : (
-            <button
-              className={classNames(
-                "w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] disabled:opacity-50 glass-btn",
-                "text-[var(--color-text-secondary)]"
-              )}
-              onClick={() => {
-                onClose();
-                void onSetGroupState("paused");
-              }}
-              disabled={!selectedGroupId || busy === "group-state"}
-            >
-              <PauseIcon size={18} />
-              <span>{t('pauseMessageDelivery')}</span>
-            </button>
-          )}
+          <section className={sectionCardClass}>
+            <div className={sectionTitleClass}>{t('runtimeSection')}</div>
+            <div className="px-2.5 pb-1 text-[12px] leading-5 text-[var(--color-text-tertiary)]">
+              {runtimeHint}
+            </div>
+            <div className="mt-2 flex items-center gap-1 rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-bg)] p-1">
+              <button
+                className={classNames(
+                  "flex-1 flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-medium transition-all min-h-[48px]",
+                  launchControl.className,
+                  launchHardUnavailable && "opacity-45"
+                )}
+                onClick={handleLaunchClick}
+                disabled={launchDisabled}
+                aria-pressed={launchControl.active}
+              >
+                <RocketIcon size={18} />
+                <span>{t('runState')}</span>
+              </button>
+              <button
+                className={classNames(
+                  "flex-1 flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-medium transition-all min-h-[48px]",
+                  pauseControl.className,
+                  pauseHardUnavailable && "opacity-45"
+                )}
+                onClick={handlePauseClick}
+                disabled={pauseDisabled}
+                aria-pressed={pauseControl.active}
+              >
+                <PauseIcon size={18} />
+                <span>{t('pauseState')}</span>
+              </button>
+              <button
+                className={classNames(
+                  "flex-1 flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-medium transition-all min-h-[48px]",
+                  stopControl.className,
+                  stopHardUnavailable && "opacity-45"
+                )}
+                onClick={handleStopClick}
+                disabled={stopDisabled}
+                aria-pressed={stopControl.active}
+              >
+                <StopIcon size={18} />
+                <span>{t('stopState')}</span>
+              </button>
+            </div>
+          </section>
         </div>
       </div>
     </div>

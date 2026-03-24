@@ -14,7 +14,45 @@ class _PollingProc:
         return None
 
 
+class _UrlopenResponse:
+    def __init__(self, status: int):
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 class TestWebRuntimeControl(unittest.TestCase):
+    def test_wait_for_web_ready_retries_after_oserror(self) -> None:
+        from cccc.ports.web.runtime_control import wait_for_web_ready
+
+        with patch(
+            "cccc.ports.web.runtime_control.urllib.request.urlopen",
+            side_effect=[ConnectionResetError("not ready"), _UrlopenResponse(200)],
+        ) as mock_urlopen, patch("cccc.ports.web.runtime_control.time.sleep") as mock_sleep:
+            ready = wait_for_web_ready(host="127.0.0.1", port=8848, timeout_s=0.2)
+
+        self.assertTrue(ready)
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once_with(0.1)
+
+    def test_wait_for_web_ready_retries_after_http_protocol_error(self) -> None:
+        from cccc.ports.web.runtime_control import wait_for_web_ready
+        import http.client
+
+        with patch(
+            "cccc.ports.web.runtime_control.urllib.request.urlopen",
+            side_effect=[http.client.RemoteDisconnected("not ready"), _UrlopenResponse(200)],
+        ) as mock_urlopen, patch("cccc.ports.web.runtime_control.time.sleep") as mock_sleep:
+            ready = wait_for_web_ready(host="127.0.0.1", port=8848, timeout_s=0.2)
+
+        self.assertTrue(ready)
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once_with(0.1)
+
     def test_wait_for_child_exit_interruptibly_returns_exit_code(self) -> None:
         from cccc.ports.web.runtime_control import wait_for_child_exit_interruptibly
 

@@ -9,6 +9,7 @@ from ...util.time import utc_now_iso
 from .actor import Actor, ActorRole, ActorSubmit, AgentRuntime, RunnerKind
 from .message import ChatMessageData, ChatReactionData, ChatStreamData
 from .notify import NotifyAckData, SystemNotifyData
+from .presentation import PresentationCardType
 
 
 EventKind = Literal[
@@ -37,6 +38,8 @@ EventKind = Literal[
     "chat.reaction",
     "system.notify",
     "system.notify_ack",
+    "presentation.publish",
+    "presentation.clear",
 ]
 
 
@@ -188,6 +191,25 @@ class ChatAckData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PresentationPublishData(BaseModel):
+    slot_id: str
+    title: str
+    card_type: PresentationCardType
+    source_label: str = ""
+    source_ref: str = ""
+    summary: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PresentationClearData(BaseModel):
+    slot_id: str = ""
+    cleared_all: bool = False
+    cleared_slots: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class Event(BaseModel):
     v: int = 1
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
@@ -227,6 +249,8 @@ _KIND_TO_MODEL = {
     "chat.reaction": ChatReactionData,
     "system.notify": SystemNotifyData,
     "system.notify_ack": NotifyAckData,
+    "presentation.publish": PresentationPublishData,
+    "presentation.clear": PresentationClearData,
 }
 
 

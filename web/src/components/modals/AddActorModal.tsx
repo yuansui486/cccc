@@ -10,6 +10,7 @@ import { BASIC_MCP_CONFIG_SNIPPET } from "../../utils/mcpConfigSnippets";
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { CapabilityPicker } from "../CapabilityPicker";
+import { RolePresetPicker } from "../RolePresetPicker";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 
@@ -46,6 +47,8 @@ export interface AddActorModalProps {
   setNewActorSecretsSetText: (v: string) => void;
   newActorCapabilityAutoloadText: string;
   setNewActorCapabilityAutoloadText: (v: string) => void;
+  newActorRoleNotes: string;
+  setNewActorRoleNotes: (v: string) => void;
 
   showAdvancedActor: boolean;
   setShowAdvancedActor: (show: boolean) => void;
@@ -110,6 +113,8 @@ export function AddActorModal({
   setNewActorSecretsSetText,
   newActorCapabilityAutoloadText,
   setNewActorCapabilityAutoloadText,
+  newActorRoleNotes,
+  setNewActorRoleNotes,
   showAdvancedActor,
   setShowAdvancedActor,
   addActorError,
@@ -231,6 +236,24 @@ export function AddActorModal({
                   <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
                     {hasForeman ? t("foremanLeads") : t("firstAgentForeman")}
                   </div>
+                </div>
+
+                <RolePresetPicker
+                  draftValue={newActorRoleNotes}
+                  onChangeDraft={setNewActorRoleNotes}
+                  disabled={busy === "actor-add"}
+                />
+
+                <div>
+                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
+                  <textarea
+                    className="w-full rounded-xl border px-3 py-2 text-sm min-h-[144px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                    value={newActorRoleNotes}
+                    onChange={(e) => setNewActorRoleNotes(e.target.value)}
+                    placeholder={t("roleNotesPlaceholder")}
+                    spellCheck={false}
+                  />
+                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("newActorRoleNotesHint")}</div>
                 </div>
               </div>
             </section>

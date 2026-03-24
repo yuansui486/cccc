@@ -19,7 +19,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** ar
 - `agent_states` = per-actor short-term working memory
 - `meta` = restricted projection-support metadata
 
-Read-only projections such as `board`, `attention`, and `panorama` are daemon-computed and are not directly writable via context ops.
+Read-only projections such as `board` and `attention` are daemon-computed and are not directly writable via context ops.
 
 All operations are applied in order. If any op is invalid, the daemon rejects the entire batch.
 

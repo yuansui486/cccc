@@ -1,0 +1,597 @@
+"""Tests for WecomAdapter core functionality (Steps 7-13)."""
+
+import sys
+import threading
+import time
+import unittest
+from unittest.mock import patch
+
+
+class TestWecomAuthFrames(unittest.TestCase):
+    """WeCom AI Bot auth now uses bot_id + secret over WebSocket."""
+
+    def _make_adapter(self, **kw):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(
+            bot_id=kw.get("bot_id", "corp123"),
+            secret=kw.get("secret", "sec456"),
+        )
+
+    def test_build_subscribe_frame_uses_bot_id_and_secret(self):
+        adapter = self._make_adapter()
+        frame = adapter._build_subscribe_frame()
+        self.assertEqual(frame["cmd"], "aibot_subscribe")
+        self.assertEqual(frame["body"]["bot_id"], "corp123")
+        self.assertEqual(frame["body"]["secret"], "sec456")
+        self.assertTrue(str(frame["headers"]["req_id"]).startswith("aibot_subscribe_"))
+
+
+class TestWecomDedup(unittest.TestCase):
+    """Step 9: _should_enqueue_message deduplication tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(bot_id="corp", secret="sec")
+
+    def test_first_message_passes(self):
+        adapter = self._make_adapter()
+        self.assertTrue(adapter._should_enqueue_message("conv1", "msg1"))
+
+    def test_duplicate_blocked(self):
+        adapter = self._make_adapter()
+        adapter._should_enqueue_message("conv1", "msg1")
+        self.assertFalse(adapter._should_enqueue_message("conv1", "msg1"))
+
+    def test_empty_msg_id_always_passes(self):
+        adapter = self._make_adapter()
+        self.assertTrue(adapter._should_enqueue_message("conv1", ""))
+        self.assertTrue(adapter._should_enqueue_message("conv1", ""))
+
+    def test_pruning_at_threshold(self):
+        adapter = self._make_adapter()
+        # Fill with 2049 entries to trigger pruning
+        for i in range(2049):
+            adapter._seen_msg_ids[f"conv:msg{i}"] = time.time()
+        # Next call should trigger pruning (no crash)
+        adapter._should_enqueue_message("conv1", "new_msg")
+        self.assertIn("conv1:new_msg", adapter._seen_msg_ids)
+
+
+class TestWecomEnqueueMessage(unittest.TestCase):
+    """Step 9: _enqueue_message normalization tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(bot_id="corp", secret="sec")
+
+    def test_text_message_normalized(self):
+        adapter = self._make_adapter()
+        data = {
+            "action": "aibot_msg_callback",
+            "data": {
+                "conversation_id": "conv_123",
+                "msg_id": "msg_456",
+                "chat_type": "single",
+                "msg_type": "text",
+                "content": {"text": "hello world"},
+                "sender": {"user_id": "user_789", "name": "Test User"},
+            },
+        }
+        adapter._enqueue_message(data)
+        msgs = adapter.poll()
+        self.assertEqual(len(msgs), 1)
+        m = msgs[0]
+        self.assertEqual(m["chat_id"], "conv_123")
+        self.assertEqual(m["chat_type"], "p2p")
+        self.assertEqual(m["text"], "hello world")
+        self.assertEqual(m["from_user"], "user_789")
+        self.assertEqual(m["message_id"], "msg_456")
+        self.assertTrue(m["routed"])  # p2p is always routed
+
+    def test_group_message_not_routed_without_mention(self):
+        adapter = self._make_adapter()
+        data = {
+            "action": "aibot_msg_callback",
+            "data": {
+                "conversation_id": "grp_1",
+                "msg_id": "msg_1",
+                "chat_type": "group",
+                "msg_type": "text",
+                "content": {"text": "hi"},
+                "sender": {"user_id": "u1"},
+            },
+        }
+        adapter._enqueue_message(data)
+        msgs = adapter.poll()
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["chat_type"], "group")
+        self.assertFalse(msgs[0]["routed"])
+
+    def test_group_message_routed_when_at_bot(self):
+        adapter = self._make_adapter()
+        data = {
+            "action": "aibot_msg_callback",
+            "data": {
+                "conversation_id": "grp_1",
+                "msg_id": "msg_2",
+                "chat_type": "group",
+                "msg_type": "text",
+                "content": {"text": "@bot hi"},
+                "sender": {"user_id": "u1"},
+                "is_at_bot": True,
+            },
+        }
+        adapter._enqueue_message(data)
+        msgs = adapter.poll()
+        self.assertTrue(msgs[0]["routed"])
+
+    def test_image_message_has_attachment(self):
+        adapter = self._make_adapter()
+        data = {
+            "action": "aibot_msg_callback",
+            "data": {
+                "conversation_id": "conv_1",
+                "msg_id": "msg_img",
+                "chat_type": "single",
+                "msg_type": "image",
+                "content": {"media_id": "media_abc"},
+                "sender": {"user_id": "u1"},
+            },
+        }
+        adapter._enqueue_message(data)
+        msgs = adapter.poll()
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["text"], "[image]")
+        self.assertEqual(msgs[0]["attachments"], [])
+
+    def test_empty_data_ignored(self):
+        adapter = self._make_adapter()
+        adapter._enqueue_message({"action": "aibot_msg_callback"})
+        self.assertEqual(len(adapter.poll()), 0)
+
+    def test_duplicate_message_not_enqueued(self):
+        adapter = self._make_adapter()
+        data = {
+            "action": "aibot_msg_callback",
+            "data": {
+                "conversation_id": "conv_1",
+                "msg_id": "dup_msg",
+                "chat_type": "single",
+                "msg_type": "text",
+                "content": {"text": "hi"},
+                "sender": {"user_id": "u1"},
+            },
+        }
+        adapter._enqueue_message(data)
+        adapter._enqueue_message(data)  # duplicate
+        msgs = adapter.poll()
+        self.assertEqual(len(msgs), 1)
+
+
+class TestWecomConnect(unittest.TestCase):
+    """Step 8: connect() early failure detection tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(bot_id="corp", secret="sec")
+
+    def test_connect_disables_proxies_before_start(self):
+        adapter = self._make_adapter()
+        calls: list[str] = []
+
+        def fake_disable() -> None:
+            calls.append("disable")
+
+        def fake_start() -> None:
+            calls.append("start")
+            adapter._ws_started.set()
+            adapter._ws_running = False
+            adapter._ws_thread = None
+
+        with patch.object(adapter, "_disable_proxies", side_effect=fake_disable):
+            with patch.object(adapter, "_start_ws_listener", side_effect=fake_start):
+                result = adapter.connect()
+
+        self.assertTrue(result)
+        self.assertEqual(calls, ["disable", "start"])
+
+    def test_connect_fails_on_first_websocket_error(self):
+        adapter = self._make_adapter()
+
+        def fake_start() -> None:
+            adapter._ws_connect_error = "boom"
+            adapter._ws_started.set()
+
+        with patch.object(adapter, "_start_ws_listener", side_effect=fake_start):
+            result = adapter.connect()
+
+        self.assertFalse(result)
+
+
+class TestWecomWebSocketReconnect(unittest.TestCase):
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(bot_id="corp", secret="sec")
+
+    def test_subsequent_websocket_failure_does_not_become_first_connect_fatal(self):
+        adapter = self._make_adapter()
+
+        attempts = {"count": 0}
+        sleep_calls = {"count": 0}
+
+        class FakeWebSocketApp:
+            def __init__(self, url, on_open, on_message, on_error, on_close):
+                self.url = url
+                self._on_open = on_open
+                self._on_message = on_message
+                self._on_error = on_error
+                self._on_close = on_close
+
+            def send(self, payload: str) -> None:
+                data = __import__("json").loads(payload)
+                cmd = str(data.get("cmd") or "")
+                req_id = str((data.get("headers") or {}).get("req_id") or "")
+                if cmd == "aibot_subscribe":
+                    self._on_message(self, __import__("json").dumps({
+                        "headers": {"req_id": req_id},
+                        "errcode": 0,
+                        "errmsg": "ok",
+                    }))
+
+            def close(self) -> None:
+                return None
+
+            def run_forever(self, ping_interval: int = 0) -> None:
+                _ = ping_interval
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    self._on_open(self)
+                    return
+                self._on_error(self, RuntimeError("reconnect failed"))
+
+        class ImmediateThread:
+            def __init__(self, target=None, kwargs=None, daemon=None):
+                self._target = target
+                self._kwargs = kwargs or {}
+                self._alive = False
+
+            def start(self) -> None:
+                self._alive = True
+                try:
+                    if self._target:
+                        self._target(**self._kwargs)
+                finally:
+                    self._alive = False
+
+            def is_alive(self) -> bool:
+                return self._alive
+
+        fake_websocket_module = type("FakeWebSocketModule", (), {"WebSocketApp": FakeWebSocketApp})
+
+        def fake_sleep(seconds: float) -> None:
+            if seconds >= 1.0:
+                sleep_calls["count"] += 1
+                if sleep_calls["count"] >= 2:
+                    adapter._ws_running = False
+
+        with patch.dict(sys.modules, {"websocket": fake_websocket_module}):
+            with patch("cccc.ports.im.adapters.wecom.threading.Thread", ImmediateThread):
+                with patch("cccc.ports.im.adapters.wecom.random.uniform", return_value=0.0):
+                    with patch("cccc.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
+                        adapter._start_ws_listener()
+
+        self.assertTrue(adapter._ws_started.is_set())
+        self.assertIsNone(adapter._ws_connect_error)
+        self.assertGreaterEqual(attempts["count"], 2)
+
+    def test_missing_heartbeat_ack_triggers_reconnect_backoff(self):
+        from cccc.ports.im.adapters.wecom import WS_HEARTBEAT_INTERVAL
+
+        adapter = self._make_adapter()
+        sends: list[str] = []
+        sleep_calls: list[float] = []
+
+        class FakeWebSocketApp:
+            def __init__(self, url, on_open, on_message, on_error, on_close):
+                self._on_open = on_open
+                self._on_message = on_message
+                self._on_error = on_error
+                self._on_close = on_close
+
+            def send(self, payload: str) -> None:
+                data = __import__("json").loads(payload)
+                cmd = str(data.get("cmd") or "")
+                sends.append(cmd)
+                if cmd == "aibot_subscribe":
+                    self._on_message(
+                        self,
+                        __import__("json").dumps(
+                            {
+                                "headers": {"req_id": str((data.get("headers") or {}).get("req_id") or "")},
+                                "errcode": 0,
+                                "errmsg": "ok",
+                            }
+                        ),
+                    )
+
+            def close(self) -> None:
+                return None
+
+            def run_forever(self, ping_interval: int = 0) -> None:
+                _ = ping_interval
+                self._on_open(self)
+
+        class FakeThread:
+            def __init__(self, target=None, kwargs=None, daemon=None):
+                self._target = target
+                self._kwargs = kwargs or {}
+                self._alive = False
+                self._keep_alive_after_start = getattr(target, "__name__", "") == "run_forever"
+
+            def start(self) -> None:
+                self._alive = True
+                if self._target:
+                    self._target(**self._kwargs)
+                if not self._keep_alive_after_start:
+                    self._alive = False
+
+            def is_alive(self) -> bool:
+                return self._alive
+
+        fake_websocket_module = type("FakeWebSocketModule", (), {"WebSocketApp": FakeWebSocketApp})
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            if 1.0 <= seconds < WS_HEARTBEAT_INTERVAL:
+                adapter._ws_running = False
+
+        with patch.dict(sys.modules, {"websocket": fake_websocket_module}):
+            with patch("cccc.ports.im.adapters.wecom.threading.Thread", FakeThread):
+                with patch("cccc.ports.im.adapters.wecom.random.uniform", return_value=0.0):
+                    with patch("cccc.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
+                        adapter._start_ws_listener()
+
+        self.assertTrue(adapter._ws_started.is_set())
+        self.assertIsNone(adapter._ws_connect_error)
+        self.assertEqual(sends.count("ping"), 3)
+        self.assertIn(WS_HEARTBEAT_INTERVAL, sleep_calls)
+        self.assertIn(1.0, sleep_calls)
+
+
+class TestWecomRespondHandles(unittest.TestCase):
+    """Step 10-11: callback req_id capture and cache behavior."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(bot_id="corp", secret="sec")
+
+    def test_enqueue_captures_reply_req_id(self):
+        adapter = self._make_adapter()
+        data = {
+            "cmd": "aibot_msg_callback",
+            "headers": {"req_id": "req_abc123"},
+            "body": {
+                "chatid": "conv_1",
+                "msgid": "msg_1",
+                "chattype": "single",
+                "msgtype": "text",
+                "text": {"content": "hello"},
+                "from": {"userid": "u1"},
+            },
+        }
+        adapter._enqueue_message(data)
+        self.assertEqual(adapter._get_reply_req_id("conv_1"), "req_abc123")
+
+    def test_reply_req_id_does_not_artificially_expire(self):
+        adapter = self._make_adapter()
+        adapter._store_reply_ref("conv_1", "req_old")
+        adapter._reply_refs["conv_1"]["ts"] = 1.0
+        self.assertEqual(adapter._get_reply_req_id("conv_1"), "req_old")
+
+    def test_reply_ref_cache_prunes_oldest_entries(self):
+        from cccc.ports.im.adapters.wecom import REPLY_REF_MAX_ENTRIES
+
+        adapter = self._make_adapter()
+        for idx in range(REPLY_REF_MAX_ENTRIES + 8):
+            adapter._store_reply_ref(f"conv_{idx}", f"req_{idx}")
+            adapter._reply_refs[f"conv_{idx}"]["ts"] = float(idx)
+
+        adapter._store_reply_ref("conv_latest", "req_latest")
+
+        self.assertLessEqual(len(adapter._reply_refs), REPLY_REF_MAX_ENTRIES)
+        self.assertEqual(adapter._get_reply_req_id("conv_latest"), "req_latest")
+        self.assertEqual(adapter._get_reply_req_id("conv_0"), "")
+
+    def test_reply_req_id_missing_returns_empty(self):
+        adapter = self._make_adapter()
+        self.assertEqual(adapter._get_reply_req_id("nonexistent"), "")
+
+    def test_reply_req_id_concurrent_reads_are_stable(self):
+        adapter = self._make_adapter()
+        adapter._store_reply_ref("conv_1", "req_shared")
+        results: list[str] = []
+        result_lock = threading.Lock()
+
+        def reader() -> None:
+            local = [adapter._get_reply_req_id("conv_1") for _ in range(20)]
+            with result_lock:
+                results.extend(local)
+
+        threads = [threading.Thread(target=reader) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(results), 160)
+        self.assertTrue(all(value == "req_shared" for value in results))
+
+
+class TestWecomRateLimiter(unittest.TestCase):
+    def test_wait_and_acquire_sleeps_for_same_chat_burst(self):
+        from cccc.ports.im.adapters.wecom import RateLimiter
+
+        limiter = RateLimiter(max_per_second=2.0)
+        fake_clock = {"now": 100.0}
+        sleep_calls: list[float] = []
+
+        def fake_time() -> float:
+            return fake_clock["now"]
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            fake_clock["now"] += seconds
+
+        with patch("cccc.ports.im.adapters.wecom.time.time", side_effect=fake_time):
+            with patch("cccc.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
+                limiter.wait_and_acquire("chat-1")
+                limiter.wait_and_acquire("chat-1")
+
+        self.assertEqual(len(sleep_calls), 1)
+        self.assertAlmostEqual(sleep_calls[0], 0.5, places=3)
+
+
+class TestWecomSendMessage(unittest.TestCase):
+    """Step 10: send_message tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        adapter = WecomAdapter(bot_id="corp", secret="sec")
+        adapter._connected = True
+        return adapter
+
+    def test_send_empty_text_returns_true(self):
+        adapter = self._make_adapter()
+        self.assertTrue(adapter.send_message("conv_1", ""))
+
+    def test_send_when_disconnected_returns_false(self):
+        adapter = self._make_adapter()
+        adapter._connected = False
+        self.assertFalse(adapter.send_message("conv_1", "hello"))
+
+    def test_send_via_ws_respond(self):
+        adapter = self._make_adapter()
+        adapter._store_reply_ref("conv_1", "req_test")
+        with patch.object(adapter, "_ws_send", return_value=True) as mock_ws:
+            result = adapter.send_message("conv_1", "hello")
+            self.assertTrue(result)
+            mock_ws.assert_called_once()
+            call_payload = mock_ws.call_args[0][0]
+            self.assertEqual(call_payload["cmd"], "aibot_respond_msg")
+            self.assertEqual(call_payload["headers"]["req_id"], "req_test")
+            self.assertTrue(call_payload["body"]["stream"]["finish"])
+            self.assertEqual(call_payload["body"]["stream"]["content"], "hello")
+            self.assertEqual(call_payload["body"]["msgtype"], "stream")
+
+    def test_send_returns_false_when_no_handle(self):
+        adapter = self._make_adapter()
+        result = adapter.send_message("conv_1", "hello")
+        self.assertFalse(result)
+
+    def test_send_returns_false_when_ws_fails(self):
+        adapter = self._make_adapter()
+        adapter._store_reply_ref("conv_1", "req_test")
+        with patch.object(adapter, "_ws_send", return_value=False):
+            result = adapter.send_message("conv_1", "hello")
+            self.assertFalse(result)
+
+    def test_compose_safe_truncates(self):
+        adapter = self._make_adapter()
+        long_text = "x" * 3000
+        safe = adapter._compose_safe(long_text)
+        self.assertLessEqual(len(safe), adapter.max_chars)
+        self.assertIn("truncated", safe)
+
+
+class TestWecomStreaming(unittest.TestCase):
+    """Step 11: Streaming reply tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        adapter = WecomAdapter(bot_id="corp", secret="sec")
+        adapter._connected = True
+        return adapter
+
+    def test_begin_stream_returns_none_without_handle(self):
+        adapter = self._make_adapter()
+        result = adapter.begin_stream("conv_no_handle", "stream_1")
+        self.assertIsNone(result)
+
+    def test_begin_stream_returns_handle(self):
+        adapter = self._make_adapter()
+        adapter._store_reply_ref("conv_1", "req_stream")
+        with patch.object(adapter, "_ws_send", return_value=True):
+            handle = adapter.begin_stream("conv_1", "s1", text="starting...")
+            self.assertIsNotNone(handle)
+            self.assertEqual(handle["stream_id"], "s1")
+            self.assertEqual(handle["platform_handle"], {"req_id": "req_stream", "stream_id": "s1"})
+
+    def test_update_stream_sends_intermediate(self):
+        adapter = self._make_adapter()
+        handle = {"stream_id": "s1", "platform_handle": {"req_id": "req_test", "stream_id": "s1"}}
+        with patch.object(adapter, "_ws_send", return_value=True) as mock_ws:
+            result = adapter.update_stream(handle, text="chunk 1")
+            self.assertTrue(result)
+            payload = mock_ws.call_args[0][0]
+            self.assertFalse(payload["body"]["stream"]["finish"])
+            self.assertEqual(payload["body"]["stream"]["content"], "chunk 1")
+
+    def test_end_stream_sends_final(self):
+        adapter = self._make_adapter()
+        handle = {"stream_id": "s1", "platform_handle": {"req_id": "req_test", "stream_id": "s1"}}
+        with patch.object(adapter, "_ws_send", return_value=True) as mock_ws:
+            result = adapter.end_stream(handle, text="final text")
+            self.assertTrue(result)
+            payload = mock_ws.call_args[0][0]
+            self.assertTrue(payload["body"]["stream"]["finish"])
+            self.assertEqual(payload["body"]["stream"]["content"], "final text")
+
+    def test_update_stream_fails_with_empty_handle(self):
+        adapter = self._make_adapter()
+        handle = {"stream_id": "s1", "platform_handle": {}}
+        self.assertFalse(adapter.update_stream(handle, text="x"))
+
+    def test_end_stream_fails_with_empty_handle(self):
+        adapter = self._make_adapter()
+        handle = {"stream_id": "s1", "platform_handle": {}}
+        self.assertFalse(adapter.end_stream(handle, text="x"))
+
+
+class TestWecomDisconnect(unittest.TestCase):
+    """Step 13: Enhanced disconnect tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        adapter = WecomAdapter(bot_id="corp", secret="sec")
+        adapter._connected = True
+        return adapter
+
+    def test_disconnect_clears_state(self):
+        adapter = self._make_adapter()
+        adapter._store_reply_ref("conv_1", "req_1")
+        adapter._seen_msg_ids["k"] = time.time()
+        with adapter._queue_lock:
+            adapter._message_queue.append({"text": "leftover"})
+
+        adapter.disconnect()
+
+        self.assertFalse(adapter._connected)
+        self.assertEqual(len(adapter._reply_refs), 0)
+        self.assertEqual(len(adapter._seen_msg_ids), 0)
+        self.assertEqual(len(adapter._message_queue), 0)
+
+
+class TestWecomGetChatTitle(unittest.TestCase):
+    """Step 13: get_chat_title tests."""
+
+    def _make_adapter(self):
+        from cccc.ports.im.adapters.wecom import WecomAdapter
+        return WecomAdapter(bot_id="corp", secret="sec")
+
+    def test_returns_chat_id(self):
+        adapter = self._make_adapter()
+        self.assertEqual(adapter.get_chat_title("chat_1"), "chat_1")
+
+
+if __name__ == "__main__":
+    unittest.main()

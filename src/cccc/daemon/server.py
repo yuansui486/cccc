@@ -19,7 +19,12 @@ from ..kernel.group import load_group
 from ..kernel.actors import find_actor, find_foreman, update_actor, get_effective_role
 from ..kernel.blobs import resolve_blob_attachment_path
 from ..kernel.ledger_retention import compact as compact_ledger
-from ..kernel.settings import get_observability_settings, update_observability_settings
+from ..kernel.settings import (
+    get_observability_settings,
+    get_web_branding_settings,
+    update_observability_settings,
+    update_web_branding_settings,
+)
 from ..kernel.terminal_transcript import get_terminal_transcript_settings
 from ..kernel.messaging import disabled_recipient_actor_ids
 from ..paths import ensure_home
@@ -107,6 +112,7 @@ from .space.group_space_memory_sync import process_due_memory_space_syncs
 from .space.group_space_runtime import process_due_space_jobs
 from .space.group_space_sync import process_due_space_syncs
 from .space.group_space_store import get_space_provider_state
+from .group.presentation_browser_runtime import close_all_browser_surface_sessions
 from .ops.template_ops import (
     group_create_from_template,
     group_template_export,
@@ -653,6 +659,8 @@ def _request_dispatch_deps() -> RequestDispatchDeps:
         get_observability=_get_observability,
         update_observability_settings=update_observability_settings,
         apply_observability_settings=lambda obs: _apply_observability_settings(ensure_home(), obs),
+        get_web_branding=get_web_branding_settings,
+        update_web_branding_settings=update_web_branding_settings,
         developer_mode_enabled=_developer_mode_enabled,
         effective_runner_kind=_effective_runner_kind,
         throttle_debug_summary=THROTTLE.debug_summary,
@@ -975,6 +983,11 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             )
             if should_exit:
                 stop_event.set()
+
+    try:
+        close_all_browser_surface_sessions()
+    except Exception:
+        pass
 
     cleanup_after_stop(
         stop_event=stop_event,

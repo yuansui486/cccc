@@ -56,7 +56,7 @@ export function RelayMessageModal({
     if (!gid) return;
     let cancelled = false;
     void api
-      .fetchActors(gid)
+      .fetchActors(gid, false)
       .then((resp) => {
         if (cancelled) return;
         if (!resp.ok) {

@@ -22,6 +22,7 @@ interface FormState {
   newActorUseDefaultCommand: boolean;
   newActorSecretsSetText: string;
   newActorCapabilityAutoloadText: string;
+  newActorRoleNotes: string;
   newActorUseProfile: boolean;
   newActorProfileId: string;
   showAdvancedActor: boolean;
@@ -56,6 +57,7 @@ interface FormState {
   setNewActorUseDefaultCommand: (v: boolean) => void;
   setNewActorSecretsSetText: (v: string) => void;
   setNewActorCapabilityAutoloadText: (v: string) => void;
+  setNewActorRoleNotes: (v: string) => void;
   setNewActorUseProfile: (v: boolean) => void;
   setNewActorProfileId: (v: string) => void;
   setShowAdvancedActor: (v: boolean) => void;
@@ -94,6 +96,7 @@ export const useFormStore = create<FormState>((set) => ({
   newActorUseDefaultCommand: true,
   newActorSecretsSetText: "",
   newActorCapabilityAutoloadText: "",
+  newActorRoleNotes: "",
   newActorUseProfile: false,
   newActorProfileId: "",
   showAdvancedActor: false,
@@ -128,6 +131,7 @@ export const useFormStore = create<FormState>((set) => ({
   setNewActorUseDefaultCommand: (v) => set({ newActorUseDefaultCommand: v }),
   setNewActorSecretsSetText: (v) => set({ newActorSecretsSetText: v }),
   setNewActorCapabilityAutoloadText: (v) => set({ newActorCapabilityAutoloadText: v }),
+  setNewActorRoleNotes: (v) => set({ newActorRoleNotes: v }),
   setNewActorUseProfile: (v) => set({ newActorUseProfile: v }),
   setNewActorProfileId: (v) => set({ newActorProfileId: v }),
   setShowAdvancedActor: (v) => set({ showAdvancedActor: v }),
@@ -139,6 +143,7 @@ export const useFormStore = create<FormState>((set) => ({
       newActorUseDefaultCommand: true,
       newActorSecretsSetText: "",
       newActorCapabilityAutoloadText: "",
+      newActorRoleNotes: "",
       newActorUseProfile: false,
       newActorProfileId: "",
       newActorRole: "peer",

@@ -38,6 +38,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                         "capability_id": "skill:anthropic:triage",
                         "name": "triage",
                         "description_short": "Issue triage checklist",
+                        "capsule_preview": "Restate the symptom first.\nGather evidence before changing anything.",
                     }
                 ],
                 "autoload_skills": [
@@ -69,6 +70,9 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertIn("For non-trivial plans, run a 6D check", markdown)
         self.assertIn("triage", markdown)
         self.assertIn("review", markdown)
+        self.assertIn("working_rules:", markdown)
+        self.assertIn("Restate the symptom first.", markdown)
+        self.assertIn("Gather evidence before changing anything.", markdown)
         self.assertNotIn("### NotebookLM Artifact Runs", markdown)
 
     def test_cccc_help_appends_group_space_runtime_only_when_bound(self) -> None:
@@ -229,6 +233,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                         "capability_id": "skill:test:triage",
                         "name": "triage",
                         "description_short": "Issue triage checklist",
+                        "capsule_preview": "Restate the symptom first.\nGather evidence before changing anything.",
                     }
                 ],
                 "autoload_skills": [],
@@ -248,6 +253,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertEqual(markdown.count("## Active Skills (Runtime)"), 1)
         self.assertIn("work_bound=true memory_bound=false", markdown)
         self.assertIn("triage", markdown)
+        self.assertIn("Restate the symptom first.", markdown)
         self.assertNotIn("stale work_bound=false memory_bound=false", markdown)
         self.assertNotIn("stale skill digest", markdown)
         self.assertIn("## Role Notes", markdown)

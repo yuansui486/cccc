@@ -26,6 +26,8 @@ from .group.group_state_ops import try_handle_group_state_op
 from .group.group_lifecycle_ops import try_handle_group_lifecycle_op
 from .automation.automation_ops import try_handle_group_automation_op
 from .group.group_settings_ops import try_handle_group_settings_op
+from .group.presentation_ops import try_handle_presentation_op
+from .group.presentation_browser_ops import try_handle_presentation_browser_op
 from .space.group_space_ops import try_handle_group_space_op
 from .group.group_ops import try_handle_group_core_op
 from .group.group_bootstrap_ops import try_handle_group_bootstrap_op
@@ -44,6 +46,8 @@ class RequestDispatchDeps:
     get_observability: Callable[[], dict[str, Any]]
     update_observability_settings: Callable[..., bool]
     apply_observability_settings: Callable[[dict[str, Any]], bool]
+    get_web_branding: Callable[[], dict[str, Any]]
+    update_web_branding_settings: Callable[..., bool]
     developer_mode_enabled: Callable[[], bool]
     effective_runner_kind: Callable[[str], str]
     throttle_debug_summary: Callable[[], dict[str, Any]]
@@ -112,6 +116,8 @@ def dispatch_request(
         get_observability=deps.get_observability,
         update_observability_settings=deps.update_observability_settings,
         apply_observability_settings=deps.apply_observability_settings,
+        get_web_branding=deps.get_web_branding,
+        update_web_branding_settings=deps.update_web_branding_settings,
     )
     if daemon_core_resp is not None:
         return daemon_core_resp
@@ -158,6 +164,14 @@ def dispatch_request(
     group_settings_resp = try_handle_group_settings_op(op, args)
     if group_settings_resp is not None:
         return group_settings_resp, False
+
+    presentation_resp = try_handle_presentation_op(op, args)
+    if presentation_resp is not None:
+        return presentation_resp, False
+
+    presentation_browser_resp = try_handle_presentation_browser_op(op, args)
+    if presentation_browser_resp is not None:
+        return presentation_browser_resp, False
 
     group_space_resp = try_handle_group_space_op(op, args)
     if group_space_resp is not None:

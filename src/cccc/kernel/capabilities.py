@@ -3,7 +3,8 @@
 This module defines:
 1) default core tool set (always visible),
 2) optional built-in capability packs (enable-on-demand),
-3) helper utilities for deriving visible MCP tool names.
+3) built-in capsule-runtime skills (enable-on-demand),
+4) helper utilities for deriving visible MCP tool names.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ CORE_BASIC_TOOLS: Tuple[str, ...] = (
     "cccc_message_send",
     "cccc_message_reply",
     "cccc_file",
+    "cccc_presentation",
     "cccc_context_get",
     "cccc_coordination",
     "cccc_task",
@@ -106,8 +108,50 @@ BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
 }
 
 
+BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
+    "skill:cccc:runtime-bootstrap": {
+        "name": "runtime-bootstrap",
+        "description_short": (
+            "Diagnose CCCC daemon/web startup, actor runtime launch, MCP injection, "
+            "bind/LAN reachability, and shutdown residue issues."
+        ),
+        "use_when": (
+            "CCCC daemon or Web fails to start, bind, or stay reachable.",
+            "Actor runtime launch, MCP injection, or shutdown cleanup looks broken.",
+        ),
+        "avoid_when": (
+            "The task is normal product work, not runtime diagnosis.",
+        ),
+        "gotchas": (
+            "Separate configured Web binding from the live listener before changing settings or restarting anything.",
+            "Treat process residue and stale pid files as evidence to verify, not proof that the current runtime is healthy.",
+        ),
+        "evidence_kind": "debug snapshot plus terminal/log proof for the failing layer",
+        "capsule_text": (
+            "You are the runtime-bootstrap skill for CCCC runtime diagnosis.\n\n"
+            "Use this skill when the task is about daemon or web startup failure, port bind or LAN "
+            "reachability, actor launch/runtime state, MCP injection, or residue left after shutdown.\n\n"
+            "Protocol:\n"
+            "1. Restate the exact symptom and isolate the failing layer before changing anything.\n"
+            "2. Gather evidence first; prefer read-only inspection and existing diagnostics/runtime tools.\n"
+            "3. Check one layer at a time: process start -> bind/port -> group/actor runtime -> MCP "
+            "injection -> shutdown cleanup.\n"
+            "4. Report findings as: Symptom, Evidence, Failed layer, Most likely root cause, Next safe action.\n"
+            "5. Do not kill, restart, or mutate runtime state unless the user explicitly asks after evidence is gathered.\n"
+            "6. Prefer the smallest reversible fix. If two hypotheses fail, stop stacking guards and surface evidence."
+        ),
+        "tags": ("runtime", "bootstrap", "diagnostics", "daemon", "web", "mcp"),
+        "requires_capabilities": ("pack:diagnostics", "pack:group-runtime"),
+    },
+}
+
+
 def all_builtin_pack_ids() -> List[str]:
     return sorted(BUILTIN_CAPABILITY_PACKS.keys())
+
+
+def all_builtin_skill_ids() -> List[str]:
+    return sorted(BUILTIN_CAPSULE_SKILLS.keys())
 
 
 def core_tool_name_set() -> Set[str]:

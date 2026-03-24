@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { aggregateWebPetState } from "./aggregateWebPetState";
-import type { AggregateInput } from "./aggregateWebPetState";
-import type { GroupContext, AgentState, LedgerEvent } from "../../types";
+import { describe, expect, it } from "vitest";
+
+import { aggregateWebPetState } from "../../../src/features/webPet/aggregateWebPetState";
+import type { AggregateInput } from "../../../src/features/webPet/aggregateWebPetState";
+import type { AgentState, GroupContext, LedgerEvent } from "../../../src/types";
 
 function makeInput(overrides: Partial<AggregateInput> = {}): AggregateInput {
   return {
@@ -14,11 +15,7 @@ function makeInput(overrides: Partial<AggregateInput> = {}): AggregateInput {
   };
 }
 
-function makeAgentState(
-  id: string,
-  activeTaskId: string,
-  focus = ""
-): AgentState {
+function makeAgentState(id: string, activeTaskId: string, focus = ""): AgentState {
   return {
     id,
     hot: { active_task_id: activeTaskId || null, focus },
@@ -36,9 +33,7 @@ describe("aggregateWebPetState", () => {
     const context: GroupContext = {
       agent_states: [makeAgentState("peer-impl-1", "T1", "implementing")],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.catState).toBe("working");
     expect(result.panelData.agents[0].state).toBe("working");
   });
@@ -50,13 +45,9 @@ describe("aggregateWebPetState", () => {
         makeAgentState("peer-impl-2", "T2"),
       ],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.catState).toBe("busy");
-    expect(result.panelData.agents.every((a) => a.state === "busy")).toBe(
-      true
-    );
+    expect(result.panelData.agents.every((a) => a.state === "busy")).toBe(true);
   });
 
   it("returns needs_you when waiting_user tasks exist", () => {
@@ -74,14 +65,10 @@ describe("aggregateWebPetState", () => {
       },
       agent_states: [],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.catState).toBe("needs_you");
     expect(result.panelData.actionItems.length).toBeGreaterThan(0);
-    expect(result.panelData.actionItems[0].id).toBe(
-      "T100_waiting_on_user"
-    );
+    expect(result.panelData.actionItems[0].id).toBe("T100_waiting_on_user");
   });
 
   it("returns needs_you when reply_required events exist", () => {
@@ -119,9 +106,7 @@ describe("aggregateWebPetState", () => {
       },
       agent_states: [makeAgentState("peer-impl-1", "T1")],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context, groupState: "paused" })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context, groupState: "paused" }));
     expect(result.catState).toBe("napping");
   });
 
@@ -154,22 +139,16 @@ describe("aggregateWebPetState", () => {
         makeAgentState("peer-reviewer", "", "also stale"),
       ],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.catState).toBe("napping");
   });
 
   it("connection status reflects sseStatus", () => {
-    const disconnected = aggregateWebPetState(
-      makeInput({ sseStatus: "disconnected" })
-    );
+    const disconnected = aggregateWebPetState(makeInput({ sseStatus: "disconnected" }));
     expect(disconnected.panelData.connection.connected).toBe(false);
     expect(disconnected.panelData.connection.message).toBe("connectionDisconnected");
 
-    const connected = aggregateWebPetState(
-      makeInput({ sseStatus: "connected" })
-    );
+    const connected = aggregateWebPetState(makeInput({ sseStatus: "connected" }));
     expect(connected.panelData.connection.connected).toBe(true);
   });
 
@@ -186,24 +165,18 @@ describe("aggregateWebPetState", () => {
       },
       agent_states: [],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.panelData.actionItems).toHaveLength(3);
   });
 
   it("populates action on waiting_user action items", () => {
     const context: GroupContext = {
       attention: {
-        waiting_user: [
-          { id: "T1", title: "Review PR", assignee: "peer-impl-1" },
-        ],
+        waiting_user: [{ id: "T1", title: "Review PR", assignee: "peer-impl-1" }],
       },
       agent_states: [],
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context, groupId: "g_abc" })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context, groupId: "g_abc" }));
     expect(result.panelData.actionItems[0].action).toEqual({
       type: "open_task",
       groupId: "g_abc",
@@ -223,9 +196,7 @@ describe("aggregateWebPetState", () => {
         },
       },
     ];
-    const result = aggregateWebPetState(
-      makeInput({ events, groupId: "g_xyz" })
-    );
+    const result = aggregateWebPetState(makeInput({ events, groupId: "g_xyz" }));
     expect(result.panelData.actionItems[0].action).toEqual({
       type: "open_chat",
       groupId: "g_xyz",
@@ -238,9 +209,7 @@ describe("aggregateWebPetState", () => {
       agent_states: [],
       tasks_summary: { total: 75, done: 3, active: 21, planned: 41, archived: 10 },
     };
-    const result = aggregateWebPetState(
-      makeInput({ groupContext: context })
-    );
+    const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.panelData.taskProgress).toEqual({
       total: 65,
       done: 3,

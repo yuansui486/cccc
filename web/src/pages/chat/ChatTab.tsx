@@ -1,15 +1,20 @@
 // ChatTab is the main chat page component.
 // Refactored to use useChatTab hook for business logic, reducing prop drilling.
 
-import type { MutableRefObject, RefObject } from "react";
+import { useCallback, type MutableRefObject, type RefObject } from "react";
 import { CompassIcon } from "../../components/Icons";
-import { Actor, GroupMeta } from "../../types";
+import { Actor, GroupMeta, LedgerEvent, PresentationMessageRef } from "../../types";
+import { PresentationRail } from "../../components/presentation/PresentationRail";
 import { VirtualMessageList } from "../../components/VirtualMessageList";
 import { classNames } from "../../utils/classNames";
 import { SetupChecklist } from "./SetupChecklist";
 import { ChatComposer } from "./ChatComposer";
 import { useChatTab } from "../../hooks/useChatTab";
 import { useTranslation } from 'react-i18next';
+import { useGroupStore, useModalStore, useUIStore } from "../../stores";
+import { getChatSession } from "../../stores/useUIStore";
+
+const EMPTY_PRESENTATION_ATTENTION: Record<string, boolean> = {};
 
 export interface ChatTabProps {
   // UI configuration
@@ -30,8 +35,8 @@ export interface ChatTabProps {
 
   // Refs (shared with App for external interactions)
   scrollRef: MutableRefObject<HTMLDivElement | null>;
-  composerRef: RefObject<HTMLTextAreaElement>;
-  fileInputRef: RefObject<HTMLInputElement>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
+  fileInputRef: RefObject<HTMLInputElement | null>;
 
   // Refs for scroll state (shared with App)
   chatAtBottomRef?: MutableRefObject<boolean>;
@@ -89,6 +94,7 @@ export function ChatTab({
     isLoadingHistory,
     hasMoreHistory,
     loadMoreHistory,
+    chatEmptyState,
 
     // UI state
     busy,
@@ -107,7 +113,9 @@ export function ChatTab({
     composerFiles,
     removeComposerFile,
     replyTarget,
+    quotedPresentationRef,
     cancelReply,
+    clearQuotedPresentationRef,
     toTokens,
     toggleRecipient,
     clearRecipients,
@@ -146,92 +154,61 @@ export function ChatTab({
   });
 
   const { t } = useTranslation('chat');
+  const groupPresentation = useGroupStore((state) => state.groupPresentation);
+  const setPresentationViewer = useModalStore((state) => state.setPresentationViewer);
+  const setPresentationPin = useModalStore((state) => state.setPresentationPin);
+  const mobileSurface = useUIStore((state) =>
+    selectedGroupId ? getChatSession(selectedGroupId, state.chatSessions).mobileSurface : "messages"
+  );
+  const presentationDockOpen = useUIStore((state) =>
+    selectedGroupId ? getChatSession(selectedGroupId, state.chatSessions).presentationDockOpen : false
+  );
+  const setChatMobileSurface = useUIStore((state) => state.setChatMobileSurface);
+  const setChatPresentationDockOpen = useUIStore((state) => state.setChatPresentationDockOpen);
+  const presentationAttention = useModalStore((state) =>
+    selectedGroupId ? (state.presentationAttention[selectedGroupId] || EMPTY_PRESENTATION_ATTENTION) : EMPTY_PRESENTATION_ATTENTION
+  );
 
-  // Empty state: show full-screen setup guidance.
-  // Don't show setup card while initial group data is still loading.
-  // Fresh buckets have hasMoreHistory=true; the API sets it to the real value.
-  // When hasMoreHistory is true but messages are empty, we're still loading —
-  // fall through to VirtualMessageList which shows a loading spinner.
-  const isInitiallyLoading = chatMessages.length === 0 && hasMoreHistory;
-  if (chatMessages.length === 0 && showSetupCard && !isInitiallyLoading) {
-    return (
-      <>
-        <div
-          ref={scrollRef}
-          className="flex-1 min-h-0 overflow-auto px-4 py-4 relative"
-          role="log"
-          aria-label={t('chatMessages')}
-        >
-          <div className="flex flex-col items-center justify-center h-full text-center pb-20">
-            <div className={classNames("w-full max-w-md", isDark ? "text-slate-200" : "text-gray-800")}>
-              <div className="mb-4 flex justify-center" aria-hidden="true">
-                <CompassIcon size={32} className={isDark ? "text-cyan-300" : "text-cyan-600"} />
-              </div>
-              <div className={classNames("text-sm font-semibold", isDark ? "text-slate-200" : "text-gray-800")}>
-                {t('nextSteps')}
-              </div>
-              {readOnly ? (
-                <div className={classNames("mt-3 text-sm", isDark ? "text-slate-400" : "text-gray-600")}>
-                  {t('noMessagesYet')}
-                </div>
-              ) : (
-                <SetupChecklist
-                  isDark={isDark}
-                  selectedGroupId={selectedGroupId}
-                  busy={busy}
-                  needsScope={needsScope}
-                  needsActors={needsActors}
-                  needsStart={needsStart}
-                  onAddAgent={addAgent}
-                  onStartGroup={onStartGroup}
-                  variant="full"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-        {!readOnly && (
-          <ChatComposer
-            isDark={isDark}
-            isSmallScreen={isSmallScreen}
-            selectedGroupId={selectedGroupId}
-            actors={actors}
-            recipientActors={recipientActors}
-            recipientActorsBusy={recipientActorsBusy}
-            groups={groups}
-            destGroupId={destGroupId}
-            setDestGroupId={setDestGroupId}
-            destGroupScopeLabel={destGroupScopeLabel}
-            busy={busy}
-            replyTarget={replyTarget}
-            onCancelReply={cancelReply}
-            toTokens={toTokens}
-            onToggleRecipient={toggleRecipient}
-            onClearRecipients={clearRecipients}
-            composerFiles={composerFiles}
-            onRemoveComposerFile={removeComposerFile}
-            appendComposerFiles={appendComposerFiles}
-            fileInputRef={fileInputRef}
-            composerRef={composerRef}
-            composerText={composerText}
-            setComposerText={setComposerText}
-            priority={priority}
-            replyRequired={replyRequired}
-            setPriority={setPriority}
-            setReplyRequired={setReplyRequired}
-            onSendMessage={sendMessage}
-            showMentionMenu={showMentionMenu}
-            setShowMentionMenu={setShowMentionMenu}
-            mentionSuggestions={mentionSuggestions}
-            mentionSelectedIndex={mentionSelectedIndex}
-            setMentionSelectedIndex={setMentionSelectedIndex}
-            setMentionFilter={setMentionFilter}
-            onAppendRecipientToken={appendRecipientToken}
-          />
-        )}
-      </>
-    );
-  }
+  const isHydratingEmptyState = chatMessages.length === 0 && chatEmptyState === "hydrating";
+  const isBusinessEmptyState = chatMessages.length === 0 && chatEmptyState === "business_empty";
+  const listIsLoadingHistory = isLoadingHistory || isHydratingEmptyState;
+  const listHasMoreHistory = hasMoreHistory || isHydratingEmptyState;
+  const hasPresentationAttention = Object.keys(presentationAttention).length > 0;
+
+  const openPresentationSlot = useCallback((slotId: string) => {
+    if (!selectedGroupId || !slotId) return;
+    setPresentationViewer({ groupId: selectedGroupId, slotId });
+  }, [selectedGroupId, setPresentationViewer]);
+
+  const openPresentationRef = useCallback((ref: PresentationMessageRef, event: LedgerEvent) => {
+    if (!selectedGroupId) return;
+    const slotId = String(ref.slot_id || "").trim();
+    if (!slotId) return;
+    setPresentationViewer({
+      groupId: selectedGroupId,
+      slotId,
+      focusRef: ref,
+      focusEventId: String(event.id || "").trim() || null,
+    });
+  }, [selectedGroupId, setPresentationViewer]);
+
+  const pinPresentationSlot = useCallback((slotId: string) => {
+    if (!selectedGroupId || !slotId || readOnly) return;
+    setPresentationPin({ groupId: selectedGroupId, slotId });
+  }, [readOnly, selectedGroupId, setPresentationPin]);
+
+  const setPresentationDockOpen = useCallback((next: boolean) => {
+    if (!selectedGroupId) return;
+    setChatPresentationDockOpen(selectedGroupId, next);
+  }, [selectedGroupId, setChatPresentationDockOpen]);
+
+  const filterOptions: Array<["all" | "user" | "attention" | "task", string]> = [
+    ["all", t('filterAll')],
+    ["user", t('filterUser')],
+    ["attention", t('filterImportant')],
+    ["task", t('filterNeedReply')],
+  ];
+  const showMessageFilters = !readOnly && !chatWindowProps && hasAnyChatMessages;
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-transparent">
@@ -308,130 +285,248 @@ export function ChatTab({
         )}
       </header>
 
-      {/* 2. Body Area: Contains the List + the Floating Filter Pill */}
-      <main className="flex-1 min-h-0 relative flex flex-col">
-        {/* Chat Filter Pill — inline on mobile, floating on sm+ */}
-        {!readOnly && !chatWindowProps && hasAnyChatMessages && (
-          <>
-            {/* Mobile: inline scrollable bar */}
+      {/* 2. Body Area: messages stay primary; presentation is a secondary surface */}
+      <main className="flex flex-1 min-h-0 flex-col">
+        {isSmallScreen ? (
+          <div
+            className={classNames(
+              "flex-shrink-0 px-4 pb-2",
+              isDark ? "text-slate-200" : "text-gray-900"
+            )}
+          >
             <div
               className={classNames(
-                "sm:hidden flex-shrink-0 overflow-x-auto scrollbar-hide px-3 py-2 border-b",
-                isDark ? "border-white/5" : "border-black/5"
+                "inline-flex items-center gap-1 rounded-full border p-1 backdrop-blur-xl",
+                isDark ? "border-white/10 bg-slate-900/60" : "border-black/10 bg-white/80"
               )}
               role="tablist"
-              aria-label={t('chatFilters')}
+              aria-label={t('presentationSurfaceSwitch', { defaultValue: 'Choose messages or presentation' })}
             >
-              <div className={classNames(
-                "inline-flex items-center gap-1 rounded-full border p-1 backdrop-blur-md",
-                isDark
-                  ? "border-slate-700/60 bg-slate-900/60"
-                  : "border-gray-200/80 bg-white/70"
-              )}>
-                {[
-                  ["all", t('filterAll')],
-                  ["to_user", t('filterToUser')],
-                  ["attention", t('filterImportant')],
-                  ["task", t('filterNeedReply')],
-                ].map(([key, label]) => {
-                  const k = key as "all" | "to_user" | "attention" | "task";
-                  const active = chatFilter === k;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      className={classNames(
-                        "text-xs px-3 py-1.5 rounded-full transition-all font-medium whitespace-nowrap flex-shrink-0",
-                        active
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : isDark
-                            ? "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
-                            : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                      )}
-                      onClick={() => setChatFilter(k)}
-                      aria-pressed={active}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              {[
+                ["messages", t('chatMessages')],
+                ["presentation", t('presentationTitle', { defaultValue: 'Presentation' })],
+              ].map(([key, label]) => {
+                const surface = key as "messages" | "presentation";
+                const active = mobileSurface === surface;
+                return (
+                  <button
+                    key={surface}
+                    type="button"
+                    className={classNames(
+                      "relative rounded-full px-3 py-1.5 text-xs font-medium transition-all",
+                      active
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : isDark
+                          ? "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100"
+                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                    )}
+                    onClick={() => selectedGroupId && setChatMobileSurface(selectedGroupId, surface)}
+                    aria-pressed={active}
+                  >
+                    {label}
+                    {surface === "presentation" && hasPresentationAttention ? (
+                      <>
+                        <span
+                          className={classNames(
+                            "pointer-events-none absolute right-1.5 top-1.5 h-2 w-2 rounded-full animate-ping",
+                            active ? "bg-white/65" : isDark ? "bg-cyan-300/70" : "bg-cyan-500/45"
+                          )}
+                        />
+                        <span
+                          className={classNames(
+                            "pointer-events-none absolute right-1.5 top-1.5 h-2 w-2 rounded-full",
+                            active ? "bg-white" : isDark ? "bg-cyan-200" : "bg-cyan-500"
+                          )}
+                        />
+                      </>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
-            {/* Desktop: floating pill over message list */}
-            <div
-              className="hidden sm:block absolute top-4 left-4 z-20 pointer-events-none"
-              style={{ width: "calc(100% - 32px)" }}
-            >
-              <div
-                className={classNames(
-                  "inline-flex items-center gap-1 xl:gap-2 rounded-full border p-1 sm:p-1.5 shadow-xl pointer-events-auto backdrop-blur-xl transition-all duration-300",
-                  isDark
-                    ? "border-white/10 bg-slate-900/60 shadow-black/40 ring-1 ring-white/5"
-                    : "border-black/5 bg-white/70 shadow-gray-200/50 ring-1 ring-black/5"
-                )}
-                role="tablist"
-                aria-label={t('chatFilters')}
-              >
-                {[
-                  ["all", t('filterAll')],
-                  ["to_user", t('filterToUser')],
-                  ["attention", t('filterImportant')],
-                  ["task", t('filterNeedReply')],
-                ].map(([key, label]) => {
-                  const k = key as "all" | "to_user" | "attention" | "task";
-                  const active = chatFilter === k;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      className={classNames(
-                        "text-xs px-4 py-1.5 rounded-full transition-all font-medium",
-                        active
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : isDark
-                            ? "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
-                            : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                      )}
-                      onClick={() => setChatFilter(k)}
-                      aria-pressed={active}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </>
-        )}
+          </div>
+        ) : null}
 
-        <VirtualMessageList
-          messages={chatMessages}
-          actors={actors}
-          agentStates={agentStates}
-          isDark={isDark}
-          readOnly={readOnly}
-          groupId={selectedGroupId}
-          groupLabelById={groupLabelById}
-          viewKey={chatViewKey}
-          initialScrollTargetId={chatInitialScrollTargetId}
-          initialScrollAnchorId={chatInitialScrollAnchorId}
-          initialScrollAnchorOffsetPx={chatInitialScrollAnchorOffsetPx}
-          highlightEventId={chatHighlightEventId}
-          scrollRef={scrollRef}
-          onReply={startReply}
-          onShowRecipients={showRecipients}
-          onCopyLink={copyMessageLink}
-          onRelay={relayMessage}
-          onOpenSource={openSourceMessage}
-          showScrollButton={showScrollButton}
-          onScrollButtonClick={handleScrollButtonClick}
-          chatUnreadCount={chatUnreadCount}
-          onScrollChange={handleScrollChange}
-          onScrollSnapshot={handleScrollSnapshot}
-          isLoadingHistory={isLoadingHistory}
-          hasMoreHistory={hasMoreHistory}
-          onLoadMore={loadMoreHistory}
-        />
+        <div className="relative flex min-h-0 flex-1">
+          {(!isSmallScreen || mobileSurface === "messages") ? (
+            <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {showMessageFilters && (
+                <>
+                  <div
+                    className={classNames(
+                      "sm:hidden flex-shrink-0 overflow-x-auto scrollbar-hide px-3 py-2 border-b",
+                      isDark ? "border-white/5" : "border-black/5"
+                    )}
+                    role="tablist"
+                    aria-label={t('chatFilters')}
+                  >
+                    <div className={classNames(
+                      "inline-flex items-center gap-1 rounded-full border p-1 backdrop-blur-md",
+                      isDark
+                        ? "border-slate-700/60 bg-slate-900/60"
+                        : "border-gray-200/80 bg-white/70"
+                    )}>
+                      {filterOptions.map(([key, label]) => {
+                        const active = chatFilter === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={classNames(
+                              "text-xs px-3 py-1.5 rounded-full transition-all font-medium whitespace-nowrap flex-shrink-0",
+                              active
+                                ? "bg-blue-600 text-white shadow-sm"
+                                : isDark
+                                  ? "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
+                                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+                            )}
+                            onClick={() => setChatFilter(key)}
+                            aria-pressed={active}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div
+                    className="hidden sm:block absolute top-4 left-4 z-20 pointer-events-none"
+                    style={{ width: "calc(100% - 32px)" }}
+                  >
+                    <div
+                      className={classNames(
+                        "inline-flex items-center gap-1 xl:gap-2 rounded-full border p-1 sm:p-1.5 shadow-xl pointer-events-auto backdrop-blur-xl transition-all duration-300",
+                        isDark
+                          ? "border-white/10 bg-slate-900/60 shadow-black/40 ring-1 ring-white/5"
+                          : "border-black/5 bg-white/70 shadow-gray-200/50 ring-1 ring-black/5"
+                      )}
+                      role="tablist"
+                      aria-label={t('chatFilters')}
+                    >
+                      {filterOptions.map(([key, label]) => {
+                        const active = chatFilter === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={classNames(
+                              "text-xs px-4 py-1.5 rounded-full transition-all font-medium",
+                              active
+                                ? "bg-blue-600 text-white shadow-sm"
+                                : isDark
+                                  ? "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
+                                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+                            )}
+                            onClick={() => setChatFilter(key)}
+                            aria-pressed={active}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {isBusinessEmptyState && showSetupCard ? (
+                <div
+                  ref={scrollRef}
+                  className="flex-1 min-h-0 overflow-auto px-4 py-4 relative"
+                  role="log"
+                  aria-label={t('chatMessages')}
+                >
+                  <div className="flex h-full flex-col items-center justify-center text-center pb-20">
+                    <div className={classNames("w-full max-w-md", isDark ? "text-slate-200" : "text-gray-800")}>
+                      <div className="mb-4 flex justify-center" aria-hidden="true">
+                        <CompassIcon size={32} className={isDark ? "text-cyan-300" : "text-cyan-600"} />
+                      </div>
+                      <div className={classNames("text-sm font-semibold", isDark ? "text-slate-200" : "text-gray-800")}>
+                        {t('nextSteps')}
+                      </div>
+                      {readOnly ? (
+                        <div className={classNames("mt-3 text-sm", isDark ? "text-slate-400" : "text-gray-600")}>
+                          {t('noMessagesYet')}
+                        </div>
+                      ) : (
+                        <SetupChecklist
+                          isDark={isDark}
+                          selectedGroupId={selectedGroupId}
+                          busy={busy}
+                          needsScope={needsScope}
+                          needsActors={needsActors}
+                          needsStart={needsStart}
+                          onAddAgent={addAgent}
+                          onStartGroup={onStartGroup}
+                          variant="full"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <VirtualMessageList
+                  messages={chatMessages}
+                  actors={actors}
+                  agentStates={agentStates}
+                  isDark={isDark}
+                  readOnly={readOnly}
+                  groupId={selectedGroupId}
+                  groupLabelById={groupLabelById}
+                  viewKey={chatViewKey}
+                  initialScrollTargetId={chatInitialScrollTargetId}
+                  initialScrollAnchorId={chatInitialScrollAnchorId}
+                  initialScrollAnchorOffsetPx={chatInitialScrollAnchorOffsetPx}
+                  highlightEventId={chatHighlightEventId}
+                  scrollRef={scrollRef}
+                  onReply={startReply}
+                  onShowRecipients={showRecipients}
+                onCopyLink={copyMessageLink}
+                onRelay={relayMessage}
+                onOpenSource={openSourceMessage}
+                onOpenPresentationRef={openPresentationRef}
+                showScrollButton={showScrollButton}
+                onScrollButtonClick={handleScrollButtonClick}
+                  chatUnreadCount={chatUnreadCount}
+                  onScrollChange={handleScrollChange}
+                  onScrollSnapshot={handleScrollSnapshot}
+                  isLoadingHistory={listIsLoadingHistory}
+                  hasMoreHistory={listHasMoreHistory}
+                  onLoadMore={loadMoreHistory}
+                />
+              )}
+            </section>
+          ) : null}
+
+          {!isSmallScreen ? (
+            <PresentationRail
+              mode="dock"
+              presentation={groupPresentation}
+              isDark={isDark}
+              readOnly={readOnly}
+              isOpen={presentationDockOpen}
+              onOpenChange={setPresentationDockOpen}
+              attentionSlots={presentationAttention}
+              onOpenSlot={openPresentationSlot}
+              onPinSlot={pinPresentationSlot}
+            />
+          ) : null}
+
+          {isSmallScreen && mobileSurface === "presentation" ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <PresentationRail
+                mode="panel"
+                presentation={groupPresentation}
+                isDark={isDark}
+                readOnly={readOnly}
+                attentionSlots={presentationAttention}
+                onOpenSlot={openPresentationSlot}
+                onPinSlot={pinPresentationSlot}
+              />
+            </div>
+          ) : null}
+        </div>
       </main>
 
       {/* 3. Footer Area: Composer */}
@@ -451,6 +546,8 @@ export function ChatTab({
             busy={busy}
             replyTarget={replyTarget}
             onCancelReply={cancelReply}
+            quotedPresentationRef={quotedPresentationRef}
+            onClearQuotedPresentationRef={clearQuotedPresentationRef}
             toTokens={toTokens}
             onToggleRecipient={toggleRecipient}
             onClearRecipients={clearRecipients}

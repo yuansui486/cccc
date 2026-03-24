@@ -31,6 +31,39 @@ export type EventAttachment = {
   mime_type?: string;
 };
 
+export type MessageRef = {
+  kind?: string;
+  [key: string]: unknown;
+};
+
+export type PresentationRefStatus = "open" | "needs_user" | "resolved";
+
+export type PresentationRefSnapshot = {
+  path: string;
+  mime_type?: string;
+  bytes?: number;
+  sha256?: string;
+  width?: number;
+  height?: number;
+  captured_at?: string;
+  source?: string;
+};
+
+export type PresentationMessageRef = MessageRef & {
+  kind: "presentation_ref";
+  v?: number;
+  slot_id: string;
+  label?: string;
+  locator_label?: string;
+  title?: string;
+  card_type?: string;
+  status?: PresentationRefStatus | string;
+  href?: string;
+  excerpt?: string;
+  locator?: Record<string, unknown>;
+  snapshot?: PresentationRefSnapshot;
+};
+
 // Chat message payload
 export type ChatMessageData = {
   text?: string;
@@ -43,6 +76,7 @@ export type ChatMessageData = {
   src_event_id?: string;
   dst_group_id?: string;
   dst_to?: string[];
+  refs?: MessageRef[];
   attachments?: EventAttachment[];
 };
 
@@ -153,6 +187,10 @@ export type CapabilityOverviewItem = {
   kind?: string;
   name?: string;
   description_short?: string;
+  use_when?: string[];
+  avoid_when?: string[];
+  gotchas?: string[];
+  evidence_kind?: string;
   source_id?: string;
   source_uri?: string;
   source_tier?: string;
@@ -224,6 +262,10 @@ export type CapabilityImportRecord = {
   install_spec?: { command?: string; package?: string; url?: string };
   name?: string;
   description_short?: string;
+  use_when?: string[];
+  avoid_when?: string[];
+  gotchas?: string[];
+  evidence_kind?: string;
   source_id?: string;
   [key: string]: unknown;
 };
@@ -334,6 +376,68 @@ export type GroupTasksSummary = {
 
 export type TaskBoardEntry = string | Partial<Task>;
 
+export type PresentationCardType = "markdown" | "table" | "image" | "pdf" | "file" | "web_preview";
+
+export type PresentationTableData = {
+  columns: string[];
+  rows: string[][];
+};
+
+export type PresentationContent = {
+  mode?: "inline" | "reference" | "workspace_link";
+  markdown?: string | null;
+  table?: PresentationTableData | null;
+  url?: string | null;
+  blob_rel_path?: string | null;
+  workspace_rel_path?: string | null;
+  mime_type?: string | null;
+  file_name?: string | null;
+};
+
+export type PresentationCard = {
+  slot_id: string;
+  title: string;
+  card_type: PresentationCardType;
+  published_by: string;
+  published_at: string;
+  source_label?: string;
+  source_ref?: string;
+  summary?: string;
+  content: PresentationContent;
+};
+
+export type PresentationSlot = {
+  slot_id: string;
+  index: number;
+  card?: PresentationCard | null;
+};
+
+export type GroupPresentation = {
+  v: number;
+  updated_at?: string;
+  highlight_slot_id?: string;
+  slots: PresentationSlot[];
+};
+
+export type PresentationBrowserSurfaceState = {
+  active: boolean;
+  state: string;
+  message?: string | null;
+  error?: {
+    code?: string | null;
+    message?: string | null;
+  } | null;
+  strategy?: string | null;
+  url?: string | null;
+  width?: number;
+  height?: number;
+  started_at?: string | null;
+  updated_at?: string | null;
+  last_frame_seq?: number;
+  last_frame_at?: string | null;
+  controller_attached?: boolean;
+};
+
 export type ContextAttention = {
   blocked?: number | TaskBoardEntry[];
   waiting_user?: number | TaskBoardEntry[];
@@ -346,6 +450,8 @@ export type ContextBoard = {
   done?: TaskBoardEntry[];
   archived?: TaskBoardEntry[];
 };
+
+export type ContextDetailLevel = "summary" | "full";
 
 export type GroupContext = {
   version?: string;
@@ -488,6 +594,15 @@ export type DoneHubSavedLogin = {
   username: string;
   password: string;
   remember_password: boolean;
+};
+
+export type WebBranding = {
+  product_name: string;
+  logo_icon_url?: string | null;
+  favicon_url?: string | null;
+  has_custom_logo_icon?: boolean;
+  has_custom_favicon?: boolean;
+  updated_at?: string | null;
 };
 
 export type GroupSpaceProviderState = {
@@ -729,7 +844,7 @@ export type GroupAutomation = {
   server_now?: string;
 };
 
-export type IMPlatform = "telegram" | "slack" | "discord" | "feishu" | "dingtalk";
+export type IMPlatform = "telegram" | "slack" | "discord" | "feishu" | "dingtalk" | "wecom";
 
 export type IMConfig = {
   platform?: IMPlatform;
@@ -755,6 +870,9 @@ export type IMConfig = {
   dingtalk_app_secret_env?: string;
   dingtalk_robot_code?: string;
   dingtalk_robot_code_env?: string;
+  // WeCom fields
+  wecom_bot_id?: string;
+  wecom_secret?: string;
 };
 
 export type IMStatus = {
@@ -768,6 +886,13 @@ export type IMStatus = {
 
 export type DirItem = { name: string; path: string; is_dir: boolean };
 export type DirSuggestion = { name: string; path: string; icon: string };
+export type PresentationWorkspaceItem = { name: string; path: string; is_dir: boolean; mime_type?: string | null };
+export type PresentationWorkspaceListing = {
+  root_path: string;
+  path: string;
+  parent: string | null;
+  items: PresentationWorkspaceItem[];
+};
 
 // Runtime configuration
 export const SUPPORTED_RUNTIMES = [

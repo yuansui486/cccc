@@ -1479,6 +1479,22 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
                 "[error] DingTalk requires app_key + app_secret (set via group IM config or DINGTALK_APP_KEY/DINGTALK_APP_SECRET)."
             )
             sys.exit(1)
+    elif platform.lower() == "wecom":
+        wecom_bot_id = _resolve_secret(
+            value_key="wecom_bot_id",
+            env_key="wecom_bot_id_env",
+            default_env="WECOM_BOT_ID",
+        )
+        wecom_secret = _resolve_secret(
+            value_key="wecom_secret",
+            env_key="wecom_secret_env",
+            default_env="WECOM_SECRET",
+        )
+        if not wecom_bot_id or not wecom_secret:
+            print(
+                "[error] WeCom requires bot_id + secret (set via group IM config or WECOM_BOT_ID/WECOM_SECRET)."
+            )
+            sys.exit(1)
     else:
         # Telegram/Discord: single token
         token_env_raw = str(im_config.get("token_env") or im_config.get("bot_token_env") or "").strip()
@@ -1512,6 +1528,8 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
         lock_identity = f"feishu|domain={str(im_config.get('feishu_domain') or '')}|app_id={feishu_app_id}"
     elif platform.lower() == "dingtalk":
         lock_identity = f"dingtalk|app_key={dingtalk_app_key}"
+    elif platform.lower() == "wecom":
+        lock_identity = f"wecom|bot_id={wecom_bot_id}"
     else:
         lock_identity = f"{platform.lower()}|token={bot_token or ''}"
     token_material = lock_identity
@@ -1565,6 +1583,14 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
             app_secret=dingtalk_app_secret,
             robot_code=dingtalk_robot_code,
             log_path=log_path,
+        )
+    elif platform.lower() == "wecom":
+        from .adapters.wecom import WecomAdapter
+        adapter = WecomAdapter(
+            bot_id=wecom_bot_id,
+            secret=wecom_secret,
+            log_path=log_path,
+            ws_url=str(im_config.get("wecom_ws_url") or ""),
         )
     else:
         print(f"[error] Unsupported platform: {platform}")
@@ -1625,7 +1651,7 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m cccc.ports.im.bridge <group_id> [platform]")
-        print("  platform: telegram (default), slack, discord, feishu (Feishu/Lark), dingtalk")
+        print("  platform: telegram (default), slack, discord, feishu (Feishu/Lark), dingtalk, wecom")
         print("")
         print("Environment variables:")
         print("  Telegram: TELEGRAM_BOT_TOKEN")
@@ -1633,6 +1659,7 @@ if __name__ == "__main__":
         print("  Discord:  DISCORD_BOT_TOKEN")
         print("  Feishu/Lark: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_DOMAIN (optional: feishu|lark|https://...)")
         print("  DingTalk: DINGTALK_APP_KEY, DINGTALK_APP_SECRET, DINGTALK_ROBOT_CODE (optional)")
+        print("  WeCom:    WECOM_BOT_ID, WECOM_SECRET")
         sys.exit(1)
 
     _group_id = sys.argv[1]

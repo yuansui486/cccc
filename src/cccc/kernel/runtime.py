@@ -215,7 +215,7 @@ def get_runtime_command_with_flags(name: str) -> List[str]:
         "codex": ["codex", "-c", "shell_environment_policy.inherit=all", "--dangerously-bypass-approvals-and-sandbox", "--search"],
         "droid": ["droid", "--auto", "high"],
         "gemini": ["gemini", "--yolo"],
-        "kimi": ["kimi"],
+        "kimi": ["kimi", "--yolo"],
         "neovate": ["neovate"],
         "custom": [],
     }

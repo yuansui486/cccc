@@ -43,6 +43,7 @@ def message_send(
     to: Optional[List[str]] = None,
     priority: str = "normal",
     reply_required: bool = False,
+    refs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Send a message to the group (or cross-group)."""
     text = _normalize_runtime_escaped_text(group_id=group_id, actor_id=actor_id, text=text)
@@ -64,6 +65,7 @@ def message_send(
                     "to": to if to is not None else [],
                     "priority": prio,
                     "reply_required": reply_required_flag,
+                    "refs": refs if refs is not None else [],
                 },
             }
         )
@@ -79,6 +81,7 @@ def message_send(
                 "path": "",
                 "priority": prio,
                 "reply_required": reply_required_flag,
+                "refs": refs if refs is not None else [],
             },
         }
     )
@@ -93,6 +96,7 @@ def message_reply(
     to: Optional[List[str]] = None,
     priority: str = "normal",
     reply_required: bool = False,
+    refs: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Reply to a message."""
     if not str(reply_to or "").strip():
@@ -113,6 +117,7 @@ def message_reply(
                 "to": to if to is not None else [],
                 "priority": prio,
                 "reply_required": reply_required_flag,
+                "refs": refs if refs is not None else [],
             },
         }
     )

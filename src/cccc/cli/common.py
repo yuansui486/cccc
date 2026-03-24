@@ -86,6 +86,20 @@ def _resolve_web_server_binding() -> tuple[str, int]:
     return host, port
 
 
+def _resolve_invocation_web_server_binding(
+    *,
+    web_host_override: str = "",
+    web_port_override: Optional[int] = None,
+) -> tuple[str, int]:
+    host, port = _resolve_web_server_binding()
+    override_host = str(web_host_override or "").strip()
+    if override_host:
+        host = override_host
+    if web_port_override is not None:
+        port = int(web_port_override)
+    return host, int(port)
+
+
 def _default_entry_lock_path(home: Path) -> Path:
     return home / "daemon" / "cccc-app.lock"
 
@@ -432,7 +446,7 @@ def _show_welcome() -> None:
     print("=" * 60)
     print()
 
-def _default_entry() -> int:
+def _default_entry(*, web_host_override: str = "", web_port_override: Optional[int] = None) -> int:
     """Default entry: start daemon + web together, stop both on Ctrl+C."""
     import threading
     
@@ -571,8 +585,15 @@ def _default_entry() -> int:
         _lifecycle.stop_daemon()
         daemon_process = _lifecycle.process
     
-    # Keep runtime binding aligned with remote_access settings/UI.
-    host, port = _resolve_web_server_binding()
+    # Saved binding is the baseline, but top-level `cccc --host/--port`
+    # must win for this invocation, including supervised child restarts.
+    def _resolve_invocation_binding() -> tuple[str, int]:
+        return _resolve_invocation_web_server_binding(
+            web_host_override=web_host_override,
+            web_port_override=web_port_override,
+        )
+
+    host, port = _resolve_invocation_binding()
     log_level = str(os.environ.get("CCCC_WEB_LOG_LEVEL") or "").strip() or "info"
     reload_mode = _env_flag("CCCC_WEB_RELOAD", default=False)
     web_process = None
@@ -640,7 +661,7 @@ def _default_entry() -> int:
                     reload=reload_mode,
                     log_level=log_level,
                     launch_source="default_entry",
-                    resolve_binding=_resolve_web_server_binding,
+                    resolve_binding=_resolve_invocation_binding,
                     log=lambda msg: print(f"[cccc] {msg}", file=sys.stderr),
                 )
                 if restarted is None:

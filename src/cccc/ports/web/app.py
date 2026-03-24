@@ -30,6 +30,7 @@ from .runtime_control import (
     clear_web_runtime_state,
     write_web_runtime_state,
 )
+from .middleware import AuthMiddleware, ReadOnlyGuardMiddleware, UiCacheControlMiddleware
 from .schemas import RouteContext
 
 logger = logging.getLogger("cccc.web")
@@ -95,7 +96,7 @@ def _web_mode() -> Literal["normal", "exhibit"]:
     return "normal"
 
 
-_PUBLIC_API_PATHS = frozenset({"/api/v1/health"})
+_PUBLIC_API_PATHS = frozenset({"/api/v1/health", "/api/v1/branding"})
 
 
 def _is_public_ui_path(request: Request) -> bool:
@@ -106,7 +107,7 @@ def _is_public_ui_path(request: Request) -> bool:
 def _is_public_path(request: Request) -> bool:
     """Routes that bypass token authentication (UI assets + health check)."""
     path = str(request.url.path or "")
-    return _is_public_ui_path(request) or path in _PUBLIC_API_PATHS
+    return _is_public_ui_path(request) or path in _PUBLIC_API_PATHS or path.startswith("/api/v1/branding/assets/")
 
 
 def _request_token_parts(request: Request) -> tuple[str, Literal["", "header", "cookie", "query"]]:
@@ -357,78 +358,6 @@ def create_app() -> FastAPI:
                 allow_headers=["*"],
             )
 
-    @app.middleware("http")
-    async def _auth(request: Request, call_next):  # type: ignore[no-untyped-def]
-        provided_token, token_source = _request_token_parts(request)
-        logout_marker = str(request.cookies.get(_SIGNED_OUT_COOKIE) or "").strip() == "1"
-        if logout_marker and token_source == "cookie":
-            provided_token = ""
-            token_source = ""
-        principal = _resolve_principal(request if not logout_marker else request)
-        stale_cookie = logout_marker and bool(str(request.cookies.get("cccc_access_token") or "").strip())
-        if logout_marker and stale_cookie:
-            principal = Principal(kind="anonymous")
-        tokens_active = bool(list_access_tokens())
-        # header/query 是用户显式提供的认证材料，仍然严格按 401 收口；
-        # cookie 在无 token 配置时允许匿名放行，并顺手清掉残留脏 cookie。
-        if not _is_public_path(request) and provided_token and principal.kind != "user":
-            if token_source in ("header", "query") or tokens_active:
-                return JSONResponse(
-                    status_code=401,
-                    content={"ok": False, "error": {"code": "unauthorized", "message": "missing/invalid token", "details": {}}},
-                )
-            if token_source == "cookie":
-                stale_cookie = True
-        # 未提供任何 token 但 token 认证已启用 → 对 API 路径返回 401，让前端显示登录框。
-        if not _is_public_path(request) and not provided_token and tokens_active and principal.kind != "user":
-            path = str(request.url.path or "")
-            if path.startswith("/api/"):
-                return JSONResponse(
-                    status_code=401,
-                    content={"ok": False, "error": {"code": "unauthorized", "message": "authentication required", "details": {}}},
-                )
-        request.state.principal = principal
-
-        resp = await call_next(request)
-        if stale_cookie:
-            resp.delete_cookie(key="cccc_access_token", path="/")
-        skip_cookie_refresh = bool(getattr(getattr(request, "state", None), "skip_token_cookie_refresh", False))
-        if logout_marker and principal.kind == "user" and token_source in ("header", "query"):
-            resp.delete_cookie(key=_SIGNED_OUT_COOKIE, path="/")
-        if not skip_cookie_refresh and principal.kind == "user" and provided_token and str(request.cookies.get("cccc_access_token") or "").strip() != provided_token:
-            # Detect real protocol: env override > proxy header > request scheme
-            # Set CCCC_WEB_SECURE=1 when behind HTTPS proxy that doesn't send X-Forwarded-Proto
-            force_secure = str(os.environ.get("CCCC_WEB_SECURE") or "").strip().lower() in ("1", "true", "yes")
-            forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").strip().lower()
-            actual_scheme = "https" if force_secure else (forwarded_proto if forwarded_proto in ("http", "https") else str(getattr(request.url, "scheme", "") or "").lower())
-            resp.set_cookie(
-                key="cccc_access_token",
-                value=provided_token,
-                httponly=True,
-                samesite="none" if actual_scheme == "https" else "lax",
-                secure=actual_scheme == "https",
-                path="/",
-            )
-        return resp
-
-    @app.middleware("http")
-    async def _read_only_guard(request: Request, call_next):  # type: ignore[no-untyped-def]
-        if read_only:
-            m = str(request.method or "").upper()
-            if m not in ("GET", "HEAD", "OPTIONS"):
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "ok": False,
-                        "error": {
-                            "code": "read_only",
-                            "message": "CCCC Web is running in read-only (exhibit) mode.",
-                            "details": {},
-                        },
-                    },
-                )
-        return await call_next(request)
-
     @app.exception_handler(HTTPException)
     async def _handle_fastapi_http_exception(_request: Request, exc: HTTPException) -> JSONResponse:
         detail = exc.detail
@@ -474,14 +403,16 @@ def create_app() -> FastAPI:
         logger.exception("unhandled exception in cccc web")
         return JSONResponse(status_code=500, content={"ok": False, "error": {"code": "internal_error", "message": "internal error", "details": {}}})
 
-    @app.middleware("http")
-    async def _ui_cache_control(request: Request, call_next):  # type: ignore[no-untyped-def]
-        resp = await call_next(request)
-        # Avoid "why didn't my UI update?" confusion during local development.
-        # Vite config uses stable filenames, so we force revalidation.
-        if str(request.url.path or "").startswith("/ui"):
-            resp.headers["Cache-Control"] = "no-cache"
-        return resp
+    app.add_middleware(
+        AuthMiddleware,
+        signed_out_cookie=_SIGNED_OUT_COOKIE,
+        request_token_parts=_request_token_parts,
+        is_public_path=_is_public_path,
+        resolve_principal=_resolve_principal,
+        tokens_active=list_access_tokens,
+    )
+    app.add_middleware(ReadOnlyGuardMiddleware, read_only=read_only)
+    app.add_middleware(UiCacheControlMiddleware)
 
     from .routes.base import register_base_routes
     from .routes.space import create_routers as create_space_routers

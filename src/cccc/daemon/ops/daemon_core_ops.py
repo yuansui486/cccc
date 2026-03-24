@@ -21,6 +21,8 @@ def try_handle_daemon_core_op(
     get_observability: Callable[[], Dict[str, Any]],
     update_observability_settings: Callable[[Dict[str, Any]], Dict[str, Any]],
     apply_observability_settings: Callable[[Dict[str, Any]], None],
+    get_web_branding: Callable[[], Dict[str, Any]],
+    update_web_branding_settings: Callable[[Dict[str, Any]], Dict[str, Any]],
 ) -> Optional[Tuple[DaemonResponse, bool]]:
     if op == "ping":
         return (
@@ -59,5 +61,21 @@ def try_handle_daemon_core_op(
             return DaemonResponse(ok=True, result={"observability": updated}), False
         except Exception as e:
             return _error("observability_update_failed", str(e)), False
+
+    if op == "branding_get":
+        return DaemonResponse(ok=True, result={"branding": get_web_branding()}), False
+
+    if op == "branding_update":
+        by = str(args.get("by") or "user").strip()
+        if by and by != "user":
+            return _error("permission_denied", "only user can update global branding settings"), False
+        patch = args.get("patch") if isinstance(args.get("patch"), dict) else {}
+        if not patch:
+            return DaemonResponse(ok=True, result={"branding": get_web_branding()}), False
+        try:
+            updated = update_web_branding_settings(dict(patch))
+            return DaemonResponse(ok=True, result={"branding": updated}), False
+        except Exception as e:
+            return _error("branding_update_failed", str(e)), False
 
     return None

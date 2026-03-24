@@ -54,6 +54,14 @@ class TestWebMessagingClientId(unittest.TestCase):
                         "by": "user",
                         "to": ["user"],
                         "client_id": "local-send-1",
+                        "refs": [
+                            {
+                                "kind": "presentation_ref",
+                                "slot_id": "slot-2",
+                                "label": "P2",
+                                "locator_label": "PDF p.12",
+                            }
+                        ],
                     },
                 )
                 self.assertEqual(send_resp.status_code, 200)
@@ -61,6 +69,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                 self.assertTrue(bool(send_body.get("ok")))
                 send_event = ((send_body.get("result") or {}).get("event")) or {}
                 self.assertEqual((((send_event.get("data") or {}).get("client_id")) or ""), "local-send-1")
+                self.assertEqual((((send_event.get("data") or {}).get("refs")) or [])[0].get("slot_id"), "slot-2")
 
                 reply_to = str(send_event.get("id") or "")
                 reply_resp = client.post(
@@ -71,6 +80,14 @@ class TestWebMessagingClientId(unittest.TestCase):
                         "to": ["user"],
                         "reply_to": reply_to,
                         "client_id": "local-reply-1",
+                        "refs": [
+                            {
+                                "kind": "presentation_ref",
+                                "slot_id": "slot-2",
+                                "label": "P2",
+                                "locator_label": "PDF p.12",
+                            }
+                        ],
                     },
                 )
                 self.assertEqual(reply_resp.status_code, 200)
@@ -78,6 +95,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                 self.assertTrue(bool(reply_body.get("ok")))
                 reply_event = ((reply_body.get("result") or {}).get("event")) or {}
                 self.assertEqual((((reply_event.get("data") or {}).get("client_id")) or ""), "local-reply-1")
+                self.assertEqual((((reply_event.get("data") or {}).get("refs")) or [])[0].get("slot_id"), "slot-2")
         finally:
             cleanup()
 
@@ -99,6 +117,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                         "text": "upload hello",
                         "to_json": "[\"user\"]",
                         "client_id": "upload-send-1",
+                        "refs_json": "[{\"kind\":\"presentation_ref\",\"slot_id\":\"slot-3\",\"label\":\"P3\",\"locator_label\":\"Web\"}]",
                     },
                     files={"files": ("note.txt", BytesIO(b"hello"), "text/plain")},
                 )
@@ -107,6 +126,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                 self.assertTrue(bool(send_upload_body.get("ok")))
                 send_upload_event = ((send_upload_body.get("result") or {}).get("event")) or {}
                 self.assertEqual((((send_upload_event.get("data") or {}).get("client_id")) or ""), "upload-send-1")
+                self.assertEqual((((send_upload_event.get("data") or {}).get("refs")) or [])[0].get("slot_id"), "slot-3")
 
                 reply_to = str(send_upload_event.get("id") or "")
                 reply_upload_resp = client.post(
@@ -117,6 +137,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                         "to_json": "[\"user\"]",
                         "reply_to": reply_to,
                         "client_id": "upload-reply-1",
+                        "refs_json": "[{\"kind\":\"presentation_ref\",\"slot_id\":\"slot-3\",\"label\":\"P3\",\"locator_label\":\"Web\"}]",
                     },
                     files={"files": ("reply.txt", BytesIO(b"reply"), "text/plain")},
                 )
@@ -125,6 +146,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                 self.assertTrue(bool(reply_upload_body.get("ok")))
                 reply_upload_event = ((reply_upload_body.get("result") or {}).get("event")) or {}
                 self.assertEqual((((reply_upload_event.get("data") or {}).get("client_id")) or ""), "upload-reply-1")
+                self.assertEqual((((reply_upload_event.get("data") or {}).get("refs")) or [])[0].get("slot_id"), "slot-3")
         finally:
             cleanup()
 

@@ -66,7 +66,8 @@ export default defineConfig({
             { text: 'Slack', link: '/guide/im-bridge/slack' },
             { text: 'Discord', link: '/guide/im-bridge/discord' },
             { text: 'Feishu', link: '/guide/im-bridge/feishu' },
-            { text: 'DingTalk', link: '/guide/im-bridge/dingtalk' }
+            { text: 'DingTalk', link: '/guide/im-bridge/dingtalk' },
+            { text: 'WeCom', link: '/guide/im-bridge/wecom' }
           ]
         }
       ],

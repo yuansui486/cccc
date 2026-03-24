@@ -16,7 +16,7 @@ import json
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.agent_state_hygiene import sync_mind_context_runtime_state
@@ -58,6 +58,8 @@ _CURATED_SPACE_SYNC_PREFIXES = (
 )
 
 logger = logging.getLogger(__name__)
+_CONTEXT_DETAIL_FULL = "full"
+_CONTEXT_DETAIL_SUMMARY = "summary"
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -176,6 +178,25 @@ def _task_to_dict(task: Task) -> Dict[str, Any]:
             if current_item is not None
             else None
         ),
+        "progress": task.progress,
+        "is_root": task.is_root,
+    }
+
+
+def _task_to_summary_dict(task: Task) -> Dict[str, Any]:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "parent_id": task.parent_id,
+        "status": task.status.value if isinstance(task.status, TaskStatus) else str(task.status),
+        "archived_from": task.archived_from,
+        "assignee": task.assignee,
+        "priority": task.priority,
+        "blocked_by": list(task.blocked_by or []),
+        "waiting_on": task.waiting_on.value if isinstance(task.waiting_on, WaitingOn) else str(task.waiting_on),
+        "handoff_to": task.handoff_to,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
         "progress": task.progress,
         "is_root": task.is_root,
     }
@@ -403,7 +424,7 @@ def _check_permission(
     if op_name == "meta.merge":
         return "Permission denied: meta.merge requires foreman or user"
 
-    if op_name in {"task.update", "task.move", "task.restore"}:
+    if op_name in {"task.update", "task.move", "task.restore", "task.delete"}:
         if task is None:
             return None
         assignee = str(task.assignee or "").strip()
@@ -415,6 +436,61 @@ def _check_permission(
         return f"Permission denied: {op_name} on {task.id} (task is not assigned or handed off to {by})"
 
     return None
+
+
+def _task_delete_is_unexecuted(task: Task) -> bool:
+    status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status or "").strip().lower()
+    archived_from = str(task.archived_from or "").strip().lower()
+    if status == TaskStatus.PLANNED.value:
+        return True
+    return status == TaskStatus.ARCHIVED.value and archived_from in {"", TaskStatus.PLANNED.value}
+
+
+def _task_delete_collect_subtree(root_task_id: str, tasks_by_id: Dict[str, Task]) -> List[Task]:
+    children_by_parent: Dict[str, List[Task]] = {}
+    for candidate in tasks_by_id.values():
+        parent_id = str(candidate.parent_id or "").strip()
+        if not parent_id:
+            continue
+        children_by_parent.setdefault(parent_id, []).append(candidate)
+    for children in children_by_parent.values():
+        children.sort(key=lambda item: str(item.id or ""))
+
+    ordered: List[Task] = []
+    seen: Set[str] = set()
+    stack: List[str] = [root_task_id]
+    while stack:
+        current_id = str(stack.pop() or "").strip()
+        if not current_id or current_id in seen:
+            continue
+        current = tasks_by_id.get(current_id)
+        if current is None:
+            continue
+        seen.add(current_id)
+        ordered.append(current)
+        children = children_by_parent.get(current_id, [])
+        for child in reversed(children):
+            stack.append(child.id)
+    return ordered
+
+
+def _task_delete_plan(
+    task: Task,
+    tasks_by_id: Dict[str, Task],
+    *,
+    group_id: str,
+    by: str,
+) -> Tuple[List[Task], Optional[str]]:
+    subtree = _task_delete_collect_subtree(task.id, tasks_by_id)
+    for candidate in subtree:
+        if not _task_delete_is_unexecuted(candidate):
+            if candidate.id == task.id:
+                return [], "only tasks that never moved past planned can be deleted"
+            return [], f"task subtree contains execution history at {candidate.id}"
+        perm_err = _check_permission(by, "task.delete", group_id, task=candidate)
+        if perm_err:
+            return [], perm_err
+    return subtree, None
 
 
 def _get_or_create_agent(agents_state: AgentsData, agent_id: str) -> AgentState:
@@ -553,6 +629,71 @@ def _save_automation_state(storage: ContextStorage, doc: Dict[str, Any]) -> None
     atomic_write_json(_automation_state_path(storage), doc)
 
 
+def _normalize_context_detail(value: Any, *, default: str = _CONTEXT_DETAIL_FULL) -> str:
+    detail = str(value or default).strip().lower() or default
+    if detail not in {_CONTEXT_DETAIL_FULL, _CONTEXT_DETAIL_SUMMARY}:
+        raise ValueError(f"Invalid context detail: {value}")
+    return detail
+
+
+def _coordination_brief_to_dict(brief: CoordinationBrief) -> Dict[str, Any]:
+    return {
+        "objective": brief.objective,
+        "current_focus": brief.current_focus,
+        "constraints": list(brief.constraints or []),
+        "project_brief": brief.project_brief,
+        "project_brief_stale": bool(brief.project_brief_stale),
+        "updated_by": brief.updated_by,
+        "updated_at": brief.updated_at,
+    }
+
+
+def _build_context_full_result(
+    *,
+    storage: ContextStorage,
+    context: Context,
+    tasks: List[Task],
+    ordered_agents: List[AgentState],
+    attention: Dict[str, List[Dict[str, Any]]],
+    board: Dict[str, List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    return {
+        "version": storage.compute_version(),
+        "coordination": {
+            "brief": _coordination_brief_to_dict(context.coordination.brief),
+            "tasks": [_task_to_dict(task) for task in _sort_tasks(tasks)],
+            "recent_decisions": [_note_to_dict(note) for note in context.coordination.recent_decisions],
+            "recent_handoffs": [_note_to_dict(note) for note in context.coordination.recent_handoffs],
+        },
+        "agent_states": [_agent_state_to_dict(agent) for agent in ordered_agents],
+        "attention": attention,
+        "board": board,
+        "tasks_summary": _tasks_summary(tasks, attention=attention),
+        "meta": context.meta if isinstance(context.meta, dict) else {},
+    }
+
+
+def _build_context_summary_result(
+    *,
+    storage: ContextStorage,
+    context: Context,
+    tasks: List[Task],
+    ordered_agents: List[AgentState],
+    attention: Dict[str, List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    return {
+        "version": storage.compute_version(),
+        "coordination": {
+            "brief": _coordination_brief_to_dict(context.coordination.brief),
+            "tasks": [_task_to_summary_dict(task) for task in _sort_tasks(tasks)],
+        },
+        "agent_states": [_agent_state_to_dict(agent) for agent in ordered_agents],
+        "attention": attention,
+        "tasks_summary": _tasks_summary(tasks, attention=attention),
+        "meta": context.meta if isinstance(context.meta, dict) else {},
+    }
+
+
 def _sync_agents_mind_context_runtime(storage: ContextStorage, agents_state: AgentsData) -> None:
     state = _load_automation_state(storage)
     actors = state.get("actors")
@@ -583,6 +724,10 @@ def handle_context_get(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     if not group_id:
         return _error("missing_group_id", "missing group_id")
+    try:
+        detail = _normalize_context_detail(args.get("detail"), default=_CONTEXT_DETAIL_FULL)
+    except ValueError as exc:
+        return _error("invalid_detail", str(exc), details={"detail": str(args.get("detail") or "")})
 
     storage = _get_storage(group_id)
     if storage is None:
@@ -593,37 +738,25 @@ def handle_context_get(args: Dict[str, Any]) -> DaemonResponse:
     agents_state = _filter_agents_to_group(storage, storage.load_agents())
     ordered_agents = _sort_agents_for_group(storage, agents_state)
     attention = _attention_projection(tasks)
-    board = _board_projection(tasks)
+    if detail == _CONTEXT_DETAIL_SUMMARY:
+        result = _build_context_summary_result(
+            storage=storage,
+            context=context,
+            tasks=tasks,
+            ordered_agents=ordered_agents,
+            attention=attention,
+        )
+        return DaemonResponse(ok=True, result=result)
 
-    result = {
-        "version": storage.compute_version(),
-        "coordination": {
-            "brief": {
-                "objective": context.coordination.brief.objective,
-                "current_focus": context.coordination.brief.current_focus,
-                "constraints": list(context.coordination.brief.constraints or []),
-                "project_brief": context.coordination.brief.project_brief,
-                "project_brief_stale": bool(context.coordination.brief.project_brief_stale),
-                "updated_by": context.coordination.brief.updated_by,
-                "updated_at": context.coordination.brief.updated_at,
-            },
-            "tasks": [_task_to_dict(task) for task in _sort_tasks(tasks)],
-            "recent_decisions": [_note_to_dict(note) for note in context.coordination.recent_decisions],
-            "recent_handoffs": [_note_to_dict(note) for note in context.coordination.recent_handoffs],
-        },
-        "agent_states": [_agent_state_to_dict(agent) for agent in ordered_agents],
-        "attention": attention,
-        "board": board,
-        "tasks_summary": _tasks_summary(tasks, attention=attention),
-        "panorama": {
-            "mermaid": storage.compute_panorama_mermaid(
-                tasks=tasks,
-                agents_state=AgentsData(agents=ordered_agents),
-                coordination=context.coordination,
-            )
-        },
-        "meta": context.meta if isinstance(context.meta, dict) else {},
-    }
+    board = _board_projection(tasks)
+    result = _build_context_full_result(
+        storage=storage,
+        context=context,
+        tasks=tasks,
+        ordered_agents=ordered_agents,
+        attention=attention,
+        board=board,
+    )
     return DaemonResponse(ok=True, result=result)
 
 
@@ -658,6 +791,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
     context_dirty = False
     agents_dirty = False
     dirty_task_ids: List[str] = []
+    deleted_task_ids: List[str] = []
     changes: List[Dict[str, Any]] = []
 
     def _mark_change(index: int, op_name: str, detail: str) -> None:
@@ -979,6 +1113,50 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 _mark_change(idx, op_name, f"Restored task {task.id}")
                 continue
 
+            if op_name == "task.delete":
+                task_id = str(raw.get("task_id") or "").strip()
+                task = tasks_by_id.get(task_id)
+                if task is None:
+                    raise ValueError(f"Task not found: {task_id}")
+                perm_err = _check_permission(by, op_name, group_id, task=task)
+                if perm_err:
+                    raise ValueError(perm_err)
+                delete_targets, delete_reason = _task_delete_plan(task, tasks_by_id, group_id=group_id, by=by)
+                if delete_reason:
+                    raise ValueError(f"op[{idx}] task.delete rejected: {delete_reason}")
+
+                delete_ids = {item.id for item in delete_targets}
+                delete_titles = {str(item.title or "").strip() for item in delete_targets if str(item.title or "").strip()}
+                for agent in agents_state.agents:
+                    hot = agent.hot if isinstance(agent.hot, AgentStateHot) else AgentStateHot()
+                    warm = agent.warm if isinstance(agent.warm, AgentStateWarm) else AgentStateWarm()
+                    auto_changed = False
+                    if str(hot.active_task_id or "").strip() in delete_ids:
+                        hot.active_task_id = None
+                        auto_changed = True
+                    if str(hot.focus or "").strip() in delete_titles:
+                        hot.focus = ""
+                        auto_changed = True
+                    if any(warm.what_changed == f"{deleted_id} -> planned" or warm.what_changed == f"{deleted_id} -> archived" for deleted_id in delete_ids):
+                        warm.what_changed = ""
+                        auto_changed = True
+                    if auto_changed:
+                        agent.hot = hot
+                        agent.warm = warm
+                        agent.updated_at = _utc_now_iso()
+                        agents_dirty = True
+
+                for delete_task in delete_targets:
+                    tasks_by_id.pop(delete_task.id, None)
+                    if delete_task.id in dirty_task_ids:
+                        dirty_task_ids.remove(delete_task.id)
+                    deleted_task_ids.append(delete_task.id)
+                if len(delete_targets) == 1:
+                    _mark_change(idx, op_name, f"Deleted task {task_id}")
+                else:
+                    _mark_change(idx, op_name, f"Deleted task subtree {task_id} ({len(delete_targets)} tasks)")
+                continue
+
             if op_name == "agent_state.update":
                 actor_id = str(raw.get("actor_id") or raw.get("agent_id") or "").strip()
                 if not actor_id:
@@ -1144,6 +1322,8 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
         if not dry_run:
             if context_dirty:
                 storage.save_context(context)
+            for task_id in sorted(set(deleted_task_ids)):
+                storage.delete_task(task_id)
             for task_id in sorted(set(dirty_task_ids)):
                 task = tasks_by_id.get(task_id)
                 if task is not None:

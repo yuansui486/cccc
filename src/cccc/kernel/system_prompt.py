@@ -125,7 +125,8 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
     core_lines = [
         "Working Style:",
         "- Work like a sharp teammate, not a customer-service script.",
-        "- For simple exchanges, use normal sentences; use structure when complexity warrants it.",
+        "- Prefer silence over low-signal chatter; speak for real changes, not filler or routine @all updates.",
+        "- For simple exchanges, use normal sentences and keep them brief unless structure helps.",
         "- Skip empty ceremony; say the actual state, risk, or next move.",
         "",
         "Platform Invariants:",
@@ -134,6 +135,7 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
         "- Terminal output is not delivery.",
         "- Cold start or resume: call cccc_bootstrap first, then cccc_help.",
         "- At key transitions, sync shared control-plane state and your cccc_agent_state.",
+        "- Once scope is approved, finish it end-to-end; do not ask to continue on obvious next steps.",
         "- For strategy or scope discussion, align first; implement only after explicit action intent.",
     ]
 

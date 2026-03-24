@@ -25,6 +25,22 @@ from ..schemas import (
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}", dependencies=[Depends(require_group)])
 
+    def _parse_refs_json(raw: str) -> list[dict[str, Any]]:
+        text = str(raw or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_refs", "message": str(exc)})
+        if not isinstance(parsed, list):
+            raise HTTPException(status_code=400, detail={"code": "invalid_refs", "message": "refs_json must be a JSON array"})
+        refs: list[dict[str, Any]] = []
+        for item in parsed:
+            if isinstance(item, dict):
+                refs.append(item)
+        return refs
+
     @group_router.post("/send")
     async def send(group_id: str, req: SendRequest) -> Dict[str, Any]:
         return await ctx.daemon(
@@ -41,6 +57,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "src_group_id": req.src_group_id,
                     "src_event_id": req.src_event_id,
                     "client_id": req.client_id,
+                    "refs": list(req.refs),
                 },
             }
         )
@@ -82,6 +99,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "priority": req.priority,
                     "reply_required": _normalize_reply_required(req.reply_required),
                     "client_id": req.client_id,
+                    "refs": list(req.refs),
                 },
             }
         )
@@ -108,6 +126,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         priority: str = Form("normal"),
         reply_required: str = Form("false"),
         client_id: str = Form(""),
+        refs_json: str = Form("[]"),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
         group = load_group(group_id)
@@ -183,6 +202,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         prio = str(priority or "normal").strip() or "normal"
         if prio not in ("normal", "attention"):
             raise HTTPException(status_code=400, detail={"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"})
+        refs = _parse_refs_json(refs_json)
 
         return await ctx.daemon(
             {
@@ -197,6 +217,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "priority": prio,
                     "reply_required": _normalize_reply_required(reply_required),
                     "client_id": str(client_id or "").strip(),
+                    "refs": refs,
                 },
             }
         )
@@ -211,6 +232,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         priority: str = Form("normal"),
         reply_required: str = Form("false"),
         client_id: str = Form(""),
+        refs_json: str = Form("[]"),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
         group = load_group(group_id)
@@ -275,6 +297,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         prio = str(priority or "normal").strip() or "normal"
         if prio not in ("normal", "attention"):
             raise HTTPException(status_code=400, detail={"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"})
+        refs = _parse_refs_json(refs_json)
 
         return await ctx.daemon(
             {
@@ -289,6 +312,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "priority": prio,
                     "reply_required": _normalize_reply_required(reply_required),
                     "client_id": str(client_id or "").strip(),
+                    "refs": refs,
                 },
             }
         )

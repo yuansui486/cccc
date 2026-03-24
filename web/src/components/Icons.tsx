@@ -24,6 +24,25 @@ export function ClipboardIcon({ className, size = 18 }: IconProps) {
   );
 }
 
+export function CopyIcon({ className, size = 18 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+    </svg>
+  );
+}
+
 export function RocketIcon({ className, size = 18 }: IconProps) {
   return (
     <svg
@@ -340,6 +359,25 @@ export function TerminalIcon({ className, size = 18 }: IconProps) {
     >
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
+
+export function BookmarkIcon({ className, size = 18 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M7 4.75h10A1.25 1.25 0 0 1 18.25 6v13l-6.25-3.9-6.25 3.9V6A1.25 1.25 0 0 1 7 4.75Z" />
+      <path d="M9.25 8.25h5.5" opacity="0.35" />
     </svg>
   );
 }

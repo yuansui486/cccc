@@ -257,6 +257,84 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_default_entry_applies_invocation_port_override_to_initial_web_start(self) -> None:
+        from cccc.cli import common
+
+        home, cleanup = self._with_home()
+        try:
+            daemon_proc = _DaemonProc()
+            web_proc = object()
+
+            class _DummyThread:
+                def __init__(self, *args, **kwargs) -> None:
+                    _ = args, kwargs
+
+                def start(self) -> None:
+                    return None
+
+            with patch.object(common, "_is_first_run", return_value=False), patch(
+                "cccc.paths.ensure_home", return_value=home
+            ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
+                common, "_stop_existing_web_runtime", return_value=True
+            ), patch.object(common, "_stop_existing_daemon", return_value=True), patch.object(
+                common, "_resolve_web_server_binding", return_value=("0.0.0.0", 8848)
+            ), patch.object(common, "call_daemon", return_value={"ok": True}), patch.object(
+                common.subprocess, "Popen", return_value=daemon_proc
+            ), patch.object(common, "start_supervised_web_child", return_value=(web_proc, None)) as mock_start_web, patch.object(
+                common, "wait_for_child_exit_interruptibly", side_effect=KeyboardInterrupt()
+            ), patch.object(common, "stop_web_child", return_value=True), patch.object(
+                common, "release_lockfile"
+            ), patch("threading.Thread", _DummyThread):
+                ret = common._default_entry(web_port_override=9000)
+
+            self.assertEqual(ret, 0)
+            self.assertEqual(mock_start_web.call_args.kwargs["host"], "0.0.0.0")
+            self.assertEqual(mock_start_web.call_args.kwargs["port"], 9000)
+        finally:
+            cleanup()
+
+    def test_default_entry_keeps_invocation_port_override_on_web_restart(self) -> None:
+        from cccc.cli import common
+
+        home, cleanup = self._with_home()
+        try:
+            daemon_proc = _DaemonProc()
+            first_web_proc = unittest.mock.Mock(pid=1111)
+            restarted_web_proc = unittest.mock.Mock(pid=2222)
+
+            class _DummyThread:
+                def __init__(self, *args, **kwargs) -> None:
+                    _ = args, kwargs
+
+                def start(self) -> None:
+                    return None
+
+            def _restart_with_assertion(**kwargs):
+                self.assertEqual(kwargs["resolve_binding"](), ("0.0.0.0", 9000))
+                return restarted_web_proc, "0.0.0.0", 9000
+
+            with patch.object(common, "_is_first_run", return_value=False), patch(
+                "cccc.paths.ensure_home", return_value=home
+            ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
+                common, "_stop_existing_web_runtime", return_value=True
+            ), patch.object(common, "_stop_existing_daemon", return_value=True), patch.object(
+                common, "_resolve_web_server_binding", return_value=("0.0.0.0", 8848)
+            ), patch.object(common, "call_daemon", return_value={"ok": True}), patch.object(
+                common.subprocess, "Popen", return_value=daemon_proc
+            ), patch.object(common, "start_supervised_web_child", return_value=(first_web_proc, None)), patch.object(
+                common, "wait_for_child_exit_interruptibly", side_effect=[common.WEB_RUNTIME_RESTART_EXIT_CODE, KeyboardInterrupt()]
+            ), patch.object(
+                common, "restart_supervised_web_child_with_fallback", side_effect=_restart_with_assertion
+            ) as mock_restart, patch.object(common, "stop_web_child", return_value=True), patch.object(
+                common, "release_lockfile"
+            ), patch("threading.Thread", _DummyThread):
+                ret = common._default_entry(web_port_override=9000)
+
+            self.assertEqual(ret, 0)
+            self.assertEqual(mock_restart.call_count, 1)
+        finally:
+            cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

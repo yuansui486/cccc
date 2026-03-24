@@ -14,15 +14,17 @@ class TestCliMain(unittest.TestCase):
             rc = cli_main.main([])
 
         self.assertEqual(rc, 7)
-        mock_default.assert_called_once_with()
+        mock_default.assert_called_once_with(web_host_override="", web_port_override=None)
 
     def test_main_applies_top_level_port_override_to_default_entry_only_for_invocation(self) -> None:
         cli_main = importlib.import_module("cccc.cli.main")
 
         old_port = os.environ.get("CCCC_WEB_PORT")
 
-        def _assert_port_and_return() -> int:
+        def _assert_port_and_return(*, web_host_override: str, web_port_override: int | None) -> int:
             self.assertEqual(os.environ.get("CCCC_WEB_PORT"), "9000")
+            self.assertEqual(web_host_override, "")
+            self.assertEqual(web_port_override, 9000)
             return 0
 
         try:
@@ -35,7 +37,7 @@ class TestCliMain(unittest.TestCase):
                 os.environ["CCCC_WEB_PORT"] = old_port
 
         self.assertEqual(rc, 0)
-        mock_default.assert_called_once_with()
+        mock_default.assert_called_once_with(web_host_override="", web_port_override=9000)
         self.assertEqual(os.environ.get("CCCC_WEB_PORT"), old_port)
 
     def test_main_accepts_top_level_port_override_before_subcommand(self) -> None:

@@ -3,12 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ....kernel.access_tokens import list_access_tokens
 from ....kernel.scope import detect_scope
+from ....kernel.settings import get_web_branding_settings
+from ..branding import (
+    build_branding_payload,
+    delete_branding_asset,
+    normalize_branding_asset_kind,
+    resolve_branding_asset_path,
+    store_branding_asset,
+)
 from ..schemas import (
+    BrandingUpdateRequest,
     DebugClearLogsRequest,
     ObservabilityUpdateRequest,
     RegistryReconcileRequest,
@@ -29,6 +38,34 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     # --- group-scoped router ---
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}", dependencies=[Depends(require_group)])
 
+    def _default_branding_asset_path(asset_kind: str) -> Path | None:
+        if ctx.dist_dir is None:
+            return None
+        if asset_kind == "logo_icon":
+            candidate = ctx.dist_dir / "logo.svg"
+            return candidate if candidate.exists() else None
+        if asset_kind == "favicon":
+            svg_candidate = ctx.dist_dir / "logo.svg"
+            if svg_candidate.exists():
+                return svg_candidate
+            png_candidate = ctx.dist_dir / "favicon.png"
+            return png_candidate if png_candidate.exists() else None
+        return None
+
+    def _branding_asset_file_response(asset_kind: str) -> FileResponse:
+        raw = get_web_branding_settings()
+        key = f"{asset_kind}_asset_path"
+        rel_path = str(raw.get(key) or "").strip()
+        if rel_path:
+            try:
+                return FileResponse(resolve_branding_asset_path(rel_path))
+            except Exception:
+                pass
+        default_path = _default_branding_asset_path(asset_kind)
+        if default_path is not None:
+            return FileResponse(default_path)
+        raise HTTPException(status_code=404)
+
     # ------------------------------------------------------------------ #
     # Global routes (public + admin, per-route guard where needed)
     # ------------------------------------------------------------------ #
@@ -45,15 +82,37 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @global_router.get("/favicon.ico")
     async def favicon_ico() -> Any:
+        raw = get_web_branding_settings()
+        if str(raw.get("favicon_asset_path") or "").strip():
+            return _branding_asset_file_response("favicon")
         if ctx.dist_dir is not None and (ctx.dist_dir / "favicon.ico").exists():
             return FileResponse(ctx.dist_dir / "favicon.ico")
         raise HTTPException(status_code=404)
 
     @global_router.get("/favicon.png")
     async def favicon_png() -> Any:
+        raw = get_web_branding_settings()
+        if str(raw.get("favicon_asset_path") or "").strip():
+            return _branding_asset_file_response("favicon")
         if ctx.dist_dir is not None and (ctx.dist_dir / "favicon.png").exists():
             return FileResponse(ctx.dist_dir / "favicon.png")
         raise HTTPException(status_code=404)
+
+    @global_router.get("/api/v1/branding")
+    async def branding_get() -> Dict[str, Any]:
+        resp = await ctx.daemon({"op": "branding_get"})
+        raw = (resp.get("result") or {}).get("branding") if resp.get("ok") else None
+        if not isinstance(raw, dict):
+            raw = get_web_branding_settings()
+        return {"ok": True, "result": {"branding": build_branding_payload(raw)}}
+
+    @global_router.get("/api/v1/branding/assets/{asset_kind}")
+    async def branding_asset_get(asset_kind: str) -> FileResponse:
+        try:
+            normalized_kind = normalize_branding_asset_kind(asset_kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_request", "message": str(exc)}) from exc
+        return _branding_asset_file_response(normalized_kind)
 
     @global_router.get("/api/v1/ping")
     async def ping(include_home: bool = False) -> Dict[str, Any]:
@@ -134,6 +193,107 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def observability_get() -> Dict[str, Any]:
         """Get global observability settings (developer mode, log level)."""
         return await ctx.daemon({"op": "observability_get"})
+
+    @global_router.put("/api/v1/branding", dependencies=[Depends(require_admin)])
+    async def branding_update(req: BrandingUpdateRequest) -> Dict[str, Any]:
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Branding write endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+        before = get_web_branding_settings()
+        patch: Dict[str, Any] = {}
+        if req.product_name is not None:
+            patch["product_name"] = str(req.product_name or "").strip()
+        if bool(req.clear_logo_icon):
+            patch["logo_icon_asset_path"] = ""
+        if bool(req.clear_favicon):
+            patch["favicon_asset_path"] = ""
+        resp = await ctx.daemon({"op": "branding_update", "args": {"by": str(req.by or "user"), "patch": patch}})
+        if not resp.get("ok"):
+            return resp
+        raw = (resp.get("result") or {}).get("branding") if isinstance(resp.get("result"), dict) else {}
+        if bool(req.clear_logo_icon):
+            old_logo = str(before.get("logo_icon_asset_path") or "").strip()
+            if old_logo:
+                delete_branding_asset(old_logo)
+        if bool(req.clear_favicon):
+            old_favicon = str(before.get("favicon_asset_path") or "").strip()
+            if old_favicon:
+                delete_branding_asset(old_favicon)
+        return {"ok": True, "result": {"branding": build_branding_payload(raw if isinstance(raw, dict) else {})}}
+
+    @global_router.post("/api/v1/branding/assets/{asset_kind}", dependencies=[Depends(require_admin)])
+    async def branding_asset_upload(
+        asset_kind: str,
+        by: str = Form("user"),
+        file: UploadFile = File(...),
+    ) -> Dict[str, Any]:
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Branding write endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+        try:
+            normalized_kind = normalize_branding_asset_kind(asset_kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_request", "message": str(exc)}) from exc
+
+        raw_bytes = await file.read()
+        try:
+            stored = store_branding_asset(
+                asset_kind=normalized_kind,
+                data=raw_bytes,
+                content_type=str(getattr(file, "content_type", "") or ""),
+                filename=str(getattr(file, "filename", "") or ""),
+            )
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 413 if "too large" in message else 400
+            raise HTTPException(status_code=status_code, detail={"code": "invalid_request", "message": message}) from exc
+
+        before = get_web_branding_settings()
+        key = f"{normalized_kind}_asset_path"
+        old_rel_path = str(before.get(key) or "").strip()
+        resp = await ctx.daemon({"op": "branding_update", "args": {"by": str(by or "user"), "patch": {key: stored["rel_path"]}}})
+        if not resp.get("ok"):
+            delete_branding_asset(str(stored.get("rel_path") or ""))
+            return resp
+        if old_rel_path and old_rel_path != str(stored.get("rel_path") or ""):
+            delete_branding_asset(old_rel_path)
+        raw = (resp.get("result") or {}).get("branding") if isinstance(resp.get("result"), dict) else {}
+        return {"ok": True, "result": {"branding": build_branding_payload(raw if isinstance(raw, dict) else {})}}
+
+    @global_router.delete("/api/v1/branding/assets/{asset_kind}", dependencies=[Depends(require_admin)])
+    async def branding_asset_clear(asset_kind: str, by: str = "user") -> Dict[str, Any]:
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Branding write endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+        try:
+            normalized_kind = normalize_branding_asset_kind(asset_kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_request", "message": str(exc)}) from exc
+        before = get_web_branding_settings()
+        key = f"{normalized_kind}_asset_path"
+        old_rel_path = str(before.get(key) or "").strip()
+        resp = await ctx.daemon({"op": "branding_update", "args": {"by": str(by or "user"), "patch": {key: ""}}})
+        if not resp.get("ok"):
+            return resp
+        if old_rel_path:
+            delete_branding_asset(old_rel_path)
+        raw = (resp.get("result") or {}).get("branding") if isinstance(resp.get("result"), dict) else {}
+        return {"ok": True, "result": {"branding": build_branding_payload(raw if isinstance(raw, dict) else {})}}
 
     @global_router.get("/api/v1/capabilities/allowlist", dependencies=[Depends(require_admin)])
     async def capability_allowlist_get(by: str = "user") -> Dict[str, Any]:

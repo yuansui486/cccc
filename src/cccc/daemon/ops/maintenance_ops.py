@@ -98,6 +98,9 @@ def handle_send_cross_group(
     attachments_raw = args.get("attachments")
     if attachments_raw:
         return _error("attachments_not_supported", "attachments are not supported for cross-group messages yet")
+    refs_raw = args.get("refs")
+    if isinstance(refs_raw, list) and any(isinstance(item, dict) for item in refs_raw):
+        return _error("refs_not_supported", "quoted refs are not supported for cross-group messages yet")
     if priority not in ("normal", "attention"):
         return _error("invalid_priority", "priority must be 'normal' or 'attention'")
     if not src_group_id:

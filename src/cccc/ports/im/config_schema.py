@@ -10,7 +10,7 @@ from typing import Any, Dict, Set
 
 from ...util.conv import coerce_bool
 
-SUPPORTED_IM_PLATFORMS: Set[str] = {"telegram", "slack", "discord", "feishu", "dingtalk"}
+SUPPORTED_IM_PLATFORMS: Set[str] = {"telegram", "slack", "discord", "feishu", "dingtalk", "wecom"}
 
 _LEGACY_KEYS: Set[str] = {
     "token_env",
@@ -30,6 +30,10 @@ _LEGACY_KEYS: Set[str] = {
     "dingtalk_app_secret_env",
     "dingtalk_robot_code",
     "dingtalk_robot_code_env",
+    "wecom_bot_id",
+    "wecom_bot_id_env",
+    "wecom_secret",
+    "wecom_secret_env",
 }
 
 
@@ -139,6 +143,19 @@ def canonicalize_im_config(raw: Any) -> Dict[str, Any]:
             value_key="dingtalk_robot_code",
             raw_value=_first_nonempty(raw, "dingtalk_robot_code_env", "dingtalk_robot_code"),
         )
+    elif platform == "wecom":
+        _set_secret_ref(
+            out,
+            env_key="wecom_bot_id_env",
+            value_key="wecom_bot_id",
+            raw_value=_first_nonempty(raw, "wecom_bot_id_env", "wecom_bot_id"),
+        )
+        _set_secret_ref(
+            out,
+            env_key="wecom_secret_env",
+            value_key="wecom_secret",
+            raw_value=_first_nonempty(raw, "wecom_secret_env", "wecom_secret"),
+        )
 
     # Preserve non-credential extension fields (forward-compatible).
     for key, value in raw.items():
@@ -146,9 +163,8 @@ def canonicalize_im_config(raw: Any) -> Dict[str, Any]:
             continue
         if key in _LEGACY_KEYS:
             continue
-        if key in {"platform", "enabled", "files", "skip_pending_on_start"}:
+        if key in {"platform", "enabled", "files", "skip_pending_on_start", "wecom_agent_id"}:
             continue
         out[key] = value
 
     return out
-

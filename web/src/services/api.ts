@@ -21,6 +21,7 @@ import type {
   IMPlatform,
   RemoteAccessState,
   WebAccessSession,
+  WebBranding,
   GroupSpaceStatus,
   GroupSpaceRemoteSpace,
   GroupSpaceSource,
@@ -36,6 +37,18 @@ import type {
   GroupTasksSummary,
   TaskBoardEntry,
   TaskChecklistItem,
+  ContextDetailLevel,
+  GroupPresentation,
+  MessageRef,
+  PresentationCard,
+  PresentationCardType,
+  PresentationContent,
+  PresentationRefSnapshot,
+  PresentationSlot,
+  PresentationTableData,
+  PresentationWorkspaceItem,
+  PresentationWorkspaceListing,
+  PresentationBrowserSurfaceState,
 } from "../types";
 import { actorProfileIdentityKey } from "../utils/actorProfiles";
 
@@ -52,7 +65,17 @@ export function onAuthRequired(handler: () => void): void {
   _authRequiredHandler = handler;
 }
 
+function clearAllReadRequestCaches(): void {
+  // Auth principal changed. Any shared/recent read keyed without principal
+  // must be discarded so the next read is forced onto the new identity.
+  globalReadEpoch += 1;
+  sharedReadRequests.clear();
+  recentReadResponses.clear();
+  recentReadGenerations.clear();
+}
+
 export function setAuthToken(token: string): void {
+  clearAllReadRequestCaches();
   cachedToken = token;
   try {
     sessionStorage.setItem("cccc_dev_token", token);
@@ -62,6 +85,7 @@ export function setAuthToken(token: string): void {
 }
 
 export function clearAuthToken(): void {
+  clearAllReadRequestCaches();
   cachedToken = "";
   try {
     sessionStorage.removeItem("cccc_dev_token");
@@ -144,10 +168,139 @@ export type ApiResponse<T> =
   | { ok: true; result: T; error?: null }
   | { ok: false; result?: unknown; error: { code: string; message: string; details?: unknown } };
 
+type SharedReadPromise = Promise<ApiResponse<unknown>>;
+type RecentReadEntry = {
+  response: ApiResponse<unknown>;
+  expiresAt: number;
+};
+
 // Helper to create a typed error response.
 function makeErrorResponse<T>(code: string, message: string): ApiResponse<T> {
   return { ok: false, error: { code, message } };
 }
+
+const sharedReadRequests = new Map<string, SharedReadPromise>();
+const recentReadResponses = new Map<string, RecentReadEntry>();
+const recentReadGenerations = new Map<string, number>();
+const RECENT_BOOTSTRAP_READ_TTL_MS = 1000;
+let globalReadEpoch = 0;
+
+function reuseSharedReadRequest<T>(key: string, loader: () => Promise<ApiResponse<T>>): Promise<ApiResponse<T>> {
+  const hit = sharedReadRequests.get(key);
+  if (hit) return hit as Promise<ApiResponse<T>>;
+
+  const task = loader().finally(() => {
+    if (sharedReadRequests.get(key) === task) {
+      sharedReadRequests.delete(key);
+    }
+  }) as SharedReadPromise;
+  sharedReadRequests.set(key, task);
+  return task as Promise<ApiResponse<T>>;
+}
+
+function reuseRecentReadRequest<T>(
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<ApiResponse<T>>
+): Promise<ApiResponse<T>> {
+  const cached = recentReadResponses.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.response as ApiResponse<T>);
+  }
+  const requestEpoch = globalReadEpoch;
+  const requestGeneration = recentReadGenerations.get(key) || 0;
+  return reuseSharedReadRequest(key, async () => {
+    const response = await loader();
+    const generationStillCurrent =
+      globalReadEpoch === requestEpoch && (recentReadGenerations.get(key) || 0) === requestGeneration;
+    if (response.ok && generationStillCurrent) {
+      recentReadResponses.set(key, {
+        response: response as ApiResponse<unknown>,
+        expiresAt: Date.now() + ttlMs,
+      });
+    } else {
+      recentReadResponses.delete(key);
+    }
+    return response;
+  });
+}
+
+function clearSharedReadRequest(key: string): void {
+  sharedReadRequests.delete(key);
+}
+
+function clearRecentReadRequest(key: string): void {
+  recentReadGenerations.set(key, (recentReadGenerations.get(key) || 0) + 1);
+  recentReadResponses.delete(key);
+  clearSharedReadRequest(key);
+}
+
+function actorsReadOnlyRequestKey(groupId: string): string {
+  return `actors:${String(groupId || "").trim()}:read-only`;
+}
+
+function groupsRequestKey(): string {
+  return "groups:list";
+}
+
+function groupPromptsRequestKey(groupId: string): string {
+  return `group-prompts:${String(groupId || "").trim()}`;
+}
+
+function pingRequestKey(includeHome: boolean): string {
+  return includeHome ? "ping:include-home" : "ping:default";
+}
+
+function webAccessSessionRequestKey(): string {
+  return "web-access-session";
+}
+
+function contextRequestKey(groupId: string, detail: ContextDetailLevel): string {
+  return `context:${String(groupId || "").trim()}:${detail}`;
+}
+
+function clearGroupsReadRequest(): void {
+  clearRecentReadRequest(groupsRequestKey());
+}
+
+export function invalidateGroupsRead(): void {
+  clearGroupsReadRequest();
+}
+
+function clearPingReadRequest(includeHome?: boolean): void {
+  if (typeof includeHome === "boolean") {
+    clearRecentReadRequest(pingRequestKey(includeHome));
+    return;
+  }
+  clearRecentReadRequest(pingRequestKey(false));
+  clearRecentReadRequest(pingRequestKey(true));
+}
+
+function clearWebAccessSessionReadRequest(): void {
+  clearRecentReadRequest(webAccessSessionRequestKey());
+}
+
+function clearActorsReadOnlyRequest(groupId: string): void {
+  clearSharedReadRequest(actorsReadOnlyRequestKey(groupId));
+}
+
+function clearContextRequest(groupId: string, detail?: ContextDetailLevel): void {
+  if (detail) {
+    clearSharedReadRequest(contextRequestKey(groupId, detail));
+    return;
+  }
+  clearSharedReadRequest(contextRequestKey(groupId, "summary"));
+  clearSharedReadRequest(contextRequestKey(groupId, "full"));
+}
+
+export function invalidateContextRead(groupId: string): void {
+  clearContextRequest(groupId);
+}
+
+export type FetchContextOptions = {
+  fresh?: boolean;
+  detail?: ContextDetailLevel;
+};
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -355,6 +508,124 @@ function normalizeContext(raw: unknown): GroupContext {
   };
 }
 
+function normalizePresentationTable(value: unknown): PresentationTableData | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const columns = Array.isArray(record.columns) ? record.columns.map((item) => asString(item)) : [];
+  const rows = Array.isArray(record.rows)
+    ? record.rows.map((row) =>
+        Array.isArray(row) ? row.map((cell) => asString(cell)) : []
+      )
+    : [];
+  return { columns, rows };
+}
+
+function normalizePresentationContent(value: unknown): PresentationContent {
+  const record = asRecord(value) ?? {};
+  const rawMode = asString(record.mode).trim();
+  return {
+    mode: rawMode === "reference" || rawMode === "workspace_link" ? rawMode : "inline",
+    markdown: asOptionalString(record.markdown),
+    table: normalizePresentationTable(record.table),
+    url: asOptionalString(record.url),
+    blob_rel_path: asOptionalString(record.blob_rel_path),
+    workspace_rel_path: asOptionalString(record.workspace_rel_path),
+    mime_type: asOptionalString(record.mime_type),
+    file_name: asOptionalString(record.file_name),
+  };
+}
+
+function normalizePresentationCard(value: unknown): PresentationCard | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const slotId = asString(record.slot_id).trim();
+  const title = asString(record.title).trim();
+  if (!slotId || !title) return null;
+
+  const rawCardType = asString(record.card_type).trim();
+  const cardType: PresentationCardType =
+    rawCardType === "markdown" ||
+    rawCardType === "table" ||
+    rawCardType === "image" ||
+    rawCardType === "pdf" ||
+    rawCardType === "web_preview"
+      ? rawCardType
+      : "file";
+
+  return {
+    slot_id: slotId,
+    title,
+    card_type: cardType,
+    published_by: asString(record.published_by).trim() || "user",
+    published_at: asString(record.published_at).trim(),
+    source_label: asString(record.source_label).trim(),
+    source_ref: asString(record.source_ref).trim(),
+    summary: asString(record.summary).trim(),
+    content: normalizePresentationContent(record.content),
+  };
+}
+
+function normalizePresentationSlot(value: unknown, fallbackIndex: number): PresentationSlot {
+  const record = asRecord(value) ?? {};
+  const index = Number(record.index || fallbackIndex);
+  const normalizedIndex = Number.isFinite(index) && index > 0 ? index : fallbackIndex;
+  const slotId = asString(record.slot_id).trim() || `slot-${normalizedIndex}`;
+  return {
+    slot_id: slotId,
+    index: normalizedIndex,
+    card: normalizePresentationCard(record.card),
+  };
+}
+
+function normalizePresentation(raw: unknown): GroupPresentation {
+  const record = asRecord(raw) ?? {};
+  const rawSlots = Array.isArray(record.slots) ? record.slots : [];
+  const slotsById = new Map<string, PresentationSlot>();
+  rawSlots.forEach((slot, index) => {
+    const normalized = normalizePresentationSlot(slot, index + 1);
+    slotsById.set(normalized.slot_id, normalized);
+  });
+
+  const orderedSlots = Array.from({ length: 4 }, (_, index) => {
+    const slotId = `slot-${index + 1}`;
+    const existing = slotsById.get(slotId);
+    return existing || { slot_id: slotId, index: index + 1, card: null };
+  });
+
+  const highlightSlotId = asString(record.highlight_slot_id).trim();
+  return {
+    v: Number(record.v || 1) || 1,
+    updated_at: asString(record.updated_at).trim(),
+    highlight_slot_id: highlightSlotId,
+    slots: orderedSlots,
+  };
+}
+
+function normalizePresentationBrowserSurfaceState(value: unknown): PresentationBrowserSurfaceState {
+  const record = asRecord(value) ?? {};
+  const errorRecord = asRecord(record.error);
+  return {
+    active: !!record.active,
+    state: asString(record.state).trim() || "idle",
+    message: asOptionalString(record.message),
+    error: errorRecord
+      ? {
+          code: asOptionalString(errorRecord.code),
+          message: asOptionalString(errorRecord.message),
+        }
+      : null,
+    strategy: asOptionalString(record.strategy),
+    url: asOptionalString(record.url),
+    width: Number.isFinite(Number(record.width)) ? Number(record.width) : 0,
+    height: Number.isFinite(Number(record.height)) ? Number(record.height) : 0,
+    started_at: asOptionalString(record.started_at),
+    updated_at: asOptionalString(record.updated_at),
+    last_frame_seq: Number.isFinite(Number(record.last_frame_seq)) ? Number(record.last_frame_seq) : 0,
+    last_frame_at: asOptionalString(record.last_frame_at),
+    controller_attached: !!record.controller_attached,
+  };
+}
+
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   let resp: Response;
   try {
@@ -436,14 +707,22 @@ export async function apiForm<T>(path: string, form: FormData, init?: RequestIni
 // ============ Groups ============
 
 export async function fetchGroups() {
-  return apiJson<{ groups: GroupMeta[] }>("/api/v1/groups");
+  return reuseRecentReadRequest(
+    groupsRequestKey(),
+    RECENT_BOOTSTRAP_READ_TTL_MS,
+    () => apiJson<{ groups: GroupMeta[] }>("/api/v1/groups")
+  );
 }
 
 export async function fetchPing(options?: { includeHome?: boolean }) {
   const includeHome = Boolean(options?.includeHome);
   const suffix = includeHome ? "?include_home=1" : "";
-  return apiJson<{ home?: string; daemon: unknown; version: string; web?: { mode?: string; read_only?: boolean } }>(
-    `/api/v1/ping${suffix}`
+  return reuseRecentReadRequest(
+    pingRequestKey(includeHome),
+    RECENT_BOOTSTRAP_READ_TTL_MS,
+    () => apiJson<{ home?: string; daemon: unknown; version: string; web?: { mode?: string; read_only?: boolean } }>(
+      `/api/v1/ping${suffix}`
+    )
   );
 }
 
@@ -451,7 +730,311 @@ export async function fetchGroup(groupId: string) {
   return apiJson<{ group: GroupDoc }>(`/api/v1/groups/${encodeURIComponent(groupId)}`);
 }
 
+export async function fetchPresentation(groupId: string): Promise<ApiResponse<{ group_id: string; presentation: GroupPresentation }>> {
+  const resp = await apiJson<{ group_id?: string; presentation?: unknown }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/presentation`
+  );
+  if (!resp.ok) return resp as ApiResponse<{ group_id: string; presentation: GroupPresentation }>;
+  return {
+    ok: true,
+    result: {
+      group_id: asString(resp.result.group_id).trim() || groupId,
+      presentation: normalizePresentation(resp.result.presentation),
+    },
+  };
+}
+
+type PresentationMutationResult = {
+  group_id: string;
+  slot_id?: string;
+  cleared_slots?: string[];
+  card?: PresentationCard;
+  presentation: GroupPresentation;
+};
+
+function normalizePresentationMutationResult(
+  groupId: string,
+  result: { group_id?: unknown; slot_id?: unknown; cleared_slots?: unknown; card?: unknown; presentation?: unknown },
+): PresentationMutationResult {
+  return {
+    group_id: asString(result.group_id).trim() || groupId,
+    slot_id: asOptionalString(result.slot_id) || undefined,
+    cleared_slots: Array.isArray(result.cleared_slots) ? result.cleared_slots.map((slot) => asString(slot).trim()).filter(Boolean) : undefined,
+    card: normalizePresentationCard(result.card) || undefined,
+    presentation: normalizePresentation(result.presentation),
+  };
+}
+
+export async function publishPresentationUrl(
+  groupId: string,
+  payload: { slotId: string; url: string; title?: string; summary?: string },
+): Promise<ApiResponse<PresentationMutationResult>> {
+  const resp = await apiJson<{
+    group_id?: unknown;
+    slot_id?: unknown;
+    card?: unknown;
+    presentation?: unknown;
+  }>(`/api/v1/groups/${encodeURIComponent(groupId)}/presentation/publish`, {
+    method: "POST",
+    body: JSON.stringify({
+      by: "user",
+      slot: String(payload.slotId || "").trim() || "auto",
+      url: String(payload.url || "").trim(),
+      title: String(payload.title || "").trim(),
+      summary: String(payload.summary || "").trim(),
+    }),
+  });
+  if (!resp.ok) return resp as ApiResponse<PresentationMutationResult>;
+  return { ok: true, result: normalizePresentationMutationResult(groupId, resp.result) };
+}
+
+export async function publishPresentationUpload(
+  groupId: string,
+  payload: { slotId: string; file: File; title?: string; summary?: string },
+): Promise<ApiResponse<PresentationMutationResult>> {
+  const form = new FormData();
+  form.append("by", "user");
+  form.append("slot", String(payload.slotId || "").trim() || "auto");
+  form.append("title", String(payload.title || "").trim());
+  form.append("summary", String(payload.summary || "").trim());
+  form.append("file", payload.file);
+  const resp = await apiForm<{
+    group_id?: unknown;
+    slot_id?: unknown;
+    card?: unknown;
+    presentation?: unknown;
+  }>(`/api/v1/groups/${encodeURIComponent(groupId)}/presentation/publish_upload`, form);
+  if (!resp.ok) return resp as ApiResponse<PresentationMutationResult>;
+  return { ok: true, result: normalizePresentationMutationResult(groupId, resp.result) };
+}
+
+export async function publishPresentationWorkspace(
+  groupId: string,
+  payload: { slotId: string; path: string; title?: string; summary?: string },
+): Promise<ApiResponse<PresentationMutationResult>> {
+  const resp = await apiJson<{
+    group_id?: unknown;
+    slot_id?: unknown;
+    card?: unknown;
+    presentation?: unknown;
+  }>(`/api/v1/groups/${encodeURIComponent(groupId)}/presentation/publish_workspace`, {
+    method: "POST",
+    body: JSON.stringify({
+      by: "user",
+      slot: String(payload.slotId || "").trim() || "auto",
+      path: String(payload.path || "").trim(),
+      title: String(payload.title || "").trim(),
+      summary: String(payload.summary || "").trim(),
+    }),
+  });
+  if (!resp.ok) return resp as ApiResponse<PresentationMutationResult>;
+  return { ok: true, result: normalizePresentationMutationResult(groupId, resp.result) };
+}
+
+export async function clearPresentationSlot(
+  groupId: string,
+  slotId: string,
+): Promise<ApiResponse<PresentationMutationResult>> {
+  const resp = await apiJson<{
+    group_id?: unknown;
+    cleared_slots?: unknown;
+    presentation?: unknown;
+  }>(`/api/v1/groups/${encodeURIComponent(groupId)}/presentation/clear`, {
+    method: "POST",
+    body: JSON.stringify({
+      by: "user",
+      slot: String(slotId || "").trim(),
+    }),
+  });
+  if (!resp.ok) return resp as ApiResponse<PresentationMutationResult>;
+  return { ok: true, result: normalizePresentationMutationResult(groupId, resp.result) };
+}
+
+function normalizePresentationWorkspaceItem(value: unknown): PresentationWorkspaceItem | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const name = asString(record.name).trim();
+  const path = asString(record.path).trim();
+  if (!name || !path) return null;
+  return {
+    name,
+    path,
+    is_dir: !!record.is_dir,
+    mime_type: asOptionalString(record.mime_type),
+  };
+}
+
+export async function fetchPresentationWorkspaceListing(
+  groupId: string,
+  path = "",
+): Promise<ApiResponse<PresentationWorkspaceListing>> {
+  const params = new URLSearchParams();
+  if (String(path || "").trim()) params.set("path", String(path).trim());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const resp = await apiJson<{
+    root_path?: unknown;
+    path?: unknown;
+    parent?: unknown;
+    items?: unknown;
+  }>(`/api/v1/groups/${encodeURIComponent(groupId)}/presentation/workspace/list${suffix}`);
+  if (!resp.ok) return resp as ApiResponse<PresentationWorkspaceListing>;
+  const items = Array.isArray(resp.result.items)
+    ? resp.result.items
+        .map((item) => normalizePresentationWorkspaceItem(item))
+        .filter((item): item is PresentationWorkspaceItem => !!item)
+    : [];
+  return {
+    ok: true,
+    result: {
+      root_path: asString(resp.result.root_path).trim(),
+      path: asString(resp.result.path).trim(),
+      parent:
+        typeof resp.result.parent === "string"
+          ? String(resp.result.parent)
+          : resp.result.parent == null
+            ? null
+            : String(resp.result.parent),
+      items,
+    },
+  };
+}
+
+export function getPresentationAssetUrl(groupId: string, slotId: string, cacheBust?: string | number): string {
+  const base = withAuthToken(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/presentation/slots/${encodeURIComponent(slotId)}/asset`
+  );
+  if (cacheBust === undefined || cacheBust === null || cacheBust === "") return base;
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}v=${encodeURIComponent(String(cacheBust))}`;
+}
+
+export function getGroupBlobUrl(groupId: string, relPath: string): string {
+  const normalized = String(relPath || "").trim();
+  if (!normalized.startsWith("state/blobs/")) return "";
+  const blobName = normalized.split("/").pop() || "";
+  if (!blobName) return "";
+  return withAuthToken(`/api/v1/groups/${encodeURIComponent(groupId)}/blobs/${encodeURIComponent(blobName)}`);
+}
+
+export async function fetchPresentationBrowserSurfaceSession(
+  groupId: string,
+  slotId: string,
+): Promise<ApiResponse<{ group_id: string; browser_surface: PresentationBrowserSurfaceState }>> {
+  const resp = await apiJson<{ group_id?: unknown; browser_surface?: unknown }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/presentation/browser_surface/session?slot=${encodeURIComponent(slotId)}`
+  );
+  if (!resp.ok) return resp as ApiResponse<{ group_id: string; browser_surface: PresentationBrowserSurfaceState }>;
+  return {
+    ok: true,
+    result: {
+      group_id: asString(resp.result.group_id).trim() || groupId,
+      browser_surface: normalizePresentationBrowserSurfaceState(resp.result.browser_surface),
+    },
+  };
+}
+
+export async function startPresentationBrowserSurfaceSession(
+  groupId: string,
+  payload: { slotId: string; url: string; width?: number; height?: number },
+): Promise<ApiResponse<{ group_id: string; browser_surface: PresentationBrowserSurfaceState }>> {
+  const resp = await apiJson<{ group_id?: unknown; browser_surface?: unknown }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/presentation/browser_surface/session`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        by: "user",
+        slot: String(payload.slotId || "").trim(),
+        url: String(payload.url || "").trim(),
+        width: Number.isFinite(Number(payload.width)) ? Number(payload.width) : 1280,
+        height: Number.isFinite(Number(payload.height)) ? Number(payload.height) : 800,
+      }),
+    }
+  );
+  if (!resp.ok) return resp as ApiResponse<{ group_id: string; browser_surface: PresentationBrowserSurfaceState }>;
+  return {
+    ok: true,
+    result: {
+      group_id: asString(resp.result.group_id).trim() || groupId,
+      browser_surface: normalizePresentationBrowserSurfaceState(resp.result.browser_surface),
+    },
+  };
+}
+
+export async function uploadPresentationReferenceSnapshot(
+  groupId: string,
+  payload: {
+    slotId: string;
+    file: File;
+    source?: string;
+    capturedAt?: string;
+    width?: number;
+    height?: number;
+  },
+): Promise<ApiResponse<{ group_id: string; snapshot: PresentationRefSnapshot }>> {
+  const form = new FormData();
+  form.append("by", "user");
+  form.append("slot", String(payload.slotId || "").trim());
+  form.append("source", String(payload.source || "").trim() || "browser_surface");
+  form.append("captured_at", String(payload.capturedAt || "").trim());
+  form.append("width", String(Number.isFinite(Number(payload.width)) ? Number(payload.width) : 0));
+  form.append("height", String(Number.isFinite(Number(payload.height)) ? Number(payload.height) : 0));
+  form.append("file", payload.file);
+  const resp = await apiForm<{ group_id?: unknown; snapshot?: unknown }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/presentation/ref_snapshot`,
+    form,
+  );
+  if (!resp.ok) return resp as ApiResponse<{ group_id: string; snapshot: PresentationRefSnapshot }>;
+  const snapshot = asRecord(resp.result.snapshot);
+  return {
+    ok: true,
+    result: {
+      group_id: asString(resp.result.group_id).trim() || groupId,
+      snapshot: {
+        path: asString(snapshot?.path).trim(),
+        mime_type: asOptionalString(snapshot?.mime_type) || undefined,
+        bytes: Number.isFinite(Number(snapshot?.bytes)) ? Number(snapshot?.bytes) : undefined,
+        sha256: asOptionalString(snapshot?.sha256) || undefined,
+        width: Number.isFinite(Number(snapshot?.width)) ? Number(snapshot?.width) : undefined,
+        height: Number.isFinite(Number(snapshot?.height)) ? Number(snapshot?.height) : undefined,
+        captured_at: asOptionalString(snapshot?.captured_at) || undefined,
+        source: asOptionalString(snapshot?.source) || undefined,
+      },
+    },
+  };
+}
+
+export async function closePresentationBrowserSurfaceSession(
+  groupId: string,
+  slotId: string,
+): Promise<ApiResponse<{ group_id: string; closed: boolean; browser_surface: PresentationBrowserSurfaceState }>> {
+  const resp = await apiJson<{ group_id?: unknown; closed?: unknown; browser_surface?: unknown }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/presentation/browser_surface/session/close`,
+    {
+      method: "POST",
+      body: JSON.stringify({ by: "user", slot: String(slotId || "").trim() }),
+    }
+  );
+  if (!resp.ok) {
+    return resp as ApiResponse<{ group_id: string; closed: boolean; browser_surface: PresentationBrowserSurfaceState }>;
+  }
+  return {
+    ok: true,
+    result: {
+      group_id: asString(resp.result.group_id).trim() || groupId,
+      closed: !!resp.result.closed,
+      browser_surface: normalizePresentationBrowserSurfaceState(resp.result.browser_surface),
+    },
+  };
+}
+
+export function getPresentationBrowserSurfaceWebSocketUrl(groupId: string, slotId: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const base = `${protocol}//${window.location.host}/api/v1/groups/${encodeURIComponent(groupId)}/presentation/browser_surface/ws?slot=${encodeURIComponent(slotId)}`;
+  return withAuthToken(base);
+}
+
 export async function createGroup(title: string, topic: string = "") {
+  clearGroupsReadRequest();
   return apiJson<{ group_id: string }>("/api/v1/groups", {
     method: "POST",
     body: JSON.stringify({ title, topic, by: "user" }),
@@ -464,6 +1047,7 @@ export async function createGroupFromTemplate(
   topic: string,
   file: File
 ) {
+  clearGroupsReadRequest();
   const form = new FormData();
   form.append("path", path);
   form.append("title", title);
@@ -480,6 +1064,7 @@ export async function previewTemplate(file: File) {
 }
 
 export async function updateGroup(groupId: string, title: string, topic: string) {
+  clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}`, {
     method: "PUT",
     body: JSON.stringify({ title: title.trim(), topic: topic.trim(), by: "user" }),
@@ -487,6 +1072,7 @@ export async function updateGroup(groupId: string, title: string, topic: string)
 }
 
 export async function deleteGroup(groupId: string) {
+  clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}?confirm=${encodeURIComponent(groupId)}&by=user`,
     { method: "DELETE" }
@@ -501,18 +1087,24 @@ export async function attachScope(groupId: string, path: string) {
 }
 
 export async function startGroup(groupId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/start?by=user`, {
     method: "POST",
   });
 }
 
 export async function stopGroup(groupId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/stop?by=user`, {
     method: "POST",
   });
 }
 
 export async function setGroupState(groupId: string, state: "active" | "idle" | "paused") {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}/state?state=${encodeURIComponent(state)}&by=user`,
     { method: "POST" }
@@ -648,7 +1240,11 @@ export type PromptUpdateOptions = {
 };
 
 export async function fetchGroupPrompts(groupId: string) {
-  return apiJson<GroupPromptsResponse>(`/api/v1/groups/${encodeURIComponent(groupId)}/prompts`);
+  const gid = String(groupId || "").trim();
+  return reuseSharedReadRequest(
+    groupPromptsRequestKey(gid),
+    () => apiJson<GroupPromptsResponse>(`/api/v1/groups/${encodeURIComponent(gid)}/prompts`)
+  );
 }
 
 export async function updateGroupPrompt(
@@ -657,6 +1253,7 @@ export async function updateGroupPrompt(
   content: string,
   opts?: PromptUpdateOptions
 ) {
+  clearSharedReadRequest(groupPromptsRequestKey(groupId));
   const body: Record<string, unknown> = { content, by: "user" };
   if (opts?.editorMode) body.editor_mode = opts.editorMode;
   if (Array.isArray(opts?.changedBlocks)) body.changed_blocks = opts.changedBlocks;
@@ -667,6 +1264,7 @@ export async function updateGroupPrompt(
 }
 
 export async function resetGroupPrompt(groupId: string, kind: GroupPromptKind) {
+  clearSharedReadRequest(groupPromptsRequestKey(groupId));
   return apiJson<GroupPromptInfo>(`/api/v1/groups/${encodeURIComponent(groupId)}/prompts/${kind}?confirm=${encodeURIComponent(kind)}`, {
     method: "DELETE",
   });
@@ -674,11 +1272,18 @@ export async function resetGroupPrompt(groupId: string, kind: GroupPromptKind) {
 
 // ============ Actors ============
 
-export async function fetchActors(groupId: string, includeUnread = true) {
+export async function fetchActors(groupId: string, includeUnread = false) {
+  const gid = String(groupId || "").trim();
   const url = includeUnread
-    ? `/api/v1/groups/${encodeURIComponent(groupId)}/actors?include_unread=true`
-    : `/api/v1/groups/${encodeURIComponent(groupId)}/actors`;
-  return apiJson<{ actors: Actor[] }>(url);
+    ? `/api/v1/groups/${encodeURIComponent(gid)}/actors?include_unread=true`
+    : `/api/v1/groups/${encodeURIComponent(gid)}/actors`;
+  if (includeUnread) {
+    return apiJson<{ actors: Actor[] }>(url);
+  }
+  return reuseSharedReadRequest(
+    actorsReadOnlyRequestKey(gid),
+    () => apiJson<{ actors: Actor[] }>(url)
+  );
 }
 
 export async function addActor(
@@ -696,6 +1301,8 @@ export async function addActor(
     capabilityAutoload?: string[];
   }
 ) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson<{ actor: Actor }>(`/api/v1/groups/${encodeURIComponent(groupId)}/actors`, {
     method: "POST",
     body: JSON.stringify({
@@ -734,6 +1341,8 @@ export async function updateActor(
     capabilityAutoload?: string[];
   }
 ) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   const body: Record<string, unknown> = { by: "user" };
   if (runtime !== undefined && runtime !== "") body.runtime = runtime;
   if (command !== undefined) body.command = command.trim();
@@ -754,6 +1363,8 @@ export async function updateActor(
 }
 
 export async function attachActorProfile(groupId: string, actorId: string, profileId: string, opts?: ProfileLookupOptions) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson<{ actor: Actor }>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}`,
     {
@@ -769,6 +1380,8 @@ export async function attachActorProfile(groupId: string, actorId: string, profi
 }
 
 export async function convertActorToCustom(groupId: string, actorId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson<{ actor: Actor }>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}`,
     {
@@ -779,6 +1392,8 @@ export async function convertActorToCustom(groupId: string, actorId: string) {
 }
 
 export async function removeActor(groupId: string, actorId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}?by=user`,
     { method: "DELETE" }
@@ -786,6 +1401,8 @@ export async function removeActor(groupId: string, actorId: string) {
 }
 
 export async function startActor(groupId: string, actorId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/start`,
     { method: "POST" }
@@ -793,6 +1410,8 @@ export async function startActor(groupId: string, actorId: string) {
 }
 
 export async function stopActor(groupId: string, actorId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/stop`,
     { method: "POST" }
@@ -800,6 +1419,8 @@ export async function stopActor(groupId: string, actorId: string) {
 }
 
 export async function restartActor(groupId: string, actorId: string) {
+  clearActorsReadOnlyRequest(groupId);
+  clearGroupsReadRequest();
   return apiJson(
     `/api/v1/groups/${encodeURIComponent(groupId)}/actors/${encodeURIComponent(actorId)}/restart?by=user`,
     { method: "POST" }
@@ -1031,10 +1652,33 @@ export async function copyProfilePrivateEnvFromProfile(
 
 // ============ Context & Settings ============
 
-export async function fetchContext(groupId: string) {
-  const resp = await apiJson<unknown>(`/api/v1/groups/${encodeURIComponent(groupId)}/context`);
-  if (!resp.ok) return resp as ApiResponse<GroupContext>;
-  return { ok: true, result: normalizeContext(resp.result) } as ApiResponse<GroupContext>;
+export async function fetchContext(groupId: string, opts?: FetchContextOptions) {
+  const gid = String(groupId || "").trim();
+  const detail: ContextDetailLevel = opts?.detail === "full" ? "full" : "summary";
+  const params = new URLSearchParams();
+  if (detail !== "summary") {
+    params.set("detail", detail);
+  }
+  if (opts?.fresh) {
+    clearContextRequest(gid);
+    params.set("fresh", "1");
+    params.set("_", String(Date.now()));
+    return reuseSharedReadRequest(contextRequestKey(gid, detail), async () => {
+      const resp = await apiJson<unknown>(
+        `/api/v1/groups/${encodeURIComponent(gid)}/context?${params.toString()}`
+      );
+      if (!resp.ok) return resp as ApiResponse<GroupContext>;
+      return { ok: true, result: normalizeContext(resp.result) } as ApiResponse<GroupContext>;
+    });
+  }
+  return reuseSharedReadRequest(contextRequestKey(gid, detail), async () => {
+    const suffix = params.toString();
+    const resp = await apiJson<unknown>(
+      `/api/v1/groups/${encodeURIComponent(gid)}/context${suffix ? `?${suffix}` : ""}`
+    );
+    if (!resp.ok) return resp as ApiResponse<GroupContext>;
+    return { ok: true, result: normalizeContext(resp.result) } as ApiResponse<GroupContext>;
+  });
 }
 
 export async function fetchTasks(groupId: string) {
@@ -1051,6 +1695,7 @@ export async function contextSync(
   ops: Array<Record<string, unknown>>,
   dryRun: boolean = false
 ) {
+  clearContextRequest(groupId);
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/context`, {
     method: "POST",
     body: JSON.stringify({ ops, by: "user", dry_run: dryRun }),
@@ -1104,6 +1749,11 @@ export async function updateCoordinationTask(groupId: string, task: Task) {
     ops.push({ op: "task.move", task_id: task.id, status: String(task.status || "planned") });
   }
   return contextSync(groupId, ops);
+}
+
+
+export async function deleteCoordinationTask(groupId: string, taskId: string) {
+  return contextSync(groupId, [{ op: "task.delete", task_id: String(taskId || "") }]);
 }
 
 
@@ -1312,7 +1962,8 @@ export async function sendMessage(
   files?: File[],
   priority: "normal" | "attention" = "normal",
   replyRequired = false,
-  clientId = ""
+  clientId = "",
+  refs?: MessageRef[],
 ) {
   if (files && files.length > 0) {
     const form = new FormData();
@@ -1323,12 +1974,13 @@ export async function sendMessage(
     form.append("priority", priority);
     form.append("reply_required", replyRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
+    if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
     for (const f of files) form.append("files", f);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/send_upload`, form);
   }
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/send`, {
     method: "POST",
-    body: JSON.stringify({ text, by: "user", to, path: "", priority, reply_required: replyRequired, client_id: clientId }),
+    body: JSON.stringify({ text, by: "user", to, path: "", priority, reply_required: replyRequired, client_id: clientId, refs: refs || [] }),
   });
 }
 
@@ -1340,7 +1992,8 @@ export async function replyMessage(
   files?: File[],
   priority: "normal" | "attention" = "normal",
   replyRequired = false,
-  clientId = ""
+  clientId = "",
+  refs?: MessageRef[],
 ) {
   if (files && files.length > 0) {
     const form = new FormData();
@@ -1351,12 +2004,13 @@ export async function replyMessage(
     form.append("priority", priority);
     form.append("reply_required", replyRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
+    if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
     for (const f of files) form.append("files", f);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/reply_upload`, form);
   }
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/reply`, {
     method: "POST",
-    body: JSON.stringify({ text, by: "user", to, reply_to: replyTo, priority, reply_required: replyRequired, client_id: clientId }),
+    body: JSON.stringify({ text, by: "user", to, reply_to: replyTo, priority, reply_required: replyRequired, client_id: clientId, refs: refs || [] }),
   });
 }
 
@@ -1447,6 +2101,8 @@ export async function setIMConfig(
     dingtalk_app_key?: string;
     dingtalk_app_secret?: string;
     dingtalk_robot_code?: string;
+    wecom_bot_id?: string;
+    wecom_secret?: string;
   }
 ) {
   const body: Record<string, unknown> = {
@@ -1474,6 +2130,12 @@ export async function setIMConfig(
     body.dingtalk_app_key = extra.dingtalk_app_key;
     body.dingtalk_app_secret = extra.dingtalk_app_secret;
     body.dingtalk_robot_code = extra.dingtalk_robot_code;
+  }
+
+  // WeCom uses bot_id / secret
+  if (platform === "wecom" && extra) {
+    body.wecom_bot_id = extra.wecom_bot_id;
+    body.wecom_secret = extra.wecom_secret;
   }
 
   return apiJson("/api/im/set", {
@@ -1604,10 +2266,48 @@ export async function fetchRemoteAccessState() {
 }
 
 export async function fetchWebAccessSession() {
-  return apiJson<{ web_access_session: WebAccessSession }>("/api/v1/web_access/session");
+  return reuseRecentReadRequest(
+    webAccessSessionRequestKey(),
+    RECENT_BOOTSTRAP_READ_TTL_MS,
+    () => apiJson<{ web_access_session: WebAccessSession }>("/api/v1/web_access/session")
+  );
+}
+
+export async function fetchWebBranding() {
+  return apiJson<{ branding: WebBranding }>("/api/v1/branding");
+}
+
+export async function updateWebBranding(args: {
+  productName?: string;
+  clearLogoIcon?: boolean;
+  clearFavicon?: boolean;
+}) {
+  return apiJson<{ branding: WebBranding }>("/api/v1/branding", {
+    method: "PUT",
+    body: JSON.stringify({
+      by: "user",
+      product_name: args.productName,
+      clear_logo_icon: Boolean(args.clearLogoIcon),
+      clear_favicon: Boolean(args.clearFavicon),
+    }),
+  });
+}
+
+export async function uploadWebBrandingAsset(assetKind: "logo_icon" | "favicon", file: File) {
+  const form = new FormData();
+  form.append("by", "user");
+  form.append("file", file);
+  return apiForm<{ branding: WebBranding }>(`/api/v1/branding/assets/${assetKind}`, form);
+}
+
+export async function clearWebBrandingAsset(assetKind: "logo_icon" | "favicon") {
+  return apiJson<{ branding: WebBranding }>(`/api/v1/branding/assets/${assetKind}?by=user`, {
+    method: "DELETE",
+  });
 }
 
 export async function logoutWebAccess() {
+  clearWebAccessSessionReadRequest();
   return apiJson<{ signed_out: boolean }>("/api/v1/web_access/logout", {
     method: "POST",
   });
@@ -1622,6 +2322,8 @@ export async function updateRemoteAccessConfig(args: {
   webPort?: number;
   webPublicUrl?: string;
 }) {
+  clearPingReadRequest();
+  clearWebAccessSessionReadRequest();
   return apiJson<{ remote_access: RemoteAccessState }>("/api/v1/remote_access", {
     method: "PUT",
     body: JSON.stringify({
@@ -1650,6 +2352,8 @@ export async function stopRemoteAccess() {
 }
 
 export async function applyRemoteAccess() {
+  clearPingReadRequest();
+  clearWebAccessSessionReadRequest();
   return apiJson<{ accepted: boolean; remote_access: RemoteAccessState; target_local_url?: string | null; target_remote_url?: string | null }>(
     "/api/v1/remote_access/apply?by=user",
     {
@@ -1675,6 +2379,7 @@ export async function fetchAccessTokens() {
 }
 
 export async function createAccessToken(userId: string, isAdmin: boolean, allowedGroups: string[], customToken?: string) {
+  clearWebAccessSessionReadRequest();
   const body: Record<string, unknown> = {
     user_id: userId,
     is_admin: isAdmin,
@@ -1688,6 +2393,7 @@ export async function createAccessToken(userId: string, isAdmin: boolean, allowe
 }
 
 export async function updateAccessToken(tokenId: string, updates: { allowed_groups?: string[]; is_admin?: boolean }) {
+  clearWebAccessSessionReadRequest();
   return apiJson<{ access_token: AccessTokenEntry }>(`/api/v1/access-tokens/${encodeURIComponent(tokenId)}`, {
     method: "PATCH",
     body: JSON.stringify(updates),
@@ -1699,6 +2405,7 @@ export async function revealAccessToken(tokenId: string) {
 }
 
 export async function deleteAccessToken(tokenId: string) {
+  clearWebAccessSessionReadRequest();
   return apiJson<{ deleted: boolean; access_tokens_remain?: boolean; deleted_current_session?: boolean }>(`/api/v1/access-tokens/${encodeURIComponent(tokenId)}`, {
     method: "DELETE",
   });

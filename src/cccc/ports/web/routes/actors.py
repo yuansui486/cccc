@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -25,10 +26,76 @@ from ..schemas import (
     websocket_tokens_active,
 )
 
+_READONLY_ACTOR_CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
+_READONLY_ACTOR_INFLIGHT: Dict[str, asyncio.Future[Dict[str, Any]]] = {}
+_READONLY_ACTOR_GENERATION: Dict[str, int] = {}
+_READONLY_ACTOR_CACHE_LOCK = asyncio.Lock()
+_READONLY_ACTOR_TTL_S = 0.8
+
+
+async def invalidate_readonly_actor_list(group_id: str) -> None:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return
+    cache_key = f"actors:{gid}:readonly"
+    async with _READONLY_ACTOR_CACHE_LOCK:
+        _READONLY_ACTOR_GENERATION[cache_key] = int(_READONLY_ACTOR_GENERATION.get(cache_key, 0)) + 1
+        _READONLY_ACTOR_CACHE.pop(cache_key, None)
+        _READONLY_ACTOR_INFLIGHT.pop(cache_key, None)
+
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}", dependencies=[Depends(require_group)])
     global_router = APIRouter(prefix="/api/v1")
+
+    async def _cached_readonly_actor_list(group_id: str, fetcher) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
+        gid = str(group_id or "").strip()
+        if not gid:
+            return await fetcher()
+
+        ttl_s = _READONLY_ACTOR_TTL_S if ctx.read_only else 0.0
+        cache_key = f"actors:{gid}:readonly"
+        now = time.monotonic()
+        fut: asyncio.Future[Dict[str, Any]] | None = None
+        fetch_generation = 0
+        do_fetch = False
+
+        async with _READONLY_ACTOR_CACHE_LOCK:
+            hit = _READONLY_ACTOR_CACHE.get(cache_key)
+            if ttl_s > 0 and hit is not None and hit[0] > now:
+                return hit[1]
+            fut = _READONLY_ACTOR_INFLIGHT.get(cache_key)
+            if fut is None or fut.done():
+                loop = asyncio.get_running_loop()
+                fut = loop.create_future()
+                _READONLY_ACTOR_INFLIGHT[cache_key] = fut
+                fetch_generation = int(_READONLY_ACTOR_GENERATION.get(cache_key, 0))
+                do_fetch = True
+
+        if fut is not None and not do_fetch:
+            return await fut
+
+        try:
+            val = await fetcher()
+            async with _READONLY_ACTOR_CACHE_LOCK:
+                current_generation = int(_READONLY_ACTOR_GENERATION.get(cache_key, 0))
+                if current_generation == fetch_generation and _READONLY_ACTOR_INFLIGHT.get(cache_key) is fut:
+                    if ttl_s > 0:
+                        _READONLY_ACTOR_CACHE[cache_key] = (time.monotonic() + ttl_s, val)
+                    else:
+                        _READONLY_ACTOR_CACHE.pop(cache_key, None)
+                if fut is not None and not fut.done():
+                    fut.set_result(val)
+            return val
+        except Exception as exc:
+            async with _READONLY_ACTOR_CACHE_LOCK:
+                if fut is not None and not fut.done():
+                    fut.set_exception(exc)
+            raise
+        finally:
+            async with _READONLY_ACTOR_CACHE_LOCK:
+                if _READONLY_ACTOR_INFLIGHT.get(cache_key) is fut:
+                    _READONLY_ACTOR_INFLIGHT.pop(cache_key, None)
 
     async def _developer_mode_enabled() -> bool:
         try:
@@ -183,11 +250,15 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         async def _fetch() -> Dict[str, Any]:
             return await ctx.daemon({"op": "actor_list", "args": {"group_id": gid, "include_unread": include_unread}})
 
+        if not include_unread:
+            return await _cached_readonly_actor_list(gid, _fetch)
+
         ttl = max(0.0, min(5.0, ctx.exhibit_cache_ttl_s))
         return await ctx.cached_json(f"actors:{gid}:{int(bool(include_unread))}", ttl, _fetch)
 
     @group_router.post("/actors")
     async def actor_create(request: Request, group_id: str, req: ActorCreateRequest) -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         command = _normalize_command(req.command) or []
         env_private = dict(req.env_private) if isinstance(req.env_private, dict) else None
         profile_id = str(req.profile_id or "").strip()
@@ -225,6 +296,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/actors/{actor_id}")
     async def actor_update(request: Request, group_id: str, actor_id: str, req: ActorUpdateRequest) -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         await _ensure_standard_web_runner(
             request,
             source="actor_update",
@@ -269,10 +341,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.delete("/actors/{actor_id}")
     async def actor_delete(group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         return await ctx.daemon({"op": "actor_remove", "args": {"group_id": group_id, "actor_id": actor_id, "by": by}})
 
     @group_router.post("/actors/{actor_id}/start")
     async def actor_start(request: Request, group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         if not await _developer_mode_enabled() and _runner_is_headless(await _actor_runner(group_id, actor_id)):
             raise _headless_error(source="actor_start")
         return await ctx.daemon(
@@ -284,10 +358,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/actors/{actor_id}/stop")
     async def actor_stop(group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         return await ctx.daemon({"op": "actor_stop", "args": {"group_id": group_id, "actor_id": actor_id, "by": by}})
 
     @group_router.post("/actors/{actor_id}/restart")
     async def actor_restart(request: Request, group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         if not await _developer_mode_enabled() and _runner_is_headless(await _actor_runner(group_id, actor_id)):
             raise _headless_error(source="actor_restart")
         return await ctx.daemon(

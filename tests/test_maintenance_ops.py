@@ -60,6 +60,35 @@ class TestMaintenanceOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_send_cross_group_rejects_refs(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            src_create, _ = self._call("group_create", {"title": "src", "topic": "", "by": "user"})
+            self.assertTrue(src_create.ok, getattr(src_create, "error", None))
+            src_group_id = str((src_create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(src_group_id)
+
+            dst_create, _ = self._call("group_create", {"title": "dst", "topic": "", "by": "user"})
+            self.assertTrue(dst_create.ok, getattr(dst_create, "error", None))
+            dst_group_id = str((dst_create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(dst_group_id)
+
+            relay, _ = self._call(
+                "send_cross_group",
+                {
+                    "group_id": src_group_id,
+                    "dst_group_id": dst_group_id,
+                    "by": "user",
+                    "text": "relay ping",
+                    "to": ["user"],
+                    "refs": [{"kind": "presentation_ref", "slot_id": "slot-2"}],
+                },
+            )
+            self.assertFalse(relay.ok)
+            self.assertEqual(str(getattr(relay.error, "code", "") or ""), "refs_not_supported")
+        finally:
+            cleanup()
+
     def test_ledger_snapshot_and_compact(self) -> None:
         _, cleanup = self._with_home()
         try:

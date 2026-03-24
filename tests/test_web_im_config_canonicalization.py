@@ -6,6 +6,36 @@ from fastapi.testclient import TestClient
 
 
 class TestWebImConfigCanonicalization(unittest.TestCase):
+    def test_canonicalize_wecom_env_refs(self) -> None:
+        from cccc.ports.im.config_schema import canonicalize_im_config
+
+        result = canonicalize_im_config({
+            "platform": "wecom",
+            "wecom_bot_id": "WECOM_BOT_ID",
+            "wecom_secret": "WECOM_SECRET",
+        })
+
+        self.assertEqual(result, {
+            "platform": "wecom",
+            "wecom_bot_id_env": "WECOM_BOT_ID",
+            "wecom_secret_env": "WECOM_SECRET",
+        })
+
+    def test_canonicalize_wecom_raw_values_in_env_slots_fall_back_to_value_keys(self) -> None:
+        from cccc.ports.im.config_schema import canonicalize_im_config
+
+        result = canonicalize_im_config({
+            "platform": "wecom",
+            "wecom_bot_id_env": "corp123",
+            "wecom_secret_env": "sec456",
+        })
+
+        self.assertEqual(result, {
+            "platform": "wecom",
+            "wecom_bot_id": "corp123",
+            "wecom_secret": "sec456",
+        })
+
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
         td_ctx = tempfile.TemporaryDirectory()
@@ -94,6 +124,35 @@ class TestWebImConfigCanonicalization(unittest.TestCase):
             cleanup()
 
 
+    def test_im_set_wecom_fields_round_trip(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group("im-cfg-wecom")
+            with TestClient(create_app()) as client:
+                r = client.post(
+                    "/api/im/set",
+                    json={
+                        "group_id": gid,
+                        "platform": "wecom",
+                        "wecom_bot_id": "corp123",
+                        "wecom_secret": "sec456",
+                    },
+                )
+                self.assertEqual(r.status_code, 200)
+                self.assertTrue(r.json().get("ok"))
+
+                c = client.get(f"/api/im/config?group_id={gid}")
+                self.assertEqual(c.status_code, 200)
+                im = ((c.json().get("result") or {}).get("im") or {})
+                self.assertEqual(str(im.get("platform") or ""), "wecom")
+                self.assertEqual(str(im.get("wecom_bot_id") or ""), "corp123")
+                self.assertEqual(str(im.get("wecom_secret") or ""), "sec456")
+                self.assertNotIn("wecom_agent_id", im)
+        finally:
+            cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()
-

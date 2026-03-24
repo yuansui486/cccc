@@ -237,7 +237,7 @@ Ledger (完整记忆)
 | codex | `codex` | Codex CLI |
 | droid | `droid` | Droid |
 | gemini | `gemini` | Gemini CLI |
-| kimi | `kimi` | Kimi CLI |
+| kimi | `kimi --yolo` | Kimi CLI |
 | neovate | `neovate` | Neovate Code |
 | custom | 自定义 | 任意命令 |
 

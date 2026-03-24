@@ -177,6 +177,7 @@ def task_update(
     task_id: str,
     title: Optional[str] = None,
     outcome: Optional[str] = None,
+    status: Optional[str] = None,
     parent_id: Optional[str] = None,
     assignee: Optional[str] = None,
     priority: Optional[str] = None,
@@ -188,27 +189,44 @@ def task_update(
     by: Optional[str] = None,
 ) -> Dict[str, Any]:
     op: Dict[str, Any] = {"op": "task.update", "task_id": task_id}
+    has_patch_fields = False
     if title is not None:
         op["title"] = title
+        has_patch_fields = True
     if outcome is not None:
         op["outcome"] = outcome
+        has_patch_fields = True
     if parent_id is not None:
         op["parent_id"] = parent_id
+        has_patch_fields = True
     if assignee is not None:
         op["assignee"] = assignee
+        has_patch_fields = True
     if priority is not None:
         op["priority"] = priority
+        has_patch_fields = True
     if blocked_by is not None:
         op["blocked_by"] = blocked_by
+        has_patch_fields = True
     if waiting_on is not None:
         op["waiting_on"] = waiting_on
+        has_patch_fields = True
     if handoff_to is not None:
         op["handoff_to"] = handoff_to
+        has_patch_fields = True
     if notes is not None:
         op["notes"] = notes
+        has_patch_fields = True
     if checklist is not None:
         op["checklist"] = checklist
-    return context_sync(group_id=group_id, ops=[op], by=by)
+        has_patch_fields = True
+
+    ops: List[Dict[str, Any]] = []
+    if has_patch_fields or status is None:
+        ops.append(op)
+    if status is not None:
+        ops.append({"op": "task.move", "task_id": task_id, "status": status})
+    return context_sync(group_id=group_id, ops=ops, by=by)
 
 
 def task_move(*, group_id: str, task_id: str, status: str, by: Optional[str] = None) -> Dict[str, Any]:
@@ -221,6 +239,10 @@ def task_move(*, group_id: str, task_id: str, status: str, by: Optional[str] = N
 
 def task_restore(*, group_id: str, task_id: str, by: Optional[str] = None) -> Dict[str, Any]:
     return context_sync(group_id=group_id, ops=[{"op": "task.restore", "task_id": task_id}], by=by)
+
+
+def task_delete(*, group_id: str, task_id: str, by: Optional[str] = None) -> Dict[str, Any]:
+    return context_sync(group_id=group_id, ops=[{"op": "task.delete", "task_id": task_id}], by=by)
 
 
 def agent_state_get(*, group_id: str, actor_id: Optional[str] = None, include_warm: bool = True) -> Dict[str, Any]:
@@ -494,6 +516,7 @@ def _handle_context_namespace(
     task_update_fn: Callable[..., Dict[str, Any]],
     task_move_fn: Callable[..., Dict[str, Any]],
     task_restore_fn: Callable[..., Dict[str, Any]],
+    task_delete_fn: Callable[..., Dict[str, Any]],
     agent_state_get_fn: Callable[..., Dict[str, Any]],
     agent_state_update_fn: Callable[..., Dict[str, Any]],
     agent_state_clear_fn: Callable[..., Dict[str, Any]],
@@ -579,7 +602,7 @@ def _handle_context_namespace(
                 "task_id": str(arguments.get("task_id") or ""),
                 "by": by,
             }
-            for field in ("title", "outcome", "parent_id", "assignee", "priority", "waiting_on", "handoff_to", "notes"):
+            for field in ("title", "outcome", "status", "parent_id", "assignee", "priority", "waiting_on", "handoff_to", "notes"):
                 if field in arguments:
                     value = arguments.get(field)
                     kwargs[field] = str(value) if value is not None else None
@@ -597,7 +620,9 @@ def _handle_context_namespace(
             )
         if action == "restore":
             return task_restore_fn(group_id=gid, task_id=str(arguments.get("task_id") or ""), by=by)
-        raise MCPError(code="invalid_request", message="cccc_task action must be list|create|update|move|restore")
+        if action == "delete":
+            return task_delete_fn(group_id=gid, task_id=str(arguments.get("task_id") or ""), by=by)
+        raise MCPError(code="invalid_request", message="cccc_task action must be list|create|update|move|restore|delete")
 
     if name == "cccc_agent_state":
         gid = resolve_group_id(arguments)

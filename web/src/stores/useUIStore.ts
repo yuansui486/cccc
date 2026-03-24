@@ -1,13 +1,18 @@
 // UI state store (tabs, sidebar, toasts, etc.).
 import { create } from "zustand";
 
+export const SIDEBAR_COLLAPSED_WIDTH = 60;
+export const SIDEBAR_DEFAULT_WIDTH = 280;
+export const SIDEBAR_MIN_WIDTH = 280;
+export const SIDEBAR_MAX_WIDTH = 480;
+
 interface UINotice {
   message: string;
   actionLabel?: string;
-  actionId?: string;
+  onAction?: () => void;
 }
 
-export type ChatFilter = "all" | "to_user" | "attention" | "task";
+export type ChatFilter = "all" | "user" | "attention" | "task";
 
 export interface ChatScrollSnapshot {
   atBottom: boolean;
@@ -20,6 +25,8 @@ export interface ChatSessionState {
   chatUnreadCount: number;
   chatFilter: ChatFilter;
   scrollSnapshot: ChatScrollSnapshot | null;
+  mobileSurface: "messages" | "presentation";
+  presentationDockOpen: boolean;
 }
 
 const DEFAULT_CHAT_SESSION: ChatSessionState = {
@@ -27,6 +34,8 @@ const DEFAULT_CHAT_SESSION: ChatSessionState = {
   chatUnreadCount: 0,
   chatFilter: "all",
   scrollSnapshot: null,
+  mobileSurface: "messages",
+  presentationDockOpen: false,
 };
 
 export function getChatSession(groupId: string | null | undefined, sessions: Record<string, ChatSessionState>): ChatSessionState {
@@ -44,6 +53,7 @@ interface UIState {
   isTransitioning: boolean;
   sidebarOpen: boolean;
   sidebarCollapsed: boolean; // Desktop sidebar collapsed state
+  sidebarWidth: number;
   isSmallScreen: boolean;
   chatSessions: Record<string, ChatSessionState>;
   webReadOnly: boolean;
@@ -60,6 +70,7 @@ interface UIState {
   setTransitioning: (v: boolean) => void;
   setSidebarOpen: (v: boolean) => void;
   setSidebarCollapsed: (v: boolean) => void;
+  setSidebarWidth: (v: number) => void;
   toggleSidebarCollapsed: () => void;
   setShowScrollButton: (groupId: string, v: boolean) => void;
   setChatUnreadCount: (groupId: string, v: number) => void;
@@ -67,6 +78,8 @@ interface UIState {
   setSmallScreen: (v: boolean) => void;
   setChatFilter: (groupId: string, v: ChatFilter) => void;
   setChatScrollSnapshot: (groupId: string, snap: ChatScrollSnapshot | null) => void;
+  setChatMobileSurface: (groupId: string, v: "messages" | "presentation") => void;
+  setChatPresentationDockOpen: (groupId: string, v: boolean) => void;
   setWebReadOnly: (v: boolean) => void;
   setSSEStatus: (v: "connected" | "connecting" | "disconnected") => void;
 }
@@ -76,6 +89,13 @@ let noticeTimeoutId: number | null = null;
 
 // localStorage key for sidebar collapsed state
 const SIDEBAR_COLLAPSED_KEY = "cccc-sidebar-collapsed";
+const SIDEBAR_WIDTH_KEY = "cccc-sidebar-width";
+
+export function clampSidebarWidth(value: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(numeric)));
+}
 
 function loadSidebarCollapsed(): boolean {
   try {
@@ -91,6 +111,23 @@ function saveSidebarCollapsed(collapsed: boolean): void {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
   } catch (e) {
     console.warn("Failed to persist sidebar state to localStorage:", e);
+  }
+}
+
+function loadSidebarWidth(): number {
+  try {
+    return clampSidebarWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY)));
+  } catch (e) {
+    console.warn("Failed to read sidebar width from localStorage:", e);
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+function saveSidebarWidth(width: number): void {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)));
+  } catch (e) {
+    console.warn("Failed to persist sidebar width to localStorage:", e);
   }
 }
 
@@ -119,6 +156,7 @@ export const useUIStore = create<UIState>((set) => ({
   isTransitioning: false,
   sidebarOpen: true,
   sidebarCollapsed: loadSidebarCollapsed(),
+  sidebarWidth: loadSidebarWidth(),
   isSmallScreen: false,
   chatSessions: {},
   webReadOnly: false,
@@ -153,7 +191,7 @@ export const useUIStore = create<UIState>((set) => ({
     }
     set({ notice });
     // Actionable notices remain until user dismisses/clicks action.
-    const persistent = Boolean(notice.actionId && notice.actionLabel);
+    const persistent = Boolean(notice.onAction && notice.actionLabel);
     if (!persistent) {
       noticeTimeoutId = window.setTimeout(() => {
         set({ notice: null });
@@ -174,6 +212,11 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarCollapsed: (v) => {
     saveSidebarCollapsed(v);
     set({ sidebarCollapsed: v });
+  },
+  setSidebarWidth: (v) => {
+    const next = clampSidebarWidth(v);
+    saveSidebarWidth(next);
+    set({ sidebarWidth: next });
   },
   toggleSidebarCollapsed: () =>
     set((state) => {
@@ -201,6 +244,10 @@ export const useUIStore = create<UIState>((set) => ({
     set((state) => ({ chatSessions: updateChatSession(state.chatSessions, groupId, { chatFilter: v }) })),
   setChatScrollSnapshot: (groupId, snap) =>
     set((state) => ({ chatSessions: updateChatSession(state.chatSessions, groupId, { scrollSnapshot: snap }) })),
+  setChatMobileSurface: (groupId, v) =>
+    set((state) => ({ chatSessions: updateChatSession(state.chatSessions, groupId, { mobileSurface: v }) })),
+  setChatPresentationDockOpen: (groupId, v) =>
+    set((state) => ({ chatSessions: updateChatSession(state.chatSessions, groupId, { presentationDockOpen: v }) })),
   setWebReadOnly: (v) => set({ webReadOnly: v }),
   setSSEStatus: (v) => set({ sseStatus: v }),
 }));

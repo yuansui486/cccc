@@ -68,6 +68,7 @@ def _build_delivery_text(
     priority: str,
     reply_required: bool,
     event_id: str,
+    refs: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
     src_group_id: str = "",
     src_event_id: str = "",
@@ -82,6 +83,9 @@ def _build_delivery_text(
         prefix_lines.append(f"[cccc] RELAYED FROM (group_id={src_group_id}, event_id={src_event_id}):")
     if prefix_lines:
         delivery_text = "\n".join(prefix_lines) + "\n" + delivery_text
+    ref_lines = _render_delivery_refs(refs)
+    if ref_lines:
+        delivery_text = (delivery_text.rstrip("\n") + "\n\n" + "\n".join(ref_lines)).strip()
     if attachments:
         lines = ["[cccc] Attachments:"]
         for attachment in attachments[:8]:
@@ -95,6 +99,112 @@ def _build_delivery_text(
     return delivery_text
 
 
+def _compact_delivery_text(value: Any, *, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _presentation_slot_label(slot_id: str, label: str) -> str:
+    if label:
+        return label
+    match = re.search(r"(\d+)$", slot_id)
+    if match:
+        try:
+            return f"P{int(match.group(1))}"
+        except Exception:
+            pass
+    return slot_id or "Presentation"
+
+
+def _render_delivery_refs(refs: list[dict[str, Any]]) -> list[str]:
+    if not refs:
+        return []
+
+    lines = ["[cccc] References:"]
+    rendered = 0
+
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        kind = str(ref.get("kind") or "").strip()
+        if kind == "presentation_ref":
+            slot_id = _compact_delivery_text(ref.get("slot_id"), limit=32)
+            label = _presentation_slot_label(
+                slot_id,
+                _compact_delivery_text(ref.get("label"), limit=24),
+            )
+            locator_label = _compact_delivery_text(ref.get("locator_label"), limit=48)
+            title = _compact_delivery_text(ref.get("title"), limit=72)
+            header = f"- {label}"
+            if slot_id:
+                header += f" ({slot_id})"
+            if locator_label:
+                header += f" · {locator_label}"
+            if title:
+                header += f" — {title}"
+            lines.append(header)
+            excerpt = _compact_delivery_text(ref.get("excerpt"), limit=120)
+            if excerpt:
+                lines.append(f'  excerpt: "{excerpt}"')
+            href = _compact_delivery_text(ref.get("href"), limit=120)
+            if href:
+                lines.append(f"  href: {href}")
+            locator = ref.get("locator") if isinstance(ref.get("locator"), dict) else {}
+            locator_url = _compact_delivery_text(locator.get("url"), limit=120)
+            if locator_url and locator_url != href:
+                lines.append(f"  view_url: {locator_url}")
+            captured_at = _compact_delivery_text(locator.get("captured_at"), limit=48)
+            if captured_at:
+                lines.append(f"  captured_at: {captured_at}")
+            viewer_scroll_top = locator.get("viewer_scroll_top")
+            if isinstance(viewer_scroll_top, (int, float)) or str(viewer_scroll_top or "").strip():
+                try:
+                    scroll_value = int(float(viewer_scroll_top))
+                except Exception:
+                    scroll_value = None
+                if scroll_value is not None and scroll_value >= 0:
+                    lines.append(f"  scroll_top: {scroll_value}")
+            snapshot = ref.get("snapshot") if isinstance(ref.get("snapshot"), dict) else {}
+            snapshot_path = _compact_delivery_text(snapshot.get("path"), limit=120)
+            if snapshot_path:
+                width = snapshot.get("width")
+                height = snapshot.get("height")
+                size_label = ""
+                try:
+                    width_value = int(width)
+                    height_value = int(height)
+                    if width_value > 0 and height_value > 0:
+                        size_label = f" ({width_value}x{height_value})"
+                except Exception:
+                    size_label = ""
+                lines.append(f"  snapshot: {snapshot_path}{size_label}")
+            rendered += 1
+            if rendered >= 4:
+                break
+            continue
+
+        summary = _compact_delivery_text(
+            ref.get("title") or ref.get("path") or ref.get("url") or kind,
+            limit=96,
+        )
+        if summary:
+            prefix = kind or "ref"
+            lines.append(f"- {prefix}: {summary}")
+            rendered += 1
+        if rendered >= 4:
+            break
+
+    if rendered == 0:
+        return []
+    if len(refs) > rendered:
+        lines.append(f"- … ({len(refs) - rendered} more)")
+    return lines
+
+
 def _touch_registry_updated_at(group_id: str, ts: str) -> None:
     try:
         reg = load_registry()
@@ -104,6 +214,16 @@ def _touch_registry_updated_at(group_id: str, ts: str) -> None:
             reg.save()
     except Exception:
         pass
+
+
+def _normalize_refs(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    refs: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            refs.append(item)
+    return refs
 
 
 def _notify_headless_targets(
@@ -269,6 +389,7 @@ def handle_send(
         attachments = normalize_attachments(group, args.get("attachments"))
     except Exception as e:
         return _error("invalid_attachments", str(e))
+    refs = _normalize_refs(args.get("refs"))
 
     if not text.strip() and not attachments:
         return _error("empty_message", "message text cannot be empty")
@@ -285,6 +406,7 @@ def handle_send(
             priority=priority,
             reply_required=reply_required,
             to=to,
+            refs=refs,
             attachments=attachments,
             source_platform=source_platform or None,
             source_user_name=source_user_name or None,
@@ -307,6 +429,7 @@ def handle_send(
         priority=priority,
         reply_required=reply_required,
         event_id=event_id,
+        refs=refs,
         attachments=attachments,
         src_group_id=src_group_id,
         src_event_id=src_event_id,
@@ -447,6 +570,7 @@ def handle_reply(
         attachments = normalize_attachments(group, args.get("attachments"))
     except Exception as e:
         return _error("invalid_attachments", str(e))
+    refs = _normalize_refs(args.get("refs"))
     if not text.strip() and not attachments:
         return _error("empty_message", "message text cannot be empty")
 
@@ -464,6 +588,7 @@ def handle_reply(
             to=to,
             reply_to=reply_to,
             quote_text=quote_text,
+            refs=refs,
             attachments=attachments,
             source_platform=original_source_platform or None,
             source_user_name=original_source_user_name or None,
@@ -508,6 +633,7 @@ def handle_reply(
         priority=priority,
         reply_required=reply_required,
         event_id=event_id,
+        refs=refs,
         attachments=attachments,
     )
     for actor in list_actors(group):

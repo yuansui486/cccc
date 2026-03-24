@@ -118,6 +118,7 @@ MCP_TOOLS = [
                 },
                 "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
                 "reply_required": {"type": "boolean", "default": False},
+                "refs": {"type": "array", "items": {"type": "object"}},
             },
             required=["text"],
         ),
@@ -140,6 +141,7 @@ MCP_TOOLS = [
                 },
                 "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
                 "reply_required": {"type": "boolean", "default": False},
+                "refs": {"type": "array", "items": {"type": "object"}},
             },
             required=["text"],
         ),
@@ -163,6 +165,40 @@ MCP_TOOLS = [
                 "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
                 "reply_required": {"type": "boolean", "default": False},
                 "rel_path": {"type": "string", "description": "Required for action=blob_path. Can be just the blob filename (e.g. 'sha256_image.png') or full relative path ('state/blobs/sha256_image.png')."},
+            }
+        ),
+    },
+    {
+        "name": "cccc_presentation",
+        "description": (
+            "Group Presentation surface tool: action=get|publish|clear. "
+            "Use it to put a persistent report/preview/file on the Chat-tab Presentation rail. "
+            "When publishing with path, keep the file linked to the group's active workspace; "
+            "blob_rel_path is for snapshot-style uploaded assets."
+        ),
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "action": {"type": "string", "enum": ["get", "publish", "clear"], "default": "get"},
+                "slot": {
+                    "type": "string",
+                    "description": "Target slot: auto | slot-1 | slot-2 | slot-3 | slot-4. clear without slot clears all slots.",
+                },
+                "card_type": {
+                    "type": "string",
+                    "enum": ["markdown", "table", "image", "pdf", "file", "web_preview"],
+                },
+                "title": {"type": "string"},
+                "summary": {"type": "string"},
+                "source_label": {"type": "string"},
+                "source_ref": {"type": "string"},
+                "content": {"type": "string"},
+                "table": {"type": "object"},
+                "path": {"type": "string"},
+                "url": {"type": "string"},
+                "blob_rel_path": {"type": "string"},
+                "all": {"type": "boolean", "default": False},
             }
         ),
     },
@@ -492,7 +528,7 @@ MCP_TOOLS = [
     },
     {
         "name": "cccc_context_get",
-        "description": "Get the context control-plane snapshot (coordination, agent states, attention, board, panorama projection).",
+        "description": "Get the context control-plane snapshot (coordination, agent states, attention, board).",
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
@@ -539,21 +575,25 @@ MCP_TOOLS = [
     },
     {
         "name": "cccc_task",
-        "description": "Shared collaboration task hub (not runtime todo): action=list|create|update|move|restore. Use for multi-actor, long-horizon, or user-tracked work.",
+        "description": "Shared collaboration task hub (not runtime todo): action=list|create|update|move|restore|delete. Use for multi-actor, long-horizon, or user-tracked work. Lifecycle transitions are canonical via move; update with status auto-applies the matching lifecycle move.",
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
                 **_COMMON_ACTOR,
                 "action": {
                     "type": "string",
-                    "enum": ["list", "create", "update", "move", "restore"],
+                    "enum": ["list", "create", "update", "move", "restore", "delete"],
                     "default": "list",
                 },
                 "task_id": {"type": "string"},
                 "include_archived": {"type": "boolean", "default": False},
                 "title": {"type": "string"},
                 "outcome": {"type": "string"},
-                "status": {"type": "string", "enum": ["planned", "active", "done", "archived"]},
+                "status": {
+                    "type": "string",
+                    "enum": ["planned", "active", "done", "archived"],
+                    "description": "Lifecycle status. Required for action=move. If passed with action=update, the wrapper also applies the corresponding lifecycle transition.",
+                },
                 "parent_id": {"type": "string"},
                 "assignee": {"type": "string"},
                 "priority": {"type": "string"},

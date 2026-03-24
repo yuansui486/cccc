@@ -1,4 +1,4 @@
-"""Context v3 focused tests: CAS, coordination brief, task lifecycle, permissions, panorama, meta validation."""
+"""Context v3 focused tests: CAS, coordination brief, task lifecycle, permissions, and meta validation."""
 
 import json
 import os
@@ -157,6 +157,95 @@ class TestContextV2Ops(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_task_delete_removes_unexecuted_task_or_subtree(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._sync(gid, [{"op": "task.create", "title": "Draft", "outcome": "Scratch"}])
+            planned_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+
+            delete_planned, _ = self._sync(gid, [{"op": "task.delete", "task_id": planned_id}])
+            self.assertTrue(delete_planned.ok, getattr(delete_planned, "error", None))
+            self.assertEqual(self._tasks(gid)[0].result["tasks"], [])
+
+            self._sync(gid, [{"op": "task.create", "title": "Archived draft", "outcome": "Scratch"}])
+            archived_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+            archive_resp, _ = self._sync(gid, [{"op": "task.move", "task_id": archived_id, "status": "archived"}])
+            self.assertTrue(archive_resp.ok, getattr(archive_resp, "error", None))
+
+            delete_archived, _ = self._sync(gid, [{"op": "task.delete", "task_id": archived_id}])
+            self.assertTrue(delete_archived.ok, getattr(delete_archived, "error", None))
+            self.assertEqual(self._tasks(gid)[0].result["tasks"], [])
+
+            self._sync(gid, [{"op": "task.create", "title": "Parent", "outcome": "Scratch", "assignee": "peer1"}])
+            parent_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+            self._sync(gid, [{"op": "task.create", "title": "Child", "outcome": "Scratch", "parent_id": parent_id, "blocked_by": ["note"]}])
+
+            delete_parent, _ = self._sync(gid, [{"op": "task.delete", "task_id": parent_id}])
+            self.assertTrue(delete_parent.ok, getattr(delete_parent, "error", None))
+            self.assertEqual(self._tasks(gid)[0].result["tasks"], [])
+        finally:
+            cleanup()
+
+    def test_task_delete_rejects_tasks_with_execution_history_in_self_or_subtree(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+
+            self._sync(gid, [{"op": "task.create", "title": "Historical", "outcome": "Keep history"}])
+            historical_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+            self._sync(gid, [{"op": "task.move", "task_id": historical_id, "status": "done"}])
+            self._sync(gid, [{"op": "task.move", "task_id": historical_id, "status": "archived"}])
+            delete_historical, _ = self._sync(gid, [{"op": "task.delete", "task_id": historical_id}])
+            self.assertFalse(delete_historical.ok)
+            self.assertIn("never moved past planned", str(delete_historical.error.message).lower())
+
+            self._sync(gid, [{"op": "task.create", "title": "Parent", "outcome": "Has child"}])
+            parent_id = next(task["id"] for task in self._tasks(gid)[0].result["tasks"] if task["title"] == "Parent")
+            self._sync(gid, [{"op": "task.create", "title": "Child", "outcome": "Nested", "parent_id": parent_id}])
+            child_id = next(task["id"] for task in self._tasks(gid)[0].result["tasks"] if task["title"] == "Child")
+            self._sync(gid, [{"op": "task.move", "task_id": child_id, "status": "active"}])
+            delete_parent, _ = self._sync(gid, [{"op": "task.delete", "task_id": parent_id}])
+            self.assertFalse(delete_parent.ok)
+            self.assertIn("subtree", str(delete_parent.error.message).lower())
+        finally:
+            cleanup()
+
+    def test_task_delete_clears_pointing_agent_state_for_deleted_subtree(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._sync(gid, [{"op": "task.create", "title": "Parent", "outcome": "Scratch"}])
+            parent_id = self._tasks(gid)[0].result["tasks"][0]["id"]
+            self._sync(gid, [{"op": "task.create", "title": "Child", "outcome": "Scratch", "parent_id": parent_id}])
+            tasks = self._tasks(gid)[0].result["tasks"]
+            child_id = next(task["id"] for task in tasks if task["title"] == "Child")
+
+            self._sync(
+                gid,
+                [
+                    {
+                        "op": "agent_state.update",
+                        "actor_id": "peer1",
+                        "active_task_id": child_id,
+                        "focus": "Child",
+                        "what_changed": f"{child_id} -> planned",
+                    }
+                ],
+                by="peer1",
+            )
+
+            delete_resp, _ = self._sync(gid, [{"op": "task.delete", "task_id": parent_id}])
+            self.assertTrue(delete_resp.ok, getattr(delete_resp, "error", None))
+
+            ctx, _ = self._context(gid)
+            state = [item for item in ctx.result["agent_states"] if item["id"] == "peer1"][0]
+            self.assertIsNone(state["hot"]["active_task_id"])
+            self.assertEqual(state["hot"]["focus"], "")
+            self.assertEqual(state["warm"]["what_changed"], "")
+        finally:
+            cleanup()
+
     def test_task_move_autosyncs_assignee_agent_state(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -202,23 +291,6 @@ class TestContextV2Ops(unittest.TestCase):
             ctx, _ = self._context(gid)
             agent_ids = [str(item.get("id") or "") for item in ctx.result["agent_states"]]
             self.assertEqual(agent_ids, ["PeerA", "管理员", "alpha"])
-        finally:
-            cleanup()
-
-    def test_panorama_mermaid_includes_coordination_tasks_and_agents(self) -> None:
-        _, cleanup = self._with_home()
-        try:
-            gid = self._create_group()
-            self._sync(gid, [{"op": "coordination.brief.update", "objective": "Ship B3", "current_focus": "Context panel"}])
-            self._sync(gid, [{"op": "task.create", "title": "Modal", "outcome": "Redesign modal", "assignee": "foreman"}])
-            task_id = self._tasks(gid)[0].result["tasks"][0]["id"]
-            self._sync(gid, [{"op": "task.move", "task_id": task_id, "status": "active"}])
-            ctx, _ = self._context(gid)
-            mermaid = ctx.result["panorama"]["mermaid"]
-            self.assertIn("Coordination", mermaid)
-            self.assertIn("Ship B3", mermaid)
-            self.assertIn("Modal", mermaid)
-            self.assertIn("foreman", mermaid)
         finally:
             cleanup()
 

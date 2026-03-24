@@ -62,6 +62,11 @@ from .handlers.cccc_messaging import (  # noqa: F401
     message_reply,
     message_send,
 )
+from .handlers.presentation import (  # noqa: F401
+    presentation_clear,
+    presentation_get,
+    presentation_publish,
+)
 from .handlers.cccc_group_actor import (  # noqa: F401
     _sanitize_actors_for_agent,
     _sanitize_group_doc_for_agent,
@@ -122,6 +127,7 @@ from .handlers.context import (  # noqa: F401
     coordination_add_note,
     coordination_get,
     coordination_update_brief,
+    task_delete,
     role_notes_clear,
     role_notes_get,
     role_notes_set,
@@ -275,12 +281,14 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
         gid = _resolve_group_id(arguments)
         aid = _resolve_self_actor_id(arguments)
         to_raw = arguments.get("to")
+        refs_raw = arguments.get("refs")
         if isinstance(to_raw, list):
             to_val: Optional[List[str]] = [str(x).strip() for x in to_raw if str(x).strip()]
         elif isinstance(to_raw, str) and to_raw.strip():
             to_val = [to_raw.strip()]
         else:
             to_val = None
+        refs_val = [item for item in refs_raw if isinstance(item, dict)] if isinstance(refs_raw, list) else None
         return message_send(
             group_id=gid,
             dst_group_id=arguments.get("dst_group_id"),
@@ -289,18 +297,21 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             to=to_val,
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
+            refs=refs_val,
         )
 
     if name == "cccc_message_reply":
         gid = _resolve_group_id(arguments)
         aid = _resolve_self_actor_id(arguments)
         to_raw = arguments.get("to")
+        refs_raw = arguments.get("refs")
         if isinstance(to_raw, list):
             to_val_reply: Optional[List[str]] = [str(x).strip() for x in to_raw if str(x).strip()]
         elif isinstance(to_raw, str) and to_raw.strip():
             to_val_reply = [to_raw.strip()]
         else:
             to_val_reply = None
+        refs_val_reply = [item for item in refs_raw if isinstance(item, dict)] if isinstance(refs_raw, list) else None
         reply_to = str(arguments.get("event_id") or arguments.get("reply_to") or "").strip()
         return message_reply(
             group_id=gid,
@@ -310,6 +321,7 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             to=to_val_reply,
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
+            refs=refs_val_reply,
         )
 
     if name == "cccc_file":
@@ -336,6 +348,37 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
                 reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             )
         raise MCPError(code="invalid_request", message="cccc_file action must be 'send' or 'blob_path'")
+
+    if name == "cccc_presentation":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        action = str(arguments.get("action") or "get").strip().lower()
+        if action == "get":
+            return presentation_get(group_id=gid)
+        if action == "publish":
+            return presentation_publish(
+                group_id=gid,
+                actor_id=aid,
+                slot=str(arguments.get("slot") or "auto"),
+                card_type=str(arguments.get("card_type") or ""),
+                title=str(arguments.get("title") or ""),
+                summary=str(arguments.get("summary") or ""),
+                source_label=str(arguments.get("source_label") or ""),
+                source_ref=str(arguments.get("source_ref") or ""),
+                content=str(arguments.get("content") or ""),
+                table=arguments.get("table"),
+                path=str(arguments.get("path") or ""),
+                url=str(arguments.get("url") or ""),
+                blob_rel_path=str(arguments.get("blob_rel_path") or ""),
+            )
+        if action == "clear":
+            return presentation_clear(
+                group_id=gid,
+                actor_id=aid,
+                slot=str(arguments.get("slot") or ""),
+                clear_all=coerce_bool(arguments.get("all"), default=False),
+            )
+        raise MCPError(code="invalid_request", message="cccc_presentation action must be 'get', 'publish', or 'clear'")
 
     # --- Group / Actor ---
     if name == "cccc_group":
@@ -726,6 +769,7 @@ def _handle_context_namespace(name: str, arguments: Dict[str, Any]) -> Optional[
         task_update_fn=task_update,
         task_move_fn=task_move,
         task_restore_fn=task_restore,
+        task_delete_fn=task_delete,
         agent_state_get_fn=agent_state_get,
         agent_state_update_fn=agent_state_update,
         agent_state_clear_fn=agent_state_clear,

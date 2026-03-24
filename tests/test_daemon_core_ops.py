@@ -82,6 +82,25 @@ class TestDaemonCoreOps(unittest.TestCase):
         finally:
             cleanup_second()
 
+    def test_branding_update_permissions_and_roundtrip(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            denied, _ = self._call("branding_update", {"by": "peer1", "patch": {"product_name": "Acme"}})
+            self.assertFalse(denied.ok)
+            self.assertEqual(str(getattr(denied, "error", None).code), "permission_denied")
+
+            update, _ = self._call("branding_update", {"by": "user", "patch": {"product_name": "Acme Console"}})
+            self.assertTrue(update.ok, getattr(update, "error", None))
+
+            get, _ = self._call("branding_get", {})
+            self.assertTrue(get.ok, getattr(get, "error", None))
+            branding = (get.result or {}).get("branding") if isinstance(get.result, dict) else {}
+            self.assertIsInstance(branding, dict)
+            assert isinstance(branding, dict)
+            self.assertEqual(str(branding.get("product_name") or ""), "Acme Console")
+        finally:
+            cleanup()
+
     def test_try_handle_unknown_daemon_core_op_returns_none(self) -> None:
         from cccc.daemon.ops.daemon_core_ops import try_handle_daemon_core_op
 
@@ -95,6 +114,8 @@ class TestDaemonCoreOps(unittest.TestCase):
                 get_observability=lambda: {},
                 update_observability_settings=lambda patch: patch,
                 apply_observability_settings=lambda _obs: None,
+                get_web_branding=lambda: {},
+                update_web_branding_settings=lambda patch: patch,
             )
         )
 

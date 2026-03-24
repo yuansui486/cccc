@@ -1,12 +1,28 @@
 // Chat composer state store with per-group draft preservation.
 import { create } from "zustand";
-import type { ReplyTarget } from "../types";
+import type { PresentationMessageRef, ReplyTarget } from "../types";
+
+export function getEffectiveComposerDestGroupId(
+  destGroupId: string,
+  activeGroupId: string,
+  selectedGroupId: string
+): string {
+  const selected = String(selectedGroupId || "").trim();
+  const active = String(activeGroupId || "").trim();
+  const dest = String(destGroupId || "").trim();
+
+  if (!selected) return dest;
+  // 切组首帧 composer 可能仍挂在旧组，先避免把旧目标组带到新组。
+  if (active !== selected) return selected;
+  return dest || selected;
+}
 
 interface GroupDraft {
   composerText: string;
   composerFiles: File[];
   toText: string;
   replyTarget: ReplyTarget;
+  quotedPresentationRef: PresentationMessageRef | null;
   priority: "normal" | "attention";
   replyRequired: boolean;
   destGroupId: string;
@@ -19,6 +35,7 @@ interface ComposerState {
   composerFiles: File[];
   toText: string;
   replyTarget: ReplyTarget;
+  quotedPresentationRef: PresentationMessageRef | null;
   priority: "normal" | "attention";
   replyRequired: boolean;
   destGroupId: string;
@@ -32,6 +49,7 @@ interface ComposerState {
   appendComposerFiles: (files: File[]) => void;
   setToText: (text: string) => void;
   setReplyTarget: (target: ReplyTarget) => void;
+  setQuotedPresentationRef: (ref: PresentationMessageRef | null) => void;
   setPriority: (priority: "normal" | "attention") => void;
   setReplyRequired: (value: boolean) => void;
   setDestGroupId: (groupId: string) => void;
@@ -49,6 +67,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   composerFiles: [],
   toText: "",
   replyTarget: null,
+  quotedPresentationRef: null,
   priority: "normal",
   replyRequired: false,
   destGroupId: "",
@@ -77,6 +96,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
 
   setToText: (text) => set({ toText: text }),
   setReplyTarget: (target) => set({ replyTarget: target }),
+  setQuotedPresentationRef: (ref) => set({ quotedPresentationRef: ref }),
   setPriority: (priority) => set({ priority }),
   setReplyRequired: (value) => set({ replyRequired: !!value }),
   setDestGroupId: (groupId) => set({ destGroupId: String(groupId || "").trim() }),
@@ -87,6 +107,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       composerFiles: [],
       toText: "",
       replyTarget: null,
+      quotedPresentationRef: null,
       priority: "normal",
       replyRequired: false,
     }),
@@ -101,7 +122,8 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
         state.composerText.trim() ||
         state.composerFiles.length > 0 ||
         state.toText.trim() ||
-        state.replyTarget;
+        state.replyTarget ||
+        state.quotedPresentationRef;
 
       if (hasContent) {
         newDrafts[fromGroupId] = {
@@ -109,6 +131,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
           composerFiles: state.composerFiles,
           toText: state.toText,
           replyTarget: state.replyTarget,
+          quotedPresentationRef: state.quotedPresentationRef,
           priority: state.priority,
           replyRequired: state.replyRequired,
           destGroupId: state.destGroupId,
@@ -129,6 +152,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       composerFiles: draft?.composerFiles || [],
       toText: draft?.toText || "",
       replyTarget: draft?.replyTarget || null,
+      quotedPresentationRef: draft?.quotedPresentationRef || null,
       priority: draft?.priority || "normal",
       replyRequired: draft?.replyRequired || false,
       // 切组后先回到当前组，跨组发送由用户显式重新选择，避免恢复草稿时误触发远端拉取。

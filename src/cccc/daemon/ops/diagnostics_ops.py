@@ -9,17 +9,127 @@ from typing import Any, Callable, Dict, Optional
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.actors import find_actor, get_effective_role, list_actors
 from ...kernel.group import load_group
+from ...kernel.settings import get_remote_access_settings, resolve_remote_access_web_binding
 from ...kernel.terminal_transcript import get_terminal_transcript_settings
 from ...paths import ensure_home
+from ...ports.web.runtime_control import (
+    http_url,
+    is_loopback_host,
+    is_wildcard_host,
+    local_display_url,
+    read_web_runtime_state,
+    web_runtime_log_path,
+    web_runtime_pid_candidates,
+)
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
+from ...util.process import pid_is_alive
 from ...util.time import utc_now_iso
 from ... import __version__
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def _binding_remote_url(host: str, port: int, public_url: str) -> Optional[str]:
+    direct_url = str(public_url or "").strip()
+    if direct_url:
+        return direct_url
+    normalized_host = str(host or "").strip() or "127.0.0.1"
+    if is_loopback_host(normalized_host):
+        return None
+    if is_wildcard_host(normalized_host):
+        return http_url("<your-lan-ip>", int(port))
+    return http_url(normalized_host, int(port))
+
+
+def _web_exposure_class(host: str, public_url: str) -> str:
+    if str(public_url or "").strip():
+        return "public"
+    return "local" if is_loopback_host(host) else "private"
+
+
+def _build_web_debug_snapshot(*, home: Path) -> Dict[str, Any]:
+    binding = resolve_remote_access_web_binding()
+    remote_cfg = get_remote_access_settings()
+    runtime = read_web_runtime_state(home)
+
+    host = str(binding.get("web_host") or "").strip() or "127.0.0.1"
+    port = _safe_int(binding.get("web_port")) or 8848
+    public_url = str(binding.get("web_public_url") or "").strip()
+    exposure_class = _web_exposure_class(host, public_url)
+
+    runtime_pid = _safe_int(runtime.get("pid"))
+    launcher_pid = _safe_int(runtime.get("launcher_pid"))
+    runtime_host = str(runtime.get("host") or "").strip()
+    runtime_port = _safe_int(runtime.get("port"))
+    runtime_pid_alive = runtime_pid > 0 and pid_is_alive(runtime_pid)
+    launcher_pid_alive = launcher_pid > 0 and pid_is_alive(launcher_pid)
+    pid_candidates = web_runtime_pid_candidates(runtime)
+    live_pid_candidates = [pid for pid in pid_candidates if pid > 0 and pid_is_alive(pid)]
+
+    runtime_matches_binding = bool(
+        runtime_pid_alive
+        and runtime_host == host
+        and runtime_port == port
+    )
+
+    issues: list[str] = []
+    if runtime_pid > 0 and not runtime_pid_alive:
+        issues.append("runtime_pid_stale")
+    if launcher_pid > 0 and not launcher_pid_alive:
+        issues.append("launcher_pid_stale")
+    if runtime_pid_alive and not runtime_matches_binding:
+        issues.append("binding_apply_pending")
+    if str(runtime.get("last_apply_error") or "").strip():
+        issues.append("last_apply_error")
+
+    return {
+        "configured": {
+            "host": host,
+            "host_source": str(binding.get("web_host_source") or "default"),
+            "port": int(port),
+            "port_source": str(binding.get("web_port_source") or "default"),
+            "public_url": (public_url or None),
+            "public_url_source": str(binding.get("web_public_url_source") or "none"),
+            "exposure_class": exposure_class,
+            "desired_local_url": local_display_url(host, port),
+            "desired_remote_url": _binding_remote_url(host, port, public_url),
+        },
+        "remote_access": {
+            "provider": str(remote_cfg.get("provider") or "off"),
+            "enabled": bool(remote_cfg.get("enabled")),
+            "require_access_token": bool(remote_cfg.get("require_access_token")),
+        },
+        "runtime": {
+            "pid": (runtime_pid if runtime_pid > 0 else None),
+            "pid_alive": bool(runtime_pid_alive),
+            "launcher_pid": (launcher_pid if launcher_pid > 0 else None),
+            "launcher_pid_alive": bool(launcher_pid_alive),
+            "pid_candidates": pid_candidates,
+            "live_pid_candidates": live_pid_candidates,
+            "host": (runtime_host or None),
+            "port": (runtime_port if runtime_port > 0 else None),
+            "mode": (str(runtime.get("mode") or "").strip() or None),
+            "started_at": (str(runtime.get("started_at") or "").strip() or None),
+            "supervisor_managed": bool(runtime.get("supervisor_managed")),
+            "supervisor_pid": (_safe_int(runtime.get("supervisor_pid")) or None),
+            "launch_source": (str(runtime.get("launch_source") or "").strip() or None),
+            "last_apply_error": (str(runtime.get("last_apply_error") or "").strip() or None),
+        },
+        "runtime_matches_configured_binding": bool(runtime_matches_binding),
+        "log_path": str(web_runtime_log_path(home)),
+        "issues": issues,
+    }
 
 
 def handle_debug_snapshot(
@@ -43,10 +153,17 @@ def handle_debug_snapshot(
             return _error("permission_denied", "debug tools are restricted to user + foreman")
 
     try:
+        home = ensure_home()
         out: Dict[str, Any] = {
             "developer_mode": True,
             "observability": get_observability(),
-            "daemon": {"pid": os.getpid(), "version": __version__, "ts": utc_now_iso()},
+            "daemon": {
+                "pid": os.getpid(),
+                "version": __version__,
+                "ts": utc_now_iso(),
+                "log_path": str(home / "daemon" / "ccccd.log"),
+            },
+            "web": _build_web_debug_snapshot(home=home),
         }
         if group is not None:
             out["group"] = {

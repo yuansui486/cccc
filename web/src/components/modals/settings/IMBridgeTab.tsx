@@ -31,6 +31,11 @@ interface IMBridgeTabProps {
   setImDingtalkAppSecret: (v: string) => void;
   imDingtalkRobotCode: string;
   setImDingtalkRobotCode: (v: string) => void;
+  // WeCom fields
+  imWecomBotId: string;
+  setImWecomBotId: (v: string) => void;
+  imWecomSecret: string;
+  setImWecomSecret: (v: string) => void;
   // Actions
   imBusy: boolean;
   onSaveConfig: () => void;
@@ -61,6 +66,10 @@ export function IMBridgeTab({
   setImDingtalkAppSecret,
   imDingtalkRobotCode,
   setImDingtalkRobotCode,
+  imWecomBotId,
+  setImWecomBotId,
+  imWecomSecret,
+  setImWecomSecret,
   imBusy,
   onSaveConfig,
   onRemoveConfig,
@@ -109,6 +118,9 @@ export function IMBridgeTab({
     if (imPlatform === "dingtalk") {
       return !!imDingtalkAppKey && !!imDingtalkAppSecret;
     }
+    if (imPlatform === "wecom") {
+      return !!imWecomBotId && !!imWecomSecret;
+    }
     if (!imBotTokenEnv) return false;
     if (imPlatform === "slack" && !imAppTokenEnv) return false;
     return true;
@@ -146,7 +158,7 @@ export function IMBridgeTab({
     } finally {
       setAuthLoading(false);
     }
-  }, [groupId]);
+  }, [groupId, t]);
 
   const loadPendingRequests = useCallback(async (opts?: { silent?: boolean }) => {
     if (!groupId) return;
@@ -173,7 +185,7 @@ export function IMBridgeTab({
         setPendingLoading(false);
       }
     }
-  }, [groupId]);
+  }, [groupId, t]);
 
   const loadIMAuthState = useCallback(async () => {
     await Promise.all([loadAuthorizedChats(), loadPendingRequests()]);
@@ -331,6 +343,7 @@ export function IMBridgeTab({
             <option value="discord">Discord</option>
             <option value="feishu">飞书</option>
             <option value="dingtalk">钉钉</option>
+            <option value="wecom">{t("imBridge.wecom")}</option>
           </select>
         </div>
 
@@ -462,6 +475,38 @@ export function IMBridgeTab({
               </p>
               <p className="text-xs mt-1 text-[var(--color-text-muted)]">
                 <Trans i18nKey="imBridge.dingtalkPackageHint" ns="settings" components={[<code />]} />
+              </p>
+            </div>
+          </>
+        )}
+
+        {/* WeCom fields */}
+        {imPlatform === "wecom" && (
+          <>
+            <div>
+              <label className={labelClass()}>{t("imBridge.wecomBotId")}</label>
+              <input
+                type="text"
+                value={imWecomBotId}
+                onChange={(e) => setImWecomBotId(e.target.value)}
+                placeholder="WECOM_BOT_ID"
+                className={`${inputClass()} placeholder-[var(--color-text-muted)]`}
+              />
+              <p className="text-xs mt-1 text-[var(--color-text-muted)]">
+                {t("imBridge.wecomBotIdHint")}
+              </p>
+            </div>
+            <div>
+              <label className={labelClass()}>{t("imBridge.wecomSecret")}</label>
+              <input
+                type="password"
+                value={imWecomSecret}
+                onChange={(e) => setImWecomSecret(e.target.value)}
+                placeholder="WECOM_SECRET (or secret)"
+                className={`${inputClass()} placeholder-[var(--color-text-muted)]`}
+              />
+              <p className="text-xs mt-1 text-[var(--color-text-muted)]">
+                {t("imBridge.wecomSecretHint")}
               </p>
             </div>
           </>

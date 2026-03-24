@@ -125,7 +125,7 @@ export function SortableGroupItem({
               "flex-shrink-0 cursor-grab active:cursor-grabbing p-1 -ml-1 rounded transition-opacity touch-none",
               "hidden md:block md:opacity-0 md:group-hover/item:opacity-100",
               isDragging && "!block !opacity-100",
-              "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+              "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
             )}
             onClick={(e) => e.stopPropagation()}
           >

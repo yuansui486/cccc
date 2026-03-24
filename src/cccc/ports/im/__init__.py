@@ -2,7 +2,7 @@
 CCCC IM Bridge Port
 
 Provides IM platform integration for CCCC groups.
-Supported platforms: Telegram, Slack, Discord, Feishu/Lark, DingTalk.
+Supported platforms: Telegram, Slack, Discord, Feishu/Lark, DingTalk, WeCom.
 Each group can bind to one IM bot for remote control and notifications.
 
 Architecture:

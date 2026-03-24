@@ -304,7 +304,7 @@ Recommended options:
 | codex | `codex` | Codex CLI |
 | droid | `droid` | Droid |
 | gemini | `gemini` | Gemini CLI |
-| kimi | `kimi` | Kimi CLI |
+| kimi | `kimi --yolo` | Kimi CLI |
 | neovate | `neovate` | Neovate Code |
 | custom | Custom | Any command |
 

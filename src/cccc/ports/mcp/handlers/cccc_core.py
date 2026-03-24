@@ -574,6 +574,17 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             sections.append("\n".join(lines_space).rstrip())
 
     if active_list or autoload_list:
+        def _append_skill_preview(lines_ref: List[str], item: Dict[str, Any]) -> None:
+            preview = str(item.get("capsule_preview") or "").strip()
+            if not preview:
+                return
+            preview_lines = [str(raw).strip() for raw in preview.splitlines() if str(raw).strip()]
+            if not preview_lines:
+                return
+            lines_ref.append("    working_rules:")
+            for raw in preview_lines[:4]:
+                lines_ref.append(f"      - {_trim_text(raw, max_chars=140)}")
+
         lines: List[str] = ["## Active Skills (Runtime)"]
         if autoload_list:
             lines.append("- autoload:")
@@ -599,6 +610,7 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
                 if desc:
                     line += f": {desc[:120]}"
                 lines.append(line)
+                _append_skill_preview(lines, item)
         lines.extend(
             [
                 "- Capsule skill is runtime capsule activation, not a full local skill-package install.",

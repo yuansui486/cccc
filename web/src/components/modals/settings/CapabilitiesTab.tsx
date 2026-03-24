@@ -46,6 +46,10 @@ function normalizeReadinessPreview(value: unknown): CapabilityReadinessPreview |
   return value && typeof value === "object" ? (value as CapabilityReadinessPreview) : null;
 }
 
+function firstRecommendationLine(value?: string[]) {
+  return Array.isArray(value) ? String(value[0] || "").trim() : "";
+}
+
 export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabProps) {
   const { t } = useTranslation("settings");
   const [loading, setLoading] = useState(false);
@@ -298,6 +302,10 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
         capId,
         String(row.name || ""),
         String(row.description_short || ""),
+        ...(Array.isArray(row.use_when) ? row.use_when.map((x) => String(x || "")) : []),
+        ...(Array.isArray(row.avoid_when) ? row.avoid_when.map((x) => String(x || "")) : []),
+        ...(Array.isArray(row.gotchas) ? row.gotchas.map((x) => String(x || "")) : []),
+        String(row.evidence_kind || ""),
         String(row.source_id || ""),
         ...(Array.isArray(row.tags) ? row.tags.map((x) => String(x || "")) : []),
       ]
@@ -601,6 +609,12 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
             const capId = String(row.capability_id || "");
             const blockedNow = Boolean(row.blocked_global);
             const readinessPreview = normalizeReadinessPreview(row.readiness_preview);
+            const recommendationMeta = [
+              { label: t("capabilities.useWhen"), value: firstRecommendationLine(row.use_when) },
+              { label: t("capabilities.verifyWith"), value: String(row.evidence_kind || "").trim() },
+              { label: t("capabilities.gotcha"), value: firstRecommendationLine(row.gotchas) },
+              { label: t("capabilities.avoidWhen"), value: firstRecommendationLine(row.avoid_when) },
+            ].filter((entry) => entry.value);
             return (
               <div key={capId} className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
@@ -609,6 +623,16 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
                     <div className="text-[11px] truncate text-[var(--color-text-tertiary)]">{capId}</div>
                     {String(row.description_short || "").trim() ? (
                       <div className="text-[11px] mt-1 text-[var(--color-text-tertiary)]">{String(row.description_short || "")}</div>
+                    ) : null}
+                    {recommendationMeta.length ? (
+                      <div className="mt-1.5 space-y-0.5">
+                        {recommendationMeta.map((entry) => (
+                          <div key={`${capId}:${entry.label}`} className="text-[10px] leading-4 text-[var(--color-text-muted)]">
+                            <span className="font-medium text-[var(--color-text-tertiary)]">{entry.label}: </span>
+                            <span>{entry.value}</span>
+                          </div>
+                        ))}
+                      </div>
                     ) : null}
                     <div className="flex flex-wrap gap-1 mt-1">
                       {row.kind ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{row.kind}</span> : null}

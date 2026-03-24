@@ -37,5 +37,5 @@ features:
     details: Combine reminders, one-time operational actions, and policy guardrails to keep groups moving.
   - icon: 🔌
     title: Remote-Ready by Design
-    details: Bridge to Telegram, Slack, Discord, Feishu, and DingTalk for mobile ops and out-of-band intervention.
+    details: Bridge to Telegram, Slack, Discord, Feishu, DingTalk, and WeCom for mobile ops and out-of-band intervention.
 ---

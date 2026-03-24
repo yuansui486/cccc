@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 
 class TestMcpCapabilityUse(unittest.TestCase):
+    def _with_home(self):
+        old_home = os.environ.get("CCCC_HOME")
+        td_ctx = tempfile.TemporaryDirectory()
+        td = td_ctx.__enter__()
+        os.environ["CCCC_HOME"] = td
+
+        def cleanup() -> None:
+            td_ctx.__exit__(None, None, None)
+            if old_home is None:
+                os.environ.pop("CCCC_HOME", None)
+            else:
+                os.environ["CCCC_HOME"] = old_home
+
+        return td, cleanup
+
     def test_capability_use_calls_core_tool_without_capability_enable(self) -> None:
         from cccc.ports.mcp.server import capability_use
 
@@ -261,6 +277,91 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertIn("active_capsule_skills", runtime_visible_in)
         self.assertIn("active_capsule_skills", str(result.get("runtime_activation_evidence") or ""))
         self.assertIn("$CODEX_HOME/skills", str(result.get("next_step_hint") or ""))
+
+    def test_capability_use_builtin_runtime_bootstrap_inproc_enables_skill_and_dependencies(self) -> None:
+        from cccc.contracts.v1 import DaemonRequest
+        from cccc.daemon.server import handle_request
+        from cccc.ports.mcp import common as mcp_common
+        from cccc.ports.mcp import server as mcp_server
+
+        def _fake_call_daemon(req, timeout_s=None, **kwargs):
+            _ = timeout_s
+            _ = kwargs
+            resp, _meta = handle_request(DaemonRequest.model_validate(req))
+            if bool(resp.ok):
+                return {"ok": True, "result": resp.result}
+            err = resp.error
+            return {
+                "ok": False,
+                "error": {
+                    "code": str(getattr(err, "code", "") or "daemon_error"),
+                    "message": str(getattr(err, "message", "") or "daemon error"),
+                    "details": dict(getattr(err, "details", {}) or {}),
+                },
+            }
+
+        _, cleanup = self._with_home()
+        try:
+            create_req = DaemonRequest.model_validate({"op": "group_create", "args": {"title": "rb", "topic": "", "by": "user"}})
+            create_resp, _ = handle_request(create_req)
+            self.assertTrue(create_resp.ok, getattr(create_resp, "error", None))
+            group_id = str((create_resp.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add_req = DaemonRequest.model_validate(
+                {
+                    "op": "actor_add",
+                    "args": {
+                        "group_id": group_id,
+                        "actor_id": "peer-1",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "by": "user",
+                    },
+                }
+            )
+            add_resp, _ = handle_request(add_req)
+            self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
+
+            with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon), patch.dict(
+                os.environ,
+                {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "peer-1"},
+                clear=False,
+            ):
+                search_result = mcp_server.handle_tool_call(
+                    "cccc_capability_search",
+                    {"query": "mcp injection", "kind": "skill", "include_external": False, "limit": 10},
+                )
+                items = search_result.get("items") if isinstance(search_result.get("items"), list) else []
+                ids = {str(item.get("capability_id") or "") for item in items if isinstance(item, dict)}
+                self.assertIn("skill:cccc:runtime-bootstrap", ids)
+
+                use_result = mcp_server.handle_tool_call(
+                    "cccc_capability_use",
+                    {"capability_id": "skill:cccc:runtime-bootstrap", "scope": "session"},
+                )
+                self.assertTrue(bool(use_result.get("enabled")))
+                self.assertFalse(bool(use_result.get("tool_called")))
+                self.assertEqual(str(use_result.get("state") or ""), "activation_pending")
+                self.assertEqual(str(use_result.get("skill_mode") or ""), "capsule_runtime")
+                skill_payload = use_result.get("skill") if isinstance(use_result.get("skill"), dict) else {}
+                self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:cccc:runtime-bootstrap")
+                applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
+                self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
+
+                state_result = mcp_server.handle_tool_call("cccc_capability_state", {})
+                enabled = set(state_result.get("enabled_capabilities") or [])
+                self.assertIn("skill:cccc:runtime-bootstrap", enabled)
+                self.assertIn("pack:diagnostics", enabled)
+                self.assertIn("pack:group-runtime", enabled)
+                active_skills = state_result.get("active_capsule_skills") if isinstance(state_result.get("active_capsule_skills"), list) else []
+                active_ids = {str(item.get("capability_id") or "") for item in active_skills if isinstance(item, dict)}
+                self.assertIn("skill:cccc:runtime-bootstrap", active_ids)
+                visible = set(state_result.get("visible_tools") or [])
+                self.assertIn("cccc_terminal", visible)
+                self.assertIn("cccc_actor", visible)
+        finally:
+            cleanup()
 
 
     def test_memory_read_tools_skip_actor_id_injection(self) -> None:

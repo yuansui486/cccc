@@ -351,7 +351,7 @@ For detailed security guidance, see [SECURITY.md](SECURITY.md).
 | [Getting Started](https://chesterra.github.io/cccc/guide/getting-started/) | Install, launch, create your first group |
 | [Use Cases](https://chesterra.github.io/cccc/guide/use-cases) | Practical multi-agent scenarios |
 | [Web UI Guide](https://chesterra.github.io/cccc/guide/web-ui) | Navigating the dashboard |
-| [IM Bridge Setup](https://chesterra.github.io/cccc/guide/im-bridge/) | Connect Telegram, Slack, Discord, Feishu, DingTalk |
+| [IM Bridge Setup](https://chesterra.github.io/cccc/guide/im-bridge/) | Connect Telegram, Slack, Discord, Feishu, DingTalk, WeCom |
 | [Operations Runbook](https://chesterra.github.io/cccc/guide/operations) | Recovery, troubleshooting, maintenance |
 | [CLI Reference](https://chesterra.github.io/cccc/reference/cli) | Complete command reference |
 | [SDK (Python/TypeScript)](https://github.com/ChesterRa/cccc-sdk) | Integrate apps/services with official daemon clients |

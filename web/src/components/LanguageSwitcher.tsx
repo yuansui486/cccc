@@ -13,6 +13,7 @@ import {
 interface LanguageSwitcherProps {
   isDark: boolean;
   showLabel?: boolean;
+  variant?: "default" | "row" | "rail";
   className?: string;
 }
 
@@ -22,7 +23,7 @@ const LANGUAGE_NATIVE_NAME: Record<LanguageCode, string> = {
   ja: "日本語",
 };
 
-export function LanguageSwitcher({ isDark: _isDark, showLabel = false, className }: LanguageSwitcherProps) {
+export function LanguageSwitcher({ isDark: _isDark, showLabel = false, variant = "default", className }: LanguageSwitcherProps) {
   const { i18n, t } = useTranslation(["layout", "common"]);
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -34,11 +35,13 @@ export function LanguageSwitcher({ isDark: _isDark, showLabel = false, className
 
   const close = useCallback(() => setIsOpen(false), []);
 
+  const isRow = variant === "row";
+  const isRail = variant === "rail";
   // Position the panel relative to the trigger button
   useEffect(() => {
     if (!isOpen || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
-    if (showLabel) {
+    if (showLabel || isRow) {
       // Mobile: open upward, centered on button
       setPanelStyle({
         position: "fixed",
@@ -54,7 +57,7 @@ export function LanguageSwitcher({ isDark: _isDark, showLabel = false, className
         right: window.innerWidth - rect.right,
       });
     }
-  }, [isOpen, showLabel]);
+  }, [isOpen, isRow, showLabel]);
 
   // Click outside & ESC to close
   useEffect(() => {
@@ -105,7 +108,7 @@ export function LanguageSwitcher({ isDark: _isDark, showLabel = false, className
                   "w-full flex items-center gap-3 px-3 py-2 text-[13px] transition-colors relative",
                   isActive
                     ? "text-[var(--color-text-primary)]"
-                    : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-black/[.03] dark:hover:bg-white/5"
+                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-black/[.03] dark:hover:bg-[var(--glass-tab-bg-hover)]"
                 )}
               >
                 {isActive && (
@@ -134,24 +137,43 @@ export function LanguageSwitcher({ isDark: _isDark, showLabel = false, className
     : null;
 
   return (
-    <div className={classNames(showLabel && "w-full")}>
+    <div className={classNames((showLabel || isRow) && "w-full")}>
       <button
         ref={triggerRef}
         onClick={() => setIsOpen((v) => !v)}
         className={classNames(
           "transition-all font-semibold tracking-wide select-none",
-          showLabel
+          isRow
+            ? "w-full flex items-center justify-between gap-3 px-3.5 py-3 rounded-xl text-sm min-h-[48px]"
+            : isRail
+            ? "flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl text-xs shrink-0 border border-transparent bg-transparent"
+            : showLabel
             ? "w-full flex items-center justify-center gap-2 px-3 py-3 text-sm rounded-2xl min-h-[52px] glass-btn"
             : "flex items-center justify-center w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl text-xs shrink-0 glass-btn",
-          "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
+          isRow
+            ? "text-[var(--color-text-primary)] hover:bg-black/5 dark:hover:bg-white/6"
+            : isRail
+            ? "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
+            : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
           className
         )}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         aria-label={t("layout:currentLanguage", { language: currentLanguageLabel })}
       >
-        {LANGUAGE_SHORT_LABEL[currentLang]}
-        {showLabel && <span className="truncate font-medium">{currentLanguageLabel}</span>}
+        {isRow ? (
+          <>
+            <span className="truncate font-medium">{t("common:language")}</span>
+            <span className="truncate text-[13px] font-medium text-[var(--color-text-tertiary)]">
+              {currentLanguageLabel}
+            </span>
+          </>
+        ) : (
+          <>
+            {LANGUAGE_SHORT_LABEL[currentLang]}
+            {showLabel && <span className="truncate font-medium">{currentLanguageLabel}</span>}
+          </>
+        )}
       </button>
       {panel}
     </div>

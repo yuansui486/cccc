@@ -164,6 +164,75 @@ Rules:
 - `heartbeat` items MUST NOT be appended to the group ledger; they are transport-level keepalives.
 - Streams are best-effort: clients MUST tolerate disconnects, duplicates, and gaps (use `inbox_list` or a ledger read to reconcile).
 
+### 4.6 Streaming Upgrade: `presentation_browser_attach` (Optional)
+
+`presentation_browser_attach` upgrades the connection into a daemon-local **browser-surface control stream** for a slot-scoped Presentation browser session.
+
+1) Client sends a normal request line with `op="presentation_browser_attach"`.
+2) Daemon sends a normal response line.
+3) If the response is `ok=true`, the connection remains open and becomes a bidirectional NDJSON stream.
+
+After upgrade:
+- The daemon pushes `state` and `frame` items for the active browser surface session.
+- The client MAY send browser-control commands such as navigation, click, scroll, key, text, resize, and close.
+- Only one active controller MAY be attached at a time for a given slot browser surface session.
+
+Recommended daemon-to-client items (CCCC v0.4.x behavior):
+```ts
+type PresentationBrowserStreamItem =
+  | {
+      t: "state"
+      active: boolean
+      state: "starting" | "ready" | "failed" | "closed" | "idle"
+      message: string
+      error?: Record<string, unknown>
+      strategy?: string
+      url?: string
+      width?: number
+      height?: number
+      started_at?: string
+      updated_at?: string
+      last_frame_seq?: number
+      last_frame_at?: string
+      controller_attached?: boolean
+    }
+  | {
+      t: "frame"
+      seq: number
+      captured_at: string
+      mime: "image/jpeg"
+      data_base64: string
+      width: number
+      height: number
+      url: string
+    }
+  | {
+      t: "error"
+      code: string
+      message: string
+    }
+```
+
+Recommended client-to-daemon commands (CCCC v0.4.x behavior):
+```ts
+type PresentationBrowserCommand =
+  | { t: "ping" }
+  | { t: "navigate"; url: string }
+  | { t: "back" }
+  | { t: "refresh" }
+  | { t: "click"; x: number; y: number; button?: "left" | "middle" | "right" }
+  | { t: "scroll"; dx?: number; dy?: number }
+  | { t: "key"; key: string }
+  | { t: "text"; text: string }
+  | { t: "resize"; width: number; height: number }
+  | { t: "close" | "disconnect" }
+```
+
+Rules:
+- Clients MUST treat unknown `t` values as ignorable forward-compatible extensions.
+- The browser-surface stream is best-effort and ephemeral; clients MUST be able to reconnect and recover via `presentation_browser_info` / `presentation_browser_open`.
+- The stream is daemon-local runtime state and MUST NOT be treated as persisted Presentation card state.
+
 ## 5. Request/Response Envelope (Normative)
 
 Daemon IPC v1 uses the envelope defined in `src/cccc/contracts/v1/ipc.py`.
@@ -300,6 +369,41 @@ Args:
 Result:
 ```ts
 { observability: Record<string, unknown> }
+```
+
+#### `branding_get`
+
+Args: none
+
+Result:
+```ts
+{
+  branding: {
+    product_name: string
+    logo_icon_asset_path?: string
+    favicon_asset_path?: string
+    updated_at?: string
+  }
+}
+```
+
+#### `branding_update`
+
+Args:
+```ts
+{ by?: "user"; patch: Record<string, unknown> }
+```
+
+Result:
+```ts
+{
+  branding: {
+    product_name: string
+    logo_icon_asset_path?: string
+    favicon_asset_path?: string
+    updated_at?: string
+  }
+}
 ```
 
 #### `debug_snapshot`
@@ -1817,7 +1921,6 @@ Result:
     done?: Array<Record<string, unknown>>
     archived?: Array<Record<string, unknown>>
   }
-  panorama?: { mermaid?: string | null }
   meta?: Record<string, unknown>
 }
 ```
@@ -2361,7 +2464,35 @@ Result:
 { group_id: string; applied: true }
 ```
 
-### 8.14 Event Streaming (Optional)
+### 8.14 Presentation Browser Surface (Optional)
+
+#### `presentation_browser_attach`
+
+Attach to the currently active slot browser-surface session over a dedicated bidirectional NDJSON stream.
+
+Args:
+```ts
+{
+  group_id: string
+  slot: "slot-1" | "slot-2" | "slot-3" | "slot-4"
+  by?: string
+}
+```
+
+Handshake result:
+```ts
+{ group_id: string; slot_id: string }
+```
+
+Streaming mode:
+- After a successful handshake, the connection upgrades into the browser-surface stream described in §4.6.
+- The daemon emits `state` items when runtime/session status changes and `frame` items for captured browser frames.
+- The client MAY send browser-control commands (`navigate`, `back`, `refresh`, `click`, `scroll`, `key`, `text`, `resize`, `close`, `disconnect`).
+- At most one active controller MAY be attached at a time; a second attach attempt SHOULD fail with a busy-style error.
+- If no active browser-surface session exists for the slot, attach SHOULD fail with `browser_surface_not_found`.
+- If the underlying browser runtime is no longer active, attach SHOULD fail with `browser_surface_not_active`.
+
+### 8.15 Event Streaming (Optional)
 
 #### `events_stream`
 
@@ -2393,7 +2524,7 @@ Streaming mode:
 - The stream ends when the client closes the connection or the daemon exits.
 - To protect daemon responsiveness, a daemon MAY drop slow subscribers (clients SHOULD reconnect and reconcile).
 
-### 8.15 IM Authentication
+### 8.16 IM Authentication
 
 #### `im_bind_chat`
 
@@ -2502,7 +2633,7 @@ Errors:
 - `missing_group_id` – `group_id` is empty.
 - `group_not_found` – group does not exist.
 
-### 8.16 Remote Access (Contract-Gated)
+### 8.17 Remote Access (Contract-Gated)
 
 These operations are optional extensions for productized remote-access control.
 Deployments without this feature MAY return `unknown_op`.
@@ -2608,7 +2739,7 @@ Result:
 { remote_access: Record<string, unknown> }
 ```
 
-### 8.17 Group Space (Provider-Backed Shared Memory, dual-lane NotebookLM)
+### 8.18 Group Space (Provider-Backed Shared Memory, dual-lane NotebookLM)
 
 These operations provide a thin control-plane for optional external memory providers.
 Provider failures MUST NOT block core collaboration flows (chat/context/actors).

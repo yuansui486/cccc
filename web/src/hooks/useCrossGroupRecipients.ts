@@ -78,7 +78,7 @@ export function useCrossGroupRecipients({
     if (remoteActorsForSend) return;
 
     let cancelled = false;
-    void api.fetchActors(sendGid).then((resp) => {
+    void api.fetchActors(sendGid, false).then((resp) => {
       if (cancelled) return;
       if (!resp.ok) {
         setRemoteActorsByGroup((prev) => {

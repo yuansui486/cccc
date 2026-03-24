@@ -158,6 +158,18 @@ DEFAULT_REMOTE_ACCESS: Dict[str, Any] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Web branding (global)
+# ---------------------------------------------------------------------------
+
+DEFAULT_WEB_BRANDING: Dict[str, Any] = {
+    "product_name": "CCCC",
+    "logo_icon_asset_path": "",
+    "favicon_asset_path": "",
+    "updated_at": "",
+}
+
+
 def _as_bool(v: Any, default: bool) -> bool:
     if isinstance(v, bool):
         return v
@@ -252,6 +264,20 @@ def _merge_remote_access(raw: Any) -> Dict[str, Any]:
     return base
 
 
+def _merge_web_branding(raw: Any) -> Dict[str, Any]:
+    """Merge/validate web branding settings with defaults."""
+    base = dict(DEFAULT_WEB_BRANDING)
+    if not isinstance(raw, dict):
+        return base
+
+    product_name = str(raw.get("product_name") or "").strip()
+    base["product_name"] = product_name or str(DEFAULT_WEB_BRANDING["product_name"])
+    base["logo_icon_asset_path"] = str(raw.get("logo_icon_asset_path") or "").strip()
+    base["favicon_asset_path"] = str(raw.get("favicon_asset_path") or "").strip()
+    base["updated_at"] = _as_str(raw.get("updated_at"), str(base["updated_at"]))
+    return base
+
+
 def get_observability_settings() -> Dict[str, Any]:
     """Get merged observability settings (global)."""
     settings = load_settings()
@@ -309,6 +335,12 @@ def get_remote_access_settings() -> Dict[str, Any]:
     """Get merged remote access settings (global)."""
     settings = load_settings()
     return _merge_remote_access(settings.get("remote_access"))
+
+
+def get_web_branding_settings() -> Dict[str, Any]:
+    """Get merged web branding settings (global)."""
+    settings = load_settings()
+    return _merge_web_branding(settings.get("web_branding"))
 
 
 def resolve_remote_access_web_binding() -> Dict[str, Any]:
@@ -418,6 +450,40 @@ def update_remote_access_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
     settings["remote_access"] = raw
     save_settings(settings)
     return _merge_remote_access(raw)
+
+
+def update_web_branding_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
+    """Update web branding settings in ~/.cccc/settings.yaml and return merged result."""
+    settings = load_settings()
+    current = _merge_web_branding(settings.get("web_branding"))
+    if not isinstance(patch, dict) or not patch:
+        return current
+
+    raw = dict(settings.get("web_branding") if isinstance(settings.get("web_branding"), dict) else {})
+    changed = False
+
+    if "product_name" in patch:
+        product_name = str(patch.get("product_name") or "").strip()
+        raw["product_name"] = product_name or str(DEFAULT_WEB_BRANDING["product_name"])
+        changed = True
+
+    if "logo_icon_asset_path" in patch:
+        raw["logo_icon_asset_path"] = str(patch.get("logo_icon_asset_path") or "").strip()
+        changed = True
+
+    if "favicon_asset_path" in patch:
+        raw["favicon_asset_path"] = str(patch.get("favicon_asset_path") or "").strip()
+        changed = True
+
+    if "updated_at" in patch:
+        raw["updated_at"] = _as_str(patch.get("updated_at"), str(raw.get("updated_at") or ""))
+        changed = True
+    elif changed:
+        raw["updated_at"] = utc_now_iso()
+
+    settings["web_branding"] = raw
+    save_settings(settings)
+    return _merge_web_branding(raw)
 
 
 def _settings_path() -> Path:

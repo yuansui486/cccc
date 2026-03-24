@@ -121,7 +121,7 @@ Access via the gear icon:
 
 ### IM Bridge
 
-Configure Telegram, Slack, Discord, Feishu, or DingTalk integration.
+Configure Telegram, Slack, Discord, Feishu, DingTalk, or WeCom integration.
 
 ### Group Space
 

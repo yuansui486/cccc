@@ -10,12 +10,14 @@ import {
   GuidanceTab,
   BlueprintTab,
   ActorProfilesTab,
+  BrandingTab,
   SettingsScope,
   GroupTabId,
   GlobalTabId,
 } from "./modals/settings";
 import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
+import { IMConfigDraft, saveAndStartIMBridge, saveIMConfigDraft } from "./modals/settings/imBridgeConfig";
 import { useModalA11y } from "../hooks/useModalA11y";
 
 interface SettingsModalProps {
@@ -97,20 +99,13 @@ export function SettingsModal({
   const [imDingtalkAppKey, setImDingtalkAppKey] = useState("");
   const [imDingtalkAppSecret, setImDingtalkAppSecret] = useState("");
   const [imDingtalkRobotCode, setImDingtalkRobotCode] = useState("");
+  // WeCom fields
+  const [imWecomBotId, setImWecomBotId] = useState("");
+  const [imWecomSecret, setImWecomSecret] = useState("");
   const [imBusy, setImBusy] = useState(false);
   const imLoadSeq = useRef(0);
 
   // IM config drafts cache (per-platform local edits, not yet saved to server)
-  type IMConfigDraft = {
-    botTokenEnv: string;
-    appTokenEnv: string;
-    feishuDomain: string;
-    feishuAppId: string;
-    feishuAppSecret: string;
-    dingtalkAppKey: string;
-    dingtalkAppSecret: string;
-    dingtalkRobotCode: string;
-  };
   const [imConfigDrafts, setImConfigDrafts] = useState<Partial<Record<IMPlatform, IMConfigDraft>>>({});
 
   // Global observability (developer mode)
@@ -125,6 +120,9 @@ export function SettingsModal({
   const [debugSnapshot, setDebugSnapshot] = useState("");
   const [debugSnapshotErr, setDebugSnapshotErr] = useState("");
   const [debugSnapshotBusy, setDebugSnapshotBusy] = useState(false);
+  const [runtimeVersion, setRuntimeVersion] = useState("");
+  const [daemonVersion, setDaemonVersion] = useState("");
+  const [runtimeInfoErr, setRuntimeInfoErr] = useState("");
 
   const [logComponent, setLogComponent] = useState<"daemon" | "web" | "im">("daemon");
   const [logLines, setLogLines] = useState(200);
@@ -214,6 +212,12 @@ export function SettingsModal({
     void loadRegistryPreview();
   }, [isOpen, scope, globalTab]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (scope !== "global" || globalTab !== "developer") return;
+    void loadRuntimeInfo();
+  }, [isOpen, scope, globalTab]);
+
   // ============ Data Loading ============
 
   const resetIMState = () => {
@@ -227,6 +231,8 @@ export function SettingsModal({
     setImDingtalkAppKey("");
     setImDingtalkAppSecret("");
     setImDingtalkRobotCode("");
+    setImWecomBotId("");
+    setImWecomSecret("");
   };
 
   const loadIMStatus = async (opts?: { resetFirst?: boolean }) => {
@@ -267,6 +273,9 @@ export function SettingsModal({
         setImDingtalkAppKey(im.dingtalk_app_key || im.dingtalk_app_key_env || "");
         setImDingtalkAppSecret(im.dingtalk_app_secret || im.dingtalk_app_secret_env || "");
         setImDingtalkRobotCode(im.dingtalk_robot_code || im.dingtalk_robot_code_env || "");
+        // WeCom fields
+        setImWecomBotId(im.wecom_bot_id || "");
+        setImWecomSecret(im.wecom_secret || "");
       }
     } catch (e) {
       console.error("Failed to load IM status:", e);
@@ -299,7 +308,7 @@ export function SettingsModal({
   const loadDevActors = async () => {
     if (!groupId) return;
     try {
-      const resp = await api.fetchActors(groupId);
+      const resp = await api.fetchActors(groupId, false);
       if (resp.ok && resp.result?.actors) {
         const actors = Array.isArray(resp.result.actors) ? resp.result.actors : [];
         setDevActors(actors);
@@ -448,6 +457,8 @@ export function SettingsModal({
     dingtalkAppKey: imDingtalkAppKey,
     dingtalkAppSecret: imDingtalkAppSecret,
     dingtalkRobotCode: imDingtalkRobotCode,
+    wecomBotId: imWecomBotId,
+    wecomSecret: imWecomSecret,
   });
 
   // Apply a draft to current IM config fields
@@ -460,7 +471,15 @@ export function SettingsModal({
     setImDingtalkAppKey(draft.dingtalkAppKey);
     setImDingtalkAppSecret(draft.dingtalkAppSecret);
     setImDingtalkRobotCode(draft.dingtalkRobotCode);
+    setImWecomBotId(draft.wecomBotId);
+    setImWecomSecret(draft.wecomSecret);
   };
+
+  const getCurrentIMSaveRequest = () => ({
+    groupId: String(groupId || ""),
+    platform: imPlatform,
+    ...getCurrentIMConfigDraft(),
+  });
 
   // Handle platform change with config caching
   const handlePlatformChange = (newPlatform: IMPlatform) => {
@@ -486,6 +505,8 @@ export function SettingsModal({
       setImDingtalkAppKey("");
       setImDingtalkAppSecret("");
       setImDingtalkRobotCode("");
+      setImWecomBotId("");
+      setImWecomSecret("");
     }
 
     // 3. Set new platform
@@ -496,14 +517,7 @@ export function SettingsModal({
     if (!groupId) return;
     setImBusy(true);
     try {
-      const resp = await api.setIMConfig(groupId, imPlatform, imBotTokenEnv, imAppTokenEnv, {
-        feishu_domain: imFeishuDomain,
-        feishu_app_id: imFeishuAppId,
-        feishu_app_secret: imFeishuAppSecret,
-        dingtalk_app_key: imDingtalkAppKey,
-        dingtalk_app_secret: imDingtalkAppSecret,
-        dingtalk_robot_code: imDingtalkRobotCode,
-      });
+      const resp = await saveIMConfigDraft(getCurrentIMSaveRequest());
       if (resp.ok) await loadIMStatus();
     } catch (e) {
       console.error("Failed to save IM config:", e);
@@ -526,6 +540,8 @@ export function SettingsModal({
         setImDingtalkAppKey("");
         setImDingtalkAppSecret("");
         setImDingtalkRobotCode("");
+        setImWecomBotId("");
+        setImWecomSecret("");
         await loadIMStatus();
       }
     } catch (e) {
@@ -539,8 +555,8 @@ export function SettingsModal({
     if (!groupId) return;
     setImBusy(true);
     try {
-      await api.startIMBridge(groupId);
-      await loadIMStatus();
+      const resp = await saveAndStartIMBridge(getCurrentIMSaveRequest());
+      if (resp.ok) await loadIMStatus();
     } catch (e) {
       console.error("Failed to start bridge:", e);
     } finally {
@@ -613,6 +629,29 @@ export function SettingsModal({
       setDebugSnapshotErr("Failed to load debug snapshot");
     } finally {
       setDebugSnapshotBusy(false);
+    }
+  };
+
+  const loadRuntimeInfo = async () => {
+    setRuntimeInfoErr("");
+    try {
+      const resp = await api.fetchPing();
+      if (!resp.ok) {
+        setRuntimeVersion("");
+        setDaemonVersion("");
+        setRuntimeInfoErr(resp.error?.message || "Failed to load runtime info");
+        return;
+      }
+      const result = resp.result || {};
+      const daemon = result.daemon && typeof result.daemon === "object" && !Array.isArray(result.daemon)
+        ? result.daemon as Record<string, unknown>
+        : null;
+      setRuntimeVersion(String(result.version || "").trim());
+      setDaemonVersion(String(daemon?.version || "").trim());
+    } catch {
+      setRuntimeVersion("");
+      setDaemonVersion("");
+      setRuntimeInfoErr("Failed to load runtime info");
     }
   };
 
@@ -711,7 +750,12 @@ export function SettingsModal({
   const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
 
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
-    ...(globalSettingsEnabled ? [{ id: "actorProfiles" as const, label: t("tabs.actorProfiles") }] : []),
+    ...(globalSettingsEnabled
+      ? [
+          { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
+          { id: "branding" as const, label: t("tabs.branding") },
+        ]
+      : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
     ...(currentBrowserSignedIn && !globalSettingsEnabled ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }] : []),
   ], [globalSettingsEnabled, currentBrowserSignedIn, t]);
@@ -860,6 +904,10 @@ export function SettingsModal({
                   setImDingtalkAppSecret={setImDingtalkAppSecret}
                   imDingtalkRobotCode={imDingtalkRobotCode}
                   setImDingtalkRobotCode={setImDingtalkRobotCode}
+                  imWecomBotId={imWecomBotId}
+                  setImWecomBotId={setImWecomBotId}
+                  imWecomSecret={imWecomSecret}
+                  setImWecomSecret={setImWecomSecret}
                   imBusy={imBusy}
                   onSaveConfig={handleSaveIMConfig}
                   onRemoveConfig={handleRemoveIMConfig}
@@ -888,6 +936,12 @@ export function SettingsModal({
                 />
               )}
 
+              {activeTab === "branding" && (
+                <BrandingTab
+                  isDark={isDark}
+                  isActive={scope === "global" && activeTab === "branding"}
+                />
+              )}
               </>
             )}
           </div>

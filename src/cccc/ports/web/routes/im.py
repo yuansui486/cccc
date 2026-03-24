@@ -25,6 +25,7 @@ from ..schemas import (
     get_principal,
     require_group,
 )
+from .actors import invalidate_readonly_actor_list
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -59,15 +60,18 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/start")
     async def group_start(request: Request, group_id: str, by: str = "user") -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         return await ctx.daemon({"op": "group_start", "args": {"group_id": group_id, "by": by, **_profile_auth_args(request)}})
 
     @group_router.post("/stop")
     async def group_stop(group_id: str, by: str = "user") -> Dict[str, Any]:
+        await invalidate_readonly_actor_list(group_id)
         return await ctx.daemon({"op": "group_stop", "args": {"group_id": group_id, "by": by}})
 
     @group_router.post("/state")
     async def group_set_state(group_id: str, state: str, by: str = "user") -> Dict[str, Any]:
         """Set group state (active/idle/paused) to control automation behavior."""
+        await invalidate_readonly_actor_list(group_id)
         return await ctx.daemon({"op": "group_set_state", "args": {"group_id": group_id, "state": state, "by": by}})
 
     # =========================================================================
@@ -195,6 +199,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 im_cfg["dingtalk_app_secret"] = app_secret
             if robot_code:
                 im_cfg["dingtalk_robot_code"] = robot_code
+        elif platform == "wecom":
+            bot_id = str(req.wecom_bot_id or "").strip()
+            secret = str(req.wecom_secret or "").strip()
+            if bot_id:
+                im_cfg["wecom_bot_id"] = bot_id
+            if secret:
+                im_cfg["wecom_secret"] = secret
 
         im_cfg = canonicalize_im_config(im_cfg)
 
@@ -320,6 +331,22 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 env[app_secret_env] = app_secret
             if robot_code_env and robot_code:
                 env[robot_code_env] = robot_code
+        elif platform == "wecom":
+            # WeCom: set WECOM_BOT_ID and WECOM_SECRET
+            bot_id = im_cfg.get("wecom_bot_id") or ""
+            secret = im_cfg.get("wecom_secret") or ""
+            bot_id_env = im_cfg.get("wecom_bot_id_env") or ""
+            secret_env = im_cfg.get("wecom_secret_env") or ""
+            # Set actual values to default env var names
+            if bot_id:
+                env["WECOM_BOT_ID"] = bot_id
+            if secret:
+                env["WECOM_SECRET"] = secret
+            # Also set to custom env var names if specified
+            if bot_id_env and bot_id:
+                env[bot_id_env] = bot_id
+            if secret_env and secret:
+                env[secret_env] = secret
         else:
             # Telegram/Slack/Discord: token-based
             bot_token_env = str(im_cfg.get("bot_token_env") or "").strip()

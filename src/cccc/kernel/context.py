@@ -5,7 +5,7 @@ v3 truths:
 - agent_states: per-actor short-term working memory (hot + warm)
 - coordination: shared control plane (brief + tasks + recent decisions/handoffs)
 
-Secondary views such as attention slices and panorama are computed projections, not
+Secondary views such as attention slices are computed projections, not
 editable truths.
 
 Storage: ~/.cccc/groups/<group_id>/context/
@@ -323,7 +323,7 @@ class ContextStorage:
             "contract": {
                 "agent_states": "Per-actor working memory. hot=current execution, warm=recovery digest.",
                 "coordination": "Shared control plane. brief=current objective/focus; tasks=dispatch truth.",
-                "projections": "Read-only derived views such as board, attention, and panorama.",
+                "projections": "Read-only derived views such as board and attention.",
             }
         }
 
@@ -500,6 +500,14 @@ class ContextStorage:
             yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),
             encoding="utf-8",
         )
+
+    def delete_task(self, task_id: str) -> bool:
+        path = self._task_path(task_id)
+        self._tasks_raw.pop(path.name, None)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
 
     def list_tasks(self) -> List[Task]:
         tasks: List[Task] = []
@@ -701,56 +709,3 @@ class ContextStorage:
             return False
         self.save_agents(agents_state)
         return True
-
-    def compute_panorama_mermaid(
-        self,
-        tasks: Optional[List[Task]] = None,
-        agents_state: Optional[AgentsData] = None,
-        coordination: Optional[Coordination] = None,
-    ) -> str:
-        if tasks is None:
-            tasks = self.list_tasks()
-        if agents_state is None:
-            agents_state = self.load_agents()
-        if coordination is None:
-            coordination = self.load_context().coordination
-
-        def _safe_node_id(prefix: str, raw: str) -> str:
-            cleaned = re.sub(r"[^a-zA-Z0-9_]", "_", str(raw or ""))
-            cleaned = re.sub(r"_+", "_", cleaned).strip("_")
-            if not cleaned:
-                cleaned = "unknown"
-            return f"{prefix}_{cleaned}"
-
-        def _safe_label(raw: str) -> str:
-            text = str(raw or "").replace('"', "'").replace("\n", " ").strip()
-            return re.sub(r"\s+", " ", text)[:120]
-
-        lines: List[str] = ["graph TD"]
-        lines.append('COORD["Coordination"]')
-        brief = coordination.brief if isinstance(coordination, Coordination) else CoordinationBrief()
-        if brief.current_focus:
-            lines.append(f'FOCUS["focus: {_safe_label(brief.current_focus)}"]')
-            lines.append("COORD --> FOCUS")
-        if brief.objective:
-            lines.append(f'OBJ["objective: {_safe_label(brief.objective)}"]')
-            lines.append("COORD --> OBJ")
-        for task in tasks:
-            status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
-            task_node = _safe_node_id("T", task.id)
-            task_label = _safe_label(f"{task.id} {task.title} [{status}]")
-            lines.append(f'{task_node}["{task_label}"]')
-            if task.parent_id:
-                parent_node = _safe_node_id("T", task.parent_id)
-                lines.append(f"{parent_node} --> {task_node}")
-            else:
-                lines.append(f"COORD --> {task_node}")
-        for agent in agents_state.agents:
-            agent_node = _safe_node_id("A", agent.id)
-            agent_label = _safe_label(f"{agent.id}: {agent.hot.focus or 'idle'}")
-            lines.append(f'{agent_node}["{agent_label}"]')
-            lines.append(f"COORD --> {agent_node}")
-            if agent.hot.active_task_id:
-                task_node = _safe_node_id("T", agent.hot.active_task_id)
-                lines.append(f"{agent_node} --> {task_node}")
-        return "\n".join(lines)

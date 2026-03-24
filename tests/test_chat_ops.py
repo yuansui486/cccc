@@ -346,6 +346,128 @@ class TestChatOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_send_and_reply_preserve_refs(self) -> None:
+        """Refs payload should round-trip through daemon send/reply."""
+        group_id, cleanup = self._setup_group_with_actors()
+        refs = [{"kind": "presentation_ref", "slot_id": "slot-2", "label": "P2", "locator_label": "PDF p.12"}]
+        try:
+            send_resp, _ = self._call("send", {
+                "group_id": group_id,
+                "by": "user",
+                "to": ["peer1"],
+                "text": "hello peer1",
+                "refs": refs,
+            })
+            self.assertTrue(send_resp.ok, getattr(send_resp, "error", None))
+            send_event = (send_resp.result or {}).get("event", {})
+            self.assertEqual(send_event.get("data", {}).get("refs", []), refs)
+
+            reply_to = str(send_event.get("id") or "")
+            reply_resp, _ = self._call("reply", {
+                "group_id": group_id,
+                "by": "user",
+                "to": ["peer1"],
+                "reply_to": reply_to,
+                "text": "reply peer1",
+                "refs": refs,
+            })
+            self.assertTrue(reply_resp.ok, getattr(reply_resp, "error", None))
+            reply_event = (reply_resp.result or {}).get("event", {})
+            self.assertEqual(reply_event.get("data", {}).get("refs", []), refs)
+        finally:
+            cleanup()
+
+    def test_send_and_reply_delivery_text_include_presentation_refs_for_pty_actor(self) -> None:
+        """PTY delivery text should include compact presentation ref details."""
+        _, cleanup = self._with_home()
+        refs = [
+            {
+                "kind": "presentation_ref",
+                "slot_id": "slot-2",
+                "label": "P2",
+                "locator_label": "PDF p.12",
+                "title": "Revenue deck",
+                "excerpt": "Gross margin note is outdated.",
+                "href": "https://example.test/deck.pdf#page=12",
+                "locator": {
+                    "url": "https://example.test/deck.pdf#page=12",
+                    "captured_at": "2026-03-23T10:00:00Z",
+                    "viewer_scroll_top": 240,
+                },
+                "snapshot": {
+                    "path": "state/blobs/sha256_demo.jpg",
+                    "width": 1440,
+                    "height": 900,
+                },
+            }
+        ]
+        try:
+            create, _ = self._call("group_create", {"title": "pty-refs", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "pty",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as send_queue:
+                send_resp, _ = self._call(
+                    "send",
+                    {
+                        "group_id": group_id,
+                        "by": "user",
+                        "to": ["peer1"],
+                        "text": "please inspect this page",
+                        "refs": refs,
+                    },
+                )
+            self.assertTrue(send_resp.ok, getattr(send_resp, "error", None))
+            send_queue.assert_called_once()
+            send_delivery_text = str(send_queue.call_args.kwargs.get("text") or "")
+            self.assertIn("[cccc] References:", send_delivery_text)
+            self.assertIn("P2 (slot-2) · PDF p.12 — Revenue deck", send_delivery_text)
+            self.assertIn('excerpt: "Gross margin note is outdated."', send_delivery_text)
+            self.assertIn("href: https://example.test/deck.pdf#page=12", send_delivery_text)
+            self.assertIn("captured_at: 2026-03-23T10:00:00Z", send_delivery_text)
+            self.assertIn("scroll_top: 240", send_delivery_text)
+            self.assertIn("snapshot: state/blobs/sha256_demo.jpg (1440x900)", send_delivery_text)
+
+            send_event = (send_resp.result or {}).get("event", {})
+            reply_to = str(send_event.get("id") or "").strip()
+            self.assertTrue(reply_to)
+
+            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as reply_queue:
+                reply_resp, _ = self._call(
+                    "reply",
+                    {
+                        "group_id": group_id,
+                        "by": "user",
+                        "to": ["peer1"],
+                        "reply_to": reply_to,
+                        "text": "same view, updated ask",
+                        "refs": refs,
+                    },
+                )
+            self.assertTrue(reply_resp.ok, getattr(reply_resp, "error", None))
+            reply_queue.assert_called_once()
+            reply_delivery_text = str(reply_queue.call_args.kwargs.get("text") or "")
+            self.assertIn("[cccc] References:", reply_delivery_text)
+            self.assertIn("P2 (slot-2) · PDF p.12 — Revenue deck", reply_delivery_text)
+            self.assertIn("snapshot: state/blobs/sha256_demo.jpg (1440x900)", reply_delivery_text)
+        finally:
+            cleanup()
+
     def test_send_to_nonexistent_actor_returns_error(self) -> None:
         """T067 scenario 5: sending to a non-existent actor returns error."""
         group_id, cleanup = self._setup_group_with_actors()

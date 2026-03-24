@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
-import { addCoordinationNote, apiJson, contextSync, updateCoordinationBrief, updateCoordinationTask } from "../services/api";
+import { addCoordinationNote, apiJson, contextSync, deleteCoordinationTask, updateCoordinationBrief, updateCoordinationTask } from "../services/api";
 import type {
   AgentState,
   CoordinationBrief,
@@ -18,9 +19,18 @@ import type {
 } from "../types";
 import { formatFullTime, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
+import {
+  TaskWorkflowScaffoldId,
+  evaluateTaskWorkflow,
+  getTaskDisplaySummary,
+  getTaskDoneTransitionBlockers,
+  getTaskWorkflowScaffold,
+  resolveTaskWorkflowScaffold,
+} from "../utils/taskWorkflow";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { ModalFrame } from "./modals/ModalFrame";
+import { settingsDialogBodyClass, settingsDialogPanelClass } from "./modals/settings/types";
 import { useWebPetStore } from "../stores";
 
 interface ContextModalProps {
@@ -70,6 +80,8 @@ interface BoardColumns {
 
 type BoardStatus = keyof BoardColumns;
 type ContextTranslator = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+type TaskDeleteBlockReason = "" | "self_history" | "subtree_history";
+type TaskDeleteInfo = { allowed: boolean; total: number; reason: TaskDeleteBlockReason };
 
 const WAITING_ON_OPTIONS: Array<{ value: TaskWaitingOn; label: string }> = [
   { value: "none", label: "None" },
@@ -88,8 +100,70 @@ function taskOutcome(task: Task | null | undefined): string {
   return String(task.outcome || "");
 }
 
+function taskDisplaySummary(task: Task | null | undefined): string {
+  if (!task) return "";
+  return getTaskDisplaySummary({
+    parent_id: task.parent_id,
+    outcome: task.outcome,
+    notes: task.notes,
+  });
+}
+
 function taskStatus(task: Task | null | undefined): string {
   return String(task?.status || "planned").toLowerCase();
+}
+
+function taskArchivedFrom(task: Task | null | undefined): string {
+  return String(task?.archived_from || "").trim().toLowerCase();
+}
+
+function taskIsUnexecuted(task: Task | null | undefined): boolean {
+  if (!task) return false;
+  const status = taskStatus(task);
+  const archivedFrom = taskArchivedFrom(task);
+  return status === "planned" || (status === "archived" && (!archivedFrom || archivedFrom === "planned"));
+}
+
+function getTaskDeleteInfo(task: Task | null | undefined, allTasks: Task[]): TaskDeleteInfo {
+  if (!task) return { allowed: false, total: 0, reason: "" };
+  const byParent = new Map<string, Task[]>();
+  for (const candidate of allTasks) {
+    const parentId = String(candidate.parent_id || "").trim();
+    if (!parentId) continue;
+    const current = byParent.get(parentId) || [];
+    current.push(candidate);
+    byParent.set(parentId, current);
+  }
+  for (const children of byParent.values()) {
+    children.sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+  }
+
+  const seen = new Set<string>();
+  const stack: Task[] = [task];
+  const subtree: Task[] = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const currentId = String(current.id || "").trim();
+    if (!currentId || seen.has(currentId)) continue;
+    seen.add(currentId);
+    subtree.push(current);
+    const children = byParent.get(currentId) || [];
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
+  }
+
+  for (const candidate of subtree) {
+    if (!taskIsUnexecuted(candidate)) {
+      return {
+        allowed: false,
+        total: subtree.length,
+        reason: candidate.id === task.id ? "self_history" : "subtree_history",
+      };
+    }
+  }
+  return { allowed: true, total: subtree.length, reason: "" };
 }
 
 function listToText(items: string[] | null | undefined): string {
@@ -609,11 +683,13 @@ export function ContextModal({
   const [assigneeFilter, setAssigneeFilter] = useState<string>("__all__");
   const [taskQuery, setTaskQuery] = useState("");
   const [dragTaskId, setDragTaskId] = useState("");
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
   const [editingBrief, setEditingBrief] = useState(false);
   const [briefDraft, setBriefDraft] = useState<BriefDraft>(briefToDraft(null));
   const [taskEditorMode, setTaskEditorMode] = useState<"none" | "create" | "edit">("none");
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
+  const [taskScaffoldId, setTaskScaffoldId] = useState<TaskWorkflowScaffoldId>("root");
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [viewBusy, setViewBusy] = useState(false);
@@ -624,8 +700,10 @@ export function ContextModal({
   const [projectNotice, setProjectNotice] = useState("");
   const [editingProject, setEditingProject] = useState(false);
   const [projectText, setProjectText] = useState("");
+  const [projectExpanded, setProjectExpanded] = useState(false);
   const [notifyAgents, setNotifyAgents] = useState(false);
   const [notifyError, setNotifyError] = useState("");
+  const lastOpenedGroupRef = useRef("");
   const [decisionDraft, setDecisionDraft] = useState<NoteDraft>(emptyNoteDraft());
   const [handoffDraft, setHandoffDraft] = useState<NoteDraft>(emptyNoteDraft());
   const [activityBusyKind, setActivityBusyKind] = useState<"decision" | "handoff" | null>(null);
@@ -649,6 +727,18 @@ export function ContextModal({
   }, [allBoardTasks]);
 
   const selectedTask = selectedTaskId ? taskMap.get(selectedTaskId) || null : null;
+  const taskWorkflowCoverage = useMemo(
+    () => evaluateTaskWorkflow({
+      parentId: taskDraft?.parentId,
+      status: taskDraft?.status,
+      assignee: taskDraft?.assignee,
+      outcome: taskDraft?.outcome,
+      notes: taskDraft?.notes,
+      checklist: taskDraft?.checklist,
+    }),
+    [taskDraft]
+  );
+  const selectedTaskScaffold = useMemo(() => getTaskWorkflowScaffold(taskScaffoldId), [taskScaffoldId]);
 
   const tasksSummary = useMemo(() => {
     const fallback = {
@@ -721,6 +811,7 @@ export function ContextModal({
     if (taskEditorMode === "create") return taskDraftDirty(taskDraft);
     return !!selectedTask && !taskDraftMatches(selectedTask, taskDraft);
   }, [selectedTask, taskDraft, taskEditorMode]);
+  const selectedTaskDeleteInfo = useMemo(() => getTaskDeleteInfo(selectedTask, tasks), [selectedTask, tasks]);
 
   const taskEditorVisible = taskEditorMode !== "none" && !!taskDraft;
 
@@ -751,10 +842,12 @@ export function ContextModal({
     setTaskFilter("all");
     setAssigneeFilter("__all__");
     setTaskQuery("");
+    setArchivedExpanded(false);
     setDragTaskId("");
     setTaskEditorMode("none");
     setSelectedTaskId("");
     setTaskDraft(null);
+    setTaskScaffoldId("root");
     setSyncError("");
     setEditingBrief(false);
     setProjectMd(null);
@@ -763,6 +856,7 @@ export function ContextModal({
     setProjectNotice("");
     setEditingProject(false);
     setProjectText("");
+    setProjectExpanded(false);
     setNotifyError("");
     setNotifyAgents(false);
     setDecisionDraft(emptyNoteDraft());
@@ -770,6 +864,17 @@ export function ContextModal({
     setActivityBusyKind(null);
     setActivityError("");
   }, [groupId, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !groupId) {
+      lastOpenedGroupRef.current = "";
+      return;
+    }
+    if (lastOpenedGroupRef.current === groupId) return;
+    lastOpenedGroupRef.current = groupId;
+    // Modal 打开时统一补 full，上层热路径仍保持 summary。
+    void onRefreshContext();
+  }, [groupId, isOpen, onRefreshContext]);
 
   useEffect(() => {
     if (!isOpen || !groupId) return;
@@ -802,7 +907,7 @@ export function ContextModal({
         const haystack = [
           task.id,
           taskTitle(task),
-          taskOutcome(task),
+          taskDisplaySummary(task),
           assignee,
           String(task.priority || ""),
           String(task.handoff_to || ""),
@@ -824,10 +929,22 @@ export function ContextModal({
     [board, taskMatches]
   );
 
-  const filteredTaskTotal = useMemo(
-    () => filteredBoard.planned.length + filteredBoard.active.length + filteredBoard.done.length + filteredBoard.archived.length,
-    [filteredBoard]
+  const hasTaskFilters = taskFilter !== "all" || assigneeFilter !== "__all__" || taskQuery.trim().length > 0;
+  const hiddenArchivedMatches = archivedExpanded ? 0 : filteredBoard.archived.length;
+  const visibleTaskTotal = useMemo(
+    () => filteredBoard.planned.length + filteredBoard.active.length + filteredBoard.done.length + (archivedExpanded ? filteredBoard.archived.length : 0),
+    [archivedExpanded, filteredBoard]
   );
+  const hasVisibleTasks = visibleTaskTotal > 0;
+  const archivedToggleCount = hasTaskFilters ? filteredBoard.archived.length : Number(tasksSummary.archived || 0);
+  const hasArchivedTasks = archivedExpanded || archivedToggleCount > 0 || Number(tasksSummary.archived || 0) > 0;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (selectedTask && taskStatus(selectedTask) === "archived") {
+      setArchivedExpanded(true);
+    }
+  }, [isOpen, selectedTask]);
 
 
   useEffect(() => {
@@ -844,7 +961,9 @@ export function ContextModal({
       return;
     }
     if (!taskDraft) {
-      setTaskDraft(taskToDraft(selectedTask));
+      const nextDraft = taskToDraft(selectedTask);
+      setTaskDraft(nextDraft);
+      setTaskScaffoldId(resolveTaskWorkflowScaffold(nextDraft));
     }
   }, [selectedTaskId, selectedTask, taskDraft, taskEditorMode]);
 
@@ -864,6 +983,7 @@ export function ContextModal({
     "glass-btn text-[var(--color-text-secondary)]"
   );
   const buttonPrimaryClass = "rounded-lg bg-blue-600 px-3 py-2 text-sm text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50";
+  const buttonDangerClass = "rounded-lg border border-rose-500/35 bg-rose-500/12 px-3 py-2 text-sm text-rose-700 transition-colors hover:bg-rose-500/18 dark:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50";
   const switchTrackClass = (active: boolean) => classNames(
     "relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
     active
@@ -878,15 +998,91 @@ export function ContextModal({
     "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
     "glass-card border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)]"
   );
+  const releaseSignalLabel = (state: string | null) => {
+    if (state === "missing_setup") return tr("context.releaseMissingSetup", "Release: missing setup");
+    if (state === "needs_closeout") return tr("context.releaseNeedsCloseout", "Release: needs closeout");
+    if (state === "ready") return tr("context.releaseReady", "Release: ready");
+    return tr("context.releaseInProgress", "Release: in progress");
+  };
+  const releaseSignalTone = (state: string | null) => classNames(
+    "rounded-full px-2 py-0.5",
+    state === "ready"
+      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+      : state === "needs_closeout"
+        ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+  );
+  const renderWorkflowBadges = (workflow: ReturnType<typeof evaluateTaskWorkflow>) => {
+    if (workflow.isRelease && workflow.releaseCloseoutState) {
+      return (
+        <span className={releaseSignalTone(workflow.releaseCloseoutState)}>
+          {releaseSignalLabel(workflow.releaseCloseoutState)}
+        </span>
+      );
+    }
+    return (
+      <>
+        {workflow.needsContract ? <span className={classNames("rounded-full px-2 py-0.5", "bg-amber-500/15 text-amber-600 dark:text-amber-400")}>{tr("context.needsContract", "Missing setup")}</span> : null}
+        {workflow.needsCloseout ? <span className={classNames("rounded-full px-2 py-0.5", "bg-amber-500/15 text-amber-600 dark:text-amber-400")}>{tr("context.needsCloseout", "Needs closeout")}</span> : null}
+      </>
+    );
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } })
   );
 
+  const formatDoneTransitionGuardMessage = useCallback(
+    (missing: string[]) => tr(
+      "context.taskDoneGuard",
+      "Complete closeout before marking this task done: {{items}}.",
+      { items: missing.join(", ") }
+    ),
+    [tr]
+  );
+  const selectedTaskDeleteHint = useMemo(() => {
+    if (!selectedTask || selectedTaskDeleteInfo.allowed || !selectedTaskDeleteInfo.reason) return "";
+    if (selectedTaskDeleteInfo.reason === "subtree_history") {
+      return tr("context.deleteTaskBlockedSubtree", "This task has child tasks with execution history, so delete is blocked.");
+    }
+    return tr("context.deleteTaskBlockedSelf", "Only tasks that never moved past planned can be deleted.");
+  }, [selectedTask, selectedTaskDeleteInfo, tr]);
+
+  function openTaskEditorForTask(task: Task, options?: { draft?: TaskDraft; error?: string }): boolean {
+    const sameTask = selectedTaskId === task.id && taskEditorMode === "edit";
+    if (!sameTask && !confirmDiscardTaskChanges()) return false;
+    const nextDraft = options?.draft ?? taskToDraft(task);
+    setSelectedTaskId(task.id);
+    setTaskDraft(nextDraft);
+    setTaskScaffoldId(resolveTaskWorkflowScaffold(nextDraft));
+    setTaskEditorMode("edit");
+    setSyncError(options?.error || "");
+    setActiveView("coordination");
+    return true;
+  }
+
   const moveTaskToStatus = async (task: Task, nextStatus: BoardStatus) => {
     if (!groupId) return;
     if (taskStatus(task) === nextStatus) return;
+    if (nextStatus === "done") {
+      const guardSource = selectedTaskId === task.id && taskEditorMode === "edit" && taskDraft
+        ? taskDraft
+        : taskToDraft(task);
+      const blockers = getTaskDoneTransitionBlockers({
+        parentId: guardSource.parentId,
+        assignee: guardSource.assignee,
+        outcome: guardSource.outcome,
+        notes: guardSource.notes,
+      });
+      if (blockers.length > 0) {
+        openTaskEditorForTask(task, {
+          draft: { ...guardSource, status: "done" },
+          error: formatDoneTransitionGuardMessage(blockers),
+        });
+        return;
+      }
+    }
     setSyncBusy(true);
     setSyncError("");
     try {
@@ -934,6 +1130,14 @@ export function ContextModal({
   const TaskGhostCard = ({ task }: { task: Task }) => {
     const status = taskStatus(task);
     const blocked = Array.isArray(task.blocked_by) && task.blocked_by.length > 0;
+    const workflow = evaluateTaskWorkflow({
+      parent_id: task.parent_id,
+      status: task.status,
+      assignee: task.assignee,
+      outcome: task.outcome,
+      notes: task.notes,
+      checklist: task.checklist,
+    });
     return (
       <div className={classNames(
         "w-[320px] rounded-2xl border p-3 shadow-2xl",
@@ -946,10 +1150,11 @@ export function ContextModal({
           </div>
           <span className={classNames("rounded-full border px-2 py-0.5 text-[11px] font-medium", statusTone(status))}>{status}</span>
         </div>
-        {taskOutcome(task) ? <div className={classNames("mt-2 line-clamp-3 text-xs", subtleTextClass)}>{taskOutcome(task)}</div> : null}
+        {taskDisplaySummary(task) ? <div className={classNames("mt-2 line-clamp-3 text-xs", subtleTextClass)}>{taskDisplaySummary(task)}</div> : null}
         <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
           {task.assignee ? <span className={classNames("rounded-full px-2 py-0.5", "glass-panel text-[var(--color-text-secondary)]")}>{task.assignee}</span> : null}
           {blocked ? <span className={classNames("rounded-full px-2 py-0.5", "bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{tr("context.blocked", "Blocked")}</span> : null}
+          {renderWorkflowBadges(workflow)}
         </div>
       </div>
     );
@@ -960,6 +1165,14 @@ export function ContextModal({
     const blocked = Array.isArray(task.blocked_by) && task.blocked_by.length > 0;
     const waiting = String(task.waiting_on || "none").trim();
     const handoff = String(task.handoff_to || "").trim();
+    const workflow = evaluateTaskWorkflow({
+      parent_id: task.parent_id,
+      status: task.status,
+      assignee: task.assignee,
+      outcome: task.outcome,
+      notes: task.notes,
+      checklist: task.checklist,
+    });
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
       id: `task:${task.id}`,
       disabled: syncBusy,
@@ -1010,8 +1223,8 @@ export function ContextModal({
             </div>
           </div>
 
-          {taskOutcome(task) ? (
-            <div className={classNames("mt-2 block w-full text-left line-clamp-3 text-xs", subtleTextClass)}>{taskOutcome(task)}</div>
+          {taskDisplaySummary(task) ? (
+            <div className={classNames("mt-2 block w-full text-left line-clamp-3 text-xs", subtleTextClass)}>{taskDisplaySummary(task)}</div>
           ) : null}
 
           <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
@@ -1024,6 +1237,7 @@ export function ContextModal({
             {blocked ? <span className={classNames("rounded-full px-2 py-0.5", "bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{tr("context.blocked", "Blocked")}</span> : null}
             {waiting && waiting !== "none" ? <span className={classNames("rounded-full px-2 py-0.5", "bg-violet-500/15 text-violet-600 dark:text-violet-400")}>{waitingLabel(waiting)}</span> : null}
             {handoff ? <span className={classNames("rounded-full px-2 py-0.5", "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400")}>{tr("context.handoffTo", "Handoff →")} {handoff}</span> : null}
+            {renderWorkflowBadges(workflow)}
           </div>
 
           <div className="mt-3 flex items-center gap-2 border-t pt-3" onClick={(event) => event.stopPropagation()}>
@@ -1035,7 +1249,15 @@ export function ContextModal({
     );
   };
 
-  const ColumnDropZone = ({ columnKey, label, items }: { columnKey: BoardStatus; label: string; items: Task[] }) => {
+  const ColumnDropZone = ({
+    columnKey,
+    label,
+    items,
+  }: {
+    columnKey: BoardStatus;
+    label: string;
+    items: Task[];
+  }) => {
     const { setNodeRef, isOver } = useDroppable({ id: `column:${columnKey}`, data: { type: "column", status: columnKey } });
     return (
       <section ref={setNodeRef} className={classNames(
@@ -1069,15 +1291,17 @@ export function ContextModal({
     return window.confirm(tr("context.unsavedTaskConfirm", "You have unsaved task edits. Discard them and continue?"));
   }, [hasTaskUnsaved, tr]);
 
-  const selectTask = (task: Task) => {
+  const selectTask = useCallback((task: Task) => {
     if (selectedTaskId === task.id && taskEditorMode === "edit") return;
     if (!confirmDiscardTaskChanges()) return;
+    const nextDraft = taskToDraft(task);
     setSelectedTaskId(task.id);
-    setTaskDraft(taskToDraft(task));
+    setTaskDraft(nextDraft);
+    setTaskScaffoldId(resolveTaskWorkflowScaffold(nextDraft));
     setTaskEditorMode("edit");
     setSyncError("");
     setActiveView("coordination");
-  };
+  }, [confirmDiscardTaskChanges, selectedTaskId, taskEditorMode]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1155,6 +1379,8 @@ export function ContextModal({
   }, [hasSteeringUnsaved, hasTaskUnsaved, onClose, tr]);
 
   const { modalRef } = useModalA11y(isOpen, handleModalClose);
+  const closeProjectExpanded = useCallback(() => setProjectExpanded(false), []);
+  const { modalRef: projectExpandedRef } = useModalA11y(projectExpanded, closeProjectExpanded);
 
   const handleToggleDesktopPet = useCallback(async (enabled: boolean) => {
     if (!onUpdateSettings) return;
@@ -1195,6 +1421,18 @@ export function ContextModal({
     if (!title) {
       setSyncError(tr("context.taskTitleRequired", "Task title is required."));
       return;
+    }
+    if (String(taskDraft.status || "").trim().toLowerCase() === "done") {
+      const blockers = getTaskDoneTransitionBlockers({
+        parentId: taskDraft.parentId,
+        assignee: taskDraft.assignee,
+        outcome: taskDraft.outcome,
+        notes: taskDraft.notes,
+      });
+      if (blockers.length > 0) {
+        setSyncError(formatDoneTransitionGuardMessage(blockers));
+        return;
+      }
     }
 
     setSyncBusy(true);
@@ -1251,14 +1489,55 @@ export function ContextModal({
     }
   };
 
+  const handleDeleteTask = async (task: Task) => {
+    if (!groupId) return;
+    const deleteInfo = getTaskDeleteInfo(task, tasks);
+    if (!deleteInfo.allowed) return;
+    if (!confirmDiscardTaskChanges()) return;
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        deleteInfo.total > 1
+          ? tr("context.deleteTaskCascadeConfirm", "Delete task \"{{title}}\" and its {{count}} unexecuted tasks?", {
+              title: taskTitle(task) || task.id,
+              count: deleteInfo.total,
+            })
+          : tr("context.deleteTaskConfirm", "Delete task \"{{title}}\" permanently?", {
+              title: taskTitle(task) || task.id,
+            })
+      );
+      if (!confirmed) return;
+    }
+
+    setSyncBusy(true);
+    setSyncError("");
+    try {
+      const resp = await deleteCoordinationTask(groupId, task.id);
+      if (!resp.ok) {
+        setSyncError(resp.error?.message || tr("context.failedToDeleteTask", "Failed to delete task"));
+        return;
+      }
+      await onRefreshContext();
+      if (selectedTaskId === task.id) {
+        setTaskEditorMode("none");
+        setSelectedTaskId("");
+        setTaskDraft(null);
+      }
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   const handleResetTask = () => {
     if (taskEditorMode === "create") {
       setTaskDraft(emptyTaskDraft("planned"));
+      setTaskScaffoldId("root");
       setSyncError("");
       return;
     }
     if (!selectedTask) return;
-    setTaskDraft(taskToDraft(selectedTask));
+    const nextDraft = taskToDraft(selectedTask);
+    setTaskDraft(nextDraft);
+    setTaskScaffoldId(resolveTaskWorkflowScaffold(nextDraft));
     setSyncError("");
   };
 
@@ -1267,6 +1546,7 @@ export function ContextModal({
     setTaskEditorMode("create");
     setSelectedTaskId("");
     setTaskDraft(emptyTaskDraft(status));
+    setTaskScaffoldId("root");
     setSyncError("");
     setActiveView("coordination");
   };
@@ -1317,6 +1597,93 @@ export function ContextModal({
     }
   };
 
+  const renderProjectPanel = (expanded = false) => {
+    const shellClass = expanded
+      ? "flex h-full min-h-0 flex-col"
+      : classNames("rounded-xl border p-4", "glass-card");
+    const contentClass = expanded ? "mt-4 min-h-0 flex flex-1 flex-col" : "mt-4";
+    const textAreaClass = classNames(
+      textareaClass,
+      expanded ? "min-h-[520px] flex-1" : "min-h-[320px]"
+    );
+    const markdownContainerClass = classNames(
+      expanded ? "min-h-0 flex-1 overflow-y-auto rounded-xl border p-4" : "max-h-[36rem] overflow-y-auto rounded-xl border p-3",
+      "glass-card"
+    );
+
+    return (
+      <section className={shellClass}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={classNames("text-sm font-semibold", "text-[var(--color-text-primary)]")}>{t("context.projectMd", { defaultValue: "PROJECT.md" })}</div>
+            <div className={classNames("mt-1 text-xs", mutedTextClass)}>{projectBusy ? t("common:loading", { defaultValue: "Loading…" }) : projectPathLabel}</div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {!expanded ? (
+              <button
+                type="button"
+                onClick={() => setProjectExpanded(true)}
+                disabled={projectBusy}
+                className={buttonSecondaryClass}
+              >
+                {tr("context.expand", "Expand")}
+              </button>
+            ) : null}
+            {editingProject ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProject(false);
+                  setProjectText(String(projectMd?.content || ""));
+                  setNotifyAgents(false);
+                }}
+                disabled={projectBusy}
+                className={buttonSecondaryClass}
+              >
+                {tr("context.cancel", "Cancel")}
+              </button>
+            ) : null}
+            <button type="button" onClick={() => void handleEditProject()} className={buttonPrimaryClass}>
+              {editingProject ? tr("context.editing", "Editing") : (projectMd?.found ? t("context.editButton", { defaultValue: "Edit" }) : t("context.createButton", { defaultValue: "Create" }))}
+            </button>
+          </div>
+        </div>
+        {projectError ? <div className={classNames("mt-3 rounded-lg border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{projectError}</div> : null}
+        {notifyError ? <div className={classNames("mt-3 rounded-lg border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{notifyError}</div> : null}
+        {projectNotice ? <div className={classNames("mt-3 rounded-lg border px-3 py-2 text-sm", "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400")}>{projectNotice}</div> : null}
+        <div className={contentClass}>
+          {editingProject ? (
+            <>
+              <textarea
+                value={projectText}
+                onChange={(event) => setProjectText(event.target.value)}
+                className={textAreaClass}
+                placeholder={t("context.writePlaceholder", { defaultValue: "Write your project constitution here…" })}
+              />
+              <label className={classNames("mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", "glass-card text-[var(--color-text-primary)]")}>
+                <input type="checkbox" checked={notifyAgents} onChange={(event) => setNotifyAgents(event.target.checked)} />
+                {tr("context.notifyAgents", "Notify the team in chat (@all) after save")}
+              </label>
+              <div className="mt-3 flex items-center gap-2">
+                <button type="button" onClick={() => void handleSaveProject()} disabled={projectBusy} className={buttonPrimaryClass}>
+                  {projectBusy ? tr("context.saving", "Saving…") : tr("context.saveProject", "Save PROJECT.md")}
+                </button>
+              </div>
+            </>
+          ) : projectMd?.found && projectMd.content ? (
+            <div className={markdownContainerClass}>
+              <MarkdownRenderer content={String(projectMd.content)} isDark={isDark} className={classNames("text-sm", subtleTextClass)} />
+            </div>
+          ) : (
+            <div className={classNames("rounded-xl border border-dashed px-3 py-4 text-sm", "border-[var(--glass-border-subtle)] text-[var(--color-text-muted)]")}>
+              {t("context.noProjectMd", { defaultValue: "No PROJECT.md found" })}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
+
   const handleAddCoordinationNote = async (kind: "decision" | "handoff") => {
     if (!groupId) return;
     const draft = kind === "decision" ? decisionDraft : handoffDraft;
@@ -1344,23 +1711,93 @@ export function ContextModal({
     }
   };
 
+  const handleApplyTaskScaffold = useCallback(() => {
+    if (!taskDraft) return;
+    const scaffold = selectedTaskScaffold;
+    const currentWorkflowText = [taskDraft.outcome, taskDraft.notes, taskDraft.checklist]
+      .map((item) => String(item || "").trim())
+      .join("\n")
+      .trim();
+    const nextWorkflowText = [scaffold.notes, scaffold.checklist].join("\n").trim();
+    if (currentWorkflowText && currentWorkflowText !== nextWorkflowText && typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        tr(
+          "context.taskScaffoldConfirm",
+          "Apply this preset and replace the current outcome, notes, and checklist?"
+        )
+      );
+      if (!confirmed) return;
+    }
+    setTaskDraft((prev) => (prev ? {
+      ...prev,
+      outcome: "",
+      notes: scaffold.notes,
+      checklist: scaffold.checklist,
+    } : prev));
+    setSyncError("");
+  }, [selectedTaskScaffold, taskDraft, tr]);
+
   const renderTaskEditorPanel = () => {
     if (!taskEditorVisible || !taskDraft) {
-      return (
-        <section className={classNames(surfaceClass, "hidden xl:flex xl:min-h-[520px] xl:flex-col xl:justify-center xl:p-6") }>
-          <div className={classNames("text-sm font-semibold", "text-[var(--color-text-primary)]")}>{tr("context.taskEditorEmptyTitle", "Select a task")}</div>
-          <div className={classNames("mt-2 text-sm", subtleTextClass)}>{tr("context.taskEditorEmptyHint", "Pick a card to edit, or create a new task from the button above.")}</div>
-        </section>
-      );
+      return null;
     }
 
     const isCreate = taskEditorMode === "create";
+    const workflowToneClass = (ok: boolean) => classNames(
+      "rounded-full px-2 py-0.5 text-[11px] font-medium",
+      ok
+        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+    );
+    const workflowSummary = taskWorkflowCoverage.isRelease
+      ? taskWorkflowCoverage.releaseCloseoutState === "missing_setup"
+        ? tr(
+          "context.taskWorkflowReleaseMissingSetup",
+          "This release preset is still missing setup: {{items}}.",
+          { items: taskWorkflowCoverage.missingSetup.join(", ") }
+        )
+        : taskWorkflowCoverage.releaseCloseoutState === "needs_closeout"
+          ? tr(
+            "context.taskWorkflowReleaseNeedsCloseout",
+            "Release execution is done enough to close, but closeout is still missing {{items}}.",
+            { items: taskWorkflowCoverage.missingCloseout.join(", ") }
+          )
+          : taskWorkflowCoverage.releaseCloseoutState === "ready"
+            ? tr(
+              "context.taskWorkflowReleaseReady",
+              "This release preset is ready: checklist and closeout are both complete."
+            )
+            : tr(
+              "context.taskWorkflowReleaseInProgress",
+              "Finish the release checklist before closeout."
+            )
+      : taskWorkflowCoverage.needsCloseout
+        ? tr(
+          "context.taskWorkflowNeedsCloseout",
+          "Closeout is still missing {{items}}.",
+          { items: taskWorkflowCoverage.missingCloseout.join(", ") }
+        )
+        : taskWorkflowCoverage.needsContract
+          ? tr(
+            "context.taskWorkflowNeedsContract",
+            "This task setup is still missing {{items}}.",
+            { items: taskWorkflowCoverage.missingSetup.join(", ") }
+          )
+          : taskWorkflowCoverage.isOptimization
+            ? tr(
+              "context.taskWorkflowOptimizationReady",
+              "This optimization task has a usable baseline / metric contract."
+            )
+            : taskWorkflowCoverage.isRoot
+              ? tr("context.taskWorkflowRootReady", "This root task has a usable goal / evidence contract.")
+              : tr("context.taskWorkflowLeanReady", "Keep subtasks lean unless more workflow structure adds clarity.");
+
     return (
-      <section className={classNames(surfaceClass, "p-4 xl:sticky xl:top-0 xl:max-h-[calc(94vh-8rem)] xl:overflow-y-auto")}>
+      <section className={classNames(surfaceClass, "p-4")}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className={classNames("text-sm font-semibold", "text-[var(--color-text-primary)]")}>{isCreate ? tr("context.newTask", "New task") : tr("context.taskDetails", "Task editor")}</div>
-            <div className={classNames("mt-1 text-xs", mutedTextClass)}>{isCreate ? tr("context.newTaskHint", "Create a new shared task. Keep it lean; fill advanced fields only when they help coordination.") : (selectedTask?.id || "")}</div>
+            <div className={classNames("mt-1 text-xs", mutedTextClass)}>{isCreate ? tr("context.newTaskHint", "Create a new shared task. Keep it lean, then apply a scaffold only when the workflow needs sharper control.") : (selectedTask?.id || "")}</div>
           </div>
           <div className="flex items-center gap-2">
             {hasTaskUnsaved ? <span className={classNames("rounded-full px-2 py-0.5 text-[11px] font-medium", "bg-amber-500/15 text-amber-600 dark:text-amber-400")}>{tr("context.unsaved", "Unsaved")}</span> : null}
@@ -1372,9 +1809,92 @@ export function ContextModal({
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className={classNames("text-xs", mutedTextClass)}>
-              {isCreate ? tr("context.editorInlineHint", "Editing stays inside the Tasks workspace so you can keep the board in view.") : (selectedTask?.updated_at ? `${tr("context.updated", "Updated {{time}}", { time: formatTime(selectedTask.updated_at) })}` : tr("context.notUpdatedYet", "Not updated yet"))}
+              {isCreate ? tr("context.editorInlineHint", "Editing opens in a side panel so the board stays readable.") : (selectedTask?.updated_at ? `${tr("context.updated", "Updated {{time}}", { time: formatTime(selectedTask.updated_at) })}` : tr("context.notUpdatedYet", "Not updated yet"))}
             </div>
             <span className={classNames("rounded-full border px-2 py-0.5 text-[11px] font-medium", statusTone(taskDraft.status))}>{taskDraft.status}</span>
+          </div>
+
+          <div className={classNames("rounded-xl border px-3 py-3", "glass-panel")}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className={classNames("text-sm font-semibold", "text-[var(--color-text-primary)]")}>{tr("context.taskWorkflow", "Workflow preset")}</div>
+                <div className={classNames("mt-1 text-xs", mutedTextClass)}>{selectedTaskScaffold.description}</div>
+                <div className={classNames("mt-1 text-xs", subtleTextClass)}>{tr("context.taskWorkflowPresetHint", "Presets only seed notes and checklist. They do not change task lifecycle.")}</div>
+              </div>
+              <div className="grid gap-2 sm:w-[15rem]">
+                <select value={taskScaffoldId} onChange={(event) => setTaskScaffoldId(event.target.value as TaskWorkflowScaffoldId)} className={inputClass}>
+                  <optgroup label={tr("context.taskPresetFamilyLean", "Lean")}>
+                    <option value="lean">{tr("context.taskScaffoldLean", "Lean")}</option>
+                  </optgroup>
+                  <optgroup label={tr("context.taskPresetFamilyContract", "Contract-first")}>
+                    <option value="root">{tr("context.taskScaffoldRoot", "Root")}</option>
+                    <option value="planner">{tr("context.taskScaffoldPlanner", "Planner")}</option>
+                    <option value="reviewer">{tr("context.taskScaffoldReviewer", "Reviewer")}</option>
+                    <option value="debugger">{tr("context.taskScaffoldDebugger", "Debugger")}</option>
+                    <option value="release">{tr("context.taskScaffoldRelease", "Release")}</option>
+                  </optgroup>
+                  <optgroup label={tr("context.taskPresetFamilyOptimization", "Metric-first")}>
+                    <option value="optimization">{tr("context.taskScaffoldOptimization", "Optimization")}</option>
+                  </optgroup>
+                </select>
+                <button type="button" onClick={handleApplyTaskScaffold} disabled={syncBusy} className={buttonSecondaryClass}>
+                  {tr("context.applyScaffold", "Apply preset")}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <span className={classNames("rounded-full px-2 py-0.5 text-[11px] font-medium", "glass-panel text-[var(--color-text-secondary)]")}>
+                {taskWorkflowCoverage.isRoot ? tr("context.rootTask", "Root task") : tr("context.subtask", "Subtask")}
+              </span>
+              {taskWorkflowCoverage.isRoot || taskWorkflowCoverage.isOptimization ? (
+                <>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasGoal)}>{tr("context.goal", "Goal")}</span>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasSuccessCriteria)}>{tr("context.successCriteria", "Success criteria")}</span>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasRequiredEvidence)}>{tr("context.requiredEvidence", "Required evidence")}</span>
+                </>
+              ) : null}
+              {taskWorkflowCoverage.isRelease && taskWorkflowCoverage.releaseCloseoutState ? (
+                <span className={classNames("rounded-full px-2 py-0.5 text-[11px] font-medium", releaseSignalTone(taskWorkflowCoverage.releaseCloseoutState))}>
+                  {releaseSignalLabel(taskWorkflowCoverage.releaseCloseoutState)}
+                </span>
+              ) : null}
+              {taskWorkflowCoverage.isRoot ? (
+                <span className={workflowToneClass(taskWorkflowCoverage.hasOwner)}>{tr("context.owner", "Owner")}</span>
+              ) : null}
+              {taskWorkflowCoverage.isOptimization ? (
+                <>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasBaseline)}>{tr("context.baseline", "Baseline")}</span>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasPrimaryMetric)}>{tr("context.primaryMetric", "Primary metric")}</span>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasVerifierBoundary)}>{tr("context.verifierBoundary", "Verifier boundary")}</span>
+                </>
+              ) : null}
+              {String(taskDraft.status || "").toLowerCase() === "done" ? (
+                <>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasOutcomeSummary)}>{tr("context.outcomeSummary", "Outcome summary")}</span>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasCloseoutVerdict)}>{tr("context.closeoutVerdict", "Closeout verdict")}</span>
+                  <span className={workflowToneClass(taskWorkflowCoverage.hasVerificationSummary)}>{tr("context.verificationSummary", "Verification summary")}</span>
+                  {taskWorkflowCoverage.isOptimization ? (
+                    <span className={workflowToneClass(taskWorkflowCoverage.hasAttemptDecision)}>{tr("context.attemptDecision", "Attempt decision")}</span>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+
+            <div className={classNames(
+              "mt-3 rounded-lg border px-3 py-2 text-xs",
+              taskWorkflowCoverage.isRelease
+                ? taskWorkflowCoverage.releaseCloseoutState === "ready"
+                  ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : taskWorkflowCoverage.releaseCloseoutState === "needs_closeout"
+                    ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : taskWorkflowCoverage.needsContract || taskWorkflowCoverage.needsCloseout
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+            )}>
+              {workflowSummary}
+            </div>
           </div>
 
           <label className="block text-sm">
@@ -1383,7 +1903,10 @@ export function ContextModal({
           </label>
 
           <label className="block text-sm">
-            <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.outcome", "Outcome")}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.outcome", "Outcome")}</span>
+              <span className={classNames("mb-1 block text-[11px]", mutedTextClass)}>{tr("context.outcomeHint", "Use this as the concise result summary, especially at closeout.")}</span>
+            </div>
             <textarea value={taskDraft.outcome} onChange={(event) => setTaskDraft((prev) => prev ? { ...prev, outcome: event.target.value } : prev)} className={textareaClass} />
           </label>
 
@@ -1407,6 +1930,21 @@ export function ContextModal({
             <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.priority", "Priority")}</span>
             <input value={taskDraft.priority} onChange={(event) => setTaskDraft((prev) => prev ? { ...prev, priority: event.target.value } : prev)} className={inputClass} />
           </label>
+
+          <div className="grid gap-3">
+            <label className="block text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.notes", "Notes")}</span>
+                <span className={classNames("mb-1 block text-[11px]", mutedTextClass)}>{tr("context.notesHint", "Keep the task contract, evidence requirements, and closeout structure here.")}</span>
+              </div>
+              <textarea value={taskDraft.notes} onChange={(event) => setTaskDraft((prev) => prev ? { ...prev, notes: event.target.value } : prev)} className={classNames(textareaClass, "min-h-[220px]")} />
+            </label>
+
+            <label className="block text-sm">
+              <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.checklist", "Checklist")}</span>
+              <textarea value={taskDraft.checklist} onChange={(event) => setTaskDraft((prev) => prev ? { ...prev, checklist: event.target.value } : prev)} className={classNames(textareaClass, "min-h-[140px]")} placeholder={tr("context.checklistPlaceholder", "Use [ ], [~], [x] prefixes if useful.")} />
+            </label>
+          </div>
 
           <details className={classNames("rounded-xl border px-3 py-3", "glass-card") }>
             <summary className={classNames("cursor-pointer text-sm font-medium", "text-[var(--color-text-primary)]")}>{tr("context.advancedTaskFields", "Advanced details")}</summary>
@@ -1434,22 +1972,12 @@ export function ContextModal({
                   </select>
                 </label>
               </div>
-
-              <label className="block text-sm">
-                <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.notes", "Notes")}</span>
-                <textarea value={taskDraft.notes} onChange={(event) => setTaskDraft((prev) => prev ? { ...prev, notes: event.target.value } : prev)} className={classNames(textareaClass, "min-h-[100px]")} />
-              </label>
-
-              <label className="block text-sm">
-                <span className={classNames("mb-1 block text-xs font-medium uppercase tracking-wide", mutedTextClass)}>{tr("context.checklist", "Checklist")}</span>
-                <textarea value={taskDraft.checklist} onChange={(event) => setTaskDraft((prev) => prev ? { ...prev, checklist: event.target.value } : prev)} className={classNames(textareaClass, "min-h-[120px]")} placeholder={tr("context.checklistPlaceholder", "Use [ ], [~], [x] prefixes if useful.")} />
-              </label>
             </div>
           </details>
 
           {isCreate ? (
             <div className={classNames("rounded-xl border px-3 py-3 text-xs", "glass-card text-[var(--color-text-muted)]")}>
-              {tr("context.newTaskHint", "Create a new shared task. Keep it lean; fill advanced fields only when they help coordination.")}
+              {tr("context.newTaskHint", "Create a new shared task. Keep it lean, then apply a scaffold only when the workflow needs sharper control.")}
             </div>
           ) : selectedTask ? (
             <div className={classNames("grid gap-2 rounded-xl border px-3 py-3 text-xs sm:grid-cols-2", "glass-card text-[var(--color-text-muted)]")}>
@@ -1461,8 +1989,22 @@ export function ContextModal({
           ) : null}
 
           <div className="flex items-center gap-2">
+            {!isCreate && selectedTask ? (
+              <button
+                type="button"
+                onClick={() => void handleDeleteTask(selectedTask)}
+                disabled={syncBusy || !selectedTaskDeleteInfo.allowed}
+                className={buttonDangerClass}
+                title={selectedTaskDeleteHint || undefined}
+              >
+                {tr("context.deleteTask", "Delete")}
+              </button>
+            ) : null}
             <button type="button" onClick={() => void handleSaveTask()} disabled={syncBusy} className={buttonPrimaryClass}>{syncBusy ? tr("context.saving", "Saving…") : (isCreate ? tr("context.createTask", "Create task") : tr("context.saveTask", "Save task"))}</button>
           </div>
+          {!isCreate && selectedTaskDeleteHint ? (
+            <div className={classNames("text-xs", mutedTextClass)}>{selectedTaskDeleteHint}</div>
+          ) : null}
         </div>
       </section>
     );
@@ -1576,41 +2118,7 @@ export function ContextModal({
             ) : null}
 
             {steeringTab === "project" ? (
-              <section className={classNames("rounded-xl border p-4", "glass-card")}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className={classNames("text-sm font-semibold", "text-[var(--color-text-primary)]")}>{t("context.projectMd", { defaultValue: "PROJECT.md" })}</div>
-                    <div className={classNames("mt-1 text-xs", mutedTextClass)}>{projectBusy ? t("common:loading", { defaultValue: "Loading…" }) : projectPathLabel}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {editingProject ? <button type="button" onClick={() => { setEditingProject(false); setProjectText(String(projectMd?.content || "")); setNotifyAgents(false); }} disabled={projectBusy} className={buttonSecondaryClass}>{tr("context.cancel", "Cancel")}</button> : null}
-                    <button type="button" onClick={() => void handleEditProject()} className={buttonPrimaryClass}>{editingProject ? tr("context.editing", "Editing") : (projectMd?.found ? t("context.editButton", { defaultValue: "Edit" }) : t("context.createButton", { defaultValue: "Create" }))}</button>
-                  </div>
-                </div>
-                {projectError ? <div className={classNames("mt-3 rounded-lg border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{projectError}</div> : null}
-                {notifyError ? <div className={classNames("mt-3 rounded-lg border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{notifyError}</div> : null}
-                {projectNotice ? <div className={classNames("mt-3 rounded-lg border px-3 py-2 text-sm", "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400")}>{projectNotice}</div> : null}
-                <div className="mt-4">
-                  {editingProject ? (
-                    <>
-                      <textarea value={projectText} onChange={(event) => setProjectText(event.target.value)} className={classNames(textareaClass, "min-h-[320px]")} />
-                      <label className={classNames("mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", "glass-card text-[var(--color-text-primary)]")}>
-                        <input type="checkbox" checked={notifyAgents} onChange={(event) => setNotifyAgents(event.target.checked)} />
-                        {tr("context.notifyAgents", "Notify the team in chat (@all) after save")}
-                      </label>
-                      <div className="mt-3 flex items-center gap-2">
-                        <button type="button" onClick={() => void handleSaveProject()} disabled={projectBusy} className={buttonPrimaryClass}>{projectBusy ? tr("context.saving", "Saving…") : tr("context.saveProject", "Save PROJECT.md")}</button>
-                      </div>
-                    </>
-                  ) : projectMd?.found && projectMd.content ? (
-                    <div className={classNames("max-h-[36rem] overflow-y-auto rounded-xl border p-3", "glass-card")}>
-                      <MarkdownRenderer content={String(projectMd.content)} isDark={isDark} className={classNames("text-sm", subtleTextClass)} />
-                    </div>
-                  ) : (
-                    <div className={classNames("rounded-xl border border-dashed px-3 py-4 text-sm", "border-[var(--glass-border-subtle)] text-[var(--color-text-muted)]")}>{t("context.noProjectMd", { defaultValue: "No PROJECT.md found" })}</div>
-                  )}
-                </div>
-              </section>
+              renderProjectPanel()
             ) : null}
 
             {steeringTab === "log" ? (
@@ -1817,32 +2325,60 @@ export function ContextModal({
                     {label} · {count}
                   </button>
                 ))}
-                <span className={classNames("text-xs", mutedTextClass)}>{tr("context.filteredTasks", "{{count}} visible", { count: filteredTaskTotal })}</span>
+                {hasArchivedTasks ? (
+                  <div className="flex items-center gap-2 sm:ml-auto">
+                    <span className={classNames("text-sm font-medium", "text-[var(--color-text-primary)]")}>
+                      {tr("context.showArchived", "Show archived")}
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={archivedExpanded}
+                      aria-label={tr("context.showArchived", "Show archived")}
+                      onClick={() => setArchivedExpanded((current) => !current)}
+                      className={switchTrackClass(archivedExpanded)}
+                    >
+                      <span className={switchThumbClass(archivedExpanded)} />
+                    </button>
+                  </div>
+                ) : null}
                 {syncBusy ? <span className={classNames("text-xs italic", mutedTextClass)}>{tr("context.applyingChanges", "Applying changes…")}</span> : null}
               </div>
             </div>
 
-            {filteredTaskTotal === 0 ? (
+            {!hasVisibleTasks && hiddenArchivedMatches === 0 ? (
               <div className={classNames("rounded-xl border border-dashed px-4 py-6 text-sm", "glass-card text-[var(--color-text-muted)]")}>
                 {tr("context.noMatchingTasks", "No tasks match the current filters")}
               </div>
             ) : null}
 
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,420px)]">
-              <div className="min-w-0">
-                <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setDragTaskId("")}>
-                  <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-                    <ColumnDropZone columnKey="planned" label={tr("context.planned", "Planned")} items={filteredBoard.planned} />
-                    <ColumnDropZone columnKey="active" label={tr("context.active", "Active")} items={filteredBoard.active} />
-                    <ColumnDropZone columnKey="done" label={tr("context.done", "Done")} items={filteredBoard.done} />
-                    <ColumnDropZone columnKey="archived" label={tr("context.archived", "Archived")} items={filteredBoard.archived} />
-                  </div>
-                  <DragOverlay>{dragTaskId && taskMap.get(dragTaskId) ? <TaskGhostCard task={taskMap.get(dragTaskId)!} /> : null}</DragOverlay>
-                </DndContext>
+            {!hasVisibleTasks && hiddenArchivedMatches > 0 ? (
+              <div className={classNames("rounded-xl border border-dashed px-4 py-5 text-sm", "glass-card text-[var(--color-text-muted)]")}>
+                <div>{tr("context.archivedHiddenMatchesDetail", "{{count}} archived tasks match the current filters. Show archived to review them.", { count: hiddenArchivedMatches })}</div>
+                <div className="mt-3">
+                  <button type="button" onClick={() => setArchivedExpanded(true)} className={buttonSecondaryClass}>
+                    {tr("context.showArchived", "Show archived")}
+                  </button>
+                </div>
               </div>
-              <div className="min-w-0">
-                {renderTaskEditorPanel()}
-              </div>
+            ) : null}
+
+            <div className="min-w-0">
+              <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setDragTaskId("")}>
+                <div className={classNames("grid gap-3 md:grid-cols-2", archivedExpanded ? "xl:grid-cols-4" : "xl:grid-cols-3")}>
+                  <ColumnDropZone columnKey="planned" label={tr("context.planned", "Planned")} items={filteredBoard.planned} />
+                  <ColumnDropZone columnKey="active" label={tr("context.active", "Active")} items={filteredBoard.active} />
+                  <ColumnDropZone columnKey="done" label={tr("context.done", "Done")} items={filteredBoard.done} />
+                  {archivedExpanded ? (
+                    <ColumnDropZone
+                      columnKey="archived"
+                      label={tr("context.archived", "Archived")}
+                      items={filteredBoard.archived}
+                    />
+                  ) : null}
+                </div>
+                <DragOverlay>{dragTaskId && taskMap.get(dragTaskId) ? <TaskGhostCard task={taskMap.get(dragTaskId)!} /> : null}</DragOverlay>
+              </DndContext>
             </div>
           </div>
         </section>
@@ -1851,35 +2387,87 @@ export function ContextModal({
   };
 
   return (
-    <ModalFrame
-      isDark={isDark}
-      onClose={handleModalClose}
-      titleId="context-modal-title"
-      title={t("context.title", { defaultValue: "Project Context" })}
-      closeAriaLabel={t("context.closeAria", { defaultValue: "Close context modal" })}
-      panelClassName="h-full w-full overflow-hidden rounded-none sm:h-[94vh] sm:max-w-[96vw]"
-      modalRef={modalRef}
-    >
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex min-h-full flex-col gap-4 p-4 sm:p-5">
-          {syncError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{syncError}</div> : null}
+    <>
+      <ModalFrame
+        isDark={isDark}
+        onClose={handleModalClose}
+        titleId="context-modal-title"
+        title={t("context.title", { defaultValue: "Project Context" })}
+        closeAriaLabel={t("context.closeAria", { defaultValue: "Close context modal" })}
+        panelClassName="h-full w-full overflow-hidden rounded-none sm:h-[94vh] sm:max-w-[96vw]"
+        modalRef={modalRef}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex min-h-full flex-col gap-4 p-4 sm:p-5">
+            {syncError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{syncError}</div> : null}
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className={classNames("inline-flex w-fit rounded-2xl border p-1", isDark ? "border-slate-800 bg-slate-950/70" : "border-gray-200 bg-gray-100/80")}>
-              <button type="button" onClick={() => handleSwitchActiveView("coordination")} className={viewButtonClass(activeView === "coordination")}>{tr("context.coordination", "Coordination")}</button>
-              <button type="button" onClick={() => handleSwitchActiveView("agents")} className={viewButtonClass(activeView === "agents")}>{tr("context.agents", "Agents")}</button>
-              <button type="button" onClick={() => handleSwitchActiveView("desktop_pet")} className={viewButtonClass(activeView === "desktop_pet")}>{tr("context.desktopPetTab", "Web Pet")}<span className="ml-1.5 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-400">Beta</span></button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className={classNames("inline-flex w-fit rounded-2xl border p-1", isDark ? "border-slate-800 bg-slate-950/70" : "border-gray-200 bg-gray-100/80")}>
+                <button type="button" onClick={() => handleSwitchActiveView("coordination")} className={viewButtonClass(activeView === "coordination")}>{tr("context.coordination", "Coordination")}</button>
+                <button type="button" onClick={() => handleSwitchActiveView("agents")} className={viewButtonClass(activeView === "agents")}>{tr("context.agents", "Agents")}</button>
+                <button type="button" onClick={() => handleSwitchActiveView("desktop_pet")} className={viewButtonClass(activeView === "desktop_pet")}>{tr("context.desktopPetTab", "Web Pet")}<span className="ml-1.5 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-400">Beta</span></button>
+              </div>
             </div>
-          </div>
 
-          {activeView === "coordination"
-            ? renderCoordinationView()
-            : activeView === "agents"
-              ? renderAgentsView()
-              : renderDesktopPetView()}
+            {activeView === "coordination"
+              ? renderCoordinationView()
+              : activeView === "agents"
+                ? renderAgentsView()
+                : renderDesktopPetView()}
+          </div>
         </div>
-      </div>
-    </ModalFrame>
+      </ModalFrame>
+
+      {taskEditorVisible && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[65] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="context-task-drawer-title"
+            >
+              <div className="absolute inset-0 glass-overlay" onPointerDown={closeTaskEditor} />
+              <div className="absolute inset-y-0 right-0 flex w-full justify-end">
+                <div className="h-full w-full sm:w-[min(860px,calc(100vw-1.5rem))]">
+                  <div className="h-full overflow-y-auto border-l border-[var(--glass-border-subtle)] shadow-2xl glass-modal">
+                    <div className="sr-only" id="context-task-drawer-title">
+                      {taskEditorMode === "create" ? tr("context.newTask", "New task") : tr("context.taskDetails", "Task editor")}
+                    </div>
+                    {renderTaskEditorPanel()}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {projectExpanded && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[70] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) setProjectExpanded(false);
+              }}
+            >
+              <div className="absolute inset-0 glass-overlay" />
+              <div ref={projectExpandedRef} className={settingsDialogPanelClass("xl")}>
+                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                  <button type="button" className={buttonSecondaryClass} onClick={() => setProjectExpanded(false)}>
+                    {t("common:close")}
+                  </button>
+                </div>
+                <div className={settingsDialogBodyClass}>
+                  {renderProjectPanel(true)}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 
 }

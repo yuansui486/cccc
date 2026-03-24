@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 
 class TestDiagnosticsOps(unittest.TestCase):
@@ -74,6 +75,85 @@ class TestDiagnosticsOps(unittest.TestCase):
             pty_backlog_bytes=lambda: 1024,
         )
         self.assertIsNone(resp)
+
+    def test_debug_snapshot_includes_web_binding_runtime_evidence(self) -> None:
+        from cccc.ports.web.runtime_control import write_web_runtime_state
+
+        td, cleanup = self._with_home()
+        try:
+            update, _ = self._call("observability_update", {"by": "user", "patch": {"developer_mode": True}})
+            self.assertTrue(update.ok, getattr(update, "error", None))
+
+            cfg, _ = self._call(
+                "remote_access_configure",
+                {
+                    "by": "user",
+                    "provider": "manual",
+                    "web_host": "0.0.0.0",
+                    "web_port": 9001,
+                },
+            )
+            self.assertTrue(cfg.ok, getattr(cfg, "error", None))
+
+            write_web_runtime_state(
+                home=Path(td),
+                pid=os.getpid(),
+                host="127.0.0.1",
+                port=8848,
+                mode="normal",
+                supervisor_managed=True,
+                supervisor_pid=os.getpid(),
+                launcher_pid=os.getpid(),
+                launch_source="test",
+            )
+
+            resp, _ = self._call("debug_snapshot", {"by": "user"})
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            web = (resp.result or {}).get("web") if isinstance(resp.result, dict) else {}
+            configured = web.get("configured") if isinstance(web.get("configured"), dict) else {}
+            runtime = web.get("runtime") if isinstance(web.get("runtime"), dict) else {}
+
+            self.assertEqual(str(configured.get("host") or ""), "0.0.0.0")
+            self.assertEqual(int(configured.get("port") or 0), 9001)
+            self.assertEqual(str(configured.get("exposure_class") or ""), "private")
+            self.assertEqual(str(runtime.get("host") or ""), "127.0.0.1")
+            self.assertEqual(int(runtime.get("port") or 0), 8848)
+            self.assertEqual(bool(runtime.get("pid_alive")), True)
+            self.assertEqual(bool(web.get("runtime_matches_configured_binding")), False)
+            self.assertIn("binding_apply_pending", web.get("issues") or [])
+            self.assertTrue(str(web.get("log_path") or "").endswith("daemon/cccc-web.log"))
+        finally:
+            cleanup()
+
+    def test_debug_snapshot_marks_stale_web_runtime_pid(self) -> None:
+        from cccc.ports.web.runtime_control import write_web_runtime_state
+
+        td, cleanup = self._with_home()
+        try:
+            update, _ = self._call("observability_update", {"by": "user", "patch": {"developer_mode": True}})
+            self.assertTrue(update.ok, getattr(update, "error", None))
+
+            write_web_runtime_state(
+                home=Path(td),
+                pid=2_147_483_647,
+                host="127.0.0.1",
+                port=8848,
+                mode="normal",
+                supervisor_managed=True,
+                supervisor_pid=os.getpid(),
+                launch_source="test",
+            )
+
+            resp, _ = self._call("debug_snapshot", {"by": "user"})
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            web = (resp.result or {}).get("web") if isinstance(resp.result, dict) else {}
+            runtime = web.get("runtime") if isinstance(web.get("runtime"), dict) else {}
+
+            self.assertEqual(int(runtime.get("pid") or 0), 2_147_483_647)
+            self.assertEqual(bool(runtime.get("pid_alive")), False)
+            self.assertIn("runtime_pid_stale", web.get("issues") or [])
+        finally:
+            cleanup()
 
 
 if __name__ == "__main__":

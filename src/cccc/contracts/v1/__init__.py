@@ -25,6 +25,15 @@ from .group_template import GroupTemplate, GroupTemplateActor, GroupTemplateProm
 from .ipc import DaemonError, DaemonRequest, DaemonResponse
 from .message import Attachment, ChatMessageData, ChatReactionData, ChatStreamData, Reference
 from .notify import NotifyAckData, NotifyKind, NotifyPriority, SystemNotifyData
+from .presentation import (
+    PresentationCard,
+    PresentationCardType,
+    PresentationContent,
+    PresentationSnapshot,
+    PresentationSlot,
+    PresentationSourceMode,
+    PresentationTableData,
+)
 
 __all__ = [
     "Actor",
@@ -68,6 +77,13 @@ __all__ = [
     "NotifyAckData",
     "NotifyKind",
     "NotifyPriority",
+    "PresentationCard",
+    "PresentationCardType",
+    "PresentationContent",
+    "PresentationSnapshot",
+    "PresentationSlot",
+    "PresentationSourceMode",
+    "PresentationTableData",
     "Reference",
     "RunnerKind",
     "SystemNotifyData",

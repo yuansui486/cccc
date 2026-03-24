@@ -52,7 +52,7 @@ export function useGroupActions() {
   const handleSetGroupState = useCallback(
     async (s: "active" | "idle" | "paused") => {
       if (!selectedGroupId) return;
-      setBusy("group-state");
+      setBusy(s === "active" ? "group-activate" : s === "paused" ? "group-pause" : "group-idle");
       try {
         const resp = await api.setGroupState(selectedGroupId, s);
         if (!resp.ok) {

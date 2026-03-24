@@ -5,6 +5,9 @@ import { inputClass, labelClass, primaryButtonClass, cardClass, preClass } from 
 interface DeveloperTabProps {
   isDark: boolean;
   groupId?: string;
+  runtimeVersion: string;
+  daemonVersion: string;
+  runtimeInfoErr: string;
   developerMode: boolean;
   setDeveloperMode: (v: boolean) => void;
   logLevel: "INFO" | "DEBUG";
@@ -49,6 +52,9 @@ interface DeveloperTabProps {
 export function DeveloperTab({
   isDark: _isDark,
   groupId,
+  runtimeVersion,
+  daemonVersion,
+  runtimeInfoErr,
   developerMode,
   setDeveloperMode,
   logLevel,
@@ -83,6 +89,7 @@ export function DeveloperTab({
   const missing = Array.isArray(registryResult?.missing_group_ids) ? registryResult!.missing_group_ids : [];
   const corrupt = Array.isArray(registryResult?.corrupt_group_ids) ? registryResult!.corrupt_group_ids : [];
   const removed = Array.isArray(registryResult?.removed_group_ids) ? registryResult!.removed_group_ids : [];
+  const versionMismatch = Boolean(runtimeVersion && daemonVersion && runtimeVersion !== daemonVersion);
 
   return (
     <div className="space-y-4">
@@ -97,6 +104,51 @@ export function DeveloperTab({
             {t("developer.warningText")}
           </div>
         </div>
+      </div>
+
+      <div className={cardClass()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("developer.runtimeInfoTitle")}</div>
+            <div className="text-xs mt-0.5 text-[var(--color-text-muted)]">
+              {t("developer.runtimeInfoHint")}
+            </div>
+          </div>
+          {versionMismatch ? (
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+              {t("developer.versionMismatchBadge")}
+            </span>
+          ) : null}
+        </div>
+
+        {runtimeInfoErr ? (
+          <div className="mt-2 text-xs text-rose-600 dark:text-rose-400">{runtimeInfoErr}</div>
+        ) : null}
+
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)] px-3 py-2.5">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+              {t("developer.ccccVersion")}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-[var(--color-text-primary)]">
+              {runtimeVersion || "—"}
+            </div>
+          </div>
+          <div className="rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)] px-3 py-2.5">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+              {t("developer.daemonVersion")}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-[var(--color-text-primary)]">
+              {daemonVersion || "—"}
+            </div>
+          </div>
+        </div>
+
+        {versionMismatch ? (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            {t("developer.versionMismatchHint")}
+          </div>
+        ) : null}
       </div>
 
       {/* Toggle */}

@@ -40,6 +40,7 @@ class SendRequest(BaseModel):
     src_group_id: str = Field(default="")
     src_event_id: str = Field(default="")
     client_id: str = Field(default="")
+    refs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SendCrossGroupRequest(BaseModel):
@@ -59,6 +60,7 @@ class ReplyRequest(BaseModel):
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
     client_id: str = Field(default="")
+    refs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DebugClearLogsRequest(BaseModel):
@@ -145,6 +147,36 @@ class RepoPromptUpdateRequest(BaseModel):
 class GroupUpdateRequest(BaseModel):
     title: Optional[str] = None
     topic: Optional[str] = None
+    by: str = Field(default="user")
+
+
+class GroupPresentationPublishRequest(BaseModel):
+    slot: str = Field(default="auto")
+    url: str = Field(default="")
+    title: str = Field(default="")
+    summary: str = Field(default="")
+    by: str = Field(default="user")
+
+
+class GroupPresentationPublishWorkspaceRequest(BaseModel):
+    slot: str = Field(default="auto")
+    path: str = Field(default="")
+    title: str = Field(default="")
+    summary: str = Field(default="")
+    by: str = Field(default="user")
+
+
+class GroupPresentationClearRequest(BaseModel):
+    slot: str = Field(default="")
+    all: bool = False
+    by: str = Field(default="user")
+
+
+class GroupPresentationBrowserSessionRequest(BaseModel):
+    slot: str = Field(default="")
+    url: str = Field(default="")
+    width: int = Field(default=1280)
+    height: int = Field(default=800)
     by: str = Field(default="user")
 
 
@@ -260,6 +292,13 @@ class RemoteAccessConfigureRequest(BaseModel):
     web_public_url: Optional[str] = None
 
 
+class BrandingUpdateRequest(BaseModel):
+    by: str = Field(default="user")
+    product_name: Optional[str] = None
+    clear_logo_icon: bool = False
+    clear_favicon: bool = False
+
+
 class GroupSpaceBindRequest(BaseModel):
     by: str = Field(default="user")
     provider: Optional[str] = Field(default="notebooklm")
@@ -342,7 +381,7 @@ class GroupSpaceProviderAuthRequest(BaseModel):
 
 class IMSetRequest(BaseModel):
     group_id: str
-    platform: Literal["telegram", "slack", "discord", "feishu", "dingtalk"]
+    platform: Literal["telegram", "slack", "discord", "feishu", "dingtalk", "wecom"]
     # Legacy single token field (backward compat for telegram/discord)
     token_env: str = ""
     token: str = ""
@@ -357,6 +396,9 @@ class IMSetRequest(BaseModel):
     dingtalk_app_key: str = ""
     dingtalk_app_secret: str = ""
     dingtalk_robot_code: str = ""
+    # WeCom fields
+    wecom_bot_id: str = ""
+    wecom_secret: str = ""
 
 
 class IMActionRequest(BaseModel):

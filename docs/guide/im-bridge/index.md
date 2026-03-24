@@ -20,6 +20,7 @@ The IM Bridge allows you to:
 | [Discord](./discord) | ✅ | Community/gaming |
 | [Feishu/Lark](./feishu) | ✅ | Enterprise (China/Global) |
 | [DingTalk](./dingtalk) | ✅ | Enterprise (China) — AI Card Streaming supported |
+| [WeCom](./wecom) | ✅ | Enterprise (China) — Long connection Bot ID / Secret flow |
 
 ## Design Principles
 
@@ -63,6 +64,10 @@ cccc im logs         # View logs
 cccc im logs -f      # Follow logs
 ```
 
+::: tip WeCom Note
+WeCom currently uses the same start/stop/status CLI controls, but credentials are configured through the Web UI rather than `cccc im set`.
+:::
+
 ## Quick Start
 
 1. Choose a platform from the list above
@@ -77,3 +82,4 @@ cccc im logs -f      # Follow logs
 - [Discord Setup](./discord) - Community access
 - [Feishu/Lark Setup](./feishu) - Enterprise (China/Global)
 - [DingTalk Setup](./dingtalk) - Enterprise (China)
+- [WeCom Setup](./wecom) - Enterprise (China)

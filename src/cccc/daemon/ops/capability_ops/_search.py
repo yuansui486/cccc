@@ -11,8 +11,10 @@ from ....contracts.v1 import DaemonError, DaemonResponse
 from ....kernel.actors import get_effective_role
 from ....kernel.capabilities import (
     BUILTIN_CAPABILITY_PACKS,
+    BUILTIN_CAPSULE_SKILLS,
     CORE_TOOL_NAMES,
     all_builtin_pack_ids,
+    all_builtin_skill_ids,
     resolve_visible_tool_names,
 )
 from ....kernel.context import ContextStorage
@@ -262,9 +264,104 @@ def _build_builtin_search_records() -> List[Dict[str, Any]]:
                 "enable_supported": True,
                 "tool_count": len(tuple(pack.get("tool_names") or ())),
                 "tool_names": [str(x).strip() for x in tuple(pack.get("tool_names") or ()) if str(x).strip()],
+                **_capability_recommendation_payload(pack),
+            }
+        )
+    for cap_id in all_builtin_skill_ids():
+        skill = BUILTIN_CAPSULE_SKILLS.get(cap_id, {})
+        out.append(
+            {
+                "capability_id": cap_id,
+                "kind": "skill",
+                "name": str(skill.get("name") or cap_id),
+                "description_short": str(skill.get("description_short") or ""),
+                "tags": list(skill.get("tags") or []),
+                "source_id": "cccc_builtin",
+                "source_tier": "builtin",
+                "source_uri": "",
+                "trust_tier": "builtin",
+                "qualification_status": "qualified",
+                "sync_state": "fresh",
+                "enable_supported": True,
+                **_capability_recommendation_payload(skill),
             }
         )
     return out
+
+
+def _is_builtin_search_record(item: Dict[str, Any]) -> bool:
+    return str(item.get("source_id") or "").strip() == "cccc_builtin"
+
+
+def _skill_capsule_preview(value: Any, *, max_lines: int = 4, max_chars: int = 420) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    raw_lines = [str(raw or "").strip() for raw in text.splitlines() if str(raw or "").strip()]
+    if not raw_lines:
+        return ""
+    protocol_start = next(
+        (
+            idx
+            for idx, line in enumerate(raw_lines)
+            if str(line).strip().lower() in {"protocol:", "workflow:", "steps:", "playbook:"}
+        ),
+        -1,
+    )
+    if protocol_start >= 0:
+        selected = [line for line in raw_lines[protocol_start + 1 :] if line]
+    else:
+        selected = [
+            line
+            for line in raw_lines
+            if not str(line).strip().lower().startswith(("you are ", "use this skill "))
+        ]
+    if not selected:
+        selected = list(raw_lines)
+    merged = "\n".join(selected[:max_lines])
+    if len(merged) <= max_chars:
+        return merged
+    if max_chars <= 3:
+        return merged[:max_chars]
+    return merged[: max_chars - 3].rstrip() + "..."
+
+
+def _recommendation_lines(value: Any) -> List[str]:
+    rows = value if isinstance(value, (list, tuple)) else []
+    out: List[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        text = " ".join(str(row or "").split()).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def _capability_recommendation_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    for field in ("use_when", "avoid_when", "gotchas"):
+        rows = _recommendation_lines(raw.get(field))
+        if rows:
+            payload[field] = rows
+    evidence_kind = " ".join(str(raw.get("evidence_kind") or "").split()).strip()
+    if evidence_kind:
+        payload["evidence_kind"] = evidence_kind
+    return payload
+
+
+def _capability_recommendation_search_text(item: Dict[str, Any]) -> str:
+    chunks: List[str] = []
+    for field in ("use_when", "avoid_when", "gotchas"):
+        chunks.extend(_recommendation_lines(item.get(field)))
+    evidence_kind = " ".join(str(item.get("evidence_kind") or "").split()).strip()
+    if evidence_kind:
+        chunks.append(evidence_kind)
+    return " ".join(chunks)
 
 
 def _search_matches(query: str, item: Dict[str, Any]) -> bool:
@@ -276,6 +373,7 @@ def _search_matches(query: str, item: Dict[str, Any]) -> bool:
         str(item.get("name") or ""),
         str(item.get("description_short") or ""),
         " ".join(str(x) for x in (item.get("tags") or [])),
+        _capability_recommendation_search_text(item),
     ]
     haystack = " ".join(fields).lower()
     if q in haystack:
@@ -295,6 +393,7 @@ def _score_item_tokens(item: Dict[str, Any], tokens: List[str]) -> int:
         str(item.get("description_short") or ""),
         " ".join(str(x) for x in (item.get("tags") or [])),
         " ".join(str(x) for x in (item.get("tool_names") or [])),
+        _capability_recommendation_search_text(item),
     ]
     haystack = " ".join(fields).lower()
     if not haystack:
@@ -542,6 +641,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
                 "blocked_global": bool(blocked),
                 "autoload_candidate": bool(enable_supported and (not blocked) and (_policy_level_visible(policy_level) or bool(recent_payload))),
                 "policy_visible": bool(_policy_level_visible(policy_level)),
+                **_capability_recommendation_payload(rec),
             }
             if blocked_reason:
                 item["blocked_reason"] = blocked_reason
@@ -581,7 +681,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
             recent_count = int(recent.get("success_count") or 0)
             recent_ts = str(recent.get("last_success_at") or "")
             cap_id = str(row.get("capability_id") or "")
-            builtin_bias = 0 if cap_id.startswith("pack:") else 1
+            builtin_bias = 0 if _is_builtin_search_record(row) else 1
             return (
                 blocked_penalty,
                 builtin_bias,
@@ -883,7 +983,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
 
         def _rank(item: Dict[str, Any]) -> Tuple[int, int, int, int, int, str]:
             cap_id = str(item.get("capability_id") or "")
-            is_builtin = 0 if cap_id.startswith("pack:") else 1
+            is_builtin = 0 if _is_builtin_search_record(item) else 1
             name_key = str(item.get("name") or cap_id).lower()
             enabled_bias = 0 if cap_id in enabled_set else 1
             qualification = str(item.get("qualification_status") or "").strip().lower()
@@ -960,6 +1060,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
                 "install_mode": str(rec.get("install_mode") or ""),
                 "policy_level": str(rec.get("policy_level") or ""),
                 "tags": list(rec.get("tags") or []),
+                **_capability_recommendation_payload(rec),
             }
             if cached_install_state:
                 item["cached_install_state"] = cached_install_state
@@ -1285,6 +1386,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                     "capability_id": cap_id,
                     "name": str(rec.get("name") or cap_id),
                     "description_short": str(rec.get("description_short") or ""),
+                    "capsule_preview": _skill_capsule_preview(rec.get("capsule_text")),
                     "source_id": str(rec.get("source_id") or ""),
                     "source_uri": str(rec.get("source_uri") or ""),
                     "policy_level": _effective_policy_level(
@@ -1309,6 +1411,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                     "capability_id": cap_id,
                     "name": str(rec.get("name") or cap_id),
                     "description_short": str(rec.get("description_short") or ""),
+                    "capsule_preview": _skill_capsule_preview(rec.get("capsule_text")),
                     "source_id": str(rec.get("source_id") or ""),
                     "policy_level": _effective_policy_level(
                         policy,

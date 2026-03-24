@@ -48,10 +48,12 @@ def find_subprocess_executable(command: str) -> Optional[str]:
                 candidate = directory / name
                 if not candidate.exists():
                     continue
-                try:
-                    return str(candidate.resolve())
-                except Exception:
-                    return str(candidate)
+                # Preserve the discovered path spelling instead of resolving
+                # symlinks. On macOS test environments, tempfile roots under
+                # /var are often symlinked to /private/var; resolving here
+                # changes the string unexpectedly and breaks callers that only
+                # need a directly executable path token.
+                return str(candidate)
 
     return None
 

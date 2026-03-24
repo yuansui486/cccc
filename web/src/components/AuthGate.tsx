@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from 'react-i18next';
 import { useTheme } from "../hooks/useTheme";
-import { getAppBrandName } from "../utils/displayText";
+import { getAppBrandName, getAppLogoPath } from "../utils/displayText";
 import * as api from "../services/api";
+import { useBrandingStore } from "../stores";
 
 type AuthStatus = "checking" | "authenticated" | "login";
 
@@ -22,6 +23,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [showRecovery, setShowRecovery] = useState(false);
   const { t } = useTranslation('layout');
   const appBrandName = getAppBrandName();
+  const branding = useBrandingStore((s) => s.branding);
+  const appLogoPath = getAppLogoPath();
   const hostname = typeof window !== "undefined" ? String(window.location.hostname || "").trim().toLowerCase() : "";
   const isLocalAccess = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
   const localRecoveryPath = "~/.cccc/access_tokens.yaml";
@@ -102,6 +105,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         className="glass-modal w-full max-w-sm mx-4 p-6"
       >
         <div className="flex flex-col items-center gap-1 mb-6">
+          <div className="mb-2 flex h-12 min-w-[48px] max-w-[220px] items-center justify-center overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 shadow-sm">
+            <img
+              src={branding.logo_icon_url || appLogoPath}
+              alt={`${appBrandName} logo`}
+              className="max-h-7 w-auto max-w-full object-contain"
+            />
+          </div>
           <h1 className="text-lg font-semibold gradient-text">
             {appBrandName}
           </h1>

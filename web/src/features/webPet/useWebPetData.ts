@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { selectChatBucketState, useGroupStore, useUIStore } from "../../stores";
 import { aggregateWebPetState } from "./aggregateWebPetState";
@@ -93,8 +93,11 @@ export function useWebPetData() {
   const sseStatus = useUIStore((state) => state.sseStatus);
   const { reminders, activeReminder, reaction, dismissReminder } =
     useWebPetNotifications();
-  const tr = (key: string, fallback: string, vars?: Record<string, unknown>) =>
-    String(t(key, { defaultValue: fallback, ...(vars || {}) }));
+  const tr = useCallback(
+    (key: string, fallback: string, vars?: Record<string, unknown>) =>
+      String(t(key, { defaultValue: fallback, ...(vars || {}) })),
+    [t]
+  );
 
   return useMemo(() => {
     const { catState, panelData: rawPanelData } = aggregateWebPetState({
@@ -153,7 +156,6 @@ export function useWebPetData() {
       dismissReminder,
     };
   }, [
-    t,
     activeReminder,
     dismissReminder,
     events,

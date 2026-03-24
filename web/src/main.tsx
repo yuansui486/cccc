@@ -5,6 +5,8 @@ import App from "./App";
 import "./i18n";
 import "./index.css";
 import "@xterm/xterm/css/xterm.css";
+import { useBrandingStore } from "./stores";
+import { applyBrandingToDocument, DEFAULT_WEB_BRANDING } from "./utils/branding";
 
 // v0.4: We intentionally do NOT use Service Workers.
 // Reason: SW caching frequently causes "stale UI" bugs in an ops/admin console.
@@ -26,6 +28,9 @@ if ("serviceWorker" in navigator && typeof navigator.serviceWorker.getRegistrati
     }
   });
 }
+
+applyBrandingToDocument(DEFAULT_WEB_BRANDING);
+void useBrandingStore.getState().refreshBranding();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
