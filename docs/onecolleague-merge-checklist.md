@@ -7,13 +7,13 @@
 ## 1. 基线与范围
 
 - 基线分支：`main`
-- 上轮 refresh 基线提交：`c921877dd0001ab6a073ea772d6e267c9f19035e`
-- 当前需要吸收的 main 提交上界：`de07912`
+- 上轮 refresh 基线提交：`de07912a32415f0661f91cd8fceb4f92416d4c02`
+- 当前需要吸收的 main 提交上界：`cea6324bcd55a4bea4e7fc1ac412aa2ac2bb177d`
 - 当前分支：`OneColleague`
-- 当前 HEAD：`018fa54`
-- 当前 merge-base：`c921877dd0001ab6a073ea772d6e267c9f19035e`
-- 本轮主线增量范围：`c921877..de07912`
-- 一号同事保留集对照仍以 `main...OneColleague` 为准，但不能再把它误读成 `1bf054f..ee9d541` 这段旧范围
+- 当前 HEAD：`79281d5`
+- 当前 merge-base：`cea6324bcd55a4bea4e7fc1ac412aa2ac2bb177d`
+- 本轮主线增量范围：`de07912..cea6324`
+- 一号同事保留集对照仍以 `main...OneColleague` 为准；本轮完成后，后续 refresh 不应再把 `de07912` 当成主线最新真相。
 
 这段范围内，一号同事定制的主提交为：
 
@@ -26,7 +26,12 @@
 - `ee9d541 style(web): shift UI theme to light blue`
 - `79b320f merge(main): refresh OneColleague onto c921877`
 - `09ba6da docs: refresh onecolleague merge checklist`
+- `018fa54 merge(main): refresh OneColleague onto de07912`
+- `d51bfc8 docs: refresh onecolleague merge checklist`
 - `12e7efc fix(web): align group settings default tab with main`
+- `df7cefc revert(web): rollback onecolleague branding aliasing`
+- `d6df847 style(web): trim new group button`
+- `79281d5 merge(main): refresh OneColleague onto cea6324`
 
 后续 merge 最新 CCCC 时，本文只关注“一号同事相对原版 CCCC 的必保留行为”，不关注上游普通演进本身。
 
@@ -56,6 +61,33 @@
 - `web/src/i18n/locales/{en,ja,zh}/{modals,settings}.json`
 
 这组文件在本轮要按“先吃新 main 结构，再回填一号同事行为链”处理，不能整文件选边。
+
+### 1.2 本轮（3/24）额外吸收框架
+
+这轮额外吸收的是 `de07912..cea6324`，重点不是旧的 desktop/webPet 收口，而是新主线继续推进的 Web shell / Presentation / Branding / IM 扩展：
+
+- `f473bea` 把 app shell 重新拆回 `AppShell` / hooks 结构
+- `0c57005` 到 `8c3d29b` 引入并扩展 Presentation surface / browser flow
+- `fa719fa` 新增 branding controls 并继续打磨 console UX
+- `151d804` / `wecom` 相关提交把 IM bridge 能力扩到企业微信
+
+这轮 changed-in-both 的高风险集合主要是：
+
+- `src/cccc/ports/web/app.py`
+- `src/cccc/ports/web/schemas.py`
+- `web/src/App.tsx`
+- `web/src/components/AppModals.tsx`
+- `web/src/components/AuthGate.tsx`
+- `web/src/components/SettingsModal.tsx`
+- `web/src/components/layout/AppHeader.tsx`
+- `web/src/components/layout/GroupSidebar.tsx`
+- `web/src/components/layout/MobileMenuSheet.tsx`
+- `web/src/pages/chat/ChatComposer.tsx`
+- `web/src/stores/index.ts`
+- `web/src/types.ts`
+- `web/src/i18n/locales/{en,ja,zh}/{chat,layout,modals,settings}.json`
+
+这组文件在本轮要继续按“先吃新 main 结构，再回填一号同事 preserve 行为链”处理，尤其不能把新的 branding/presentation shell 回退成旧的一体式 App，也不能让一号同事的登录门禁、品牌壳层、DoneHub 账户入口和 settings 裁剪在新 shell 里丢失。
 
 ## 2. 必须保留的品牌与用户可见裁剪
 
