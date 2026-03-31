@@ -28,6 +28,8 @@ _RESERVED_IDS = frozenset({
     "@all", "@peers", "@foreman", "@user",
 })
 
+INTERNAL_KIND_PET = "pet"
+
 
 def _normalize_capability_id_list(raw: Any) -> List[str]:
     out: List[str] = []
@@ -116,6 +118,18 @@ def list_actors(group: Group) -> List[Dict[str, Any]]:
     return out
 
 
+def is_internal_actor(actor: Dict[str, Any]) -> bool:
+    return bool(str(actor.get("internal_kind") or "").strip())
+
+
+def is_pet_actor(actor: Dict[str, Any]) -> bool:
+    return str(actor.get("internal_kind") or "").strip() == INTERNAL_KIND_PET
+
+
+def list_visible_actors(group: Group) -> List[Dict[str, Any]]:
+    return [actor for actor in list_actors(group) if isinstance(actor, dict) and not is_internal_actor(actor)]
+
+
 def find_actor(group: Group, actor_id: str) -> Optional[Dict[str, Any]]:
     wanted = actor_id.strip()
     if not wanted:
@@ -139,7 +153,11 @@ def get_effective_role(group: Group, actor_id: str) -> ActorRole:
     if not wanted:
         return "peer"
     
-    actors = list_actors(group)
+    actor = find_actor(group, wanted)
+    if isinstance(actor, dict) and is_internal_actor(actor):
+        return "peer"
+
+    actors = list_visible_actors(group)
     for actor in actors:
         if not isinstance(actor, dict):
             continue
@@ -165,7 +183,7 @@ def find_foreman(group: Group) -> Optional[Dict[str, Any]]:
     
     Note: This is now based on position, not stored role.
     """
-    actors = list_actors(group)
+    actors = list_visible_actors(group)
     for actor in actors:
         if not isinstance(actor, dict):
             continue
@@ -190,6 +208,7 @@ def add_actor(
     enabled: bool = True,
     runner: RunnerKind = "pty",
     runtime: AgentRuntime = "codex",
+    internal_kind: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Add a new actor to the group.
     
@@ -217,6 +236,7 @@ def add_actor(
         enabled=coerce_bool(enabled, default=True),
         runner=runner,
         runtime=runtime,
+        internal_kind=(str(internal_kind or "").strip() or None),
         created_at=now,
         updated_at=now,
     )
@@ -252,7 +272,9 @@ def reorder_actors(group: Group, actor_ids: List[str]) -> List[Dict[str, Any]]:
         Reordered actor list with effective roles
     """
     actors = list_actors(group)
-    id_to_actor = {str(a.get("id")): a for a in actors}
+    visible_actors = list_visible_actors(group)
+    hidden_actors = [a for a in actors if isinstance(a, dict) and is_internal_actor(a)]
+    id_to_actor = {str(a.get("id")): a for a in visible_actors}
     
     # Validate all IDs exist
     for aid in actor_ids:
@@ -263,13 +285,13 @@ def reorder_actors(group: Group, actor_ids: List[str]) -> List[Dict[str, Any]]:
     if len(actor_ids) != len(set(actor_ids)):
         raise ValueError("duplicate actor IDs in list")
     
-    # Check all actors are included
+    # Check all visible actors are included. Internal actors remain appended.
     if set(actor_ids) != set(id_to_actor.keys()):
-        raise ValueError("actor_ids must include all actors")
+        raise ValueError("actor_ids must include all visible actors")
     
     # Reorder
     new_actors = [id_to_actor[aid] for aid in actor_ids]
-    group.doc["actors"] = new_actors
+    group.doc["actors"] = new_actors + hidden_actors
     group.save()
     
     # Return with effective roles
@@ -293,6 +315,9 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
     if "title" in patch:
         title = str(patch.get("title") or "").strip()
         item["title"] = title
+
+    if "avatar_asset_path" in patch:
+        item["avatar_asset_path"] = str(patch.get("avatar_asset_path") or "").strip()
 
     if "command" in patch:
         cmd = patch.get("command")
@@ -360,6 +385,10 @@ def update_actor(group: Group, actor_id: str, patch: Dict[str, Any]) -> Dict[str
         ):
             raise ValueError("custom runtime requires a command (PTY runner)")
 
+    if "internal_kind" in patch:
+        internal_kind = str(patch.get("internal_kind") or "").strip()
+        item["internal_kind"] = internal_kind or None
+
     # Normalize "empty command" for non-custom PTY runtimes: treat it as "use default command".
     runner_kind = str(item.get("runner") or "pty").strip() or "pty"
     runtime_name = str(item.get("runtime") or "codex").strip() or "codex"
@@ -388,7 +417,7 @@ def resolve_recipient_tokens(group: Group, tokens: List[str]) -> List[str]:
     if not raw:
         return []
 
-    actors = list_actors(group)
+    actors = list_visible_actors(group)
     id_set = {str(a.get("id")) for a in actors if isinstance(a, dict) and isinstance(a.get("id"), str)}
     title_map: Dict[str, List[str]] = {}
     for a in actors:

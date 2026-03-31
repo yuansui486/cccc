@@ -9,6 +9,7 @@ import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/cap
 import { actorProfileIdentityKey, actorProfileMatchesRef } from "../../utils/actorProfiles";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
+import { ActorAvatarField } from "../ActorAvatarField";
 
 type EditMode = "custom" | "profile";
 
@@ -36,6 +37,8 @@ export interface EditActorModalProps {
   busy: string;
   groupId: string;
   actorId: string;
+  avatarUrl?: string | null;
+  hasCustomAvatar?: boolean;
   isRunning: boolean;
   runtimes: RuntimeInfo[];
   runtime: SupportedRuntime;
@@ -57,6 +60,7 @@ export interface EditActorModalProps {
   actorProfiles: ActorProfile[];
   actorProfilesBusy: boolean;
   onSaveAsProfile: () => Promise<SaveActorProfileResult | void>;
+  onAvatarChanged?: () => Promise<void>;
   inlineNotice?: string;
   onCancel: () => void;
 }
@@ -66,22 +70,22 @@ type SecretSource = "none" | "actor" | "profile-preview";
 /** Runtime-specific placeholder hints for secret environment variables */
 const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
   claude: {
-    set: 'export ANTHROPIC_API_KEY="...";\nexport ANTHROPIC_BASE_URL="...";',
-    unset: "unset ANTHROPIC_API_KEY;\nunset ANTHROPIC_BASE_URL;",
+    set: 'ANTHROPIC_API_KEY="..."\nANTHROPIC_BASE_URL="..."',
+    unset: "ANTHROPIC_API_KEY\nANTHROPIC_BASE_URL",
   },
   codex: {
-    set: 'export OPENAI_API_KEY="...";\nexport OPENAI_BASE_URL="...";',
-    unset: "unset OPENAI_API_KEY;\nunset OPENAI_BASE_URL;",
+    set: 'OPENAI_API_KEY="..."\nOPENAI_BASE_URL="..."',
+    unset: "OPENAI_API_KEY\nOPENAI_BASE_URL",
   },
   gemini: {
-    set: 'export GOOGLE_API_KEY="...";',
-    unset: "unset GOOGLE_API_KEY;",
+    set: 'GOOGLE_API_KEY="..."',
+    unset: "GOOGLE_API_KEY",
   },
 };
 
 const DEFAULT_SECRETS_PLACEHOLDER = {
-  set: 'export OPENAI_API_KEY="...";\nexport ANTHROPIC_API_KEY="...";\nexport ANTHROPIC_BASE_URL="...";',
-  unset: "unset OPENAI_API_KEY;\nunset ANTHROPIC_API_KEY;\nunset ANTHROPIC_BASE_URL;",
+  set: 'OPENAI_API_KEY="..."\nANTHROPIC_API_KEY="..."\nANTHROPIC_BASE_URL="..."',
+  unset: "OPENAI_API_KEY\nANTHROPIC_API_KEY\nANTHROPIC_BASE_URL",
 };
 
 function commandPreview(command: string[] | undefined): string {
@@ -111,6 +115,8 @@ export function EditActorModal({
   busy,
   groupId,
   actorId,
+  avatarUrl,
+  hasCustomAvatar = false,
   isRunning,
   runtimes,
   runtime,
@@ -132,6 +138,7 @@ export function EditActorModal({
   actorProfiles,
   actorProfilesBusy,
   onSaveAsProfile,
+  onAvatarChanged,
   inlineNotice,
   onCancel,
 }: EditActorModalProps) {
@@ -149,6 +156,7 @@ export function EditActorModal({
   const [pendingConvertToCustom, setPendingConvertToCustom] = useState(false);
   const [localNotice, setLocalNotice] = useState("");
   const [secretSource, setSecretSource] = useState<SecretSource>("none");
+  const [avatarBusy, setAvatarBusy] = useState<"" | "upload" | "clear">("");
   const secretFetchSeqRef = useRef(0);
   const modalStateRef = useRef<{
     groupId: string;
@@ -381,6 +389,46 @@ export function EditActorModal({
     }
   };
 
+  const handleUploadAvatar = async (file: File | null) => {
+    if (!file || !groupId || !actorId) return;
+    setAvatarBusy("upload");
+    setSecretsError("");
+    setLocalNotice("");
+    try {
+      const resp = await api.uploadActorAvatar(groupId, actorId, file);
+      if (!resp.ok) {
+        setSecretsError(resp.error?.message || t("avatarUploadFailed"));
+        return;
+      }
+      await onAvatarChanged?.();
+      setLocalNotice(t("avatarSaved"));
+    } catch {
+      setSecretsError(t("avatarUploadFailed"));
+    } finally {
+      setAvatarBusy("");
+    }
+  };
+
+  const handleClearAvatar = async () => {
+    if (!groupId || !actorId) return;
+    setAvatarBusy("clear");
+    setSecretsError("");
+    setLocalNotice("");
+    try {
+      const resp = await api.clearActorAvatar(groupId, actorId);
+      if (!resp.ok) {
+        setSecretsError(resp.error?.message || t("saveFailed"));
+        return;
+      }
+      await onAvatarChanged?.();
+      setLocalNotice(t("avatarReset"));
+    } catch {
+      setSecretsError(t("saveFailed"));
+    } finally {
+      setAvatarBusy("");
+    }
+  };
+
   const submit = async (restart: boolean) => {
     if (!groupId || !actorId) return;
     if (busy === "actor-update") return;
@@ -471,6 +519,7 @@ export function EditActorModal({
   const nestedCardClass = "group rounded-xl border p-3 border-[var(--glass-border-subtle)] bg-[var(--glass-bg)]";
   const saveDisabled =
     busy === "actor-update" ||
+    avatarBusy !== "" ||
     secretsBusy ||
     roleNotesBusy ||
     (editMode === "custom" && effectiveLinked) ||
@@ -508,15 +557,34 @@ export function EditActorModal({
               </div>
 
               <div className="mt-4 space-y-4">
-                <div>
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("displayName")}</label>
-                  <input
-                    className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
-                    value={title}
-                    onChange={(e) => onChangeTitle(e.target.value)}
-                    placeholder={actorId}
-                  />
-                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("leaveEmptyForId")}</div>
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                  <div className="sm:w-[104px] sm:flex-shrink-0">
+                    <ActorAvatarField
+                      label={null}
+                      avatarUrl={avatarUrl}
+                      runtime={runtime}
+                      title={title || actorId}
+                      isDark={isDark}
+                      sizeClassName="h-14 w-14"
+                      disabled={busy === "actor-update" || avatarBusy !== ""}
+                      resetDisabled={!hasCustomAvatar}
+                      uploadBusy={avatarBusy === "upload"}
+                      resetBusy={avatarBusy === "clear"}
+                      onSelectFile={(file) => void handleUploadAvatar(file)}
+                      onReset={() => void handleClearAvatar()}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("displayName")}</label>
+                    <input
+                      className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                      value={title}
+                      onChange={(e) => onChangeTitle(e.target.value)}
+                      placeholder={actorId}
+                    />
+                    <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("leaveEmptyForId")}</div>
+                  </div>
                 </div>
 
                 <div>

@@ -21,6 +21,7 @@ def handle_incoming_connection(
     dump_response: Callable[[Any], Dict[str, Any]],
     try_handle_special: Callable[[Any, Any], bool],
     handle_request: Callable[[Any], Tuple[Any, bool]],
+    schedule_request: Callable[[Any, Any], bool] | None = None,
     logger: logging.Logger,
 ) -> bool:
     """Handle a single accepted daemon connection.
@@ -59,6 +60,31 @@ def handle_incoming_connection(
         return False
 
     if try_handle_special(req, conn):
+        return False
+
+    if schedule_request is not None:
+        try:
+            conn.settimeout(None)
+        except Exception:
+            pass
+        if schedule_request(req, conn):
+            return False
+        try:
+            error_resp = DaemonResponse(
+                ok=False,
+                error=DaemonError(
+                    code="internal_error",
+                    message="internal error: request executor unavailable",
+                ),
+            )
+            send_json(conn, dump_response(error_resp))
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
         return False
 
     should_exit = False

@@ -220,3 +220,40 @@ def get_runtime_command_with_flags(name: str) -> List[str]:
         "custom": [],
     }
     return commands.get(name, [name])
+
+
+def runtime_start_preflight_error(runtime: str, command: Optional[List[str]] = None, *, runner: str = "pty") -> str:
+    """Return a user-facing startup error when a runtime cannot be launched.
+
+    This is intentionally stricter than schema validation:
+    - It checks whether the executable actually exists on this machine.
+    - It keeps headless actors out of the check because they do not spawn a CLI process.
+    """
+    runner_kind = str(runner or "pty").strip() or "pty"
+    if runner_kind == "headless":
+        return ""
+
+    rt = str(runtime or "").strip()
+    cmd = [str(part) for part in (command or []) if str(part).strip()]
+
+    if rt == "custom":
+        if not cmd:
+            return "custom runtime requires a command (PTY runner)"
+        executable = str(cmd[0] or "").strip()
+        if find_subprocess_executable(executable):
+            return ""
+        return f"runtime unavailable: custom runtime command not found: {executable}"
+
+    info = detect_runtime(rt)
+    if info.available:
+        return ""
+
+    command_hint = list(cmd or get_runtime_command_with_flags(rt))
+    executable = str(command_hint[0] or "").strip() if command_hint else ""
+    if executable and find_subprocess_executable(executable):
+        return ""
+
+    label = str(info.display_name or rt or "runtime").strip() or "runtime"
+    if executable and executable != rt:
+        return f"runtime unavailable: {label} executable not found: {executable}"
+    return f"runtime unavailable: {label} is not installed or not in PATH"

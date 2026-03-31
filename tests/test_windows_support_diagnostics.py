@@ -109,6 +109,55 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertFalse(bool(result.get("success")))
         self.assertIn("pywinpty", str(result.get("error") or ""))
 
+    def test_actor_runtime_returns_explicit_runtime_unavailable_error(self) -> None:
+        from cccc.daemon.actors import actor_runtime_ops
+
+        group = SimpleNamespace(
+            group_id="g1",
+            doc={"active_scope_key": "scope1"},
+            save=lambda: None,
+            ledger_path="ledger.jsonl",
+        )
+        actor = {
+            "id": "peer1",
+            "default_scope_key": "scope1",
+            "runner": "pty",
+            "runtime": "codex",
+            "command": ["codex"],
+            "env": {},
+        }
+
+        with patch.object(actor_runtime_ops, "find_actor", return_value=actor), patch.object(
+            actor_runtime_ops,
+            "runtime_start_preflight_error",
+            return_value="runtime unavailable: Codex CLI is not installed or not in PATH",
+        ), patch.object(actor_runtime_ops.pty_runner, "PTY_SUPPORTED", True, create=False):
+            result = actor_runtime_ops.start_actor_process(
+                group,
+                "peer1",
+                command=["codex"],
+                env={},
+                runner="pty",
+                runtime="codex",
+                by="user",
+                find_scope_url=lambda _group, _scope_key: ".",
+                effective_runner_kind=lambda runner: runner,
+                merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                normalize_runtime_command=lambda _runtime, command: list(command),
+                ensure_mcp_installed=lambda _runtime, _cwd: True,
+                inject_actor_context_env=lambda env, _gid, _aid: dict(env),
+                prepare_pty_env=lambda env: dict(env),
+                pty_backlog_bytes=lambda: 1024,
+                write_headless_state=lambda _gid, _aid: None,
+                write_pty_state=lambda _gid, _aid, _pid: None,
+                clear_preamble_sent=lambda _group, _aid: None,
+                throttle_reset_actor=lambda _gid, _aid: None,
+                supported_runtimes=("codex",),
+            )
+
+        self.assertFalse(bool(result.get("success")))
+        self.assertIn("not in PATH", str(result.get("error") or ""))
+
     def test_windows_pty_does_not_fallback_to_spawn_without_env(self) -> None:
         from cccc.runners import pty_win
 

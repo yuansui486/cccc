@@ -127,6 +127,7 @@ class ActorAddData(BaseModel):
 class ActorUpdatePatch(BaseModel):
     role: Optional[ActorRole] = None
     title: Optional[str] = None
+    avatar_asset_path: Optional[str] = None
     command: Optional[List[str]] = None
     env: Optional[Dict[str, str]] = None
     default_scope_key: Optional[str] = None

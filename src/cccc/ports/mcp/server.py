@@ -23,7 +23,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 # Kernel/util imports needed by routing
-from ...kernel.actors import get_effective_role
+from ...kernel.actors import find_actor, get_effective_role, is_pet_actor
 from ...kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ...kernel.group import load_group
 from ...kernel.capabilities import CORE_ADMIN_TOOLS, CORE_TOOL_NAMES
@@ -173,6 +173,16 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
         aid = runtime_ctx.actor_id
         role: Optional[str] = None
         help_result: Dict[str, Any]
+
+        def _safe_find_actor(group_obj: Any, actor_id: str | None) -> Optional[Dict[str, Any]]:
+            if not actor_id:
+                return None
+            try:
+                actor = find_actor(group_obj, actor_id)
+            except Exception:
+                return None
+            return actor if isinstance(actor, dict) else None
+
         if gid:
             g = load_group(gid)
             if g is not None:
@@ -183,18 +193,30 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
                         role = None
                 pf = read_group_prompt_file(g, HELP_FILENAME)
                 if pf.found and isinstance(pf.content, str) and pf.content.strip():
+                    actor = _safe_find_actor(g, aid)
                     help_result = {
                         "markdown": _append_runtime_help_addenda(
-                            _select_help_markdown(pf.content, role=role, actor_id=aid),
+                            _select_help_markdown(
+                                pf.content,
+                                role=role,
+                                actor_id=aid,
+                                include_pet=bool(isinstance(actor, dict) and is_pet_actor(actor)),
+                            ),
                             group_id=gid,
                             actor_id=aid,
                         ),
                         "source": str(pf.path or ""),
                     }
                 else:
+                    actor = _safe_find_actor(g, aid)
                     help_result = {
                         "markdown": _append_runtime_help_addenda(
-                            _select_help_markdown(_CCCC_HELP_BUILTIN, role=role, actor_id=aid),
+                            _select_help_markdown(
+                                _CCCC_HELP_BUILTIN,
+                                role=role,
+                                actor_id=aid,
+                                include_pet=bool(isinstance(actor, dict) and is_pet_actor(actor)),
+                            ),
                             group_id=gid,
                             actor_id=aid,
                         ),
@@ -323,6 +345,27 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val_reply,
         )
+
+    if name == "cccc_pet_decisions":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        action = str(arguments.get("action") or "get").strip().lower()
+        if action == "get":
+            return _call_daemon_or_raise({"op": "pet_decisions_get", "args": {"group_id": gid, "actor_id": aid}})
+        if action == "replace":
+            return _call_daemon_or_raise(
+                {
+                    "op": "pet_decisions_replace",
+                    "args": {
+                        "group_id": gid,
+                        "actor_id": aid,
+                        "decisions": list(arguments.get("decisions") or []) if isinstance(arguments.get("decisions"), list) else [],
+                    },
+                }
+            )
+        if action == "clear":
+            return _call_daemon_or_raise({"op": "pet_decisions_clear", "args": {"group_id": gid, "actor_id": aid}})
+        raise MCPError(code="invalid_request", message="cccc_pet_decisions action must be get|replace|clear")
 
     if name == "cccc_file":
         gid = _resolve_group_id(arguments)

@@ -1,16 +1,17 @@
-export type HelpChangedBlock = "common" | "role:foreman" | "role:peer" | `actor:${string}`;
+export type HelpChangedBlock = "common" | "role:foreman" | "role:peer" | "pet" | `actor:${string}`;
 
 export type ParsedHelpMarkdown = {
   common: string;
   foreman: string;
   peer: string;
+  pet: string;
   actorNotes: Record<string, string>;
   extraTaggedBlocks: string[];
   usedLegacyRoleNotes: boolean;
 };
 
 type TaggedSection = {
-  kind: "role" | "actor" | "extra";
+  kind: "role" | "actor" | "pet" | "extra";
   key: string;
   raw: string;
   body: string;
@@ -18,7 +19,8 @@ type TaggedSection = {
 
 const H2_RE = /^##(?!#)\s+.*$/;
 const ROLE_TAG_RE = /^##\s*@role:\s*(\w+)\s*$/i;
-const ACTOR_TAG_RE = /^##\s*@actor:\s*(.+?)\s*$/i;
+const ACTOR_TAG_RE = /^##\s*@actor:\s*(\S+)(?:\s+(.*\S))?\s*$/i;
+const PET_TAG_RE = /^##\s*@pet\s*:?\s*$/i;
 const LEGACY_ROLE_SECTION_RE = /^##\s+Role Notes\s*$/i;
 const H3_RE = /^###\s+(.+?)\s*$/;
 
@@ -60,9 +62,20 @@ function parseTaggedSection(section: string): TaggedSection | null {
   const actorMatch = header.match(ACTOR_TAG_RE);
   if (actorMatch) {
     const actorId = String(actorMatch[1] || "").trim();
+    const inlineBody = String(actorMatch[2] || "").trim();
+    const bodyLines = lines.slice(1);
+    const body = trimBlock([inlineBody, ...bodyLines].filter(Boolean).join("\n"));
     return {
       kind: actorId ? "actor" : "extra",
       key: actorId ? `actor:${actorId}` : "actor:",
+      raw: trimBlock(normalized),
+      body,
+    };
+  }
+  if (PET_TAG_RE.test(header)) {
+    return {
+      kind: "pet",
+      key: "pet",
       raw: trimBlock(normalized),
       body: trimBlock(lines.slice(1).join("\n")),
     };
@@ -157,6 +170,7 @@ export function parseHelpMarkdown(markdown: string): ParsedHelpMarkdown {
   const extraTaggedBlocks: string[] = [];
   let foreman = "";
   let peer = "";
+  let pet = "";
 
   for (const section of sections) {
     const raw = trimBlock(section);
@@ -178,6 +192,10 @@ export function parseHelpMarkdown(markdown: string): ParsedHelpMarkdown {
       else extraTaggedBlocks.push(tagged.raw);
       continue;
     }
+    if (tagged.kind === "pet") {
+      pet = tagged.body;
+      continue;
+    }
     extraTaggedBlocks.push(tagged.raw);
   }
 
@@ -191,13 +209,14 @@ export function parseHelpMarkdown(markdown: string): ParsedHelpMarkdown {
     usedLegacyRoleNotes = legacy.used;
   }
 
-  return { common, foreman, peer, actorNotes, extraTaggedBlocks, usedLegacyRoleNotes };
+  return { common, foreman, peer, pet, actorNotes, extraTaggedBlocks, usedLegacyRoleNotes };
 }
 
 export function buildHelpMarkdown(input: {
   common: string;
   foreman: string;
   peer: string;
+  pet: string;
   actorNotes: Record<string, string>;
   actorOrder?: string[];
   extraTaggedBlocks?: string[];
@@ -206,12 +225,14 @@ export function buildHelpMarkdown(input: {
   const common = trimBlock(input.common);
   const foreman = trimBlock(input.foreman);
   const peer = trimBlock(input.peer);
+  const pet = trimBlock(input.pet);
   const actorNotes = input.actorNotes || {};
   const extraTaggedBlocks = Array.isArray(input.extraTaggedBlocks) ? input.extraTaggedBlocks.map(trimBlock).filter(Boolean) : [];
 
   if (common) parts.push(common);
   if (foreman) parts.push(`## @role: foreman\n\n${foreman}`);
   if (peer) parts.push(`## @role: peer\n\n${peer}`);
+  if (pet) parts.push(`## @pet\n\n${pet}`);
 
   const seen = new Set<string>();
   const orderedActorIds: string[] = [];
@@ -246,7 +267,21 @@ export function updateActorHelpNote(markdown: string, actorId: string, note: str
     common: parsed.common,
     foreman: parsed.foreman,
     peer: parsed.peer,
+    pet: parsed.pet,
     actorNotes: nextActorNotes,
+    actorOrder,
+    extraTaggedBlocks: parsed.extraTaggedBlocks,
+  });
+}
+
+export function updatePetHelpNote(markdown: string, note: string, actorOrder?: string[]): string {
+  const parsed = parseHelpMarkdown(markdown);
+  return buildHelpMarkdown({
+    common: parsed.common,
+    foreman: parsed.foreman,
+    peer: parsed.peer,
+    pet: trimBlock(note),
+    actorNotes: parsed.actorNotes,
     actorOrder,
     extraTaggedBlocks: parsed.extraTaggedBlocks,
   });

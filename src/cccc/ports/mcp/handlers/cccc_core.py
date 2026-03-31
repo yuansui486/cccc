@@ -225,11 +225,13 @@ def _slim_task_for_bootstrap(task: Dict[str, Any]) -> Dict[str, Any]:
         "id": str(task.get("id") or ""),
         "title": _trim_text(task.get("title"), max_chars=120),
         "outcome": _trim_text(task.get("outcome"), max_chars=160),
+        "parent_id": str(task.get("parent_id") or ""),
         "status": str(task.get("status") or ""),
         "assignee": str(task.get("assignee") or ""),
         "priority": str(task.get("priority") or ""),
         "waiting_on": str(task.get("waiting_on") or "none"),
         "handoff_to": str(task.get("handoff_to") or ""),
+        "task_type": str(task.get("task_type") or "").strip(),
         "notes": _trim_text(task.get("notes"), max_chars=240),
         "checklist": [
             {

@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -87,14 +88,23 @@ class TestRegistryReconcileAndAutoWake(unittest.TestCase):
                             }
                         )
                     )
-                self.assertFalse(send_resp.ok)
-                self.assertEqual((send_resp.error.code if send_resp.error else ""), "no_enabled_recipients")
+                self.assertTrue(send_resp.ok, getattr(send_resp, "error", None))
 
                 g = load_group(gid)
                 self.assertIsNotNone(g)
                 actor = find_actor(g, "peer1") if g is not None else None
                 self.assertIsNotNone(actor)
                 self.assertFalse(bool(actor.get("enabled", True)))
+                deadline = time.monotonic() + 1.0
+                while time.monotonic() < deadline:
+                    g = load_group(gid)
+                    actor = find_actor(g, "peer1") if g is not None else None
+                    if actor is not None and not bool(actor.get("enabled", True)):
+                        break
+                    time.sleep(0.01)
+                actor = find_actor(load_group(gid), "peer1")  # type: ignore[arg-type]
+                self.assertIsNotNone(actor)
+                self.assertFalse(bool((actor or {}).get("enabled", True)))
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)

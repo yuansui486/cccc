@@ -12,6 +12,7 @@ const TARGET_FPS = 8;
 const FADE_MS = 200;
 const PROCEDURAL_FRAMES = 8;
 const REACTION_DURATION_MS = 2200;
+const SPRITE_LOAD_TIMEOUT_MS = 10_000;
 
 const LAUNCH_GUIDANCE_MARKERS = ["web ui", "launch", "启动"];
 
@@ -54,19 +55,32 @@ export function createCatEngine(options: CatEngineOptions): CatEngine {
   async function loadSprites(): Promise<void> {
     const promises = CAT_STATES.map((state) => {
       return new Promise<void>((resolve) => {
+        let settled = false;
         const img = new Image();
+        const finish = (sheet: SpriteSheet | null, warning?: string) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          img.onload = null;
+          img.onerror = null;
+          if (warning) {
+            console.warn(warning);
+          }
+          if (!destroyed) {
+            spriteSheets[state] = sheet;
+          }
+          resolve();
+        };
         img.onload = () => {
           const frameCount = Math.floor(img.naturalWidth / FRAME_SIZE);
-          spriteSheets[state] = { img, frameCount };
-          resolve();
+          finish({ img, frameCount });
         };
         img.onerror = () => {
-          console.warn(
-            `Sprite not found: ${state}.png, using procedural fallback`
-          );
-          spriteSheets[state] = null;
-          resolve();
+          finish(null, `Sprite not found: ${state}.png, using procedural fallback`);
         };
+        const timeout = window.setTimeout(() => {
+          finish(null, `Sprite load timed out: ${state}.png, using procedural fallback`);
+        }, SPRITE_LOAD_TIMEOUT_MS);
         img.src = spriteUrls[state];
       });
     });
@@ -180,13 +194,6 @@ export function createCatEngine(options: CatEngineOptions): CatEngine {
           ctx.fillRect(44, 14 + bounce, 3, 5);
         }
         break;
-      case "needs_you":
-        ctx.fillRect(24, 18 + bounce, 6, 6);
-        ctx.fillRect(34, 18 + bounce, 6, 6);
-        ctx.fillStyle = "#FFF";
-        ctx.fillRect(26, 19 + bounce, 3, 3);
-        ctx.fillRect(36, 19 + bounce, 3, 3);
-        break;
     }
 
     // State-specific details
@@ -202,19 +209,6 @@ export function createCatEngine(options: CatEngineOptions): CatEngine {
         ctx.fillRect(36, 46 + bounce + (2 - pawOffset), 8, 4);
         break;
       }
-      case "needs_you":
-        ctx.fillStyle = "#FFF";
-        ctx.fillRect(44, 6, 14, 14);
-        ctx.fillStyle = "#000";
-        ctx.fillRect(44, 4, 14, 2);
-        ctx.fillRect(44, 20, 14, 2);
-        ctx.fillRect(42, 6, 2, 14);
-        ctx.fillRect(58, 6, 2, 14);
-        ctx.fillRect(46, 20, 4, 4);
-        ctx.fillStyle = "#FF0000";
-        ctx.fillRect(50, 8, 2, 6);
-        ctx.fillRect(50, 16, 2, 2);
-        break;
     }
 
     // Tail
@@ -445,6 +439,29 @@ export function createCatEngine(options: CatEngineOptions): CatEngine {
         cancelAnimationFrame(animationId);
         animationId = null;
       }
+      ctx.clearRect(0, 0, RENDER_SIZE, RENDER_SIZE);
+      for (const state of CAT_STATES) {
+        const sheet = spriteSheets[state];
+        if (sheet?.img) {
+          sheet.img.onload = null;
+          sheet.img.onerror = null;
+          try {
+            sheet.img.src = "";
+          } catch {
+            // Ignore best-effort cleanup failures.
+          }
+        }
+        spriteSheets[state] = null;
+      }
+      currentState = "napping";
+      currentFrame = 0;
+      lastFrameTime = 0;
+      fadeOpacity = 1;
+      fadeStart = 0;
+      prevState = null;
+      currentHintMessage = "";
+      activeReaction = null;
+      reactionStartTime = 0;
     },
   };
 }

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
+
+from ....daemon.server import get_daemon_endpoint
 
 from ..schemas import (
     GroupSpaceArtifactActionRequest,
@@ -15,9 +19,14 @@ from ..schemas import (
     GroupSpaceSourceActionRequest,
     GroupSpaceSyncRequest,
     RouteContext,
+    check_admin,
     require_admin,
     require_group,
+    resolve_websocket_principal,
+    websocket_tokens_active,
 )
+
+_PROJECTED_BROWSER_STREAM_LIMIT_BYTES = 16 * 1024 * 1024
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -349,6 +358,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "action": action,
                     "timeout_seconds": int(req.timeout_seconds or 900),
                     "force_reauth": bool(req.force_reauth),
+                    "projected": bool(req.projected),
                 },
             }
         )
@@ -365,5 +375,139 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 },
             }
         )
+
+    @global_router.websocket("/space/providers/{provider}/auth/browser_surface/ws")
+    async def group_space_provider_auth_browser_surface_ws(websocket: WebSocket, provider: str) -> None:
+        await websocket.accept()
+        provider_name = str(provider or "").strip().lower() or "notebooklm"
+
+        principal = resolve_websocket_principal(websocket)
+        websocket.state.principal = principal
+
+        auth_header = str((getattr(websocket, "headers", {}) or {}).get("authorization") or "").strip()
+        has_header_token = auth_header.lower().startswith("bearer ") and bool(str(auth_header[7:] or "").strip())
+        has_cookie_token = False
+        try:
+            cookies = getattr(websocket, "cookies", None) or {}
+            has_cookie_token = bool(str(cookies.get("cccc_access_token") or "").strip())
+        except Exception:
+            has_cookie_token = False
+        has_query_token = bool(str(websocket.query_params.get("token") or "").strip())
+        if (has_header_token or has_cookie_token or has_query_token) and str(getattr(principal, "kind", "anonymous") or "anonymous") != "user" and websocket_tokens_active():
+            try:
+                await websocket.send_json({"ok": False, "error": {"code": "auth_required", "message": "Invalid or missing authentication token"}})
+            except Exception:
+                pass
+            await websocket.close(code=4401)
+            return
+
+        try:
+            check_admin(websocket)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"code": "permission_denied", "message": str(exc.detail or "permission denied")}
+            try:
+                await websocket.send_json({"ok": False, "error": detail})
+            except Exception:
+                pass
+            await websocket.close(code=1008)
+            return
+
+        if ctx.read_only:
+            try:
+                await websocket.send_json(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "read_only_browser_surface",
+                            "message": "Provider auth browser surface is disabled in read-only mode.",
+                            "details": {},
+                        },
+                    }
+                )
+            except Exception:
+                pass
+            try:
+                await websocket.close(code=1000)
+            except Exception:
+                pass
+            return
+
+        try:
+            ep = get_daemon_endpoint()
+            transport = str(ep.get("transport") or "").strip().lower()
+            if transport == "tcp":
+                host = str(ep.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+                port = int(ep.get("port") or 0)
+                reader, writer = await asyncio.open_connection(host, port, limit=_PROJECTED_BROWSER_STREAM_LIMIT_BYTES)
+            else:
+                sock_path = ctx.home / "daemon" / "ccccd.sock"
+                path = str(ep.get("path") or sock_path)
+                reader, writer = await asyncio.open_unix_connection(path, limit=_PROJECTED_BROWSER_STREAM_LIMIT_BYTES)
+        except Exception:
+            await websocket.send_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}})
+            await websocket.close(code=1011)
+            return
+
+        try:
+            req = {"op": "space_provider_auth_browser_attach", "args": {"provider": provider_name, "by": "user"}}
+            writer.write((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
+            await writer.drain()
+            line = await reader.readline()
+            try:
+                resp = json.loads(line.decode("utf-8", errors="replace"))
+            except Exception:
+                resp = {}
+            if not isinstance(resp, dict) or not resp.get("ok"):
+                err = resp.get("error") if isinstance(resp.get("error"), dict) else {"code": "browser_surface_attach_failed", "message": "browser surface attach failed"}
+                await websocket.send_json({"ok": False, "error": err})
+                await websocket.close(code=1008)
+                return
+
+            async def _pump_out() -> None:
+                while True:
+                    line2 = await reader.readline()
+                    if not line2:
+                        break
+                    await websocket.send_text(line2.decode("utf-8", errors="replace").rstrip("\n"))
+
+            async def _pump_in() -> None:
+                while True:
+                    raw = await websocket.receive_text()
+                    if not raw:
+                        continue
+                    writer.write((raw + "\n").encode("utf-8", errors="replace"))
+                    await writer.drain()
+
+            out_task = asyncio.create_task(_pump_out())
+            in_task = asyncio.create_task(_pump_in())
+            try:
+                done, pending = await asyncio.wait({out_task, in_task}, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    try:
+                        _ = task.result()
+                    except Exception:
+                        pass
+                for task in pending:
+                    task.cancel()
+                try:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                try:
+                    await websocket.close(code=1000)
+                except Exception:
+                    pass
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
     return [group_router, global_router]

@@ -6,8 +6,11 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from ...kernel.actors import list_actors
+from ...kernel.context import ContextStorage
+from ...kernel.actors import list_actors, remove_actor
 from ...kernel.group import load_group
+from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor, sync_pet_actor
+from ...kernel.runtime import runtime_start_preflight_error
 from ...util.conv import coerce_bool
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
@@ -60,6 +63,16 @@ def autostart_running_groups(
                 pass
             continue
 
+        try:
+            sync_pet_actor(group)
+        except Exception as e:
+            logger.warning("Pet actor sync failed for %s: %s", group_id, e)
+            try:
+                if get_pet_actor(group) is not None:
+                    remove_actor(group, PET_ACTOR_ID)
+            except Exception:
+                pass
+
         for actor in list_actors(group):
             if not isinstance(actor, dict):
                 continue
@@ -105,6 +118,11 @@ def autostart_running_groups(
                 continue
 
             ok_mcp = True
+            effective_cmd = normalize_runtime_command(runtime, list(command or [])) if effective_runner != "headless" else []
+            runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=effective_runner)
+            if runtime_error:
+                logger.warning("Autostart skipped for %s/%s: %s", group_id, actor_id, runtime_error)
+                continue
             try:
                 ok_mcp = bool(ensure_mcp_installed(runtime, cwd))
             except Exception:
@@ -130,7 +148,6 @@ def autostart_running_groups(
                     )
                 else:
                     effective_env = merge_actor_env_with_private(group.group_id, actor_id, env)
-                    effective_cmd = normalize_runtime_command(runtime, list(command or []))
                     session = pty_runner.SUPERVISOR.start_actor(
                         group_id=group.group_id,
                         actor_id=actor_id,
@@ -153,6 +170,10 @@ def autostart_running_groups(
 
             clear_preamble_sent(group, actor_id)
             throttle_reset_actor(group.group_id, actor_id)
+            try:
+                ContextStorage(group).clear_agent_status_if_present(actor_id)
+            except Exception:
+                pass
 
         try:
             if (

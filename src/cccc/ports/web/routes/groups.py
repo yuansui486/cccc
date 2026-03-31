@@ -10,12 +10,16 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from ....contracts.v1.automation import AutomationRuleSet
 from ....daemon.server import get_daemon_endpoint
 from ....daemon.group.presentation_ops import load_presentation_snapshot, resolve_workspace_asset_path
+from ....runners import headless as headless_runner
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
-from ....kernel.group import load_group
+from ....kernel.group import get_group_state, load_group
+from ....kernel.query_projections import get_groups_projection
+from ....daemon.runner_state_ops import pty_state_path
 from ....kernel.group_template import parse_group_template
 from ....kernel.ledger import read_last_lines
 from ....kernel.prompt_files import (
@@ -28,9 +32,17 @@ from ....kernel.prompt_files import (
     resolve_active_scope_root,
     write_group_prompt_file,
 )
+from ....kernel.pet_prompt import build_pet_prompt_parts, build_pet_snapshot_text, load_pet_help_markdown
+from ....kernel.pet_outcomes import append_pet_decision_outcome
+from ....kernel.pet_actor import get_pet_actor, is_desktop_pet_enabled
+from ....kernel.pet_signals import load_pet_signals
+from ....daemon.pet.review_scheduler import request_manual_pet_review
+from ...mcp.utils.help_markdown import parse_help_markdown
 from ....kernel.access_tokens import list_access_tokens
+from ....kernel.pet_decisions import load_pet_decisions
 from ....util.conv import coerce_bool
 from ....util.fs import atomic_write_text
+from ....util.process import pid_is_alive
 from ..schemas import (
     AttachRequest,
     CreateGroupRequest,
@@ -44,6 +56,7 @@ from ..schemas import (
     GroupSettingsRequest,
     GroupTemplatePreviewRequest,
     GroupUpdateRequest,
+    PetDecisionOutcomeRequest,
     ProjectMdUpdateRequest,
     RepoPromptUpdateRequest,
     RouteContext,
@@ -60,6 +73,117 @@ from ..schemas import (
 )
 
 _PRESENTATION_BROWSER_STREAM_LIMIT_BYTES = 16 * 1024 * 1024
+_CONTEXT_INFLIGHT: Dict[str, asyncio.Future[Dict[str, Any]]] = {}
+_CONTEXT_GENERATION: Dict[str, int] = {}
+_CONTEXT_LOCK = asyncio.Lock()
+
+
+def _group_running_local(group_id: str) -> bool:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return False
+    group = load_group(gid)
+    if group is None:
+        return False
+    actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+    for actor in actors:
+        if not isinstance(actor, dict):
+            continue
+        aid = str(actor.get("id") or "").strip()
+        if not aid:
+            continue
+        pty_state = pty_state_path(gid, aid)
+        if pty_state.exists():
+            try:
+                raw = json.loads(pty_state.read_text(encoding="utf-8"))
+                pid = int(raw.get("pid") or 0)
+            except Exception:
+                pid = 0
+            if pid > 0 and pid_is_alive(pid):
+                return True
+        if headless_runner.SUPERVISOR.actor_running(gid, aid):
+            return True
+    return False
+
+
+def _read_groups_local() -> Dict[str, Any]:
+    projection = get_groups_projection()
+    groups = projection.get("groups") if isinstance(projection.get("groups"), list) else []
+    out: list[dict[str, Any]] = []
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("group_id") or "").strip()
+        row = dict(item)
+        row["running"] = _group_running_local(gid)
+        out.append(row)
+    return {
+        "ok": True,
+        "result": {
+            "groups": out,
+            "registry_health": dict(projection.get("registry_health") or {}),
+        },
+    }
+
+
+def _context_cache_key(group_id: str, detail: str) -> str:
+    gid = str(group_id or "").strip()
+    mode = str(detail or "summary").strip().lower() or "summary"
+    return f"context:{gid}:{mode}"
+
+
+async def invalidate_context_read(group_id: str, *, detail: Optional[str] = None) -> None:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return
+    mode = str(detail or "").strip().lower()
+    if mode in {"summary", "full"}:
+        keys = [_context_cache_key(gid, mode)]
+    else:
+        keys = [_context_cache_key(gid, "summary"), _context_cache_key(gid, "full")]
+    async with _CONTEXT_LOCK:
+        touched = False
+        for key in keys:
+            if key in _CONTEXT_GENERATION or key in _CONTEXT_INFLIGHT:
+                _CONTEXT_GENERATION[key] = int(_CONTEXT_GENERATION.get(key, 0)) + 1
+                touched = True
+            _CONTEXT_INFLIGHT.pop(key, None)
+        if not touched:
+            for key in keys:
+                _CONTEXT_GENERATION[key] = 1
+
+
+def _build_pet_context_payload(
+    group: Any,
+    help_prompt: Dict[str, Any],
+    context_payload: Dict[str, Any],
+    *,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    help_content = str(help_prompt.get("content") or "")
+    persona = str(help_prompt.get("persona") or "").strip()
+    source = str(help_prompt.get("pet_source") or "default").strip() or "default"
+    decisions = load_pet_decisions(group)
+    signals = load_pet_signals(group, context_payload=context_payload)
+    payload = {
+        "persona": persona,
+        "snapshot": build_pet_snapshot_text(group, context_payload),
+        "decisions": decisions,
+        "signals": signals,
+        "source": source,
+    }
+    if not verbose:
+        return payload
+    parts = build_pet_prompt_parts(group, help_markdown=help_content, context_payload=context_payload)
+    payload.update(
+        {
+            "help": str(parts.get("help") or ""),
+            "prompt": str(parts.get("prompt") or ""),
+            "help_prompt": help_prompt,
+            "source": str(parts.get("source") or payload["source"]),
+        }
+    )
+    return payload
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -68,34 +192,6 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     # --- group-scoped router ---
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}", dependencies=[Depends(require_group)])
-    context_inflight: Dict[str, asyncio.Future[Dict[str, Any]]] = {}
-    context_generation: Dict[str, int] = {}
-    context_lock = asyncio.Lock()
-
-    def _context_cache_key(group_id: str, detail: str) -> str:
-        gid = str(group_id or "").strip()
-        mode = str(detail or "summary").strip().lower() or "summary"
-        return f"context:{gid}:{mode}"
-
-    async def _invalidate_context_read(group_id: str) -> None:
-        gid = str(group_id or "").strip()
-        if not gid:
-            return
-        async with context_lock:
-            prefix = f"context:{gid}:"
-            touched = False
-            for key in list(context_generation.keys()):
-                if key.startswith(prefix):
-                    context_generation[key] = int(context_generation.get(key, 0)) + 1
-                    touched = True
-            for key in list(context_inflight.keys()):
-                if key.startswith(prefix):
-                    context_inflight.pop(key, None)
-                    touched = True
-            if not touched:
-                context_generation[_context_cache_key(gid, "summary")] = 1
-                context_generation[_context_cache_key(gid, "full")] = 1
-
     async def _deduped_context_get(group_id: str, detail: str, fetcher) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         gid = str(group_id or "").strip()
         if not gid:
@@ -110,13 +206,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         fetch_generation = 0
         do_fetch = False
 
-        async with context_lock:
-            fut = context_inflight.get(key)
+        async with _CONTEXT_LOCK:
+            fut = _CONTEXT_INFLIGHT.get(key)
             if fut is None or fut.done():
                 loop = asyncio.get_running_loop()
                 fut = loop.create_future()
-                context_inflight[key] = fut
-                fetch_generation = int(context_generation.get(key, 0))
+                _CONTEXT_INFLIGHT[key] = fut
+                fetch_generation = int(_CONTEXT_GENERATION.get(key, 0))
                 do_fetch = True
 
         if fut is not None and not do_fetch:
@@ -124,22 +220,22 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         try:
             val = await fetcher()
-            async with context_lock:
-                if int(context_generation.get(key, 0)) == fetch_generation and context_inflight.get(key) is fut:
+            async with _CONTEXT_LOCK:
+                if int(_CONTEXT_GENERATION.get(key, 0)) == fetch_generation and _CONTEXT_INFLIGHT.get(key) is fut:
                     if fut is not None and not fut.done():
                         fut.set_result(val)
                 elif fut is not None and not fut.done():
                     fut.set_result(val)
             return val
         except Exception as exc:
-            async with context_lock:
+            async with _CONTEXT_LOCK:
                 if fut is not None and not fut.done():
                     fut.set_exception(exc)
             raise
         finally:
-            async with context_lock:
-                if context_inflight.get(key) is fut:
-                    context_inflight.pop(key, None)
+            async with _CONTEXT_LOCK:
+                if _CONTEXT_INFLIGHT.get(key) is fut:
+                    _CONTEXT_INFLIGHT.pop(key, None)
 
     def _request_access_token(request: Request) -> str:
         auth = str(request.headers.get("authorization") or "").strip()
@@ -230,7 +326,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @global_router.get("/groups")
     async def groups(request: Request) -> Dict[str, Any]:
         async def _fetch() -> Dict[str, Any]:
-            return await ctx.daemon({"op": "groups"})
+            return _read_groups_local()
 
         ttl = max(0.0, min(5.0, ctx.exhibit_cache_ttl_s))
         resp = await ctx.cached_json("groups", ttl, _fetch)
@@ -386,7 +482,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             return await ctx.daemon({"op": "context_get", "args": {"group_id": gid, "detail": detail_mode}})
 
         if fresh:
-            await _invalidate_context_read(gid)
+            await invalidate_context_read(gid, detail=detail_mode)
             return await _fetch()
         return await _deduped_context_get(gid, detail_mode, _fetch)
 
@@ -421,6 +517,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if len(raw) > WEB_MAX_TEMPLATE_BYTES:
             raise HTTPException(status_code=413, detail={"code": "template_too_large", "message": "template too large"})
         template_text = raw.decode("utf-8", errors="replace")
+        await invalidate_context_read(group_id)
         return await ctx.daemon(
             {
                 "op": "group_template_import_replace",
@@ -816,8 +913,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             atomic_write_text(project_md_path, str(req.content or ""), encoding="utf-8")
             content = project_md_path.read_text(encoding="utf-8", errors="replace")
             try:
-                await _invalidate_context_read(group_id)
-                await ctx.daemon({
+                resp = await ctx.daemon({
                     "op": "context_sync",
                     "args": {
                         "group_id": group_id,
@@ -825,6 +921,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                         "ops": [{"op": "coordination.brief.update", "project_brief_stale": True}],
                     },
                 })
+                if bool(resp.get("ok")):
+                    await invalidate_context_read(group_id)
             except Exception:
                 pass
             return {"ok": True, "result": {"found": True, "path": str(project_md_path), "content": content}}
@@ -861,6 +959,10 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 out.append(value)
                 continue
             if value in ("role:foreman", "role:peer"):
+                seen.add(value)
+                out.append(value)
+                continue
+            if value == "pet":
                 seen.add(value)
                 out.append(value)
                 continue
@@ -949,6 +1051,10 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     ) -> list[str]:
         if not content_changed:
             return []
+        if str(editor_mode or "").strip().lower() == "structured":
+            normalized_blocks = {str(item or "").strip() for item in list(changed_blocks or []) if str(item or "").strip()}
+            if normalized_blocks and normalized_blocks.issubset({"pet"}):
+                return []
         running = await _list_running_actor_views(group_id)
         if not running:
             return []
@@ -1022,6 +1128,93 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "help": _one("help"),
             },
         }
+
+    @group_router.get("/pet-context")
+    async def pet_context_get(group_id: str, fresh: bool = False, verbose: bool = False) -> Dict[str, Any]:
+        """Get the injected context payload for the independent pet peer."""
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+
+        def _help_prompt() -> Dict[str, Any]:
+            pf = read_group_prompt_file(group, HELP_FILENAME)
+            content = ""
+            prompt_source = "builtin"
+            if pf.found and isinstance(pf.content, str) and pf.content.strip():
+                content = str(pf.content)
+                prompt_source = "home"
+            else:
+                content = load_pet_help_markdown(group)
+            parsed = parse_help_markdown(content)
+            persona = str(parsed.get("pet") or "").strip()
+            return {
+                "kind": "help",
+                "source": prompt_source,
+                "pet_source": "help" if persona else "default",
+                "prompt_source": prompt_source,
+                "filename": HELP_FILENAME,
+                "path": pf.path,
+                "content": content,
+                "persona": persona,
+            }
+
+        if fresh:
+            await invalidate_context_read(group_id, detail="summary")
+        context_resp = await _deduped_context_get(group_id, "summary", lambda: ctx.daemon({"op": "context_get", "args": {"group_id": group_id, "detail": "summary"}}))
+        if not isinstance(context_resp, dict) or not context_resp.get("ok"):
+            return context_resp
+
+        help_prompt = _help_prompt()
+        return {
+            "ok": True,
+            "result": {
+                **_build_pet_context_payload(
+                    group,
+                    help_prompt,
+                    context_resp.get("result") if isinstance(context_resp.get("result"), dict) else {},
+                    verbose=verbose,
+                ),
+            },
+        }
+
+    @group_router.post("/pet-context/review")
+    async def pet_context_review_post(group_id: str) -> Dict[str, Any]:
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        if not is_desktop_pet_enabled(group):
+            return {"ok": False, "error": {"code": "desktop_pet_disabled", "message": "desktop pet is disabled"}}
+        if get_group_state(group) not in {"active", "idle"}:
+            return {"ok": False, "error": {"code": "group_not_active", "message": "pet review requires active or idle group state"}}
+        pet_actor = get_pet_actor(group)
+        if not isinstance(pet_actor, dict) or not bool(pet_actor.get("enabled", True)):
+            return {"ok": False, "error": {"code": "pet_actor_unavailable", "message": "pet actor is unavailable"}}
+        accepted = await run_in_threadpool(
+            request_manual_pet_review,
+            group_id,
+            reason="bubble_click",
+        )
+        if not accepted:
+            return {"ok": False, "error": {"code": "pet_review_unavailable", "message": "pet review is currently unavailable"}}
+        return {"ok": True, "result": {"accepted": True}}
+
+    @group_router.post("/pet-decisions/outcome")
+    async def pet_decision_outcome_post(group_id: str, req: PetDecisionOutcomeRequest) -> Dict[str, Any]:
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        event = await run_in_threadpool(
+            append_pet_decision_outcome,
+            group,
+            by=str(req.by or "user").strip() or "user",
+            fingerprint=str(req.fingerprint or "").strip(),
+            outcome=str(req.outcome or "").strip(),
+            decision_id=str(req.decision_id or "").strip(),
+            action_type=str(req.action_type or "").strip(),
+            cooldown_ms=int(req.cooldown_ms or 0),
+            source_event_id=str(req.source_event_id or "").strip(),
+        )
+        return {"ok": True, "result": {"event": event}}
 
     @group_router.put("/prompts/{kind}")
     async def prompts_put(group_id: str, kind: str, req: RepoPromptUpdateRequest) -> Dict[str, Any]:
@@ -1115,11 +1308,15 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         by = str(body.get("by") or "user")
         dry_run = coerce_bool(body.get("dry_run"), default=False)
 
-        await _invalidate_context_read(group_id)
-        return await ctx.daemon({
+        resp = await ctx.daemon({
             "op": "context_sync",
             "args": {"group_id": group_id, "ops": ops, "by": by, "dry_run": dry_run}
         })
+        # A successful context write with explicit ops must not leave later reads
+        # attached to a stale inflight fetch started before the write.
+        if bool(resp.get("ok")) and not dry_run and ops:
+            await invalidate_context_read(group_id)
+        return resp
 
     @group_router.get("/settings")
     async def group_settings_get(group_id: str) -> Dict[str, Any]:
@@ -1350,61 +1547,59 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         with_obligation_status: bool = False,
     ) -> Dict[str, Any]:
         """Search and paginate messages in the ledger."""
-        group = load_group(group_id)
-        if group is None:
-            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        def _load() -> Dict[str, Any]:
+            group = load_group(group_id)
+            if group is None:
+                raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
 
-        from ....kernel.inbox import search_messages, get_read_status_batch
+            from ....kernel.inbox import search_messages, get_read_status_batch
 
-        # Validate and clamp limit
-        limit = max(1, min(200, limit))
+            clamped_limit = max(1, min(200, limit))
+            kind_filter = kind if kind in ("all", "chat", "notify") else "all"
 
-        # Validate kind filter
-        kind_filter = kind if kind in ("all", "chat", "notify") else "all"
+            events, has_more = search_messages(
+                group,
+                query=q,
+                kind_filter=kind_filter,  # type: ignore
+                by_filter=by,
+                before_id=before,
+                after_id=after,
+                limit=clamped_limit,
+            )
 
-        events, has_more = search_messages(
-            group,
-            query=q,
-            kind_filter=kind_filter,  # type: ignore
-            by_filter=by,
-            before_id=before,
-            after_id=after,
-            limit=limit,
-        )
+            if with_read_status:
+                status_map = get_read_status_batch(group, events)
+                for ev in events:
+                    event_id = str(ev.get("id") or "")
+                    if event_id in status_map:
+                        ev["_read_status"] = status_map[event_id]
 
-        # Optionally include read status (batch optimized)
-        if with_read_status:
-            status_map = get_read_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in status_map:
-                    ev["_read_status"] = status_map[event_id]
+            if with_ack_status:
+                from ....kernel.inbox import get_ack_status_batch
+                ack_map = get_ack_status_batch(group, events)
+                for ev in events:
+                    event_id = str(ev.get("id") or "")
+                    if event_id in ack_map:
+                        ev["_ack_status"] = ack_map[event_id]
 
-        # Optionally include ack status (batch optimized)
-        if with_ack_status:
-            from ....kernel.inbox import get_ack_status_batch
-            ack_map = get_ack_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in ack_map:
-                    ev["_ack_status"] = ack_map[event_id]
+            if with_obligation_status:
+                from ....kernel.inbox import get_obligation_status_batch
+                obligation_map = get_obligation_status_batch(group, events)
+                for ev in events:
+                    event_id = str(ev.get("id") or "")
+                    if event_id in obligation_map:
+                        ev["_obligation_status"] = obligation_map[event_id]
 
-        if with_obligation_status:
-            from ....kernel.inbox import get_obligation_status_batch
-            obligation_map = get_obligation_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in obligation_map:
-                    ev["_obligation_status"] = obligation_map[event_id]
-
-        return {
-            "ok": True,
-            "result": {
-                "events": events,
-                "has_more": has_more,
-                "count": len(events),
+            return {
+                "ok": True,
+                "result": {
+                    "events": events,
+                    "has_more": has_more,
+                    "count": len(events),
+                },
             }
-        }
+
+        return await run_in_threadpool(_load)
 
     @group_router.get("/ledger/window")
     async def ledger_window(
@@ -1418,91 +1613,96 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         with_obligation_status: bool = False,
     ) -> Dict[str, Any]:
         """Return a bounded window of events around a center event_id."""
-        group = load_group(group_id)
-        if group is None:
-            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        def _load() -> Dict[str, Any]:
+            group = load_group(group_id)
+            if group is None:
+                raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
 
-        from ....kernel.inbox import find_event, search_messages, get_read_status_batch
+            from ....kernel.inbox import find_event, search_messages, get_read_status_batch
 
-        center_id = str(center or "").strip()
-        if not center_id:
-            raise HTTPException(status_code=400, detail={"code": "missing_center", "message": "missing center event_id"})
+            center_id = str(center or "").strip()
+            if not center_id:
+                raise HTTPException(status_code=400, detail={"code": "missing_center", "message": "missing center event_id"})
 
-        center_event = find_event(group, center_id)
-        if center_event is None:
-            raise HTTPException(status_code=404, detail={"code": "event_not_found", "message": f"event not found: {center_id}"})
+            center_event = find_event(group, center_id)
+            if center_event is None:
+                raise HTTPException(status_code=404, detail={"code": "event_not_found", "message": f"event not found: {center_id}"})
 
-        # Validate and clamp window sizes
-        before = max(0, min(200, int(before)))
-        after = max(0, min(200, int(after)))
+            clamped_before = max(0, min(200, int(before)))
+            clamped_after = max(0, min(200, int(after)))
+            kind_filter = kind if kind in ("all", "chat", "notify") else "chat"
 
-        kind_filter = kind if kind in ("all", "chat", "notify") else "chat"
+            if kind_filter == "chat" and str(center_event.get("kind") or "") != "chat.message":
+                raise HTTPException(status_code=400, detail={"code": "invalid_center_kind", "message": "center event kind must be chat.message for kind=chat"})
 
-        if kind_filter == "chat" and str(center_event.get("kind") or "") != "chat.message":
-            raise HTTPException(status_code=400, detail={"code": "invalid_center_kind", "message": "center event kind must be chat.message for kind=chat"})
+            before_events, has_more_before = search_messages(
+                group,
+                query="",
+                kind_filter=kind_filter,  # type: ignore
+                before_id=center_id,
+                limit=clamped_before,
+            )
+            after_events, has_more_after = search_messages(
+                group,
+                query="",
+                kind_filter=kind_filter,  # type: ignore
+                after_id=center_id,
+                limit=clamped_after,
+            )
 
-        before_events, has_more_before = search_messages(
-            group,
-            query="",
-            kind_filter=kind_filter,  # type: ignore
-            before_id=center_id,
-            limit=before,
-        )
-        after_events, has_more_after = search_messages(
-            group,
-            query="",
-            kind_filter=kind_filter,  # type: ignore
-            after_id=center_id,
-            limit=after,
-        )
+            events = [*before_events, center_event, *after_events]
 
-        events = [*before_events, center_event, *after_events]
+            if with_read_status:
+                status_map = get_read_status_batch(group, events)
+                for ev in events:
+                    event_id = str(ev.get("id") or "")
+                    if event_id in status_map:
+                        ev["_read_status"] = status_map[event_id]
 
-        if with_read_status:
-            status_map = get_read_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in status_map:
-                    ev["_read_status"] = status_map[event_id]
+            if with_ack_status:
+                from ....kernel.inbox import get_ack_status_batch
+                ack_map = get_ack_status_batch(group, events)
+                for ev in events:
+                    event_id = str(ev.get("id") or "")
+                    if event_id in ack_map:
+                        ev["_ack_status"] = ack_map[event_id]
 
-        if with_ack_status:
-            from ....kernel.inbox import get_ack_status_batch
-            ack_map = get_ack_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in ack_map:
-                    ev["_ack_status"] = ack_map[event_id]
+            if with_obligation_status:
+                from ....kernel.inbox import get_obligation_status_batch
+                obligation_map = get_obligation_status_batch(group, events)
+                for ev in events:
+                    event_id = str(ev.get("id") or "")
+                    if event_id in obligation_map:
+                        ev["_obligation_status"] = obligation_map[event_id]
 
-        if with_obligation_status:
-            from ....kernel.inbox import get_obligation_status_batch
-            obligation_map = get_obligation_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in obligation_map:
-                    ev["_obligation_status"] = obligation_map[event_id]
+            return {
+                "ok": True,
+                "result": {
+                    "center_id": center_id,
+                    "center_index": len(before_events),
+                    "events": events,
+                    "has_more_before": has_more_before,
+                    "has_more_after": has_more_after,
+                    "count": len(events),
+                },
+            }
 
-        return {
-            "ok": True,
-            "result": {
-                "center_id": center_id,
-                "center_index": len(before_events),
-                "events": events,
-                "has_more_before": has_more_before,
-                "has_more_after": has_more_after,
-                "count": len(events),
-            },
-        }
+        return await run_in_threadpool(_load)
 
     @group_router.get("/events/{event_id}/read_status")
     async def event_read_status(group_id: str, event_id: str) -> Dict[str, Any]:
         """Get read status for a specific event (which actors have read it)."""
-        group = load_group(group_id)
-        if group is None:
-            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        def _load() -> Dict[str, Any]:
+            group = load_group(group_id)
+            if group is None:
+                raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
 
-        from ....kernel.inbox import get_read_status
-        status = get_read_status(group, event_id)
-        return {"ok": True, "result": {"event_id": event_id, "read_status": status}}
+            from ....kernel.inbox import get_read_status
+
+            status = get_read_status(group, event_id)
+            return {"ok": True, "result": {"event_id": event_id, "read_status": status}}
+
+        return await run_in_threadpool(_load)
 
     @global_router.websocket("/groups/{group_id}/presentation/browser_surface/ws")
     async def group_presentation_browser_surface_ws(websocket: WebSocket, group_id: str) -> None:

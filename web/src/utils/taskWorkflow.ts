@@ -1,19 +1,10 @@
-export type TaskWorkflowScaffoldId =
-  | "lean"
-  | "root"
-  | "planner"
-  | "reviewer"
-  | "debugger"
-  | "release"
+export type TaskTypeId =
+  | "free"
+  | "standard"
   | "optimization";
 
-export type TaskWorkflowPresetFamily = "lean" | "contract" | "optimization";
-
-export type TaskReleaseCloseoutState =
-  | "missing_setup"
-  | "in_progress"
-  | "needs_closeout"
-  | "ready";
+export type TaskTypeFamily = "free" | "standard" | "optimization";
+export type TaskAttemptVerdict = "" | "keep" | "discard" | "crash" | "continue";
 
 type TaskWorkflowChecklistItemLike = {
   text?: string | null;
@@ -23,6 +14,8 @@ type TaskWorkflowChecklistItemLike = {
 export type TaskWorkflowFields = {
   parentId?: string | null;
   parent_id?: string | null;
+  taskType?: string | null;
+  task_type?: string | null;
   status?: string | null;
   assignee?: string | null;
   outcome?: string | null;
@@ -30,28 +23,27 @@ export type TaskWorkflowFields = {
   checklist?: string | TaskWorkflowChecklistItemLike[] | null;
 };
 
-export type TaskWorkflowScaffold = {
-  id: TaskWorkflowScaffoldId;
-  family: TaskWorkflowPresetFamily;
+export type TaskTypeDefinition = {
+  id: TaskTypeId;
+  family: TaskTypeFamily;
   label: string;
   description: string;
-  notes: string;
-  checklist: string;
+  requirements: string[];
+  starterNotes: string;
+  starterChecklist: string;
 };
 
 export type TaskWorkflowCoverage = {
-  scaffoldId: TaskWorkflowScaffoldId;
-  scaffoldFamily: TaskWorkflowPresetFamily;
+  taskTypeId: TaskTypeId;
+  taskTypeFamily: TaskTypeFamily;
   isRoot: boolean;
   isOptimization: boolean;
-  isRelease: boolean;
   missingSetup: string[];
   missingCloseout: string[];
   needsContract: boolean;
   needsCloseout: boolean;
   checklistTotal: number;
   checklistDone: number;
-  releaseCloseoutState: TaskReleaseCloseoutState | null;
   hasGoal: boolean;
   hasSuccessCriteria: boolean;
   hasRequiredEvidence: boolean;
@@ -63,6 +55,13 @@ export type TaskWorkflowCoverage = {
   hasPrimaryMetric: boolean;
   hasVerifierBoundary: boolean;
   hasAttemptDecision: boolean;
+  hasCurrentBest: boolean;
+  hasFrontierNext: boolean;
+  hasAttemptLog: boolean;
+  currentBestSummary: string;
+  frontierNextSummary: string;
+  latestAttemptVerdict: TaskAttemptVerdict;
+  latestAttemptSummary: string;
   goalSummary: string;
 };
 
@@ -76,11 +75,18 @@ const ROOT_SECTION_ORDER = [
   "Open Concerns",
 ] as const;
 
-const OPTIMIZATION_SECTION_ORDER = [
+const OPTIMIZATION_CORE_SECTION_ORDER = [
   "Baseline",
   "Primary Metric",
   "Verifier Boundary",
   "Attempt Decision",
+] as const;
+
+const OPTIMIZATION_SECTION_ORDER = [
+  ...OPTIMIZATION_CORE_SECTION_ORDER,
+  "Current Best",
+  "Frontier Next",
+  "Attempt Log",
 ] as const;
 
 const ALL_SECTION_HEADINGS = new Set(
@@ -124,28 +130,45 @@ const OPTIMIZATION_NOTES_TEMPLATE = [
   "",
   "Attempt Decision:",
   "- [keep / discard / continue]",
+  "",
+  "Current Best:",
+  "- [state the best kept branch or current leading result]",
+  "",
+  "Frontier Next:",
+  "- [state the next bounded branch worth trying]",
+  "",
+  "Attempt Log:",
+  "- [keep] [what changed] [metric before -> after] [evidence ref]",
 ].join("\n");
 
 function checklistLines(items: string[]): string {
   return items.map((item) => `[ ] ${item}`).join("\n");
 }
 
-export const TASK_WORKFLOW_SCAFFOLDS: TaskWorkflowScaffold[] = [
+export const TASK_TYPES: TaskTypeDefinition[] = [
   {
-    id: "lean",
-    family: "lean",
-    label: "Lean",
-    description: "Keep it minimal. Use this when the task is small enough that extra structure would just add noise.",
-    notes: "",
-    checklist: "",
+    id: "free",
+    family: "free",
+    label: "Free",
+    description: "Keep it lightweight. Use this when extra task structure would add more ceremony than control.",
+    requirements: [
+      "Keep the task lightweight unless more structure improves control.",
+    ],
+    starterNotes: "",
+    starterChecklist: "",
   },
   {
-    id: "root",
-    family: "contract",
-    label: "Root",
-    description: "Goal, success criteria, required evidence, and closeout in one place. Best default for foreman-owned or user-facing tasks.",
-    notes: ROOT_NOTES_TEMPLATE,
-    checklist: checklistLines([
+    id: "standard",
+    family: "standard",
+    label: "Standard",
+    description: "Use the normal closed-loop contract: goal, success criteria, required evidence, owner, and closeout.",
+    requirements: [
+      "Capture the goal, success criteria, and required evidence.",
+      "Make the owner explicit.",
+      "When closing, record the verdict and verification summary.",
+    ],
+    starterNotes: ROOT_NOTES_TEMPLATE,
+    starterChecklist: checklistLines([
       "Confirm the goal and owner",
       "Define success criteria",
       "Name the required evidence",
@@ -153,76 +176,30 @@ export const TASK_WORKFLOW_SCAFFOLDS: TaskWorkflowScaffold[] = [
     ]),
   },
   {
-    id: "planner",
-    family: "contract",
-    label: "Planner",
-    description: "For planning and decomposition work. Bias toward minimum path, existing leverage, and explicit acceptance.",
-    notes: ROOT_NOTES_TEMPLATE,
-    checklist: checklistLines([
-      "Check what existing workflow or code already solves part of this",
-      "Choose the minimum path",
-      "Capture unresolved decisions or dependencies",
-      "Define acceptance before handoff",
-    ]),
-  },
-  {
-    id: "reviewer",
-    family: "contract",
-    label: "Reviewer",
-    description: "For review and audit work. Bias toward full reading, severity ordering, and evidence-backed findings.",
-    notes: ROOT_NOTES_TEMPLATE,
-    checklist: checklistLines([
-      "Read the full diff or affected surface",
-      "List concrete findings only",
-      "Check docs, tests, and adjacent drift",
-      "Record the verdict and required fixes",
-    ]),
-  },
-  {
-    id: "debugger",
-    family: "contract",
-    label: "Debugger",
-    description: "For bug-fixing work. Bias toward repro, hypothesis, proof, minimal fix, and regression coverage.",
-    notes: ROOT_NOTES_TEMPLATE,
-    checklist: checklistLines([
-      "Capture a stable repro",
-      "Name the leading hypothesis",
-      "Collect proof before changing behavior",
-      "Apply the minimal fix",
-      "Add or update regression coverage",
-    ]),
-  },
-  {
-    id: "release",
-    family: "contract",
-    label: "Release",
-    description: "For ship or bump work. Bias toward release notes, version-surface checks, and smoke verification.",
-    notes: ROOT_NOTES_TEMPLATE,
-    checklist: checklistLines([
-      "Update the release note",
-      "Check version and docs drift",
-      "Run smoke verification",
-      "Record the shipping verdict",
-    ]),
-  },
-  {
     id: "optimization",
     family: "optimization",
     label: "Optimization",
-    description: "For metric-sensitive work. Capture baseline, primary metric, verifier boundary, and keep-or-discard closeout.",
-    notes: OPTIMIZATION_NOTES_TEMPLATE,
-    checklist: checklistLines([
+    description: "For metric-sensitive work. Capture baseline, primary metric, verifier boundary, current best, next frontier, and keep-or-discard closeout.",
+    requirements: [
+      "Capture the goal, success criteria, required evidence, and owner.",
+      "Capture the baseline, primary metric, and verifier boundary.",
+      "Keep the current best and next frontier explicit.",
+      "At closeout, record keep or discard.",
+    ],
+    starterNotes: OPTIMIZATION_NOTES_TEMPLATE,
+    starterChecklist: checklistLines([
       "Capture the baseline",
       "Name the primary metric",
       "Freeze the verifier boundary",
       "Run one bounded attempt",
       "Record keep or discard",
+      "Update the current best and next frontier",
     ]),
   },
 ];
 
-export function getTaskWorkflowScaffold(id: TaskWorkflowScaffoldId): TaskWorkflowScaffold {
-  return TASK_WORKFLOW_SCAFFOLDS.find((item) => item.id === id) || TASK_WORKFLOW_SCAFFOLDS[0];
+export function getTaskTypeDefinition(id: TaskTypeId): TaskTypeDefinition {
+  return TASK_TYPES.find((item) => item.id === id) || TASK_TYPES[0];
 }
 
 function normalizeText(value: string | null | undefined): string {
@@ -241,11 +218,33 @@ function stripPlaceholders(value: string): string {
 function hasMeaningfulText(value: string | null | undefined): boolean {
   const normalized = normalizeText(value);
   if (!normalized) return false;
-  return stripPlaceholders(normalized).length > 0;
+  return /[\p{L}\p{N}]/u.test(stripPlaceholders(normalized));
 }
 
 function normalizedParentId(fields: TaskWorkflowFields): string {
   return String(fields.parentId ?? fields.parent_id ?? "").trim();
+}
+
+function normalizeTaskTypeId(value: string | null | undefined): TaskTypeId | null {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "free" || normalized === "optimization" || normalized === "standard") return normalized;
+  if (normalized === "lean") return "free";
+  if (
+    normalized === "root"
+    || normalized === "planner"
+    || normalized === "reviewer"
+    || normalized === "debugger"
+    || normalized === "release"
+  ) return "standard";
+  return null;
+}
+
+function explicitTaskType(fields: TaskWorkflowFields): TaskTypeId | null {
+  return normalizeTaskTypeId(fields.taskType ?? fields.task_type);
+}
+
+function defaultTaskType(fields: TaskWorkflowFields): TaskTypeId {
+  return normalizedParentId(fields) ? "free" : "standard";
 }
 
 function normalizeChecklistItemText(value: string | null | undefined): string {
@@ -302,10 +301,6 @@ function checklistProgress(fields: TaskWorkflowFields): { total: number; done: n
   };
 }
 
-function normalizedNotes(fields: TaskWorkflowFields): string {
-  return normalizeText(fields.notes);
-}
-
 function normalizedStatus(fields: TaskWorkflowFields): string {
   return String(fields.status || "planned").trim().toLowerCase();
 }
@@ -338,6 +333,59 @@ function extractSectionValue(notes: string | null | undefined, heading: string):
   return out.join("\n").trim();
 }
 
+function toInlineSummary(value: string | null | undefined): string {
+  return String(value || "")
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*]\s*/, ""))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeAttemptVerdict(value: string | null | undefined): TaskAttemptVerdict {
+  const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "keep" || normalized === "discard" || normalized === "crash" || normalized === "continue") {
+    return normalized;
+  }
+  return "";
+}
+
+function getLatestAttemptEntry(notes: string | null | undefined): { verdict: TaskAttemptVerdict; summary: string } {
+  const section = extractSectionValue(notes, "Attempt Log");
+  if (!hasMeaningfulText(section)) {
+    return { verdict: "", summary: "" };
+  }
+  const lines = section
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const entries = lines
+    .map((line) => line.replace(/^[-*]\s*/, "").trim())
+    .map((line) => {
+      const bracketMatch = line.match(/^\[([^\]]+)\]\s*(.+)$/);
+      if (bracketMatch) {
+        return {
+          verdict: normalizeAttemptVerdict(bracketMatch[1]),
+          summary: toInlineSummary(bracketMatch[2]),
+        };
+      }
+      const inlineMatch = line.match(/^(keep|discard|crash|continue)\s*[:|-]\s*(.+)$/i);
+      if (inlineMatch) {
+        return {
+          verdict: normalizeAttemptVerdict(inlineMatch[1]),
+          summary: toInlineSummary(inlineMatch[2]),
+        };
+      }
+      return {
+        verdict: "" as TaskAttemptVerdict,
+        summary: toInlineSummary(line),
+      };
+    })
+    .filter((entry) => hasMeaningfulText(entry.summary));
+  return entries.length > 0 ? entries[entries.length - 1] : { verdict: "", summary: "" };
+}
+
 export function getTaskGoalSummary(fields: TaskWorkflowFields): string {
   const goal = extractSectionValue(fields.notes, "Goal");
   if (hasMeaningfulText(goal)) return goal;
@@ -347,61 +395,25 @@ export function getTaskGoalSummary(fields: TaskWorkflowFields): string {
 export function getTaskDisplaySummary(fields: TaskWorkflowFields): string {
   const outcome = normalizeText(fields.outcome);
   if (hasMeaningfulText(outcome)) return outcome;
+  const currentBest = extractSectionValue(fields.notes, "Current Best");
+  if (hasMeaningfulText(currentBest)) return toInlineSummary(currentBest);
   return getTaskGoalSummary(fields);
 }
 
-function inferChecklistScaffold(fields: TaskWorkflowFields): TaskWorkflowScaffoldId | null {
-  const checklistItems = checklistItemsFromFields(fields.checklist);
-  if (!checklistItems.length) return null;
-  const checklistSet = new Set(checklistItems.map((item) => normalizeChecklistItemText(item.text)));
-  let bestId: TaskWorkflowScaffoldId | null = null;
-  let bestScore = 0;
-  let bestMatchCount = 0;
-  for (const scaffold of TASK_WORKFLOW_SCAFFOLDS) {
-    if (scaffold.id === "lean" || scaffold.id === "optimization") continue;
-    const seededItems = checklistItemsFromString(scaffold.checklist).map((item) => normalizeChecklistItemText(item.text));
-    if (!seededItems.length) continue;
-    const matchCount = seededItems.filter((item) => checklistSet.has(item)).length;
-    if (!matchCount) continue;
-    const score = matchCount / seededItems.length;
-    if (
-      score > bestScore ||
-      (score === bestScore && matchCount > bestMatchCount)
-    ) {
-      bestId = scaffold.id;
-      bestScore = score;
-      bestMatchCount = matchCount;
-    }
-  }
-  if (!bestId) return null;
-  if (bestId === "root") {
-    return bestScore >= 0.5 ? bestId : null;
-  }
-  return bestScore >= 0.5 ? bestId : null;
+export function recommendTaskType(fields: TaskWorkflowFields): TaskTypeId {
+  return explicitTaskType(fields) || defaultTaskType(fields);
 }
 
-export function recommendTaskWorkflowScaffold(fields: TaskWorkflowFields): TaskWorkflowScaffoldId {
-  if (isOptimizationTask(fields)) return "optimization";
-  return normalizedParentId(fields) ? "lean" : "root";
-}
-
-export function isOptimizationTask(fields: TaskWorkflowFields): boolean {
-  const notes = normalizedNotes(fields);
-  return OPTIMIZATION_SECTION_ORDER.some((heading) => notes.toLowerCase().includes(`${heading.toLowerCase()}:`));
-}
-
-export function resolveTaskWorkflowScaffold(fields: TaskWorkflowFields): TaskWorkflowScaffoldId {
-  if (isOptimizationTask(fields)) return "optimization";
-  if (normalizedParentId(fields)) return "lean";
-  return inferChecklistScaffold(fields) || "root";
+export function resolveTaskType(fields: TaskWorkflowFields): TaskTypeId {
+  return explicitTaskType(fields) || defaultTaskType(fields);
 }
 
 export function evaluateTaskWorkflow(fields: TaskWorkflowFields): TaskWorkflowCoverage {
-  const scaffoldId = resolveTaskWorkflowScaffold(fields);
-  const scaffoldFamily = getTaskWorkflowScaffold(scaffoldId).family;
+  const taskTypeId = resolveTaskType(fields);
+  const taskTypeFamily = getTaskTypeDefinition(taskTypeId).family;
   const isRoot = !normalizedParentId(fields);
-  const isOptimization = isOptimizationTask(fields);
-  const isRelease = scaffoldId === "release";
+  const usesStandardWorkflow = taskTypeFamily === "standard";
+  const isOptimization = taskTypeId === "optimization";
   const status = normalizedStatus(fields);
   const goalSummary = getTaskGoalSummary(fields);
   const hasGoal = hasMeaningfulText(goalSummary);
@@ -415,15 +427,21 @@ export function evaluateTaskWorkflow(fields: TaskWorkflowFields): TaskWorkflowCo
   const hasPrimaryMetric = hasMeaningfulText(extractSectionValue(fields.notes, "Primary Metric"));
   const hasVerifierBoundary = hasMeaningfulText(extractSectionValue(fields.notes, "Verifier Boundary"));
   const hasAttemptDecision = hasMeaningfulText(extractSectionValue(fields.notes, "Attempt Decision"));
+  const currentBestSummary = toInlineSummary(extractSectionValue(fields.notes, "Current Best"));
+  const frontierNextSummary = toInlineSummary(extractSectionValue(fields.notes, "Frontier Next"));
+  const hasCurrentBest = hasMeaningfulText(currentBestSummary);
+  const hasFrontierNext = hasMeaningfulText(frontierNextSummary);
+  const latestAttempt = getLatestAttemptEntry(fields.notes);
+  const hasAttemptLog = hasMeaningfulText(latestAttempt.summary);
   const checklistState = checklistProgress(fields);
 
   const missingSetup: string[] = [];
-  if (isRoot || isOptimization) {
+  if (usesStandardWorkflow || isOptimization) {
     if (!hasGoal) missingSetup.push("Goal");
     if (!hasSuccessCriteria) missingSetup.push("Success criteria");
     if (!hasRequiredEvidence) missingSetup.push("Required evidence");
   }
-  if (isRoot && !hasOwner) {
+  if (usesStandardWorkflow && !hasOwner) {
     missingSetup.push("Owner");
   }
   if (isOptimization) {
@@ -433,7 +451,7 @@ export function evaluateTaskWorkflow(fields: TaskWorkflowFields): TaskWorkflowCo
   }
 
   const missingCloseout: string[] = [];
-  const expectsCloseout = status === "done" && (isRoot || isOptimization);
+  const expectsCloseout = status === "done" && (usesStandardWorkflow || isOptimization);
   if (expectsCloseout) {
     if (!hasOutcomeSummary) missingCloseout.push("Outcome summary");
     if (!hasCloseoutVerdict) missingCloseout.push("Closeout verdict");
@@ -441,32 +459,17 @@ export function evaluateTaskWorkflow(fields: TaskWorkflowFields): TaskWorkflowCo
     if (isOptimization && !hasAttemptDecision) missingCloseout.push("Attempt decision");
   }
 
-  let releaseCloseoutState: TaskReleaseCloseoutState | null = null;
-  if (isRelease) {
-    if (missingSetup.length > 0) {
-      releaseCloseoutState = "missing_setup";
-    } else if ((status === "done" || checklistState.done === checklistState.total) && missingCloseout.length > 0) {
-      releaseCloseoutState = "needs_closeout";
-    } else if (checklistState.total === 0 || checklistState.done < checklistState.total) {
-      releaseCloseoutState = "in_progress";
-    } else {
-      releaseCloseoutState = "ready";
-    }
-  }
-
   return {
-    scaffoldId,
-    scaffoldFamily,
+    taskTypeId,
+    taskTypeFamily,
     isRoot,
     isOptimization,
-    isRelease,
     missingSetup,
     missingCloseout,
     needsContract: missingSetup.length > 0,
     needsCloseout: missingCloseout.length > 0,
     checklistTotal: checklistState.total,
     checklistDone: checklistState.done,
-    releaseCloseoutState,
     hasGoal,
     hasSuccessCriteria,
     hasRequiredEvidence,
@@ -478,6 +481,13 @@ export function evaluateTaskWorkflow(fields: TaskWorkflowFields): TaskWorkflowCo
     hasPrimaryMetric,
     hasVerifierBoundary,
     hasAttemptDecision,
+    hasCurrentBest,
+    hasFrontierNext,
+    hasAttemptLog,
+    currentBestSummary,
+    frontierNextSummary,
+    latestAttemptVerdict: latestAttempt.verdict,
+    latestAttemptSummary: latestAttempt.summary,
     goalSummary,
   };
 }

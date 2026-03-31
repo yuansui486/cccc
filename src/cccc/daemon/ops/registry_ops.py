@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.group import load_group
+from ...kernel.query_projections import get_groups_projection
 from ...kernel.registry import load_registry
 from ...paths import ensure_home
 from ...runners import headless as headless_runner
@@ -45,12 +46,9 @@ def _registry_group_health(group_id: str, meta: Dict[str, Any]) -> tuple[str, An
 
 
 def handle_groups(_: Dict[str, Any]) -> DaemonResponse:
-    reg = load_registry()
-    groups = list(reg.groups.values())
-    groups.sort(key=lambda g: (g.get("updated_at") or "", g.get("created_at") or ""), reverse=True)
+    projection = get_groups_projection()
+    groups = projection.get("groups") if isinstance(projection.get("groups"), list) else []
     out = []
-    missing_ids: list[str] = []
-    corrupt_ids: list[str] = []
     for group_meta in groups:
         if not isinstance(group_meta, dict):
             continue
@@ -61,26 +59,12 @@ def handle_groups(_: Dict[str, Any]) -> DaemonResponse:
         )
         item = dict(group_meta)
         item["running"] = bool(running)
-        if gid:
-            health, full_group = _registry_group_health(gid, group_meta)
-            item["registry_health"] = health
-            if health == "ok" and full_group is not None:
-                item["state"] = full_group.doc.get("state", "active")
-            else:
-                if health == "missing":
-                    missing_ids.append(gid)
-                elif health == "corrupt":
-                    corrupt_ids.append(gid)
-                continue
         out.append(item)
     return DaemonResponse(
         ok=True,
         result={
             "groups": out,
-            "registry_health": {
-                "missing_group_ids": missing_ids,
-                "corrupt_group_ids": corrupt_ids,
-            },
+            "registry_health": dict(projection.get("registry_health") or {}),
         },
     )
 

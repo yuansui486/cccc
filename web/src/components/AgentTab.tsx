@@ -8,10 +8,13 @@ import { Actor, AgentState, getRuntimeColor, RUNTIME_INFO } from "../types";
 import { getTerminalTheme } from "../hooks/useTheme";
 import { classNames } from "../utils/classNames";
 import { formatFullTime, formatTime } from "../utils/time";
-import { useObservabilityStore } from "../stores";
+import { useObservabilityStore, useTerminalSignalsStore } from "../stores";
 import { withAuthToken, fetchTerminalTail } from "../services/api";
 import { StopIcon, RefreshIcon, InboxIcon, TrashIcon, PlayIcon, EditIcon, RocketIcon, TerminalIcon } from "./Icons";
 import { ScrollFade } from "./ScrollFade";
+import { getActorDisplayWorkingState, getTerminalSignalFromChunk } from "../utils/terminalWorkingState";
+import { getTerminalSignalKey } from "../stores/useTerminalSignalsStore";
+import { getRuntimeIndicatorState } from "../utils/statusIndicators";
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -26,6 +29,7 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 interface AgentTabProps {
   actor: Actor;
   groupId: string;
+  termEpoch?: number;
   agentState: AgentState | null;
   isVisible: boolean;
   readOnly?: boolean;
@@ -45,6 +49,7 @@ interface AgentTabProps {
 export function AgentTab({
   actor,
   groupId,
+  termEpoch = 0,
   agentState,
   isVisible,
   readOnly,
@@ -68,6 +73,11 @@ export function AgentTab({
   const observabilityLoaded = useObservabilityStore((s) => s.loaded);
   const loadObservability = useObservabilityStore((s) => s.load);
   const terminalScrollbackLines = useObservabilityStore((s) => s.terminalScrollbackLines);
+  const terminalSignals = useTerminalSignalsStore((s) => s.signals);
+  const setTerminalSignal = useTerminalSignalsStore((s) => s.setSignal);
+  const clearTerminalSignal = useTerminalSignalsStore((s) => s.clearSignal);
+  const terminalSignal = terminalSignals[getTerminalSignalKey(groupId, actor.id)];
+  const workingState = getActorDisplayWorkingState(actor, terminalSignal);
 
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -84,6 +94,7 @@ export function AgentTab({
   // Last terminal output captured when agent stops — shows crash/error info
   const [stoppedTerminalTail, setStoppedTerminalTail] = useState("");
   const [stoppedTerminalTailLoading, setStoppedTerminalTailLoading] = useState(false);
+  const terminalSignalBufferRef = useRef("");
 
   const pasteStateRef = useRef<{ inFlight: boolean; lastAt: number }>({ inFlight: false, lastAt: 0 });
 
@@ -92,18 +103,29 @@ export function AgentTab({
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stop reconnecting if server reports actor is not running
   const actorNotRunningRef = useRef(false);
+  const lastTermEpochRef = useRef(termEpoch);
 
   // Ref to avoid stale closure in WebSocket callbacks
   const isRunningRef = useRef(isRunning);
+  const runtimeRef = useRef(actor.runtime);
+  const canControlRef = useRef(canControl);
 
   // Keep ref in sync with prop
   useEffect(() => {
     isRunningRef.current = isRunning;
+    runtimeRef.current = actor.runtime;
+    canControlRef.current = canControl;
     // Reset the "actor not running" flag when actor starts running again
     if (isRunning) {
       actorNotRunningRef.current = false;
     }
-  }, [isRunning]);
+  }, [actor.runtime, canControl, isRunning]);
+
+  useEffect(() => {
+    if (isRunning && !isHeadless) return;
+    terminalSignalBufferRef.current = "";
+    clearTerminalSignal(groupId, actor.id);
+  }, [actor.id, clearTerminalSignal, groupId, isHeadless, isRunning]);
 
   // When agent stops, fetch the last terminal output so crash errors are visible
   useEffect(() => {
@@ -172,6 +194,56 @@ export function AgentTab({
     overflow: "hidden",
   };
 
+  const runtimeIndicator = getRuntimeIndicatorState({ isRunning: Boolean(isRunning), workingState });
+  const statusTone = (() => {
+    switch (runtimeIndicator.tone) {
+      case "stop":
+        return {
+          dotClass: runtimeIndicator.dotClass,
+          pulse: runtimeIndicator.pulse,
+          strongPulse: runtimeIndicator.strongPulse,
+          badgeClass: "bg-slate-500/10 text-slate-500 dark:text-slate-300",
+        };
+      case "working":
+        return {
+          dotClass: runtimeIndicator.dotClass,
+          pulse: runtimeIndicator.pulse,
+          strongPulse: runtimeIndicator.strongPulse,
+          badgeClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+        };
+      case "waiting":
+        return {
+          dotClass: runtimeIndicator.dotClass,
+          pulse: runtimeIndicator.pulse,
+          strongPulse: runtimeIndicator.strongPulse,
+          badgeClass: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
+        };
+      case "stuck":
+        return {
+          dotClass: runtimeIndicator.dotClass,
+          pulse: runtimeIndicator.pulse,
+          strongPulse: runtimeIndicator.strongPulse,
+          badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+        };
+      case "run":
+      default:
+        return {
+          dotClass: runtimeIndicator.dotClass,
+          pulse: runtimeIndicator.pulse,
+          strongPulse: runtimeIndicator.strongPulse,
+          badgeClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+        };
+    }
+  })();
+
+  const runtimeStatusText = (() => {
+    if (!isRunning) return t("stopped");
+    if (workingState === "working") return t("working");
+    if (workingState === "waiting") return t("waiting");
+    if (workingState === "stuck") return t("stuck");
+    return t("running");
+  })();
+
   // Send interrupt (Ctrl+C)
   const sendInterrupt = () => {
     if (readOnly) return;
@@ -186,6 +258,13 @@ export function AgentTab({
       terminalRef.current.options.theme = getTerminalTheme(isDark);
     }
   }, [isDark]);
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.disableStdin = !canControl;
+      terminalRef.current.options.cursorBlink = canControl;
+    }
+  }, [canControl]);
 
   // Update terminal scrollback when global settings change.
   useEffect(() => {
@@ -246,7 +325,7 @@ export function AgentTab({
           return false; // prevent ^C from reaching the runtime
         }
       }
-      if (isPaste && canControl) {
+      if (isPaste && canControlRef.current) {
         // xterm.js intentionally doesn't map Ctrl+V to paste by default (to preserve terminal semantics),
         // but for CCCC agents the high-ROI expectation is "Ctrl/Cmd+V pastes text into the PTY".
         const readText = navigator.clipboard?.readText;
@@ -307,7 +386,7 @@ export function AgentTab({
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Theme changes are handled in a dedicated effect; avoid re-creating the terminal.
-  }, [isHeadless, isRunning, activated, canControl]);
+  }, [isHeadless, isRunning, activated]);
 
   // Connect WebSocket when visible and running (with auto-reconnect).
   useEffect(() => {
@@ -325,6 +404,10 @@ export function AgentTab({
 
     const connect = () => {
       if (disposed) return;
+      const existingWs = wsRef.current;
+      if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
 
       // Clean up old disposables to avoid race conditions on rapid reconnect
       if (disposable) {
@@ -337,8 +420,8 @@ export function AgentTab({
       }
 
       // Close existing connection if any
-      if (wsRef.current) {
-        wsRef.current.close();
+      if (existingWs) {
+        existingWs.close();
         wsRef.current = null;
       }
 
@@ -361,6 +444,7 @@ export function AgentTab({
         reconnectAttemptRef.current = 0; // Reset reconnect counter
         // Reset output filter state on each successful (re)connect.
         outputFilterTailRef.current = "";
+        terminalSignalBufferRef.current = "";
 
         // Delay showing terminal to let backlog replay complete (avoids visible scrolling)
         if (terminalReadyTimeoutRef.current) {
@@ -373,9 +457,30 @@ export function AgentTab({
           }
         }, TERMINAL_SHOW_DELAY_MS);
 
+        // Rebuild terminal signal from the current visible tail so the working badge
+        // does not depend on catching a later incremental chunk.
+        void fetchTerminalTail(groupId, actor.id, 4000, true, true)
+          .then((resp) => {
+            if (disposed || !resp.ok) return;
+            const tailText = String(resp.result?.text || "");
+            const signal = getTerminalSignalFromChunk("", tailText, actor.runtime);
+            terminalSignalBufferRef.current = signal.nextBuffer;
+            if (signal.signalKind) {
+              setTerminalSignal(groupId, actor.id, {
+                kind: signal.signalKind,
+                updatedAt: Date.now(),
+              });
+              return;
+            }
+            clearTerminalSignal(groupId, actor.id);
+          })
+          .catch(() => {
+            if (disposed) return;
+          });
+
         // Send initial resize (ops mode only). Exhibit should be view-only and not affect PTY size.
         // Guard against sending tiny cols (layout not yet complete) which would break line wrapping.
-        if (canControl) {
+        if (canControlRef.current) {
           const term = terminalRef.current;
           if (term && term.cols >= 10 && term.rows >= 2) {
             ws.send(JSON.stringify({ t: "r", c: term.cols, r: term.rows }));
@@ -408,6 +513,14 @@ export function AgentTab({
         }
         outputFilterTailRef.current = tail;
         const safe = tail ? replaced.slice(0, -tail.length) : replaced;
+        const signal = getTerminalSignalFromChunk(terminalSignalBufferRef.current, safe, actor.runtime);
+        terminalSignalBufferRef.current = signal.nextBuffer;
+        if (signal.signalKind) {
+          setTerminalSignal(groupId, actor.id, {
+            kind: signal.signalKind,
+            updatedAt: Date.now(),
+          });
+        }
         try {
           term.write(safe);
         } catch (err) {
@@ -478,13 +591,14 @@ export function AgentTab({
 
       // Handle terminal input - send as JSON with type "i" (input)
       const term = terminalRef.current;
-      if (term && canControl) {
+      if (term && canControlRef.current) {
         disposable = term.onData((data) => {
           if (ws.readyState === WebSocket.OPEN) {
             // xterm.js can emit terminal replies (not user keystrokes), e.g. device attributes / color queries.
             // Some runtimes can echo these back as literal text (seen as "1;2c" or "]11;rgb:..."), so filter for those.
             // Keep the filter runtime-scoped to avoid interfering with full-screen TUIs that may rely on terminal queries.
-            if (actor.runtime === "droid" || actor.runtime === "gemini" || actor.runtime === "neovate") {
+            const runtime = runtimeRef.current;
+            if (runtime === "droid" || runtime === "gemini" || runtime === "neovate") {
               const isDeviceAttributesReply = /^\x1b\[(?:\?|>)(?:\d+)(?:;\d+)*c$/.test(data);
               if (isDeviceAttributesReply) return;
 
@@ -496,6 +610,12 @@ export function AgentTab({
               // Some runtimes echo them as literal text on tab focus changes (seen as "[O").
               const isFocusEvent = /^\x1b\[[IO]$/.test(data);
               if (isFocusEvent) return;
+            }
+            if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
+              setTerminalSignal(groupId, actor.id, {
+                kind: "working_output",
+                updatedAt: Date.now(),
+              });
             }
             ws.send(JSON.stringify({ t: "i", d: data }));
           }
@@ -538,7 +658,16 @@ export function AgentTab({
       setTerminalReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Theme changes are handled separately; onStatusChange should not trigger reconnects.
-  }, [activated, isRunning, isHeadless, groupId, actor.id, actor.runtime, canControl, reconnectTrigger]);
+  }, [activated, isRunning, isHeadless, groupId, actor.id, reconnectTrigger]);
+
+  useEffect(() => {
+    if (!activated || isHeadless || !isRunning || !terminalRef.current) return;
+    if (lastTermEpochRef.current === termEpoch) return;
+    lastTermEpochRef.current = termEpoch;
+    reconnectAttemptRef.current = 0;
+    actorNotRunningRef.current = false;
+    setReconnectTrigger((n) => n + 1);
+  }, [termEpoch, activated, isHeadless, isRunning]);
 
   // Fit terminal on visibility change and resize (with debounce to reduce jitter)
   useEffect(() => {
@@ -613,14 +742,22 @@ export function AgentTab({
       )}>
         <span
           className={classNames(
-            "relative inline-flex w-3.5 h-3.5 rounded-full flex-shrink-0 ring-2 transition-all",
-            isRunning
-              ? "bg-emerald-500 ring-emerald-500/20 shadow-[0_0_14px_rgba(16,185,129,0.3)]"
-              : "bg-slate-400/70 ring-slate-400/15 opacity-70"
+            "relative inline-flex w-2.5 h-2.5 rounded-full flex-shrink-0 transition-all",
+            statusTone.dotClass
           )}
         >
-          {isRunning && (
-            <span className="absolute inset-0 rounded-full animate-ping bg-emerald-400/35 motion-reduce:animate-none" />
+          {statusTone.pulse && (
+            <span
+              className={classNames(
+                "absolute inset-[-3px] rounded-full motion-reduce:animate-none",
+                statusTone.strongPulse
+                  ? "animate-ping bg-emerald-300/35"
+                  : "animate-pulse bg-current/20"
+              )}
+            />
+          )}
+          {statusTone.strongPulse && (
+            <span className="absolute inset-[-7px] rounded-full border border-emerald-300/35 animate-ping motion-reduce:animate-none [animation-duration:1.6s]" />
           )}
         </span>
 
@@ -635,7 +772,7 @@ export function AgentTab({
               )}
             </div>
             <div className={classNames("mt-0.5 text-xs truncate", "text-[var(--color-text-tertiary)]")}>
-              {rtInfo?.label || t('custom')} • {isRunning ? t('running') : t('stopped')}
+              {rtInfo?.label || t('custom')} • {runtimeStatusText}
               {isHeadless && ` • ${t('headless')}`}
             </div>
             {/* Mobile-only: condensed single-line agent state */}
@@ -720,8 +857,8 @@ export function AgentTab({
               {t('headlessDescription')}
             </div>
             {isRunning && (
-              <div className={classNames("mt-4 px-3 py-1.5 rounded text-sm", "bg-sky-500/15 text-sky-700 dark:text-sky-300")}>
-                {t('statusRunning')}
+              <div className={classNames("mt-4 px-3 py-1.5 rounded text-sm", statusTone.badgeClass)}>
+                {t("statusWithValue", { value: runtimeStatusText })}
               </div>
             )}
           </div>

@@ -125,6 +125,31 @@ class TestSocketAcceptOps(unittest.TestCase):
             "internal_error",
         )
 
+    def test_schedule_request_hands_off_connection_without_direct_execution(self) -> None:
+        conn = _FakeConn()
+        scheduled: list[tuple[dict, _FakeConn]] = []
+        should_exit = handle_incoming_connection(
+            conn,
+            recv_json_line=lambda _conn: {"op": "x"},
+            parse_request=lambda raw: raw,
+            make_invalid_request_error=lambda err: DaemonResponse(
+                ok=False,
+                error=DaemonError(code="invalid_request", message="invalid request", details={"error": err}),
+            ),
+            send_json=lambda _conn, _payload: None,
+            dump_response=lambda resp: resp.model_dump(),
+            try_handle_special=lambda _req, _conn: False,
+            handle_request=lambda _req: (_ for _ in ()).throw(AssertionError("should not execute directly")),
+            schedule_request=lambda req, queued_conn: scheduled.append((req, queued_conn)) or True,
+            logger=logging.getLogger("test"),
+        )
+        self.assertFalse(should_exit)
+        self.assertFalse(conn.closed)
+        self.assertEqual(conn.timeout, None)
+        self.assertEqual(len(scheduled), 1)
+        self.assertEqual(scheduled[0][0], {"op": "x"})
+        self.assertIs(scheduled[0][1], conn)
+
 
 if __name__ == "__main__":
     unittest.main()

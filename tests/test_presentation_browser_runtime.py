@@ -82,9 +82,10 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             from cccc.daemon.group import presentation_browser_runtime as runtime
+            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
 
             fake_runtime = _FakeRuntime()
-            with patch.object(runtime, "_launch_browser_surface_runtime", return_value=fake_runtime):
+            with patch.object(browser_runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
                 state = runtime.open_browser_surface_session(
                     group_id="g_demo",
                     slot_id="slot-1",
@@ -93,6 +94,9 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
                     height=800,
                 )
                 self.assertEqual(state.get("state"), "ready")
+                launch_kwargs = browser_runtime.launch_projected_browser_runtime.call_args.kwargs
+                self.assertFalse(bool(launch_kwargs.get("headless")))
+                self.assertEqual(tuple(launch_kwargs.get("channel_candidates") or ()), ("chrome", "msedge", None))
 
                 left, right = socket.socketpair()
                 try:
@@ -148,9 +152,10 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             from cccc.daemon.group import presentation_browser_runtime as runtime
+            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
 
             fake_runtime = _FakeRuntime()
-            with patch.object(runtime, "_launch_browser_surface_runtime", return_value=fake_runtime):
+            with patch.object(browser_runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
                 state = runtime.open_browser_surface_session(
                     group_id="g_demo",
                     slot_id="slot-1",
@@ -200,11 +205,12 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             from cccc.daemon.group import presentation_browser_runtime as runtime
+            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
 
             first_runtime = _FakeRuntime()
             second_runtime = _FakeRuntime()
             second_runtime._url = "http://127.0.0.1:4000"
-            with patch.object(runtime, "_launch_browser_surface_runtime", side_effect=[first_runtime, second_runtime]):
+            with patch.object(browser_runtime, "launch_projected_browser_runtime", side_effect=[first_runtime, second_runtime]):
                 first = runtime.open_browser_surface_session(
                     group_id="g_demo",
                     slot_id="slot-1",

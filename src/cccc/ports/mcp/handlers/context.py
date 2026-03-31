@@ -11,8 +11,29 @@ from ....kernel.prompt_files import (
     read_group_prompt_file,
     write_group_prompt_file,
 )
+from ..task_types import default_task_type_id, normalize_task_type_id
 from ..common import MCPError, _call_daemon_or_raise
 from ..utils.help_markdown import parse_help_markdown, update_actor_help_note
+
+
+def _resolve_task_create_assignee(
+    *,
+    group_id: str,
+    actor_id: Optional[str],
+    arguments: Dict[str, Any],
+) -> Optional[str]:
+    if "assignee" in arguments:
+        return str(arguments.get("assignee") or "").strip() or None
+    actor = str(actor_id or "").strip()
+    if not actor or actor in {"system", "user"}:
+        return None
+    group = load_group(group_id)
+    if group is None:
+        return None
+    role = get_effective_role(group, actor)
+    if role == "peer":
+        return actor
+    return None
 
 
 def context_get(*, group_id: str, include_archived: bool = False) -> Dict[str, Any]:
@@ -145,29 +166,33 @@ def task_create(
     blocked_by: Optional[List[str]] = None,
     waiting_on: Optional[str] = None,
     handoff_to: Optional[str] = None,
+    task_type: Optional[str] = None,
     notes: Optional[str] = None,
     checklist: Optional[List[Dict[str, Any]]] = None,
     by: Optional[str] = None,
 ) -> Dict[str, Any]:
+    resolved_task_type = task_type or default_task_type_id(parent_id)
+    op: Dict[str, Any] = {
+        "op": "task.create",
+        "title": title,
+        "outcome": outcome,
+        "status": status,
+        "parent_id": parent_id,
+        "assignee": assignee,
+        "priority": priority,
+        "blocked_by": blocked_by or [],
+        "waiting_on": waiting_on,
+        "handoff_to": handoff_to,
+        "task_type": resolved_task_type,
+    }
+    if notes is not None:
+        op["notes"] = notes
+    if checklist is not None:
+        op["checklist"] = checklist
     return context_sync(
         group_id=group_id,
         by=by,
-        ops=[
-            {
-                "op": "task.create",
-                "title": title,
-                "outcome": outcome,
-                "status": status,
-                "parent_id": parent_id,
-                "assignee": assignee,
-                "priority": priority,
-                "blocked_by": blocked_by or [],
-                "waiting_on": waiting_on,
-                "handoff_to": handoff_to,
-                "notes": notes,
-                "checklist": checklist or [],
-            }
-        ],
+        ops=[op],
     )
 
 
@@ -184,6 +209,7 @@ def task_update(
     blocked_by: Optional[List[str]] = None,
     waiting_on: Optional[str] = None,
     handoff_to: Optional[str] = None,
+    task_type: Optional[str] = None,
     notes: Optional[str] = None,
     checklist: Optional[List[Dict[str, Any]]] = None,
     by: Optional[str] = None,
@@ -214,6 +240,9 @@ def task_update(
     if handoff_to is not None:
         op["handoff_to"] = handoff_to
         has_patch_fields = True
+    if task_type is not None:
+        op["task_type"] = task_type
+        has_patch_fields = True
     if notes is not None:
         op["notes"] = notes
         has_patch_fields = True
@@ -243,6 +272,19 @@ def task_restore(*, group_id: str, task_id: str, by: Optional[str] = None) -> Di
 
 def task_delete(*, group_id: str, task_id: str, by: Optional[str] = None) -> Dict[str, Any]:
     return context_sync(group_id=group_id, ops=[{"op": "task.delete", "task_id": task_id}], by=by)
+
+
+def _resolve_task_type(arguments: Dict[str, Any]) -> Optional[str]:
+    if "type" not in arguments:
+        return None
+    task_type = normalize_task_type_id(arguments.get("type"))
+    raw = str(arguments.get("type") or "").strip()
+    if raw and task_type is None:
+        raise MCPError(
+            code="invalid_request",
+            message="cccc_task type must be one of: free|standard|optimization",
+        )
+    return task_type
 
 
 def agent_state_get(*, group_id: str, actor_id: Optional[str] = None, include_warm: bool = True) -> Dict[str, Any]:
@@ -579,24 +621,28 @@ def _handle_context_namespace(
         if action == "create":
             checklist_raw = arguments.get("checklist")
             blocked_by_raw = arguments.get("blocked_by")
+            task_type = _resolve_task_type(arguments)
+            assignee = _resolve_task_create_assignee(group_id=gid, actor_id=by, arguments=arguments)
             return task_create_fn(
                 group_id=gid,
                 title=str(arguments.get("title") or ""),
                 outcome=str(arguments.get("outcome") or ""),
                 status=str(arguments.get("status") or "planned"),
                 parent_id=(str(arguments.get("parent_id") or "").strip() or None),
-                assignee=(str(arguments.get("assignee") or "").strip() or None),
+                assignee=assignee,
                 priority=(str(arguments.get("priority") or "").strip() or None),
                 blocked_by=list(blocked_by_raw) if isinstance(blocked_by_raw, list) else None,
                 waiting_on=(str(arguments.get("waiting_on") or "").strip() or None),
                 handoff_to=(str(arguments.get("handoff_to") or "").strip() or None),
+                task_type=task_type,
                 notes=(str(arguments.get("notes") or "") if "notes" in arguments else None),
-                checklist=list(checklist_raw) if isinstance(checklist_raw, list) else None,
+                checklist=(list(checklist_raw) if isinstance(checklist_raw, list) else None),
                 by=by,
             )
         if action == "update":
             checklist_raw = arguments.get("checklist")
             blocked_by_raw = arguments.get("blocked_by")
+            task_type = _resolve_task_type(arguments)
             kwargs: Dict[str, Any] = {
                 "group_id": gid,
                 "task_id": str(arguments.get("task_id") or ""),
@@ -608,6 +654,8 @@ def _handle_context_namespace(
                     kwargs[field] = str(value) if value is not None else None
             if "blocked_by" in arguments:
                 kwargs["blocked_by"] = list(blocked_by_raw) if isinstance(blocked_by_raw, list) else []
+            if "type" in arguments:
+                kwargs["task_type"] = task_type
             if "checklist" in arguments:
                 kwargs["checklist"] = list(checklist_raw) if isinstance(checklist_raw, list) else []
             return task_update_fn(**kwargs)

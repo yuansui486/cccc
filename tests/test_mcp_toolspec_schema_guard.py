@@ -84,6 +84,20 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
             self.assertIsInstance(priority, dict)
             self.assertEqual(priority.get("enum"), ["normal", "attention"])
 
+    def test_task_toolspec_exposes_type_enum(self) -> None:
+        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_task"), None)
+        self.assertIsInstance(spec, dict)
+        schema = spec.get("inputSchema") if isinstance(spec, dict) else {}
+        self.assertIsInstance(schema, dict)
+        props = schema.get("properties") if isinstance(schema, dict) else {}
+        self.assertIsInstance(props, dict)
+        task_type = props.get("type") if isinstance(props, dict) else {}
+        self.assertIsInstance(task_type, dict)
+        self.assertEqual(
+            task_type.get("enum"),
+            ["free", "standard", "optimization"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

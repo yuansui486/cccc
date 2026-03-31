@@ -8,6 +8,7 @@ import type {
   GroupSpaceStatus,
 } from "../../../types";
 import * as api from "../../../services/api";
+import { ProjectedBrowserSurfacePanel } from "../../browser/ProjectedBrowserSurfacePanel";
 import { cardClass, inputClass } from "./types";
 
 interface GroupSpaceTabProps {
@@ -270,6 +271,7 @@ export function GroupSpaceTab({ isDark: _isDark, groupId, isActive = true }: Gro
         action: "start",
         timeoutSeconds: 900,
         forceReauth,
+        projected: true,
       });
       if (!resp.ok) {
         setErr(
@@ -613,6 +615,32 @@ export function GroupSpaceTab({ isDark: _isDark, groupId, isActive = true }: Gro
         ) : null}
         {authFlow?.error?.message ? (
           <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{String(authFlow.error.message)}</div>
+        ) : null}
+        {connectionRunning &&
+        String(authFlow?.delivery || "").trim() === "projected_browser" &&
+        Boolean(authFlow?.projected_browser?.active) ? (
+          <div className="mt-4">
+            <ProjectedBrowserSurfacePanel
+              key={String(authFlow?.session_id || authFlow?.started_at || "notebooklm-auth")}
+              isDark={_isDark}
+              refreshNonce={0}
+              viewportClassName="h-[68vh] min-h-[460px] max-h-[780px] w-full sm:h-[72vh] sm:min-h-[560px]"
+              fallbackUrl="https://notebooklm.google.com/"
+              labels={{
+                starting: t("groupSpace.projectedAuthStarting"),
+                waiting: t("groupSpace.projectedAuthWaiting"),
+                ready: t("groupSpace.projectedAuthReady"),
+                failed: t("groupSpace.projectedAuthFailed"),
+                closed: t("groupSpace.projectedAuthClosed"),
+                reconnecting: t("groupSpace.projectedAuthReconnecting"),
+                reconnect: t("groupSpace.projectedAuthReconnect"),
+                back: t("groupSpace.projectedAuthBack"),
+                frameAlt: t("groupSpace.projectedAuthFrameAlt"),
+              }}
+              webSocketUrl={api.getGroupSpaceProviderAuthBrowserWebSocketUrl(provider)}
+              loadSession={() => api.fetchGroupSpaceProviderAuthBrowserSession(provider)}
+            />
+          </div>
         ) : null}
       </div>
 

@@ -4,6 +4,13 @@
   "dismissReminderAria": "关闭提醒",
   "bubbleAria": "Web 宠物",
   "bubbleAriaHint": "Web 宠物：{{hint}}",
+  "panelTitle": "Web 宠物",
+  "panelIdle": "当前没有提醒",
+  "reminderCount": "{{count}} 条提醒",
+  "reviewNow": "立即复查",
+  "reviewing": "复查中…",
+  "moreReminders": "更多提醒",
+  "moreCount": "另有 {{count}} 条",
   "teamFallback": "团队",
   "systemAgent": "系统",
   "taskFallback": "这条任务",
@@ -14,26 +21,54 @@
   },
   "countWorking": "{{count}} 工作中",
   "countBusy": "{{count}} 忙碌",
-  "countNeedsYou": "{{count}} 需要你",
-  "noActionItems": "当前没有待处理事项。",
+  "petPeerLabel": "宠物协作者",
+  "petPersonaSourceHelp": "已载入人格设定",
+  "petPersonaSourceDefault": "默认种子",
+  "noActionItems": "当前没有建议或异常。",
+  "hintPetContextLoading": "宠物上下文同步中…",
+  "hintPetContextUnavailable": "宠物上下文暂不可用",
   "kind": {
-    "waiting_user": "等待用户",
-    "reply_required": "等待回复",
-    "stalled_peer": "协作停滞",
+    "suggestion": "建议",
+    "actor_down": "实例停止",
     "mention": "提及"
   },
   "action": {
-    "complete": "完成",
-    "view": "查看",
-    "reply": "回复"
+    "draft": "放入聊天框",
+    "applyRule": "应用规则",
+    "restart": "重启",
+    "restartPeer": "重启协作者",
+    "restartForeman": "重启领班",
+    "dismiss": "忽略"
   },
+  "notice": {
+    "suggestionDrafted": "草稿已放入聊天输入框",
+    "restartRequested": "已请求重启",
+    "actorRestartFailed": "重启失败",
+    "automationProposalApplied": "自动化提案已应用",
+    "automationProposalApplyFailed": "应用自动化提案失败",
+    "reviewRequested": "已请求宠物复查",
+    "reviewNoReminders": "当前没有提醒",
+    "reviewPetUnavailable": "宠物运行实例不可用",
+    "reviewPetNotRunning": "宠物运行实例未启动",
+    "reviewPetAuthExpired": "宠物运行实例认证已过期，请重新登录后再试。"
+  },
+  "suggestionLabel": "建议",
   "taskProgress": "{{done}}/{{total}} 已完成",
   "taskActive": "{{count}} 进行中",
   "hintTaskProgress": "{{done}}/{{total}} 任务已完成",
-  "hintTaskWithAction": "{{done}}/{{total}} 已完成，{{count}} 个等你处理",
   "reminderSummary": {
-    "mention": "{{actor}} 提到了你。",
-    "replyRequired": "{{actor}} 正在等你回复。",
-    "stalledPeer": "{{actor}} 挂着 {{taskId}} 已经空闲很久了。"
+    "mention": "{{actor}} 准备了一条可在聊天中查看和编辑的草稿。",
+    "replyRequired": "{{actor}} 准备了一条可在聊天中查看和编辑的回复草稿。"
+  },
+  "snapshot": {
+    "group": "团队：{{value}}",
+    "groupState": "状态：{{value}}",
+    "tasks": "任务：总数 {{total}}，进行中 {{active}}，已完成 {{done}}，已归档 {{archived}}",
+    "agentSnapshot": "实例快照：{{value}}",
+    "blockedTasks": "阻塞任务：{{value}}",
+    "waitingUserTasks": "等待用户：{{value}}",
+    "handoffTasks": "待交接：{{value}}",
+    "plannedBacklog": "计划积压：{{value}}",
+    "taskProposals": "任务建议：{{value}}"
   }
 }

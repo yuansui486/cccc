@@ -33,8 +33,10 @@ from ...paths import ensure_home
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
+from ..automation.automation_ops import _set_automation_ruleset
 from ..actors.actor_profile_runtime import actor_profile_ref
 from ..actors.actor_profile_store import get_actor_profile, get_actor_profile_by_ref
+from ..context.context_ops import _schedule_summary_snapshot_rebuild, _wait_for_summary_snapshot_rebuild
 from ..messaging.delivery import THROTTLE, clear_preamble_sent
 
 
@@ -594,18 +596,7 @@ def group_template_import_replace(args: Dict[str, Any]) -> DaemonResponse:
     automation_result: Dict[str, Any] = {}
     try:
         ruleset = tpl.automation
-        automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
-        template_rules = [r.model_dump(exclude_none=True) for r in (ruleset.rules or [])]
-        template_snippets = dict(ruleset.snippets or {})
-        automation["rules"] = template_rules
-        automation["snippets"] = template_snippets
-        try:
-            old_version = int(automation.get("version") or 0)
-        except Exception:
-            old_version = 0
-        automation["version"] = max(1, old_version) + 1
-        group.doc["automation"] = automation
-        group.save()
+        _set_automation_ruleset(group, ruleset=ruleset)
 
         automation_result = {
             "rule_ids": [str(r.id) for r in (ruleset.rules or []) if str(r.id or "").strip()],
@@ -636,6 +627,21 @@ def group_template_import_replace(args: Dict[str, Any]) -> DaemonResponse:
                 pass
     except Exception:
         pass
+
+    if removed or added or updated or existing_ids != template_ids:
+        try:
+            storage.bump_version_state(actors_changed=True)
+            # Actor removals should invalidate the cached summary first so the next
+            # summary read can return the previous snapshot marked stale before any
+            # rebuild races ahead and replaces it.
+            if not removed:
+                _schedule_summary_snapshot_rebuild(group.group_id)
+        except Exception:
+            pass
+        try:
+            _wait_for_summary_snapshot_rebuild(group.group_id, timeout_s=1.0)
+        except Exception:
+            pass
 
     return DaemonResponse(
         ok=True,

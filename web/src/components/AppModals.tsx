@@ -1,8 +1,6 @@
 // AppModals renders all modal components in one place.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ContextModal } from "./ContextModal";
-import { SettingsModal } from "./SettingsModal";
 import { SearchModal } from "./SearchModal";
 import type { TemplatePreviewDetailsProps } from "./TemplatePreviewDetails";
 import { MobileMenuSheet } from "./layout/MobileMenuSheet";
@@ -18,9 +16,13 @@ import {
 import { GroupEditModal } from "./modals/GroupEditModal";
 import { InboxModal } from "./modals/InboxModal";
 import { PresentationPinModal } from "./presentation/PresentationPinModal";
-import { PresentationViewerModal } from "./presentation/PresentationViewerModal";
 import { RelayMessageModal } from "./modals/RelayMessageModal";
 import { RecipientsModal } from "./modals/RecipientsModal";
+import {
+  openContextModalData,
+  syncContextModalData,
+  type ContextModalFetch,
+} from "../features/contextModal/contextRead";
 import { parsePrivateEnvSetText } from "../utils/privateEnvInput";
 import { parseHelpMarkdown, updateActorHelpNote } from "../utils/helpMarkdown";
 import { formatCapabilityIdInput, normalizeCapabilityIdList, parseCapabilityIdInput } from "../utils/capabilityAutoload";
@@ -28,6 +30,7 @@ import { actorProfileIdentityKey, actorProfileMatchesRef } from "../utils/actorP
 import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayText";
 import { findPresentationSlot } from "../utils/presentation";
 import { buildPresentationRefForSlot } from "../utils/presentationRefs";
+import { formatGroupSettingsUpdateError } from "../utils/groupSettingsErrors";
 import {
   useGroupStore,
   useUIStore,
@@ -41,6 +44,12 @@ import { getAckRecipientIdsForEvent, getRecipientActorIdsForEvent } from "../hoo
 import * as api from "../services/api";
 import { Actor, ActorProfile, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime } from "../types";
 
+const ContextModal = lazy(() => import("./ContextModal/index").then((module) => ({ default: module.ContextModal })));
+const SettingsModal = lazy(() => import("./SettingsModal").then((module) => ({ default: module.SettingsModal })));
+const PresentationViewerModal = lazy(() =>
+  import("./presentation/PresentationViewerModal").then((module) => ({ default: module.PresentationViewerModal }))
+);
+
 interface AppModalsProps {
   isDark: boolean;
   readOnly?: boolean;
@@ -51,7 +60,7 @@ interface AppModalsProps {
   onStartGroup: () => Promise<void>;
   onStopGroup: () => Promise<void>;
   onSetGroupState: (state: "active" | "idle" | "paused") => Promise<void>;
-  fetchContext: (groupId: string, opts?: { fresh?: boolean; detail?: "summary" | "full" }) => Promise<void>;
+  fetchContext: ContextModalFetch;
   canManageGroups: boolean;
 }
 
@@ -70,6 +79,21 @@ function sortPresentationSlotIds(slotIds: string[]): string[] {
   });
 }
 
+function LazyModalFallback({ isDark }: { isDark: boolean }) {
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+      <div
+        className={[
+          "rounded-2xl border px-4 py-3 text-sm shadow-xl",
+          isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-200 bg-white text-slate-700",
+        ].join(" ")}
+      >
+        Loading...
+      </div>
+    </div>
+  );
+}
+
 export function AppModals({
   isDark,
   readOnly,
@@ -83,7 +107,7 @@ export function AppModals({
   fetchContext,
   canManageGroups,
 }: AppModalsProps) {
-  const { t } = useTranslation(['actors', 'chat']);
+  const { t } = useTranslation(['actors', 'chat', 'modals']);
   // Stores
   const {
     groups,
@@ -102,6 +126,7 @@ export function AppModals({
     setGroupSettings,
     setGroupPresentation,
     refreshGroups,
+    refreshSettings,
     refreshActors,
     loadGroup,
     openChatWindow,
@@ -481,14 +506,10 @@ export function AppModals({
     try {
       const resp = await api.updateSettings(selectedGroupId, settings);
       if (!resp.ok) {
-        const msg = `${resp.error.code}: ${resp.error.message}`;
-        showError(msg);
+        showError(formatGroupSettingsUpdateError(t, resp.error));
         return false;
       }
-      const settingsResp = await api.fetchSettings(selectedGroupId);
-      if (settingsResp.ok && settingsResp.result.settings) {
-        setGroupSettings(settingsResp.result.settings);
-      }
+      await refreshSettings(selectedGroupId);
       return true;
     } finally {
       setBusy("");
@@ -796,7 +817,7 @@ export function AppModals({
     if (!actorId) return;
     const latest = actors.find((item) => String(item.id || "").trim() === actorId);
     if (!latest) return;
-    const changed =
+    const configChanged =
       String(editingActor.profile_id || "").trim() !== String(latest.profile_id || "").trim() ||
       Number(editingActor.profile_revision_applied || 0) !== Number(latest.profile_revision_applied || 0) ||
       String(editingActor.runtime || "").trim() !== String(latest.runtime || "").trim() ||
@@ -811,8 +832,19 @@ export function AppModals({
         String(
           normalizeCapabilityIdList((latest as { capability_autoload?: unknown[] }).capability_autoload).join("\u0000")
         );
-    if (changed) applyEditingActor(latest as Record<string, unknown>);
-  }, [actors, editingActor, applyEditingActor]);
+    if (configChanged) {
+      applyEditingActor(latest as Record<string, unknown>);
+      return;
+    }
+
+    const avatarChanged =
+      String(editingActor.avatar_url || "") !== String(latest.avatar_url || "") ||
+      Boolean(editingActor.has_custom_avatar) !== Boolean(latest.has_custom_avatar);
+
+    if (avatarChanged) {
+      setEditingActor(latest);
+    }
+  }, [actors, editingActor, applyEditingActor, setEditingActor]);
 
   const handleSaveEditActorAsProfile = async (): Promise<SaveActorProfileResult | void> => {
     if (!editingActor || !selectedGroupId) return;
@@ -951,8 +983,8 @@ export function AppModals({
     }
   };
 
-  const handleAddActor = async () => {
-    if (!selectedGroupId) return;
+  const handleAddActor = async (avatarFile?: File | null): Promise<boolean> => {
+    if (!selectedGroupId) return false;
     const actorId = newActorId.trim();
     const secretsText = String(newActorSecretsSetText || "");
     const roleNotes = String(newActorRoleNotes || "").trim();
@@ -961,7 +993,7 @@ export function AppModals({
 
     if (newActorUseProfile && !selectedProfile) {
       setAddActorError(t("selectProfileFirst"));
-      return;
+      return false;
     }
 
     let secretsSetVars: Record<string, string> = {};
@@ -969,7 +1001,7 @@ export function AppModals({
       const parsedSecrets = parsePrivateEnvSetText(secretsText);
       if (!parsedSecrets.ok) {
         setAddActorError(parsedSecrets.error);
-        return;
+        return false;
       }
       secretsSetVars = parsedSecrets.setVars;
     }
@@ -998,7 +1030,7 @@ export function AppModals({
       );
       if (!resp.ok) {
         setAddActorError(resp.error?.message || t('failedToAddAgent'));
-        return;
+        return false;
       }
 
       const createdActorId = String(
@@ -1006,6 +1038,8 @@ export function AppModals({
           ? (resp.result as { actor?: { id?: string } }).actor?.id
           : "") || actorId || suggestedActorId
       ).trim();
+
+      const postCreateErrors: string[] = [];
 
       if (roleNotes && createdActorId) {
         const roleNotesResp = await persistActorRoleNotes(
@@ -1015,17 +1049,29 @@ export function AppModals({
           [...actors.map((item) => String(item.id || "").trim()).filter(Boolean), createdActorId]
         );
         if (!roleNotesResp.ok) {
-          closeModal("addActor");
-          resetAddActorForm();
-          await refreshActors();
-          showError(t("actorCreatedRoleNotesSaveFailed", { actor: createdActorId, message: roleNotesResp.error }));
-          return;
+          postCreateErrors.push(`${t("roleNotes")}: ${roleNotesResp.error}`);
+        }
+      }
+
+      if (avatarFile && createdActorId) {
+        const avatarResp = await api.uploadActorAvatar(selectedGroupId, createdActorId, avatarFile);
+        if (!avatarResp.ok) {
+          postCreateErrors.push(`${t("avatarTitle")}: ${avatarResp.error?.message || t("avatarUploadFailed")}`);
         }
       }
 
       closeModal("addActor");
       resetAddActorForm();
       await refreshActors();
+      if (postCreateErrors.length > 0) {
+        showError(
+          t("actorCreatedSetupFailed", {
+            actor: createdActorId,
+            details: postCreateErrors.join(" · "),
+          })
+        );
+      }
+      return true;
     } finally {
       setBusy("");
     }
@@ -1450,60 +1496,71 @@ export function AppModals({
         onSubmitFile={handlePresentationPublishFile}
       />
 
-      {presentationViewerSlotIds.map((slotId) => {
-        const slot = findPresentationSlot(groupPresentation, slotId);
-        const version = String(slot?.card?.published_at || "empty").trim() || "empty";
-        return (
-          <PresentationViewerModal
-            key={`${selectedGroupId}:${slotId}:${version}`}
-            isOpen={!!presentationViewer && presentationViewer.groupId === selectedGroupId && presentationViewer.slotId === slotId}
-            isDark={isDark}
-            readOnly={readOnly}
+      {presentationViewerSlotIds.length > 0 ? (
+        <Suspense fallback={<LazyModalFallback isDark={isDark} />}>
+          {presentationViewerSlotIds.map((slotId) => {
+            const slot = findPresentationSlot(groupPresentation, slotId);
+            const version = String(slot?.card?.published_at || "empty").trim() || "empty";
+            return (
+              <PresentationViewerModal
+                key={`${selectedGroupId}:${slotId}:${version}`}
+                isOpen={!!presentationViewer && presentationViewer.groupId === selectedGroupId && presentationViewer.slotId === slotId}
+                isDark={isDark}
+                readOnly={readOnly}
+                groupId={selectedGroupId}
+                slotId={slotId}
+                presentation={groupPresentation}
+                focusRef={presentationViewer?.groupId === selectedGroupId && presentationViewer.slotId === slotId ? presentationViewer.focusRef || null : null}
+                focusEventId={presentationViewer?.groupId === selectedGroupId && presentationViewer.slotId === slotId ? presentationViewer.focusEventId || null : null}
+                sourceEvent={presentationViewer?.groupId === selectedGroupId && presentationViewer.slotId === slotId ? presentationViewerSourceEvent : null}
+                onQuoteInChat={handleQuotePresentationReference}
+                onOpenMessageContext={(eventId) => void handleOpenPresentationMessageContext(eventId)}
+                onReplyToMessage={(event) => void handleReplyToPresentationMessage(event)}
+                onReplaceSlot={(nextSlotId) => {
+                  const gid = String(selectedGroupId || "").trim();
+                  if (!gid || !nextSlotId) return;
+                  setPresentationViewer(null);
+                  setPresentationPin({ groupId: gid, slotId: nextSlotId });
+                }}
+                onClearSlot={(nextSlotId) => void handlePresentationClear(nextSlotId)}
+                onClose={() => setPresentationViewer(null)}
+              />
+            );
+          })}
+        </Suspense>
+      ) : null}
+
+      {modals.context ? (
+        <Suspense fallback={<LazyModalFallback isDark={isDark} />}>
+          <ContextModal
+            isOpen={modals.context}
+            onClose={() => closeModal("context")}
             groupId={selectedGroupId}
-            slotId={slotId}
-            presentation={groupPresentation}
-            focusRef={presentationViewer?.groupId === selectedGroupId && presentationViewer.slotId === slotId ? presentationViewer.focusRef || null : null}
-            focusEventId={presentationViewer?.groupId === selectedGroupId && presentationViewer.slotId === slotId ? presentationViewer.focusEventId || null : null}
-            sourceEvent={presentationViewer?.groupId === selectedGroupId && presentationViewer.slotId === slotId ? presentationViewerSourceEvent : null}
-            onQuoteInChat={handleQuotePresentationReference}
-            onOpenMessageContext={(eventId) => void handleOpenPresentationMessageContext(eventId)}
-            onReplyToMessage={(event) => void handleReplyToPresentationMessage(event)}
-            onReplaceSlot={(nextSlotId) => {
-              const gid = String(selectedGroupId || "").trim();
-              if (!gid || !nextSlotId) return;
-              setPresentationViewer(null);
-              setPresentationPin({ groupId: gid, slotId: nextSlotId });
-            }}
-            onClearSlot={(nextSlotId) => void handlePresentationClear(nextSlotId)}
-            onClose={() => setPresentationViewer(null)}
+            context={groupContext}
+            onOpenContext={() => openContextModalData(fetchContext, selectedGroupId)}
+            onSyncContext={() => syncContextModalData(fetchContext, selectedGroupId)}
+            isDark={isDark}
+            settings={groupSettings}
+            onUpdateSettings={handleUpdateSettings}
           />
-        );
-      })}
+        </Suspense>
+      ) : null}
 
-      <ContextModal
-        isOpen={modals.context}
-        onClose={() => closeModal("context")}
-        groupId={selectedGroupId}
-        context={groupContext}
-        onRefreshContext={async () => {
-          if (selectedGroupId) await fetchContext(selectedGroupId, { fresh: true, detail: "full" });
-        }}
-        isDark={isDark}
-        settings={groupSettings}
-        onUpdateSettings={handleUpdateSettings}
-      />
-
-      <SettingsModal
-        isOpen={modals.settings}
-        onClose={() => closeModal("settings")}
-        settings={groupSettings}
-        onUpdateSettings={handleUpdateSettings}
-        onRegistryChanged={refreshGroups}
-        busy={busy.startsWith("settings")}
-        isDark={isDark}
-        groupId={selectedGroupId}
-        groupDoc={groupDoc}
-      />
+      {modals.settings ? (
+        <Suspense fallback={<LazyModalFallback isDark={isDark} />}>
+          <SettingsModal
+            isOpen={modals.settings}
+            onClose={() => closeModal("settings")}
+            settings={groupSettings}
+            onUpdateSettings={handleUpdateSettings}
+            onRegistryChanged={refreshGroups}
+            busy={busy.startsWith("settings")}
+            isDark={isDark}
+            groupId={selectedGroupId}
+            groupDoc={groupDoc}
+          />
+        </Suspense>
+      ) : null}
 
       <RecipientsModal
         isOpen={!!messageMeta}
@@ -1553,6 +1610,8 @@ export function AppModals({
         busy={busy}
         groupId={selectedGroupId || groupDoc?.group_id || ""}
         actorId={editingActor?.id || ""}
+        avatarUrl={editingActor?.avatar_url || undefined}
+        hasCustomAvatar={!!editingActor?.has_custom_avatar}
         isRunning={!!(editingActor && (editingActor.running ?? editingActor.enabled ?? false))}
         runtimes={runtimes}
         runtime={editActorRuntime}
@@ -1574,6 +1633,7 @@ export function AppModals({
         actorProfiles={actorProfiles}
         actorProfilesBusy={actorProfilesBusy}
         onSaveAsProfile={handleSaveEditActorAsProfile}
+        onAvatarChanged={refreshActors}
         onCancel={handleCancelEditActor}
       />
 

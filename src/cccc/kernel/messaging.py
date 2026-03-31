@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal
 
-from .actors import list_actors
+from .actors import list_visible_actors
 from .group import Group
 from .inbox import is_message_for_actor
 from ..util.conv import coerce_bool
@@ -24,7 +24,7 @@ def get_default_send_to(group_doc: Dict[str, Any]) -> DefaultSendTo:
 
 def _enabled_actor_ids(group: Group) -> List[str]:
     out: List[str] = []
-    for a in list_actors(group):
+    for a in list_visible_actors(group):
         if not isinstance(a, dict):
             continue
         if not coerce_bool(a.get("enabled"), default=True):
@@ -37,7 +37,7 @@ def _enabled_actor_ids(group: Group) -> List[str]:
 
 def _disabled_actor_ids(group: Group) -> List[str]:
     out: List[str] = []
-    for a in list_actors(group):
+    for a in list_visible_actors(group):
         if not isinstance(a, dict):
             continue
         if coerce_bool(a.get("enabled"), default=True):

@@ -1,34 +1,35 @@
+import { useCallback, useState } from "react";
+import {
+  FloatingPortal,
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useClick,
+  useDismiss,
+  useFloating,
+  useInteractions,
+  useRole,
+} from "@floating-ui/react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GroupMeta } from "../../types";
 import { classNames } from "../../utils/classNames";
-import { getGroupStatusLabel } from "../../utils/displayText";
-import { GripIcon } from "../Icons";
+import { getGroupStatusUnified } from "../../utils/groupStatus";
+import { GripIcon, MoreIcon } from "../Icons";
 
 interface SortableGroupItemProps {
   group: GroupMeta;
   isActive: boolean;
   isDark: boolean;
   isCollapsed: boolean;
+  isArchived?: boolean;
   dragDisabled?: boolean;
+  menuActionLabel?: string;
+  menuAriaLabel?: string;
+  onMenuAction?: () => void;
   onSelect: () => void;
   onWarm?: () => void;
-}
-
-type StatusKey = "run" | "paused" | "idle" | "stop";
-
-function getStatusInfo(running: boolean, state?: string): { label: string; key: StatusKey; dotClass: string } {
-  if (!running) {
-    return { label: getGroupStatusLabel("stop"), key: "stop", dotClass: "bg-gray-400 dark:bg-slate-500" };
-  }
-  switch (state) {
-    case "paused":
-      return { label: getGroupStatusLabel("paused"), key: "paused", dotClass: "bg-amber-500 dark:bg-amber-400" };
-    case "idle":
-      return { label: getGroupStatusLabel("idle"), key: "idle", dotClass: "bg-blue-500 dark:bg-blue-400" };
-    default:
-      return { label: getGroupStatusLabel("run"), key: "run", dotClass: "bg-emerald-500 dark:bg-emerald-400 run-indicator-glow" };
-  }
 }
 
 export function SortableGroupItem({
@@ -36,11 +37,16 @@ export function SortableGroupItem({
   isActive,
   isDark: _isDark,
   isCollapsed,
+  isArchived = false,
   dragDisabled = false,
+  menuActionLabel,
+  menuAriaLabel,
+  onMenuAction,
   onSelect,
   onWarm,
 }: SortableGroupItemProps) {
   const gid = String(group.group_id || "");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const {
     attributes,
@@ -56,7 +62,21 @@ export function SortableGroupItem({
     transition,
   };
 
-  const status = getStatusInfo(group.running ?? false, group.state);
+  const status = getGroupStatusUnified(group.running ?? false, group.state);
+  const { refs, floatingStyles, context } = useFloating({
+    open: menuOpen,
+    onOpenChange: setMenuOpen,
+    placement: "bottom-end",
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+    strategy: "fixed",
+  });
+  const click = useClick(context);
+  const dismiss = useDismiss(context);
+  const role = useRole(context, { role: "menu" });
+  const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss, role]);
+  const setReference = useCallback((node: HTMLElement | null) => refs.setReference(node), [refs]);
+  const setFloating = useCallback((node: HTMLElement | null) => refs.setFloating(node), [refs]);
 
   if (isCollapsed) {
     const initial = (group.title || gid).charAt(0).toUpperCase();
@@ -105,17 +125,15 @@ export function SortableGroupItem({
         isDragging && "z-50"
       )}
     >
-      <button
+      <div
         className={classNames(
           "w-full text-left px-3 py-3 rounded-xl transition-all min-h-[48px] flex items-center gap-2 relative",
-          isDragging && "opacity-70 shadow-lg ring-2 ring-sky-500/25",
+          isDragging && "opacity-70 shadow-lg ring-2 ring-cyan-500/30",
           isActive
             ? "glass-group-item-active glow-pulse"
-            : "glass-group-item"
+            : "glass-group-item",
+          isArchived && !isActive && "opacity-90"
         )}
-        onClick={onSelect}
-        onMouseEnter={onWarm}
-        onFocus={onWarm}
       >
         {/* Drag handle */}
         {!dragDisabled && (
@@ -133,11 +151,17 @@ export function SortableGroupItem({
           </div>
         )}
 
-        <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left"
+          onClick={onSelect}
+          onMouseEnter={onWarm}
+          onFocus={onWarm}
+        >
           <div className="flex items-center gap-2 min-w-0">
             {/* Status dot */}
             <span className={classNames(
-              "w-2 h-2 rounded-full flex-shrink-0",
+              "w-2.5 h-2.5 rounded-full flex-shrink-0",
               status.dotClass
             )} />
             <span
@@ -153,14 +177,59 @@ export function SortableGroupItem({
           </div>
           <span
             className={classNames(
-              "glass-status-pill text-[9px] px-2.5 py-1 rounded-full font-semibold flex-shrink-0 uppercase",
-              `glass-status-pill-${status.key}`
+              "text-[9px] px-2.5 py-1 rounded-full font-semibold flex-shrink-0 uppercase",
+              status.pillClass
             )}
           >
             {status.label}
           </span>
-        </div>
-      </button>
+        </button>
+
+        {onMenuAction && menuActionLabel && (
+          <>
+            <button
+              type="button"
+              ref={setReference}
+              {...getReferenceProps({
+                className: classNames(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors glass-btn",
+                  isActive
+                    ? "text-cyan-700 dark:text-cyan-300"
+                    : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
+                ),
+                "aria-label": menuAriaLabel || menuActionLabel,
+                title: menuAriaLabel || menuActionLabel,
+              })}
+            >
+              <MoreIcon size={16} />
+            </button>
+            <FloatingPortal>
+              {menuOpen && (
+                <div
+                  ref={setFloating}
+                  style={floatingStyles}
+                  {...getFloatingProps()}
+                  className="z-max min-w-[160px] rounded-xl p-1.5 shadow-2xl glass-panel"
+                >
+                  <button
+                    type="button"
+                    className={classNames(
+                      "w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
+                      "text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                    )}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onMenuAction();
+                    }}
+                  >
+                    {menuActionLabel}
+                  </button>
+                </div>
+              )}
+            </FloatingPortal>
+          </>
+        )}
+      </div>
     </div>
   );
 }

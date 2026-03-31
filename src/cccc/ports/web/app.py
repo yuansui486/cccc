@@ -154,7 +154,15 @@ def _resolve_principal(request: Request) -> Principal:
 async def _daemon(req: Dict[str, Any]) -> Dict[str, Any]:
     resp = await run_in_threadpool(call_daemon, req)
     if not resp.get("ok") and isinstance(resp.get("error"), dict) and resp["error"].get("code") == "daemon_unavailable":
-        raise HTTPException(status_code=503, detail={"code": "daemon_unavailable", "message": "ccccd unavailable"})
+        err = resp.get("error") if isinstance(resp.get("error"), dict) else {}
+        detail = {
+            "code": "daemon_unavailable",
+            "message": "ccccd unavailable",
+        }
+        err_details = err.get("details") if isinstance(err.get("details"), dict) else None
+        if err_details:
+            detail["details"] = err_details
+        raise HTTPException(status_code=503, detail=detail)
     return resp
 
 

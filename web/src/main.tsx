@@ -4,7 +4,6 @@ import { AuthGate } from "./components/AuthGate";
 import App from "./App";
 import "./i18n";
 import "./index.css";
-import "@xterm/xterm/css/xterm.css";
 import { useBrandingStore } from "./stores";
 import { applyBrandingToDocument, DEFAULT_WEB_BRANDING } from "./utils/branding";
 

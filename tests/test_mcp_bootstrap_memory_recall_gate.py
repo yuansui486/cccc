@@ -50,7 +50,17 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
             return_value={
                 "coordination": {
                     "brief": {"current_focus": "memory lifecycle", "objective": "Ship memory", "project_brief": "Hot project brief"},
-                    "tasks": [{"id": "T001", "title": "B2 rollout", "outcome": "Ship memory", "status": "active", "assignee": "peer1"}],
+                    "tasks": [
+                        {
+                            "id": "T001",
+                            "title": "B2 rollout",
+                            "outcome": "Ship memory",
+                            "parent_id": "T000",
+                            "status": "active",
+                            "assignee": "peer1",
+                            "task_type": "optimization",
+                        }
+                    ],
                     "recent_decisions": [{"summary": "Keep lifecycle deterministic.", "by": "foreman", "at": "2026-03-07T00:00:00Z"}],
                     "recent_handoffs": [],
                 },
@@ -115,6 +125,8 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
         self.assertEqual(recovery["self_state"]["recovery"]["persona_notes"], "be precise and low-noise")
         self.assertEqual(recovery["self_state"]["mind_context_mini"]["environment_summary"], "repo dirty but scoped")
         self.assertEqual(recovery["task_slice"]["assigned_active"][0]["id"], "T001")
+        self.assertEqual(recovery["task_slice"]["assigned_active"][0]["parent_id"], "T000")
+        self.assertEqual(recovery["task_slice"]["assigned_active"][0]["task_type"], "optimization")
         self.assertEqual(recovery["recent_notes"]["decisions"][0]["summary"], "Keep lifecycle deterministic.")
 
         hygiene = out["context_hygiene"]
@@ -213,8 +225,10 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
                         "id": f"T{i:03d}",
                         "title": f"Task {i}",
                         "outcome": noisy_note,
+                        "parent_id": "T000" if i == 1 else None,
                         "status": "active" if i == 1 else "planned",
                         "assignee": "peer1",
+                        "task_type": "optimization" if i == 1 else "standard",
                         "notes": noisy_note,
                         "checklist": [
                             {"id": "C001", "text": noisy_note, "status": "pending"},
@@ -250,11 +264,16 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
         pack = _build_bootstrap_context(context=context_payload, actor_id="peer1")
         agent_state = pack.get("agent_state") if isinstance(pack.get("agent_state"), dict) else {}
         mini = agent_state.get("mind_context_mini") if isinstance(agent_state.get("mind_context_mini"), dict) else {}
+        tasks = pack.get("tasks") if isinstance(pack.get("tasks"), dict) else {}
+        assigned_active = tasks.get("assigned_active") if isinstance(tasks.get("assigned_active"), list) else []
 
         self.assertTrue(mini)
         self.assertIn("workspace has many parallel changes", str(mini.get("environment_summary") or ""))
         self.assertIn("prefers simple mechanisms", str(mini.get("user_model") or ""))
         self.assertIn("preserve continuity", str(mini.get("persona_notes") or ""))
+        self.assertTrue(assigned_active)
+        self.assertEqual(assigned_active[0].get("task_type"), "optimization")
+        self.assertEqual(assigned_active[0].get("parent_id"), "T000")
 
 
 if __name__ == "__main__":

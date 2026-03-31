@@ -57,6 +57,10 @@ interface ComposerState {
 
   // Group switching: save current draft and load new group's draft
   switchGroup: (fromGroupId: string | null, toGroupId: string | null) => void;
+  upsertDraft: (
+    groupId: string,
+    updater: (draft: GroupDraft | null) => GroupDraft | null,
+  ) => void;
   // Clear draft for a specific group
   clearDraft: (groupId: string) => void;
 }
@@ -159,6 +163,23 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       destGroupId: normalizedDestGroupId,
     });
   },
+
+  upsertDraft: (groupId, updater) =>
+    set((state) => {
+      const gid = String(groupId || "").trim();
+      if (!gid) return state;
+      const nextDraft = updater(state.drafts[gid] || null);
+      const drafts = { ...state.drafts };
+      if (nextDraft) {
+        drafts[gid] = {
+          ...nextDraft,
+          destGroupId: String(nextDraft.destGroupId || gid).trim() || gid,
+        };
+      } else {
+        delete drafts[gid];
+      }
+      return { drafts };
+    }),
 
   clearDraft: (groupId) => {
     const state = get();

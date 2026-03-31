@@ -14,26 +14,63 @@ const GLOBAL_REFRESH_EVENT_KINDS = new Set([
   "actor.restart",
 ]);
 
+const ACTOR_REFRESH_EVENT_KINDS = new Set([
+  "actor.start",
+  "actor.stop",
+  "actor.restart",
+  "group.state_changed",
+]);
+
 export function shouldRefreshGroupsAfterGlobalEventsOpen(_hasConnectedOnce: boolean): boolean {
   return true;
+}
+
+export function getGlobalEventGroupId(ev: unknown): string {
+  if (!ev || typeof ev !== "object") return "";
+  const directGroupId = String((ev as { group_id?: unknown }).group_id || "").trim();
+  if (directGroupId) return directGroupId;
+  const data = (ev as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return "";
+  return String((data as { group_id?: unknown }).group_id || "").trim();
+}
+
+export function shouldRefreshActorsAfterGlobalEvent(ev: unknown, selectedGroupId: string): boolean {
+  if (!ev || typeof ev !== "object") return false;
+  const kind = String((ev as { kind?: unknown }).kind || "").trim();
+  if (!ACTOR_REFRESH_EVENT_KINDS.has(kind)) return false;
+  const selected = String(selectedGroupId || "").trim();
+  if (!selected) return false;
+  return getGlobalEventGroupId(ev) === selected;
 }
 
 interface UseGlobalEventsOptions {
   /** Callback to refresh groups when events are received */
   refreshGroups: () => void;
+  /** Callback to refresh actors for the selected group when lifecycle changes land */
+  refreshActors?: (groupId: string, opts?: { includeUnread?: boolean }) => Promise<void> | void;
+  /** Currently selected group id */
+  selectedGroupId?: string;
 }
 
 /**
  * Subscribes to the global events stream to keep sidebar status in sync.
  * Falls back to polling after 3 consecutive SSE errors.
  */
-export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void {
+export function useGlobalEvents({ refreshGroups, refreshActors, selectedGroupId }: UseGlobalEventsOptions): void {
   // Use ref to avoid recreating SSE connection when refreshGroups reference changes
   const refreshGroupsRef = useRef(refreshGroups);
+  const refreshActorsRef = useRef(refreshActors);
+  const selectedGroupIdRef = useRef(selectedGroupId);
   const hasConnectedOnceRef = useRef(false);
   useEffect(() => {
     refreshGroupsRef.current = refreshGroups;
   }, [refreshGroups]);
+  useEffect(() => {
+    refreshActorsRef.current = refreshActors;
+  }, [refreshActors]);
+  useEffect(() => {
+    selectedGroupIdRef.current = selectedGroupId;
+  }, [selectedGroupId]);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -51,6 +88,13 @@ export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void
     function invalidateAndRefreshGroups() {
       api.invalidateGroupsRead();
       refreshGroupsRef.current();
+    }
+
+    function refreshSelectedActors() {
+      const gid = String(selectedGroupIdRef.current || "").trim();
+      if (!gid || !refreshActorsRef.current) return;
+      api.clearActorsReadOnlyRequest(gid);
+      void refreshActorsRef.current(gid, { includeUnread: false });
     }
 
     function scheduleFallbackPoll() {
@@ -80,6 +124,9 @@ export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void
           if (GLOBAL_REFRESH_EVENT_KINDS.has(kind)) {
             invalidateAndRefreshGroups();
           }
+          if (shouldRefreshActorsAfterGlobalEvent(ev, selectedGroupIdRef.current || "")) {
+            refreshSelectedActors();
+          }
         } catch {
           /* ignore parse errors */
         }
@@ -94,6 +141,7 @@ export function useGlobalEvents({ refreshGroups }: UseGlobalEventsOptions): void
         // reconnect need a catch-up refresh to cover the open window.
         if (shouldRefresh) {
           invalidateAndRefreshGroups();
+          refreshSelectedActors();
         }
       };
       es.onerror = () => {

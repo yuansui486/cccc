@@ -4,9 +4,22 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ...contracts.v1 import AutomationRule, AutomationRuleSet, DaemonError, DaemonResponse
+from ...contracts.v1 import (
+    AutomationRule,
+    AutomationRuleSet,
+    AutomationSnippetCatalog,
+    DaemonError,
+    DaemonResponse,
+)
 from ...kernel.actors import find_actor, get_effective_role
-from ...kernel.group import default_automation_ruleset_doc, load_group
+from ...kernel.group import (
+    automation_snippet_catalog,
+    default_automation_builtin_snippets,
+    default_automation_ruleset_doc,
+    load_group,
+    normalize_automation_snippet_storage,
+    split_automation_snippets_for_storage,
+)
 from ...kernel.ledger import append_event
 from ...kernel.permissions import require_group_permission
 from ...util.conv import coerce_bool
@@ -42,14 +55,19 @@ def _ensure_automation_doc(group: Any) -> Dict[str, Any]:
         automation = dict(raw_automation)
         has_rules = isinstance(automation.get("rules"), list)
         has_snippets = isinstance(automation.get("snippets"), dict)
-        if not has_rules and not has_snippets:
-            automation["rules"] = seed.get("rules", [])
-            automation["snippets"] = seed.get("snippets", {})
+        has_snippet_overrides = isinstance(automation.get("snippet_overrides"), dict)
+        if not has_rules and not has_snippets and not has_snippet_overrides:
+            automation = seed
         else:
             if not has_rules:
                 automation["rules"] = []
-            if not has_snippets:
-                automation["snippets"] = {}
+            custom_snippets, built_in_overrides = normalize_automation_snippet_storage(automation)
+            automation["snippets"] = custom_snippets
+            automation["snippet_overrides"] = built_in_overrides
+    if "snippets" not in automation:
+        automation["snippets"] = {}
+    if "snippet_overrides" not in automation:
+        automation["snippet_overrides"] = {}
     try:
         version = int(automation.get("version") or 0)
     except Exception:
@@ -146,8 +164,10 @@ def _reconcile_automation_state_after_ruleset_change(
 def _set_automation_ruleset(group: Any, *, ruleset: AutomationRuleSet) -> int:
     previous_ruleset = load_automation_ruleset(group)
     automation = _ensure_automation_doc(group)
+    custom_snippets, built_in_overrides = split_automation_snippets_for_storage(ruleset.snippets or {})
     automation["rules"] = [r.model_dump(exclude_none=True) for r in (ruleset.rules or [])]
-    automation["snippets"] = dict(ruleset.snippets or {})
+    automation["snippets"] = custom_snippets
+    automation["snippet_overrides"] = built_in_overrides
     try:
         old_version = int(automation.get("version") or 0)
     except Exception:
@@ -209,6 +229,59 @@ def _actor_role_or_none(group: Any, actor_id: str) -> str:
         return ""
 
 
+def _build_automation_payload(group: Any, *, by: str) -> Dict[str, Any]:
+    role = ""
+    if by and by != "user":
+        role = _actor_role_or_none(group, by)
+        if not role:
+            raise ValueError(f"unknown actor: {by}")
+
+    ruleset = load_automation_ruleset(group)
+    snippet_catalog = AutomationSnippetCatalog.model_validate(automation_snippet_catalog(group.doc.get("automation")))
+    status = build_automation_status(group)
+    version = _automation_version(group)
+
+    if role == "peer":
+        visible_rules: list[Any] = []
+        visible_ids: set[str] = set()
+        for rule in ruleset.rules:
+            rid = str(rule.id or "").strip()
+            if not rid:
+                continue
+            scope = str(rule.scope or "group")
+            owner = str(rule.owner_actor_id or "").strip()
+            if scope == "group" or owner == by:
+                visible_rules.append(rule)
+                visible_ids.add(rid)
+        snippet_refs: set[str] = set()
+        for rule in visible_rules:
+            action = getattr(rule, "action", None)
+            if str(getattr(action, "kind", "notify") or "notify").strip() != "notify":
+                continue
+            ref = str(getattr(action, "snippet_ref", "") or "").strip()
+            if ref:
+                snippet_refs.add(ref)
+        snippets = {k: v for k, v in (ruleset.snippets or {}).items() if k in snippet_refs}
+        status = {rid: st for rid, st in status.items() if rid in visible_ids}
+        ruleset = AutomationRuleSet(rules=visible_rules, snippets=snippets)
+        snippet_catalog = AutomationSnippetCatalog(
+            built_in={k: v for k, v in snippet_catalog.built_in.items() if k in snippet_refs},
+            built_in_overrides={k: v for k, v in snippet_catalog.built_in_overrides.items() if k in snippet_refs},
+            custom={k: v for k, v in snippet_catalog.custom.items() if k in snippet_refs},
+        )
+
+    return {
+        "group_id": group.group_id,
+        "ruleset": ruleset.model_dump(),
+        "snippet_catalog": snippet_catalog.model_dump(),
+        "status": status,
+        "supported_vars": automation_supported_vars(),
+        "version": int(version),
+        "server_now": utc_now_iso(),
+        "config_path": str(group.path / "group.yaml"),
+    }
+
+
 def handle_group_automation_update(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or "user").strip()
@@ -264,7 +337,7 @@ def handle_group_automation_update(args: Dict[str, Any]) -> DaemonResponse:
     )
     return DaemonResponse(
         ok=True,
-        result={"group_id": group.group_id, "ruleset": ruleset.model_dump(), "version": int(next_version), "event": ev},
+        result={**_build_automation_payload(group, by=by), "event": ev},
     )
 
 
@@ -277,54 +350,11 @@ def handle_group_automation_state(args: Dict[str, Any]) -> DaemonResponse:
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
 
-    role = ""
-    if by and by != "user":
-        role = _actor_role_or_none(group, by)
-        if not role:
-            return _error("permission_denied", f"unknown actor: {by}")
-
-    ruleset = load_automation_ruleset(group)
-    status = build_automation_status(group)
-    version = _automation_version(group)
-
-    if role == "peer":
-        visible_rules: list[Any] = []
-        visible_ids: set[str] = set()
-        for rule in ruleset.rules:
-            rid = str(rule.id or "").strip()
-            if not rid:
-                continue
-            scope = str(rule.scope or "group")
-            owner = str(rule.owner_actor_id or "").strip()
-            if scope == "group" or owner == by:
-                visible_rules.append(rule)
-                visible_ids.add(rid)
-        snippet_refs: set[str] = set()
-        for rule in visible_rules:
-            action = getattr(rule, "action", None)
-            if str(getattr(action, "kind", "notify") or "notify").strip() != "notify":
-                continue
-            ref = str(getattr(action, "snippet_ref", "") or "").strip()
-            if ref:
-                snippet_refs.add(ref)
-        snippets = {k: v for k, v in (ruleset.snippets or {}).items() if k in snippet_refs}
-        status = {rid: st for rid, st in status.items() if rid in visible_ids}
-        ruleset_out = AutomationRuleSet(rules=visible_rules, snippets=snippets)
-    else:
-        ruleset_out = ruleset
-
-    return DaemonResponse(
-        ok=True,
-        result={
-            "group_id": group.group_id,
-            "ruleset": ruleset_out.model_dump(),
-            "status": status,
-            "supported_vars": automation_supported_vars(),
-            "version": int(version),
-            "server_now": utc_now_iso(),
-            "config_path": str(group.path / "group.yaml"),
-        },
-    )
+    try:
+        payload = _build_automation_payload(group, by=by)
+    except Exception as e:
+        return _error("permission_denied", str(e))
+    return DaemonResponse(ok=True, result=payload)
 
 
 def handle_group_automation_manage(args: Dict[str, Any]) -> DaemonResponse:
@@ -563,12 +593,7 @@ def handle_group_automation_manage(args: Dict[str, Any]) -> DaemonResponse:
     return DaemonResponse(
         ok=True,
         result={
-            "group_id": group.group_id,
-            "ruleset": next_ruleset.model_dump(),
-            "status": build_automation_status(group),
-            "supported_vars": automation_supported_vars(),
-            "version": int(next_version),
-            "server_now": utc_now_iso(),
+            **_build_automation_payload(group, by=by),
             "applied_actions": applied_actions,
             "changed": bool(changed),
             "event": ev,
@@ -601,7 +626,7 @@ def handle_group_automation_reset_baseline(args: Dict[str, Any]) -> DaemonRespon
         baseline = AutomationRuleSet.model_validate(
             {
                 "rules": list(seed.get("rules", [])),
-                "snippets": dict(seed.get("snippets", {})),
+                "snippets": default_automation_builtin_snippets(),
             }
         )
         next_version = _set_automation_ruleset(group, ruleset=baseline)
@@ -624,13 +649,7 @@ def handle_group_automation_reset_baseline(args: Dict[str, Any]) -> DaemonRespon
     return DaemonResponse(
         ok=True,
         result={
-            "group_id": group.group_id,
-            "ruleset": baseline.model_dump(),
-            "status": build_automation_status(group),
-            "supported_vars": automation_supported_vars(),
-            "version": int(next_version),
-            "server_now": utc_now_iso(),
-            "config_path": str(group.path / "group.yaml"),
+            **_build_automation_payload(group, by=by),
             "event": ev,
         },
     )

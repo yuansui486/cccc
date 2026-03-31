@@ -78,6 +78,14 @@ BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("automation", "ops"),
     },
+    "pack:pet": {
+        "title": "Pet Decision Surface",
+        "description": "Structured Web Pet reminder decision storage for the internal pet actor.",
+        "tool_names": (
+            "cccc_pet_decisions",
+        ),
+        "tags": ("pet", "decision", "web-pet"),
+    },
     "pack:context-advanced": {
         "title": "Context Advanced",
         "description": "Low-level context batch sync and memory admin operations.",

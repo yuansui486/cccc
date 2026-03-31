@@ -30,6 +30,12 @@ class TestDeliveryStateBehavior(unittest.TestCase):
                 group = set_group_state(group, state="paused")
                 self.assertFalse(should_deliver_message(group, "chat.message"))
                 self.assertFalse(should_deliver_message(group, "system.notify"))
+
+                # stopped: block all PTY delivery
+                group.doc["state"] = "stopped"
+                group.save()
+                self.assertFalse(should_deliver_message(group, "chat.message"))
+                self.assertFalse(should_deliver_message(group, "system.notify"))
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)

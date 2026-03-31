@@ -352,6 +352,36 @@ class TestWebGroupSpaceApi(unittest.TestCase):
             cleanup_mode()
             cleanup()
 
+    def test_group_space_provider_auth_browser_surface_ws_uses_large_stream_limit(self) -> None:
+        from cccc.ports.web.app import create_app
+        from cccc.ports.web.routes import space as space_routes
+
+        _, cleanup = self._with_home()
+        try:
+            captured: dict[str, object] = {}
+
+            async def fake_open_connection(host: str, port: int, *, limit: int | None = None):
+                captured["host"] = host
+                captured["port"] = port
+                captured["limit"] = limit
+                raise RuntimeError("simulated connect failure")
+
+            with patch("cccc.ports.web.routes.space.get_daemon_endpoint", return_value={"transport": "tcp", "host": "127.0.0.1", "port": 9001}), patch(
+                "cccc.ports.web.routes.space.check_admin",
+                return_value=None,
+            ), patch(
+                "cccc.ports.web.routes.space.asyncio.open_connection",
+                side_effect=fake_open_connection,
+            ):
+                client = TestClient(create_app())
+                with client.websocket_connect("/api/v1/space/providers/notebooklm/auth/browser_surface/ws") as ws:
+                    payload = ws.receive_json()
+
+            self.assertEqual(payload["error"]["code"], "daemon_unavailable")
+            self.assertEqual(captured.get("limit"), space_routes._PROJECTED_BROWSER_STREAM_LIMIT_BYTES)
+        finally:
+            cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

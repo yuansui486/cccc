@@ -92,6 +92,9 @@ class TestMaintenanceOps(unittest.TestCase):
     def test_ledger_snapshot_and_compact(self) -> None:
         _, cleanup = self._with_home()
         try:
+            from cccc.kernel.group import load_group
+            from cccc.kernel.ledger_index import lookup_event_by_id
+
             create, _ = self._call("group_create", {"title": "ledger", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
             group_id = str((create.result or {}).get("group_id") or "").strip()
@@ -99,15 +102,38 @@ class TestMaintenanceOps(unittest.TestCase):
 
             sent, _ = self._call("send", {"group_id": group_id, "text": "hello", "by": "user", "to": ["user"]})
             self.assertTrue(sent.ok, getattr(sent, "error", None))
+            event = (sent.result or {}).get("event") if isinstance(sent.result, dict) else {}
+            event_id = str((event or {}).get("id") or "")
+            self.assertTrue(event_id)
 
             snap, _ = self._call("ledger_snapshot", {"group_id": group_id, "by": "user", "reason": "test"})
             self.assertTrue(snap.ok, getattr(snap, "error", None))
             snapshot = (snap.result or {}).get("snapshot") if isinstance(snap.result, dict) else {}
             self.assertIsInstance(snapshot, dict)
+            self.assertIn("manifest", snapshot)
 
             compact, _ = self._call("ledger_compact", {"group_id": group_id, "by": "user", "reason": "test", "force": True})
             self.assertTrue(compact.ok, getattr(compact, "error", None))
             self.assertIsInstance(compact.result, dict)
+            result = compact.result if isinstance(compact.result, dict) else {}
+            inner = result.get("result") if isinstance(result.get("result"), dict) else {}
+            rotation = inner.get("rotation") if isinstance(inner.get("rotation"), dict) else {}
+            self.assertTrue(bool(rotation.get("rotated")))
+            compression = inner.get("compression") if isinstance(inner.get("compression"), dict) else {}
+            self.assertGreaterEqual(int(compression.get("count") or 0), 1)
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            manifest_path = group.path / "state" / "ledger" / "manifest.json"
+            self.assertTrue(manifest_path.exists())
+            manifest = manifest_path.read_text(encoding="utf-8")
+            self.assertIn(".jsonl.gz", manifest)
+
+            found = lookup_event_by_id(group.ledger_path, event_id)
+            self.assertIsInstance(found, dict)
+            self.assertEqual(str((found or {}).get("id") or ""), event_id)
+            self.assertEqual(str((found or {}).get("kind") or ""), "chat.message")
         finally:
             cleanup()
 

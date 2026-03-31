@@ -72,12 +72,26 @@ class TestPromptDefaults(unittest.TestCase):
         from cccc.kernel.group import _DEFAULT_AUTOMATION_STANDUP_SNIPPET
 
         body = str(_DEFAULT_AUTOMATION_STANDUP_SNIPPET or "")
-        self.assertIn("Checklist:", body)
-        self.assertIn("Recall:", body)
-        self.assertIn("cccc_capability_use(...)", body)
+        self.assertIn("Keep this short.", body)
+        self.assertIn("current status, next step, blocker", body)
+        self.assertIn("not a task switch", body)
+        self.assertIn("Do not answer from fuzzy memory.", body)
+        self.assertIn("grounded in fresh context", body)
+        self.assertIn("`cccc_bootstrap`", body)
+        self.assertIn("`memory_recall_gate`", body)
+        self.assertIn("before replying", body)
+        self.assertIn("return to your prior active task", body)
         self.assertIn("cccc_help", body)
-        self.assertNotIn('cccc_capability_search(kind="mcp_toolpack"|"skill"', body)
+        self.assertNotIn("Recall:", body)
+        self.assertNotIn("cccc_capability_use(...)", body)
         self.assertNotIn("diagnostics", body)
+
+    def test_builtin_help_marks_coordination_interrupts_as_non_switches(self) -> None:
+        from cccc.kernel.prompt_files import load_builtin_help_markdown
+
+        body = str(load_builtin_help_markdown() or "")
+        self.assertIn("`standup` and `help_nudge` are coordination interrupts, not task switches", body)
+        self.assertIn("Do not overwrite `active_task_id`, `focus`, or `next_action`", body)
 
 
 if __name__ == "__main__":

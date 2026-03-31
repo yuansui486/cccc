@@ -1,24 +1,32 @@
 // SettingsModal renders the settings modal.
-import { useState, useEffect, useRef, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Actor, GroupDoc, GroupSettings, IMStatus, IMPlatform, WebAccessSession } from "../types";
 import * as api from "../services/api";
 import { useObservabilityStore } from "../stores";
 import {
-  AutomationTab,
-  IMBridgeTab,
-  GuidanceTab,
-  BlueprintTab,
-  ActorProfilesTab,
-  BrandingTab,
   SettingsScope,
   GroupTabId,
   GlobalTabId,
-} from "./modals/settings";
+} from "./modals/settings/types";
 import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
 import { IMConfigDraft, saveAndStartIMBridge, saveIMConfigDraft } from "./modals/settings/imBridgeConfig";
 import { useModalA11y } from "../hooks/useModalA11y";
+
+const AutomationTab = lazy(() => import("./modals/settings/AutomationTab").then((module) => ({ default: module.AutomationTab })));
+const DeliveryTab = lazy(() => import("./modals/settings/DeliveryTab").then((module) => ({ default: module.DeliveryTab })));
+const MessagingTab = lazy(() => import("./modals/settings/MessagingTab").then((module) => ({ default: module.MessagingTab })));
+const IMBridgeTab = lazy(() => import("./modals/settings/IMBridgeTab").then((module) => ({ default: module.IMBridgeTab })));
+const TranscriptTab = lazy(() => import("./modals/settings/TranscriptTab").then((module) => ({ default: module.TranscriptTab })));
+const GuidanceTab = lazy(() => import("./modals/settings/GuidanceTab").then((module) => ({ default: module.GuidanceTab })));
+const GroupSpaceTab = lazy(() => import("./modals/settings/GroupSpaceTab").then((module) => ({ default: module.GroupSpaceTab })));
+const BlueprintTab = lazy(() => import("./modals/settings/BlueprintTab").then((module) => ({ default: module.BlueprintTab })));
+const CapabilitiesTab = lazy(() => import("./modals/settings/CapabilitiesTab").then((module) => ({ default: module.CapabilitiesTab })));
+const ActorProfilesTab = lazy(() => import("./modals/settings/ActorProfilesTab").then((module) => ({ default: module.ActorProfilesTab })));
+const BrandingTab = lazy(() => import("./modals/settings/BrandingTab").then((module) => ({ default: module.BrandingTab })));
+const WebAccessTab = lazy(() => import("./modals/settings/WebAccessTab").then((module) => ({ default: module.WebAccessTab })));
+const DeveloperTab = lazy(() => import("./modals/settings/DeveloperTab").then((module) => ({ default: module.DeveloperTab })));
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -30,6 +38,18 @@ interface SettingsModalProps {
   isDark: boolean;
   groupId?: string;
   groupDoc?: GroupDoc | null;
+}
+
+function SettingsTabFallback({ isDark }: { isDark: boolean }) {
+  return (
+    <div
+      className={`rounded-2xl border p-5 text-sm ${
+        isDark ? "border-slate-700 bg-slate-900/70 text-slate-200" : "border-slate-200 bg-slate-50 text-slate-600"
+      }`}
+    >
+      Loading...
+    </div>
+  );
 }
 
 export function SettingsModal({
@@ -844,7 +864,7 @@ export function SettingsModal({
                 ) : null}
               </div>
             ) : !tabs.some((tab) => tab.id === activeTab) ? null : (
-              <>
+              <Suspense fallback={<SettingsTabFallback isDark={isDark} />}>
               {activeTab === "automation" && (
                 <AutomationTab
                   isDark={isDark}
@@ -942,7 +962,57 @@ export function SettingsModal({
                   isActive={scope === "global" && activeTab === "branding"}
                 />
               )}
-              </>
+
+              {activeTab === "webAccess" && (
+                <WebAccessTab
+                  isDark={isDark}
+                  isActive={scope === "global" && activeTab === "webAccess"}
+                />
+              )}
+
+
+              {activeTab === "developer" && (
+                <DeveloperTab
+                  isDark={isDark}
+                  groupId={groupId}
+                  runtimeVersion={runtimeVersion}
+                  daemonVersion={daemonVersion}
+                  runtimeInfoErr={runtimeInfoErr}
+                  developerMode={developerMode}
+                  setDeveloperMode={setDeveloperMode}
+                  logLevel={logLevel}
+                  setLogLevel={setLogLevel}
+                  terminalBacklogMiB={terminalBacklogMiB}
+                  setTerminalBacklogMiB={setTerminalBacklogMiB}
+                  terminalScrollbackLines={terminalScrollbackLines}
+                  setTerminalScrollbackLines={setTerminalScrollbackLines}
+                  obsBusy={obsBusy}
+                  onSaveObservability={handleSaveObservability}
+                  debugSnapshot={debugSnapshot}
+                  debugSnapshotErr={debugSnapshotErr}
+                  debugSnapshotBusy={debugSnapshotBusy}
+                  onLoadDebugSnapshot={loadDebugSnapshot}
+                  onClearDebugSnapshot={() => {
+                    setDebugSnapshot("");
+                    setDebugSnapshotErr("");
+                  }}
+                  logComponent={logComponent}
+                  setLogComponent={setLogComponent}
+                  logLines={logLines}
+                  setLogLines={setLogLines}
+                  logText={logText}
+                  logErr={logErr}
+                  logBusy={logBusy}
+                  onLoadLogTail={loadLogTail}
+                  onClearLogs={handleClearLogs}
+                  registryBusy={registryBusy}
+                  registryErr={registryErr}
+                  registryResult={registryResult}
+                  onPreviewRegistry={loadRegistryPreview}
+                  onReconcileRegistry={handleReconcileRegistry}
+                />
+              )}
+              </Suspense>
             )}
           </div>
         </div>

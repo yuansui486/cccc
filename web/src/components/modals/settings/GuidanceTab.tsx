@@ -17,12 +17,13 @@ import {
 type PromptKind = "preamble" | "help";
 type PromptInfo = api.GroupPromptInfo;
 type HelpViewMode = "structured" | "raw";
-type HelpScopeId = "common" | "role:foreman" | "role:peer" | `actor:${string}`;
+type HelpScopeId = "common" | "role:foreman" | "role:peer" | "pet" | `actor:${string}`;
 
 const EMPTY_HELP: ParsedHelpMarkdown = {
   common: "",
   foreman: "",
   peer: "",
+  pet: "",
   actorNotes: {},
   extraTaggedBlocks: [],
   usedLegacyRoleNotes: false,
@@ -138,6 +139,7 @@ export function GuidanceTab({ isDark, groupId }: {
       common: next.common,
       foreman: next.foreman,
       peer: next.peer,
+      pet: next.pet,
       actorNotes: next.actorNotes,
       actorOrder: actorIds,
       extraTaggedBlocks: next.extraTaggedBlocks,
@@ -165,6 +167,10 @@ export function GuidanceTab({ isDark, groupId }: {
     const nextActorNotes = { ...helpStructured.actorNotes, [actorId]: value };
     if (!String(value || "").trim()) delete nextActorNotes[actorId];
     applyStructuredHelp({ ...helpStructured, actorNotes: nextActorNotes }, `actor:${actorId}`);
+  };
+
+  const updatePet = (value: string) => {
+    applyStructuredHelp({ ...helpStructured, pet: value }, "pet");
   };
 
   const savePrompt = async (kind: PromptKind) => {
@@ -365,6 +371,16 @@ export function GuidanceTab({ isDark, groupId }: {
     placeholder: t("guidance.peerNotesPlaceholder", "Report risks early, deliver verifiable outputs, and say when the direction is wrong…"),
     value: helpStructured.peer,
     roleLabel: undefined as string | undefined,
+    isOrphan: false,
+  };
+
+  const petScope = {
+    id: "pet" as HelpScopeId,
+    title: t("guidance.petPersonaTitle", "Pet Persona"),
+    hint: t("guidance.petPersonaHint", "Local persona block for the Web Pet shadow-peer. Use it for stable routing style, not temporary suggestions."),
+    placeholder: t("guidance.petPersonaPlaceholder", "Describe how the Web Pet should behave as a low-noise coordination helper..."),
+    value: helpStructured.pet,
+    roleLabel: t("guidance.petPersonaBadge", "Web Pet"),
     isOrphan: false,
   };
 

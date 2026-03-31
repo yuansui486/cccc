@@ -94,6 +94,14 @@ class AutomationRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AutomationSnippetCatalog(BaseModel):
+    built_in: Dict[str, str] = Field(default_factory=dict)
+    built_in_overrides: Dict[str, str] = Field(default_factory=dict)
+    custom: Dict[str, str] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class AutomationRuleSet(BaseModel):
     """Automation rules + snippet library for a group."""
 

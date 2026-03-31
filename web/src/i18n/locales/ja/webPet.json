@@ -4,6 +4,13 @@
   "dismissReminderAria": "リマインダーを閉じる",
   "bubbleAria": "Web ペット",
   "bubbleAriaHint": "Web ペット。{{hint}}",
+  "panelTitle": "Web ペット",
+  "panelIdle": "現在のリマインダーはありません",
+  "reminderCount": "{{count}} 件のリマインダー",
+  "reviewNow": "今すぐ再確認",
+  "reviewing": "再確認中…",
+  "moreReminders": "他のリマインダー",
+  "moreCount": "他に {{count}} 件",
   "teamFallback": "チーム",
   "systemAgent": "システム",
   "taskFallback": "このタスク",
@@ -14,26 +21,54 @@
   },
   "countWorking": "{{count}} 作業中",
   "countBusy": "{{count}} ビジー",
-  "countNeedsYou": "{{count}} 対応が必要",
-  "noActionItems": "今すぐ対応が必要な項目はありません。",
+  "petPeerLabel": "ペットピア",
+  "petPersonaSourceHelp": "人格設定あり",
+  "petPersonaSourceDefault": "既定シード",
+  "noActionItems": "今は提案も異常もありません。",
+  "hintPetContextLoading": "ペットコンテキストを同期中…",
+  "hintPetContextUnavailable": "ペットコンテキストを取得できません",
   "kind": {
-    "waiting_user": "ユーザー待ち",
-    "reply_required": "要返信",
-    "stalled_peer": "停滞中",
+    "suggestion": "提案",
+    "actor_down": "停止中",
     "mention": "メンション"
   },
   "action": {
-    "complete": "完了",
-    "view": "表示",
-    "reply": "返信"
+    "draft": "入力欄へ入れる",
+    "applyRule": "ルール適用",
+    "restart": "再起動",
+    "restartPeer": "ピアを再起動",
+    "restartForeman": "フォアマンを再起動",
+    "dismiss": "閉じる"
   },
+  "notice": {
+    "suggestionDrafted": "下書きを入力欄に入れました",
+    "restartRequested": "再起動を依頼しました",
+    "actorRestartFailed": "再起動に失敗しました",
+    "automationProposalApplied": "自動化提案を適用しました",
+    "automationProposalApplyFailed": "自動化提案の適用に失敗しました",
+    "reviewRequested": "ペットレビューを依頼しました",
+    "reviewNoReminders": "現在のリマインダーはありません",
+    "reviewPetUnavailable": "ペット実行系を利用できません",
+    "reviewPetNotRunning": "ペット実行系が起動していません",
+    "reviewPetAuthExpired": "ペット実行系の認証が切れています。再ログインしてから再試行してください。"
+  },
+  "suggestionLabel": "提案",
   "taskProgress": "{{done}}/{{total}} 完了",
   "taskActive": "{{count}} 進行中",
   "hintTaskProgress": "{{done}}/{{total}} タスク完了",
-  "hintTaskWithAction": "{{done}}/{{total}} 完了、{{count}} 件対応待ち",
   "reminderSummary": {
-    "mention": "{{actor}} があなたにメンションしました。",
-    "replyRequired": "{{actor}} があなたの返信を待っています。",
-    "stalledPeer": "{{actor}} は {{taskId}} のまま長くアイドル状態です。"
+    "mention": "{{actor}} がチャットで確認できる下書きを用意しました。",
+    "replyRequired": "{{actor}} がチャットで確認できる返信下書きを用意しました。"
+  },
+  "snapshot": {
+    "group": "グループ：{{value}}",
+    "groupState": "状態：{{value}}",
+    "tasks": "タスク：合計 {{total}}、進行中 {{active}}、完了 {{done}}、アーカイブ {{archived}}",
+    "agentSnapshot": "エージェント要約：{{value}}",
+    "blockedTasks": "ブロック中：{{value}}",
+    "waitingUserTasks": "ユーザー待ち：{{value}}",
+    "handoffTasks": "引き継ぎ待ち：{{value}}",
+    "plannedBacklog": "計画バックログ：{{value}}",
+    "taskProposals": "タスク提案候補：{{value}}"
   }
 }

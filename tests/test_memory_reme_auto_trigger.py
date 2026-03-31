@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 
 from cccc.util.fs import read_json
@@ -79,14 +80,25 @@ class TestMemoryRemeAutoTrigger(unittest.TestCase):
                     data={"text": f"msg {i} " + ("z" * 180), "to": []},
                 )
 
-            AutomationManager().on_new_message(group)
-
             state_path = group.path / "state" / "automation.json"
-            state = read_json(state_path)
-            self.assertIsInstance(state, dict)
-            assert isinstance(state, dict)
-            memory_auto = state.get("memory_auto") if isinstance(state.get("memory_auto"), dict) else {}
-            last_result = memory_auto.get("last_result") if isinstance(memory_auto.get("last_result"), dict) else {}
+            started = time.monotonic()
+            AutomationManager().on_new_message(group)
+            self.assertLess(time.monotonic() - started, 0.2)
+
+            state = {}
+            deadline = time.monotonic() + 5.0
+            last_result = {}
+            memory_auto = {}
+            while time.monotonic() < deadline:
+                state = read_json(state_path)
+                self.assertIsInstance(state, dict)
+                assert isinstance(state, dict)
+                memory_auto = state.get("memory_auto") if isinstance(state.get("memory_auto"), dict) else {}
+                last_result = memory_auto.get("last_result") if isinstance(memory_auto.get("last_result"), dict) else {}
+                if str(memory_auto.get("last_result_at") or "").strip():
+                    break
+                time.sleep(0.05)
+
             self.assertIn(str(last_result.get("status") or ""), {"written", "silent"})
             self.assertTrue(str(memory_auto.get("last_result_at") or "").strip())
         finally:
@@ -95,4 +107,3 @@ class TestMemoryRemeAutoTrigger(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

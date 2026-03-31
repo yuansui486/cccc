@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import re
 import threading
-from typing import Any, Deque, Dict, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, Optional, Tuple
 
 from ...contracts.v1 import DaemonError, DaemonResponse, SpaceBinding, SpaceLane, SystemNotifyData
 from ...kernel.group import load_group
@@ -47,6 +47,7 @@ from .group_space_memory_sync import (
 from .group_space_sync import (
     group_space_local_file_policy,
     mark_group_space_sync_pending,
+    restore_group_space_sync_state,
     read_group_space_sync_state,
     sync_group_space_files,
 )
@@ -890,6 +891,23 @@ def _emit_artifact_async_notify(
         group = load_group(group_id)
         if group is None:
             return
+        target_actor_id = _notify_target_from_by(by)
+        if target_actor_id:
+            actors = [
+                item
+                for item in group.doc.get("actors", [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip() == target_actor_id
+            ]
+            if not actors:
+                return
+        else:
+            actors = [
+                item
+                for item in group.doc.get("actors", [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip() not in {"", "user"}
+            ]
+            if not actors:
+                return
         title = "Group Space artifact ready" if ok else "Group Space artifact failed"
         recommended_next_action = _artifact_notify_recommended_action(ok=ok, output_path=output_path)
         completion_guidance = _artifact_completion_guidance(ok=ok, output_path=output_path)
@@ -921,7 +939,7 @@ def _emit_artifact_async_notify(
             priority=("normal" if ok else "high"),
             title=title,
             message=message,
-            target_actor_id=_notify_target_from_by(by),
+            target_actor_id=target_actor_id,
             requires_ack=False,
             context=context,
         )
@@ -2230,7 +2248,11 @@ def handle_group_space_jobs(args: Dict[str, Any]) -> DaemonResponse:
         return _error("group_space_jobs_failed", str(e))
 
 
-def handle_group_space_sync(args: Dict[str, Any]) -> DaemonResponse:
+def handle_group_space_sync(
+    args: Dict[str, Any],
+    *,
+    enqueue_group_space_sync_run: Optional[Callable[..., Dict[str, Any]]] = None,
+) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or "user").strip() or "user"
     provider_raw = args.get("provider")
@@ -2272,6 +2294,52 @@ def handle_group_space_sync(args: Dict[str, Any]) -> DaemonResponse:
                 },
             )
         _assert_write_permission(group, by=by)
+        if lane == "work" and enqueue_group_space_sync_run is not None:
+            binding = get_space_binding(group.group_id, provider=provider, lane="work") or {}
+            if not isinstance(binding, dict) or str(binding.get("status") or "") != "bound":
+                return _error("space_binding_missing", "group space binding is not active")
+            remote_space_id = str(binding.get("remote_space_id") or "").strip()
+            if not remote_space_id:
+                return _error("space_binding_missing", "binding has no remote_space_id")
+            provider_state = get_space_provider_state(provider)
+            if not bool(provider_state.get("enabled")) or str(provider_state.get("mode") or "") == "disabled":
+                return _error("space_provider_disabled", "provider is disabled")
+            previous_sync_state = read_group_space_sync_state(group.group_id)
+            pending_state = mark_group_space_sync_pending(
+                group.group_id,
+                provider=provider,
+                remote_space_id=remote_space_id,
+            )
+            enqueue_result = enqueue_group_space_sync_run(
+                group_id=group.group_id,
+                provider=provider,
+                force=force,
+                by=by,
+            )
+            if not bool(enqueue_result.get("accepted")):
+                restore_group_space_sync_state(group.group_id, previous_sync_state)
+                return _error(
+                    str(enqueue_result.get("code") or "group_space_sync_failed"),
+                    str(enqueue_result.get("message") or enqueue_result.get("reason") or "group space sync enqueue failed"),
+                    details=enqueue_result,
+                )
+            binding = get_space_binding(group.group_id, provider=provider, lane="work") or {}
+            return DaemonResponse(
+                ok=True,
+                result={
+                    "group_id": group.group_id,
+                    "provider": provider,
+                    "lane": lane,
+                    "sync": _live_work_sync_state(group_id=group.group_id, provider=provider, binding=binding),
+                    "sync_result": {
+                        "ok": True,
+                        "deferred": True,
+                        "force": bool(force),
+                        "state": pending_state,
+                        **enqueue_result,
+                    },
+                },
+            )
         if lane == "work":
             result = sync_group_space_files(group.group_id, provider=provider, force=force, by=by)
         else:
@@ -2426,6 +2494,7 @@ def handle_group_space_provider_auth(args: Dict[str, Any]) -> DaemonResponse:
     action_raw = args.get("action")
     timeout_seconds = int(args.get("timeout_seconds") or 900)
     force_reauth = bool(args.get("force_reauth") is True)
+    projected = bool(args.get("projected") is True)
     if not _is_user_writer(by):
         return _error("space_permission_denied", "only user can run provider auth flow")
     try:
@@ -2437,6 +2506,7 @@ def handle_group_space_provider_auth(args: Dict[str, Any]) -> DaemonResponse:
             auth = start_notebooklm_auth_flow(
                 timeout_seconds=timeout_seconds,
                 force_reauth=force_reauth,
+                projected=projected,
             )
         elif action == "cancel":
             auth = cancel_notebooklm_auth_flow()
@@ -2474,7 +2544,12 @@ def handle_group_space_provider_auth(args: Dict[str, Any]) -> DaemonResponse:
         return _error("group_space_provider_auth_failed", str(e))
 
 
-def try_handle_group_space_op(op: str, args: Dict[str, Any]) -> Optional[DaemonResponse]:
+def try_handle_group_space_op(
+    op: str,
+    args: Dict[str, Any],
+    *,
+    enqueue_group_space_sync_run: Optional[Callable[..., Dict[str, Any]]] = None,
+) -> Optional[DaemonResponse]:
     if op == "group_space_capabilities":
         return handle_group_space_capabilities(args)
     if op == "group_space_status":
@@ -2494,7 +2569,7 @@ def try_handle_group_space_op(op: str, args: Dict[str, Any]) -> Optional[DaemonR
     if op == "group_space_jobs":
         return handle_group_space_jobs(args)
     if op == "group_space_sync":
-        return handle_group_space_sync(args)
+        return handle_group_space_sync(args, enqueue_group_space_sync_run=enqueue_group_space_sync_run)
     if op == "group_space_provider_credential_status":
         return handle_group_space_provider_credential_status(args)
     if op == "group_space_provider_credential_update":

@@ -9,3 +9,4 @@ export { useObservabilityStore } from "./useObservabilityStore";
 export { useDoneHubStore } from "./useDoneHubStore";
 export { useWebPetStore } from "./useWebPetStore";
 export { useBrandingStore } from "./useBrandingStore";
+export { useTerminalSignalsStore, getTerminalSignalKey } from "./useTerminalSignalsStore";

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -28,6 +29,29 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
         reg = load_registry()
         group = create_group(reg, title="web-pet-test", topic="")
         return group.group_id
+
+    def _seed_pet_group(self, group_id: str, *, state: str) -> None:
+        from cccc.kernel.group import load_group
+
+        group = load_group(group_id)
+        assert group is not None
+        group.doc["state"] = state
+        group.doc["features"] = {"desktop_pet_enabled": True}
+        actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+        actors.append(
+            {
+                "id": "pet-peer",
+                "title": "Pet Peer",
+                "runtime": "codex",
+                "runner": "headless",
+                "command": [],
+                "env": {},
+                "enabled": True,
+                "internal_kind": "pet",
+            }
+        )
+        group.doc["actors"] = actors
+        group.save()
 
     def test_get_settings_desktop_pet_defaults_to_false(self) -> None:
         from cccc.ports.web.app import create_app
@@ -165,6 +189,50 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
                 headers={"Authorization": f"Bearer {token}"},
             )
             self.assertEqual(resp.status_code, 403)
+        finally:
+            cleanup()
+
+    def test_pet_review_route_allows_idle_group(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+            self._seed_pet_group(group_id, state="idle")
+            app = create_app()
+            client = TestClient(app)
+
+            with patch("cccc.ports.web.routes.groups.request_manual_pet_review", return_value=True) as manual_review:
+                resp = client.post(f"/api/v1/groups/{group_id}/pet-context/review")
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(body.get("ok"))
+            self.assertTrue((body.get("result") or {}).get("accepted"))
+            manual_review.assert_called_once_with(group_id, reason="bubble_click")
+        finally:
+            cleanup()
+
+    def test_pet_review_route_rejects_paused_group(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+            self._seed_pet_group(group_id, state="paused")
+            app = create_app()
+            client = TestClient(app)
+
+            with patch("cccc.ports.web.routes.groups.request_manual_pet_review", return_value=True) as manual_review:
+                resp = client.post(f"/api/v1/groups/{group_id}/pet-context/review")
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertFalse(body.get("ok"))
+            error = body.get("error") or {}
+            self.assertEqual(str(error.get("code") or ""), "group_not_active")
+            self.assertEqual(str(error.get("message") or ""), "pet review requires active or idle group state")
+            manual_review.assert_not_called()
         finally:
             cleanup()
 

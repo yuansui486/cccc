@@ -32,13 +32,16 @@ If you expose Web outside localhost, first create an **Admin Access Token** in *
 In **Google Account**:
 
 1. Click **Connect Google**.
-2. Complete sign-in in the opened browser window.
+2. Complete sign-in in the interactive browser view shown inside CCCC Web.
 3. Wait until the account status becomes connected.
 
 Notes:
 
 - If a valid credential is already stored, reconnect may complete without a full browser login.
 - The default Web page does not expose manual credential editing anymore.
+- The Web flow uses a projected sign-in browser so Docker / remote deployments do not need a local desktop browser on the daemon host.
+- The projected sign-in browser now runs in headed mode for better Google compatibility. In server/container environments without a native display, CCCC uses `Xvfb` automatically.
+- The Docker image includes the minimal Chromium shared libraries needed for the projected sign-in browser. Playwright / Chromium binaries themselves are still installed lazily on first use.
 
 ## 4. Bind the Work Notebook
 

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { PointerEventHandler } from "react";
-import { useWebPetStore } from "../../stores/useWebPetStore";
+import { getWebPetPosition, useWebPetStore } from "../../stores/useWebPetStore";
 import {
   WEB_PET_BUBBLE_SIZE,
   WEB_PET_DRAG_THRESHOLD_PX,
@@ -32,10 +32,10 @@ function clampPosition(x: number, y: number) {
   };
 }
 
-export function useWebPetDrag() {
-  const position = useWebPetStore((state) => state.position);
+export function useWebPetDrag(groupId: string, stackIndex = 0, onTap?: () => void) {
+  const positions = useWebPetStore((state) => state.positions);
   const setPosition = useWebPetStore((state) => state.setPosition);
-  const togglePanel = useWebPetStore((state) => state.togglePanel);
+  const position = getWebPetPosition(groupId, positions, stackIndex);
   const [isDragging, setIsDragging] = useState(false);
   const pointerStateRef = useRef<PointerState>(null);
 
@@ -75,7 +75,7 @@ export function useWebPetDrag() {
       setIsDragging(true);
     }
 
-    setPosition({
+    setPosition(groupId, {
       x: pointerState.originX + deltaX,
       y: pointerState.originY + deltaY,
     });
@@ -95,11 +95,11 @@ export function useWebPetDrag() {
 
     if (!pointerState.dragging) {
       setIsDragging(false);
-      togglePanel();
+      onTap?.();
       return;
     }
 
-    setPosition(clampPosition(position.x, position.y));
+    setPosition(groupId, clampPosition(position.x, position.y));
     setIsDragging(false);
   };
 

@@ -3,13 +3,23 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import threading
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from ....daemon.server import call_daemon, get_daemon_endpoint
 from ....daemon.actors.actor_profile_store import get_actor_profile, get_actor_profile_by_ref
 from ....kernel.group import load_group
+from ....kernel.actors import find_actor
+from ..actor_avatar import (
+    build_actor_web_payload,
+    delete_actor_avatar,
+    resolve_actor_avatar_path,
+    store_actor_avatar,
+)
+from .groups import invalidate_context_read
 from ..schemas import (
     ActorCreateRequest,
     ActorProfileUpsertRequest,
@@ -27,9 +37,10 @@ from ..schemas import (
 )
 
 _READONLY_ACTOR_CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
-_READONLY_ACTOR_INFLIGHT: Dict[str, asyncio.Future[Dict[str, Any]]] = {}
+_READONLY_ACTOR_INFLIGHT: Dict[str, Dict[str, Any]] = {}
+_READONLY_ACTOR_HANDOFF_ONCE: set[str] = set()
 _READONLY_ACTOR_GENERATION: Dict[str, int] = {}
-_READONLY_ACTOR_CACHE_LOCK = asyncio.Lock()
+_READONLY_ACTOR_CACHE_LOCK = threading.Lock()
 _READONLY_ACTOR_TTL_S = 0.8
 
 
@@ -38,9 +49,10 @@ async def invalidate_readonly_actor_list(group_id: str) -> None:
     if not gid:
         return
     cache_key = f"actors:{gid}:readonly"
-    async with _READONLY_ACTOR_CACHE_LOCK:
+    with _READONLY_ACTOR_CACHE_LOCK:
         _READONLY_ACTOR_GENERATION[cache_key] = int(_READONLY_ACTOR_GENERATION.get(cache_key, 0)) + 1
         _READONLY_ACTOR_CACHE.pop(cache_key, None)
+        _READONLY_ACTOR_HANDOFF_ONCE.discard(cache_key)
         _READONLY_ACTOR_INFLIGHT.pop(cache_key, None)
 
 
@@ -56,46 +68,65 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         ttl_s = _READONLY_ACTOR_TTL_S if ctx.read_only else 0.0
         cache_key = f"actors:{gid}:readonly"
         now = time.monotonic()
-        fut: asyncio.Future[Dict[str, Any]] | None = None
+        inflight_entry: Optional[Dict[str, Any]] = None
         fetch_generation = 0
         do_fetch = False
 
-        async with _READONLY_ACTOR_CACHE_LOCK:
+        with _READONLY_ACTOR_CACHE_LOCK:
             hit = _READONLY_ACTOR_CACHE.get(cache_key)
             if ttl_s > 0 and hit is not None and hit[0] > now:
                 return hit[1]
-            fut = _READONLY_ACTOR_INFLIGHT.get(cache_key)
-            if fut is None or fut.done():
-                loop = asyncio.get_running_loop()
-                fut = loop.create_future()
-                _READONLY_ACTOR_INFLIGHT[cache_key] = fut
+            if ttl_s <= 0 and hit is not None and cache_key in _READONLY_ACTOR_HANDOFF_ONCE:
+                _READONLY_ACTOR_HANDOFF_ONCE.discard(cache_key)
+                _READONLY_ACTOR_CACHE.pop(cache_key, None)
+                return hit[1]
+            inflight_entry = _READONLY_ACTOR_INFLIGHT.get(cache_key)
+            if inflight_entry is None:
+                inflight_entry = {"event": threading.Event(), "result": None, "error": None, "waiters": 1}
+                _READONLY_ACTOR_INFLIGHT[cache_key] = inflight_entry
                 fetch_generation = int(_READONLY_ACTOR_GENERATION.get(cache_key, 0))
                 do_fetch = True
-
-        if fut is not None and not do_fetch:
-            return await fut
+            else:
+                inflight_entry["waiters"] = int(inflight_entry.get("waiters", 1)) + 1
 
         try:
+            if inflight_entry is not None and not do_fetch:
+                await asyncio.to_thread(inflight_entry["event"].wait)
+                error = inflight_entry.get("error")
+                if error is not None:
+                    raise error
+                result = inflight_entry.get("result")
+                if isinstance(result, dict):
+                    return result
+                return await fetcher()
+
             val = await fetcher()
-            async with _READONLY_ACTOR_CACHE_LOCK:
+            with _READONLY_ACTOR_CACHE_LOCK:
                 current_generation = int(_READONLY_ACTOR_GENERATION.get(cache_key, 0))
-                if current_generation == fetch_generation and _READONLY_ACTOR_INFLIGHT.get(cache_key) is fut:
+                if current_generation == fetch_generation and _READONLY_ACTOR_INFLIGHT.get(cache_key) is inflight_entry:
                     if ttl_s > 0:
                         _READONLY_ACTOR_CACHE[cache_key] = (time.monotonic() + ttl_s, val)
                     else:
-                        _READONLY_ACTOR_CACHE.pop(cache_key, None)
-                if fut is not None and not fut.done():
-                    fut.set_result(val)
+                        _READONLY_ACTOR_CACHE[cache_key] = (time.monotonic(), val)
+                        _READONLY_ACTOR_HANDOFF_ONCE.add(cache_key)
+                if inflight_entry is not None:
+                    inflight_entry["result"] = val
+                    inflight_entry["event"].set()
             return val
         except Exception as exc:
-            async with _READONLY_ACTOR_CACHE_LOCK:
-                if fut is not None and not fut.done():
-                    fut.set_exception(exc)
+            with _READONLY_ACTOR_CACHE_LOCK:
+                if inflight_entry is not None:
+                    inflight_entry["error"] = exc
+                    inflight_entry["event"].set()
             raise
         finally:
-            async with _READONLY_ACTOR_CACHE_LOCK:
-                if _READONLY_ACTOR_INFLIGHT.get(cache_key) is fut:
-                    _READONLY_ACTOR_INFLIGHT.pop(cache_key, None)
+            with _READONLY_ACTOR_CACHE_LOCK:
+                if inflight_entry is not None:
+                    remaining_waiters = int(inflight_entry.get("waiters", 1)) - 1
+                    if remaining_waiters > 0:
+                        inflight_entry["waiters"] = remaining_waiters
+                    elif _READONLY_ACTOR_INFLIGHT.get(cache_key) is inflight_entry:
+                        _READONLY_ACTOR_INFLIGHT.pop(cache_key, None)
 
     async def _developer_mode_enabled() -> bool:
         try:
@@ -216,6 +247,29 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             ]
         return resp
 
+    def _actor_or_404(group_id: str, actor_id: str) -> tuple[Any, Dict[str, Any]]:
+        group = load_group(str(group_id or "").strip())
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        actor = find_actor(group, str(actor_id or "").strip())
+        if not isinstance(actor, dict):
+            raise HTTPException(status_code=404, detail={"code": "actor_not_found", "message": f"actor not found: {actor_id}"})
+        return group, actor
+
+    def _decorate_actor_result(group_id: str, resp: Dict[str, Any]) -> Dict[str, Any]:
+        if not bool(resp.get("ok")):
+            return resp
+        result = resp.get("result")
+        if not isinstance(result, dict):
+            return resp
+        actor = result.get("actor")
+        if isinstance(actor, dict):
+            result["actor"] = build_actor_web_payload(group_id, actor)
+        actors = result.get("actors")
+        if isinstance(actors, list):
+            result["actors"] = [build_actor_web_payload(group_id, item) for item in actors if isinstance(item, dict)]
+        return resp
+
     async def _actor_profile_upsert_impl(
         request: Request,
         *,
@@ -247,14 +301,15 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.get("/actors")
     async def actors(group_id: str, include_unread: bool = False) -> Dict[str, Any]:
         gid = str(group_id or "").strip()
+
         async def _fetch() -> Dict[str, Any]:
             return await ctx.daemon({"op": "actor_list", "args": {"group_id": gid, "include_unread": include_unread}})
 
         if not include_unread:
-            return await _cached_readonly_actor_list(gid, _fetch)
+            return _decorate_actor_result(gid, await _cached_readonly_actor_list(gid, _fetch))
 
         ttl = max(0.0, min(5.0, ctx.exhibit_cache_ttl_s))
-        return await ctx.cached_json(f"actors:{gid}:{int(bool(include_unread))}", ttl, _fetch)
+        return _decorate_actor_result(gid, await ctx.cached_json(f"actors:{gid}:{int(bool(include_unread))}", ttl, _fetch))
 
     @group_router.post("/actors")
     async def actor_create(request: Request, group_id: str, req: ActorCreateRequest) -> Dict[str, Any]:
@@ -270,7 +325,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             profile_scope=str(req.profile_scope or ""),
             profile_owner=str(req.profile_owner or ""),
         )
-        return await ctx.daemon(
+        resp = await ctx.daemon(
             {
                 "op": "actor_add",
                 "args": {
@@ -293,6 +348,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 },
             }
         )
+        if bool(resp.get("ok")):
+            await invalidate_context_read(group_id)
+        return _decorate_actor_result(group_id, resp)
 
     @group_router.post("/actors/{actor_id}")
     async def actor_update(request: Request, group_id: str, actor_id: str, req: ActorUpdateRequest) -> Dict[str, Any]:
@@ -325,6 +383,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch["runtime"] = req.runtime
         if req.enabled is not None:
             patch["enabled"] = bool(req.enabled)
+        if req.avatar_asset_path is not None:
+            patch["avatar_asset_path"] = str(req.avatar_asset_path or "").strip()
         args: Dict[str, Any] = {
             "group_id": group_id,
             "actor_id": actor_id,
@@ -337,12 +397,117 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             args.update(_profile_ref_args(scope=req.profile_scope, owner_id=req.profile_owner))
         if req.profile_action is not None:
             args["profile_action"] = str(req.profile_action or "").strip()
-        return await ctx.daemon({"op": "actor_update", "args": args})
+        resp = await ctx.daemon({"op": "actor_update", "args": args})
+        return _decorate_actor_result(group_id, resp)
+
+    @group_router.get("/actors/{actor_id}/avatar")
+    async def actor_avatar_get(group_id: str, actor_id: str) -> FileResponse:
+        _, actor = _actor_or_404(group_id, actor_id)
+        rel_path = str(actor.get("avatar_asset_path") or "").strip()
+        if not rel_path:
+            raise HTTPException(status_code=404, detail={"code": "actor_avatar_not_found", "message": "actor avatar not found"})
+        try:
+            return FileResponse(resolve_actor_avatar_path(rel_path))
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail={"code": "actor_avatar_not_found", "message": "actor avatar not found"}) from exc
+
+    @group_router.post("/actors/{actor_id}/avatar")
+    async def actor_avatar_upload(
+        request: Request,
+        group_id: str,
+        actor_id: str,
+        by: str = Form("user"),
+        file: UploadFile = File(...),
+    ) -> Dict[str, Any]:
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Actor avatar write endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+        await invalidate_readonly_actor_list(group_id)
+        _, actor = _actor_or_404(group_id, actor_id)
+        old_rel_path = str(actor.get("avatar_asset_path") or "").strip()
+        raw_bytes = await file.read()
+        try:
+            stored = store_actor_avatar(
+                group_id=group_id,
+                data=raw_bytes,
+                content_type=str(getattr(file, "content_type", "") or ""),
+                filename=str(getattr(file, "filename", "") or ""),
+            )
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 413 if "too large" in message else 400
+            raise HTTPException(status_code=status_code, detail={"code": "invalid_request", "message": message}) from exc
+        resp = await ctx.daemon(
+            {
+                "op": "actor_update",
+                "args": {
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "patch": {"avatar_asset_path": str(stored.get("rel_path") or "")},
+                    "by": str(by or "user"),
+                    **_profile_auth_args(request),
+                },
+            }
+        )
+        if not bool(resp.get("ok")):
+            delete_actor_avatar(str(stored.get("rel_path") or ""))
+            return resp
+        new_rel_path = str(stored.get("rel_path") or "").strip()
+        if old_rel_path and old_rel_path != new_rel_path:
+            delete_actor_avatar(old_rel_path)
+        return _decorate_actor_result(group_id, resp)
+
+    @group_router.delete("/actors/{actor_id}/avatar")
+    async def actor_avatar_clear(request: Request, group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Actor avatar write endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+        await invalidate_readonly_actor_list(group_id)
+        _, actor = _actor_or_404(group_id, actor_id)
+        old_rel_path = str(actor.get("avatar_asset_path") or "").strip()
+        resp = await ctx.daemon(
+            {
+                "op": "actor_update",
+                "args": {
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "patch": {"avatar_asset_path": ""},
+                    "by": str(by or "user"),
+                    **_profile_auth_args(request),
+                },
+            }
+        )
+        if not bool(resp.get("ok")):
+            return resp
+        if old_rel_path:
+            delete_actor_avatar(old_rel_path)
+        return _decorate_actor_result(group_id, resp)
 
     @group_router.delete("/actors/{actor_id}")
     async def actor_delete(group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:
         await invalidate_readonly_actor_list(group_id)
-        return await ctx.daemon({"op": "actor_remove", "args": {"group_id": group_id, "actor_id": actor_id, "by": by}})
+        old_rel_path = ""
+        try:
+            _, actor = _actor_or_404(group_id, actor_id)
+            old_rel_path = str(actor.get("avatar_asset_path") or "").strip()
+        except HTTPException:
+            old_rel_path = ""
+        resp = await ctx.daemon({"op": "actor_remove", "args": {"group_id": group_id, "actor_id": actor_id, "by": by}})
+        if bool(resp.get("ok")):
+            if old_rel_path:
+                delete_actor_avatar(old_rel_path)
+            await invalidate_context_read(group_id)
+        return resp
 
     @group_router.post("/actors/{actor_id}/start")
     async def actor_start(request: Request, group_id: str, actor_id: str, by: str = "user") -> Dict[str, Any]:

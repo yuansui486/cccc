@@ -65,6 +65,7 @@
   "needReply": "Need Reply",
   "copyText": "Copy text",
   "copyLink": "Copy link",
+  "contentCopied": "Content copied",
   "relay": "Relay",
   "relayToGroup": "Relay to another group",
   "download": "Download {{name}}",

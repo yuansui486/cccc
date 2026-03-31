@@ -4,29 +4,35 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from ..util.conv import coerce_bool
-from .actors import get_effective_role, list_actors
+from .actors import get_effective_role, is_pet_actor, list_visible_actors
 from .group import Group
 from .prompt_files import DEFAULT_PREAMBLE_BODY, PREAMBLE_FILENAME, read_group_prompt_file
 
 
-def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
-    """Render SYSTEM prompt for an actor.
-    
-    Design principles:
-    - Minimal: Only session-specific context (identity, group, scopes)
-    - No tool docs: Agent sees MCP tools automatically
-    - Ops playbook lives in MCP: see cccc_help
+def render_role_system_prompt(
+    *,
+    group: Group,
+    actor_id: str,
+    role: str,
+    runtime_name: str = "",
+    runner: str = "pty",
+) -> str:
+    """Render the shared system prompt frame for a concrete role/identity.
+
+    This is the common prompt scaffold used by normal peer/foreman actors.
+    Other role-adjacent surfaces, like the pet peer context injector, should
+    reuse this frame instead of hand-rolling a parallel prompt format.
     """
     group_id = str(group.group_id or "").strip()
-    actor_id = str(actor.get("id") or "").strip()
-    role = get_effective_role(group, actor_id)
-    runner = str(actor.get("runner") or "pty").strip()
+    actor_id = str(actor_id or "").strip()
+    role = str(role or "").strip()
+    runner = str(runner or "pty").strip() or "pty"
 
     title = str(group.doc.get("title") or group_id)
     topic = str(group.doc.get("topic") or "").strip()
-    
+
     # Count actors
-    actors = list_actors(group)
+    actors = list_visible_actors(group)
     enabled_actor_ids: List[str] = []
     for a in actors:
         if not isinstance(a, dict) or not coerce_bool(a.get("enabled"), default=True):
@@ -90,9 +96,9 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
         f"[CCCC] You are {actor_id} ({role}) in group '{title}'",
         f"group_id: {group_id}",
     ]
-    runtime_name = str(actor.get("runtime") or "").strip()
-    if runtime_name:
-        lines.append(f"runtime: {runtime_name} ({runner})")
+    runtime_label = str(runtime_name or "").strip()
+    if runtime_label:
+        lines.append(f"runtime: {runtime_label} ({runner})")
     else:
         lines.append(f"runtime: ({runner})")
     if topic:
@@ -151,3 +157,28 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
         body.rstrip(),
     ]
     return "\n\n".join([p for p in parts if p]).rstrip() + "\n"
+
+
+def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
+    """Render SYSTEM prompt for an actor.
+
+    Design principles:
+    - Minimal: Only session-specific context (identity, group, scopes)
+    - No tool docs: Agent sees MCP tools automatically
+    - Ops playbook lives in MCP: see cccc_help
+    """
+    actor_id = str(actor.get("id") or "").strip()
+    if is_pet_actor(actor):
+        from .pet_prompt import render_pet_system_prompt
+
+        return render_pet_system_prompt(group, actor=actor)
+    role = get_effective_role(group, actor_id)
+    runner = str(actor.get("runner") or "pty").strip()
+    runtime_name = str(actor.get("runtime") or "").strip()
+    return render_role_system_prompt(
+        group=group,
+        actor_id=actor_id,
+        role=role,
+        runtime_name=runtime_name,
+        runner=runner,
+    )

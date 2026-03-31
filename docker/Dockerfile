@@ -15,12 +15,25 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ENV http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY}
 
-# Install dependencies + Node.js
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates git bash \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+ENV CCCC_BROWSER_TOOLS="xvfb fonts-noto-color-emoji fonts-unifont libfontconfig1 libfreetype6 xfonts-scalable fonts-liberation fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf fonts-freefont-ttf"
+ENV CCCC_BROWSER_DEPS_DEBIAN12="libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2"
+ENV CCCC_BROWSER_DEPS_DEBIAN13="libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2"
+
+# Install dependencies + Node.js + minimal Chromium shared libraries for projected browser/runtime auth.
+RUN set -eux; \
+    . /etc/os-release; \
+    BROWSER_DEPS="${CCCC_BROWSER_DEPS_DEBIAN12}"; \
+    if [ "${ID:-}" = "debian" ] && [ "${VERSION_ID:-}" = "13" ]; then \
+      BROWSER_DEPS="${CCCC_BROWSER_DEPS_DEBIAN13}"; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      curl ca-certificates git bash \
+      ${CCCC_BROWSER_TOOLS} \
+      ${BROWSER_DEPS}; \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; \
+    apt-get install -y --no-install-recommends nodejs; \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI and move to global path
 RUN curl -fsSL https://claude.ai/install.sh | bash \

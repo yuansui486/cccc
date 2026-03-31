@@ -65,6 +65,7 @@
   "needReply": "要返信",
   "copyText": "テキストをコピー",
   "copyLink": "リンクをコピー",
+  "contentCopied": "内容をコピーしました",
   "relay": "リレー",
   "relayToGroup": "別のグループに転送",
   "download": "{{name}} をダウンロード",

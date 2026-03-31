@@ -51,9 +51,9 @@ export function ActorTab({
       fallback={<div className={`flex-1 flex items-center justify-center ${isDark ? "text-slate-400" : "text-gray-500"}`}>{t('loadingAgent')}</div>}
     >
       <LazyAgentTab
-        key={`${groupId}:${actor.id}:${termEpoch}`}
         actor={actor}
         groupId={groupId}
+        termEpoch={termEpoch}
         agentState={agentState}
         isVisible={isVisible}
         readOnly={readOnly}

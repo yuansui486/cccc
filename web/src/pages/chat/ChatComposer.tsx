@@ -391,14 +391,14 @@ export function ChatComposer({
   return (
     <footer
       className={classNames(
-        "flex-shrink-0 border-t px-3 sm:px-4 py-2.5 sm:py-3 safe-area-bottom-compact transition-colors",
-        isDark ? "border-white/5 bg-slate-950/90 backdrop-blur-md" : "border-black/5 bg-white/95 backdrop-blur-md"
+        "flex-shrink-0 border-t px-3 sm:px-4 py-2 sm:py-3 safe-area-bottom-compact transition-colors",
+        isDark ? "border-white/5 bg-slate-950/72 backdrop-blur-md" : "border-black/5 bg-white/78 backdrop-blur-md"
       )}
     >
       {/* Reply indicator */}
       {replyTarget && (
         <div className={classNames(
-          "mb-3 flex items-center gap-2 text-xs rounded-xl px-3 py-2",
+          "mb-2 flex items-center gap-2 text-xs rounded-xl px-3 py-1.5",
           isDark ? "text-[var(--color-text-tertiary)] bg-white/[0.08] border border-white/[0.08]" : "text-gray-500 bg-black/5"
         )}>
           <ReplyIcon size={14} className="flex-shrink-0 opacity-60" />
@@ -426,7 +426,7 @@ export function ChatComposer({
       {quotedPresentationRef && (
         <div
           className={classNames(
-            "mb-3 flex items-center gap-2 text-xs rounded-xl px-3 py-2",
+            "mb-2 flex items-center gap-2 text-xs rounded-xl px-3 py-1.5",
             isDark ? "text-[var(--color-text-tertiary)] bg-cyan-500/12 border border-cyan-400/15" : "text-gray-600 bg-cyan-50",
           )}
         >
@@ -451,7 +451,7 @@ export function ChatComposer({
       )}
 
       {/* Recipient Selector Row */}
-      <div className="mb-3 sm:mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="mb-2.5 sm:mb-4 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
         <ScrollFade className="-mx-4 sm:mx-0" innerClassName="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-0" fadeWidth={20}>
           <div className={classNames("text-[10px] font-medium uppercase tracking-wide flex-shrink-0", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500")}>{t('to', 'To')}</div>
 
@@ -463,7 +463,7 @@ export function ChatComposer({
               style={{ colorScheme: isDark ? "dark" : "light" }}
               className={classNames(
                 "appearance-none pr-8 truncate min-w-[120px] max-w-[180px] sm:max-w-[240px]",
-                "h-8 transition-colors cursor-pointer", // Fixed height to match buttons
+                "h-7 sm:h-8 transition-colors cursor-pointer",
                 chipBaseClass,
                 groupSelectClass
               )}
@@ -489,13 +489,13 @@ export function ChatComposer({
             recipientActorsBusy ? "opacity-50 pointer-events-none" : ""
           )}>
             {/* Special tokens */}
-            {["@all", "@foreman", "@peers", "@user"].map((tok) => {
+            {["@all", "@foreman", "@peers"].map((tok) => {
               const active = toTokens.includes(tok);
               return (
                 <button
                   key={tok}
                   className={classNames(
-                    "h-7 sm:h-8", // Fixed height, smaller on mobile
+                    "h-[26px] sm:h-8",
                     chipBaseClass,
                     active
                       ? "bg-blue-600 text-white border-blue-500 shadow-sm shadow-blue-500/20"
@@ -520,7 +520,7 @@ export function ChatComposer({
                 <button
                   key={id}
                   className={classNames(
-                    "h-7 sm:h-8", // Fixed height, smaller on mobile
+                    "h-[26px] sm:h-8",
                     chipBaseClass,
                     active
                       ? "bg-blue-600 text-white border-blue-500 shadow-sm shadow-blue-500/20"
@@ -587,7 +587,7 @@ export function ChatComposer({
       {modeNotice ? (
         <div
           className={classNames(
-            "mb-2.5 rounded-lg border px-3 py-2 text-[11px] leading-5",
+            "mb-2 rounded-lg border px-3 py-1.5 text-[11px] leading-5",
             messageMode === "task"
               ? isDark
                 ? "border-violet-500/30 bg-violet-500/10 text-violet-200"
@@ -636,7 +636,7 @@ export function ChatComposer({
           <textarea
             ref={composerRef as RefObject<HTMLTextAreaElement>}
             className={classNames(
-                "w-full rounded-xl sm:rounded-2xl border px-4 sm:px-5 pr-11 sm:pr-14 py-3 sm:py-3.5 text-base sm:text-sm resize-none min-h-[44px] sm:min-h-[48px] max-h-[160px] overflow-y-auto scrollbar-hide transition-all duration-300 ease-out",
+                "w-full rounded-xl sm:rounded-2xl border px-3.5 sm:px-5 pr-10 sm:pr-14 py-2.5 sm:py-3.5 text-[15px] sm:text-sm resize-none min-h-[40px] sm:min-h-[48px] max-h-[128px] overflow-y-auto scrollbar-hide transition-all duration-300 ease-out",
                 "focus:outline-none focus:ring-2 focus:ring-offset-0 flex items-center shadow-sm",
                 isDark
                 ? "bg-white/[0.08] border-white/[0.1] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:ring-blue-500/35 focus:border-blue-400/45"
@@ -658,6 +658,7 @@ export function ChatComposer({
               type="button"
               className={classNames(
                 composerInlineToolButtonClass,
+                "h-8 w-8 sm:h-10 sm:w-10",
                 busy === "send" || !selectedGroupId
                   ? "text-[var(--color-text-tertiary)]"
                   : messageMode === "task"
@@ -794,7 +795,7 @@ export function ChatComposer({
         {/* Send button - Using icon for modern feel */}
         <button
           className={classNames(
-            "w-11 h-11 sm:min-w-[6.25rem] sm:px-3 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all duration-300 ease-out flex-shrink-0",
+            "h-10 w-10 sm:min-w-[6.25rem] sm:h-11 sm:px-3 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all duration-300 ease-out flex-shrink-0",
             "border",
             busy === "send" || !canSend
               ? isDark ? "border-white/[0.12] bg-white/[0.08] text-[var(--color-text-tertiary)] shadow-none disabled:opacity-100" : "border-gray-200 bg-gray-100 text-gray-400 shadow-none disabled:opacity-100"

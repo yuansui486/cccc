@@ -33,7 +33,7 @@ logger = logging.getLogger("cccc.delivery")
 from ...contracts.v1 import SystemNotifyData
 from ...kernel.actors import find_actor, list_actors
 from ...kernel.group import Group, get_group_state, set_group_state
-from ...kernel.inbox import is_message_for_actor, set_cursor
+from ...kernel.inbox import get_cursor, is_message_for_actor, set_cursor
 from ...kernel.ledger import append_event
 from ...kernel.system_prompt import render_system_prompt
 from ...paths import ensure_home
@@ -42,6 +42,10 @@ from ...runners import headless as headless_runner
 from ...util.fs import atomic_write_text, read_json
 from ...util.time import parse_utc_iso, utc_now_iso
 from ...util.conv import coerce_bool
+
+
+_ASYNC_FLUSH_LOCK = threading.Lock()
+_ASYNC_FLUSH_IN_FLIGHT: set[tuple[str, str]] = set()
 
 
 # ============================================================================
@@ -54,6 +58,8 @@ PTY_SUBMIT_DELAY_SECONDS = 1.5  # Empirically reliable for CLI readline timing (
 PREAMBLE_TO_MESSAGE_DELAY_SECONDS = 2.0  # Wait for preamble submit + a small buffer
 PTY_STARTUP_MAX_WAIT_SECONDS = 10.0  # Max wait for a fresh runtime to become ready before first PTY injection
 PTY_STARTUP_READY_GRACE_SECONDS = 1.0  # Extra safety delay after readiness is detected (user request)
+ASYNC_FLUSH_POLL_SECONDS = 0.25  # Short poll used when a one-shot kick loses the immediate flush window
+ASYNC_FLUSH_MAX_WAIT_SECONDS = 12.0  # Avoid keeping a kick thread alive indefinitely when delivery is impossible
 ### NOTE
 # Delivery is intentionally daemon-driven (single-writer). If a service needs to notify actors, it
 # should call the daemon IPC and retry on transient failures rather than writing directly to ledgers.
@@ -102,11 +108,12 @@ def should_deliver_message(group: Group, kind: str) -> bool:
         - active: All messages delivered
         - idle: chat.message + system.notify delivered (no auto state transition here)
         - paused: All messages blocked (inbox only)
+        - stopped: All messages blocked (no actor runtime delivery)
     """
     state = get_group_state(group)
     
-    if state == "paused":
-        # Paused: block all PTY delivery
+    if state in ("paused", "stopped"):
+        # Paused/stopped: block all PTY delivery
         return False
     
     if state == "idle":
@@ -247,6 +254,7 @@ class ActorDeliveryState:
     last_attempt_at: Optional[datetime] = None
     pending_messages: List[PendingMessage] = field(default_factory=list)
     delivered_chat_count: int = 0  # Count of delivered chat.message (per actor, in-memory)
+    delivery_inflight: bool = False  # True while a background/synchronous delivery chain owns this actor
 
 
 class DeliveryThrottle:
@@ -363,6 +371,28 @@ class DeliveryThrottle:
             # A successful delivery should not trigger retry backoff gating.
             state.last_attempt_at = None
 
+    def next_retry_delay(self, group_id: str, actor_id: str, min_interval_seconds: int) -> float:
+        """Return the remaining wait before the next delivery attempt is eligible."""
+        with self._lock:
+            state = self._get_state(group_id, actor_id)
+            if not state.pending_messages:
+                return 0.0
+            now = datetime.now(timezone.utc)
+            wait_seconds = 0.0
+            if state.last_delivery_at is None:
+                if state.last_attempt_at is None:
+                    return 0.0
+                elapsed_attempt = (now - state.last_attempt_at).total_seconds()
+                return max(0.0, float(DEFAULT_DELIVERY_RETRY_INTERVAL_SECONDS) - elapsed_attempt)
+
+            elapsed_delivery = (now - state.last_delivery_at).total_seconds()
+            if elapsed_delivery < float(min_interval_seconds):
+                wait_seconds = max(wait_seconds, float(min_interval_seconds) - elapsed_delivery)
+            if state.last_attempt_at is not None:
+                elapsed_attempt = (now - state.last_attempt_at).total_seconds()
+                wait_seconds = max(wait_seconds, float(DEFAULT_DELIVERY_RETRY_INTERVAL_SECONDS) - elapsed_attempt)
+            return max(0.0, wait_seconds)
+
     def get_delivered_chat_count(self, group_id: str, actor_id: str) -> int:
         """Get delivered chat.message count for an actor (in-memory)."""
         with self._lock:
@@ -408,6 +438,21 @@ class DeliveryThrottle:
             state.last_attempt_at = None
             state.delivered_chat_count = 0
             state.pending_messages = pending
+
+    def try_begin_delivery(self, group_id: str, actor_id: str) -> bool:
+        """Claim exclusive ownership of the delivery chain for an actor."""
+        with self._lock:
+            state = self._get_state(group_id, actor_id)
+            if state.delivery_inflight:
+                return False
+            state.delivery_inflight = True
+            return True
+
+    def end_delivery(self, group_id: str, actor_id: str) -> None:
+        """Release exclusive delivery ownership for an actor."""
+        with self._lock:
+            state = self._get_state(group_id, actor_id)
+            state.delivery_inflight = False
 
     def clear_pending_system_notifies(self, group_id: str, *, notify_kinds: Optional[set[str]] = None) -> int:
         """Remove pending system.notify messages for a group.
@@ -468,6 +513,7 @@ class DeliveryThrottle:
                     "last_delivery_at": last_delivery,
                     "last_attempt_at": last_attempt,
                     "delivered_chat_count": int(st.delivered_chat_count or 0),
+                    "delivery_inflight": bool(st.delivery_inflight),
                 }
             return out
 
@@ -833,6 +879,131 @@ def emit_system_notify(
     return event
 
 
+def _finalize_delivery_success(
+    group: Group,
+    *,
+    actor_id: str,
+    chat_total: int,
+    deliverable: List[PendingMessage],
+    requeue: List[PendingMessage],
+) -> None:
+    """Record a successful delivery attempt and preserve blocked messages."""
+    gid = str(group.group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    if chat_total > 0:
+        THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
+    THROTTLE.mark_delivered(gid, aid)
+    if _get_auto_mark_on_delivery(group) and deliverable:
+        last_msg = deliverable[-1]
+        try:
+            prev_event_id, prev_ts = get_cursor(group, aid)
+            cursor = set_cursor(group, aid, event_id=last_msg.event_id, ts=last_msg.ts)
+            if (
+                str(cursor.get("event_id") or "") == str(last_msg.event_id or "")
+                and str(cursor.get("ts") or "") == str(last_msg.ts or "")
+                and (str(prev_event_id or "") != str(last_msg.event_id or "") or str(prev_ts or "") != str(last_msg.ts or ""))
+            ):
+                append_event(
+                    group.ledger_path,
+                    kind="chat.read",
+                    group_id=group.group_id,
+                    scope_key="",
+                    by=aid,
+                    data={"actor_id": aid, "event_id": last_msg.event_id},
+                )
+            logger.debug(f"[flush] {gid}/{aid} auto-marked {len(deliverable)} messages as read")
+        except Exception as e:
+            logger.warning(f"[flush] {gid}/{aid} auto-mark failed: {e}")
+    if requeue:
+        THROTTLE.requeue_front(gid, aid, requeue)
+
+
+def _finish_delivery_chain(group: Group, *, actor_id: str) -> None:
+    """Release delivery ownership and opportunistically continue queued work."""
+    gid = str(group.group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    THROTTLE.end_delivery(gid, aid)
+    if not THROTTLE.has_pending(gid, aid):
+        return
+    try:
+        flush_pending_messages(group, actor_id=aid)
+    except Exception:
+        pass
+
+
+def _start_async_first_delivery(
+    group: Group,
+    *,
+    actor_id: str,
+    messages: List[PendingMessage],
+    deliverable: List[PendingMessage],
+    requeue: List[PendingMessage],
+    message_text: str,
+    chat_total: int,
+    actor: Dict[str, Any],
+) -> None:
+    """Run the first PTY delivery chain in the background.
+
+    Boundary 1: request success is durable append + enqueue only. The worker must
+    not leak preamble/submit/message timing back into the synchronous send path.
+    Boundary 2: the actor-level in-flight gate serializes delivery ownership so
+    follow-up flushes cannot overtake or interleave with this first-delivery chain.
+    """
+    gid = str(group.group_id or "").strip()
+    aid = str(actor_id or "").strip()
+
+    def worker() -> None:
+        try:
+            prompt = render_system_prompt(group=group, actor=actor)
+            if prompt and prompt.strip():
+                preamble_ok = pty_submit_text(group, actor_id=aid, text=prompt.strip(), wait_for_submit=True)
+                if not preamble_ok:
+                    THROTTLE.requeue_front(gid, aid, messages)
+                    return
+                mark_preamble_sent(group, aid)
+                logger.debug(f"[flush] {gid}/{aid} preamble sent in background, will send message after delay")
+
+            if not message_text:
+                _finalize_delivery_success(
+                    group,
+                    actor_id=aid,
+                    chat_total=chat_total,
+                    deliverable=deliverable,
+                    requeue=requeue,
+                )
+                return
+
+            time.sleep(PREAMBLE_TO_MESSAGE_DELAY_SECONDS)
+            if not pty_runner.SUPERVISOR.actor_running(gid, aid):
+                logger.warning(f"[flush] {gid}/{aid} actor no longer running, re-queueing delayed message(s)")
+                THROTTLE.requeue_front(gid, aid, messages)
+                return
+
+            logger.debug(f"[flush] {gid}/{aid} sending delayed first message now")
+            ok = bool(pty_submit_text(group, actor_id=aid, text=message_text))
+            if ok:
+                _finalize_delivery_success(
+                    group,
+                    actor_id=aid,
+                    chat_total=chat_total,
+                    deliverable=deliverable,
+                    requeue=requeue,
+                )
+            else:
+                THROTTLE.requeue_front(gid, aid, messages)
+        except Exception:
+            # First-delivery worker must be lossless: once flush() has taken pending
+            # messages, any exception in preamble/submit/mark/message steps must
+            # push the full batch back before releasing the actor-level inflight gate.
+            THROTTLE.requeue_front(gid, aid, messages)
+            logger.exception("[flush] first delivery worker failed gid=%s aid=%s", gid, aid)
+        finally:
+            _finish_delivery_chain(group, actor_id=aid)
+
+    thread = threading.Thread(target=worker, name=f"cccc-delivery-{gid}-{aid}", daemon=True)
+    thread.start()
+
+
 def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
     """Flush pending messages for an actor if ready.
 
@@ -851,151 +1022,157 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
 
     if not THROTTLE.should_deliver(gid, aid, min_interval):
         return False
+    if not THROTTLE.try_begin_delivery(gid, aid):
+        return False
 
-    # Startup gate: when a PTY actor was just started/restarted, its CLI may still be initializing and
-    # can drop early stdin/TTY input. Hold the first delivery until we see some output (then wait an
-    # extra grace period) or until the max startup wait elapses.
-    #
-    # Additionally, for the very first delivery (system prompt preamble), prefer waiting until the
-    # app enables bracketed paste mode. The preamble is multi-line; sending it before bracketed paste
-    # is enabled can lead to partial/ignored input in some TUIs.
+    background_started = False
     try:
-        started_at, first_output_at = pty_runner.SUPERVISOR.startup_times(group_id=gid, actor_id=aid)
-        if started_at is not None:
-            now = time.monotonic()
-            if first_output_at is not None:
-                if (now - float(first_output_at)) < PTY_STARTUP_READY_GRACE_SECONDS:
-                    return False
-            else:
-                if (now - float(started_at)) < PTY_STARTUP_MAX_WAIT_SECONDS:
-                    return False
-            # Wait for bracketed paste mode for the preamble (best-effort; fall back after max wait).
-            if not is_preamble_sent(group, aid):
-                enabled, changed_at = pty_runner.SUPERVISOR.bracketed_paste_status(group_id=gid, actor_id=aid)
-                if not enabled and (now - float(started_at)) < PTY_STARTUP_MAX_WAIT_SECONDS:
-                    return False
-                if enabled and changed_at is not None and (now - float(changed_at)) < PTY_STARTUP_READY_GRACE_SECONDS:
-                    return False
-    except Exception:
-        pass
+        # Boundary: the synchronous send path only guarantees durable append + enqueue.
+        # Any PTY worker timing after that point must stay inside the delivery layer.
 
-    messages = THROTTLE.take_pending(gid, aid)
-    if not messages:
-        return False
-
-    # Filter messages based on group state
-    deliverable: List[PendingMessage] = []
-    requeue: List[PendingMessage] = []
-
-    for msg in messages:
-        if should_deliver_message(group, msg.kind):
-            deliverable.append(msg)
-        else:
-            # Message blocked by state - requeue for later
-            requeue.append(msg)
-
-    if not deliverable:
-        # Nothing is deliverable in the current group state; keep everything queued.
-        THROTTLE.requeue_front(gid, aid, messages)
-        return False
-    
-    actor = find_actor(group, aid)
-    if not isinstance(actor, dict):
-        THROTTLE.requeue_front(gid, aid, messages)
-        return False
-
-    chat_total = sum(1 for m in deliverable if m.kind == "chat.message")
-    reminder_after_index: Optional[int] = None
-    if chat_total > 0:
-        delivered_before = THROTTLE.get_delivered_chat_count(gid, aid)
-        delivered_after = delivered_before + chat_total
-        # Remind every N delivered chat messages per actor (count is in-memory).
-        if (delivered_after // REMINDER_EVERY_N_MESSAGES) > (delivered_before // REMINDER_EVERY_N_MESSAGES):
-            reminder_after_index = len(deliverable)
-    
-    # Check if preamble needs to be sent - send SEPARATELY before message
-    # This is critical: sending preamble+message together as a large payload
-    # causes Claude Code to miss the first message (readline buffer issue).
-    preamble_already_sent = is_preamble_sent(group, aid)
-    preamble_just_sent = False
-    if not preamble_already_sent:
+        # Startup gate: when a PTY actor was just started/restarted, its CLI may still be initializing and
+        # can drop early stdin/TTY input. Hold the first delivery until we see some output (then wait an
+        # extra grace period) or until the max startup wait elapses.
+        #
+        # Additionally, for the very first delivery (system prompt preamble), prefer waiting until the
+        # app enables bracketed paste mode. The preamble is multi-line; sending it before bracketed paste
+        # is enabled can lead to partial/ignored input in some TUIs.
         try:
-            prompt = render_system_prompt(group=group, actor=actor)
-            if prompt and prompt.strip():
-                preamble_ok = pty_submit_text(group, actor_id=aid, text=prompt.strip(), wait_for_submit=True)
-                if preamble_ok:
-                    mark_preamble_sent(group, aid)
-                    preamble_just_sent = True
-                    logger.debug(f"[flush] {gid}/{aid} preamble sent, will send message after delay")
+            started_at, first_output_at = pty_runner.SUPERVISOR.startup_times(group_id=gid, actor_id=aid)
+            if started_at is not None:
+                now = time.monotonic()
+                if first_output_at is not None:
+                    if (now - float(first_output_at)) < PTY_STARTUP_READY_GRACE_SECONDS:
+                        return False
                 else:
-                    # Preamble failed, requeue everything
-                    THROTTLE.requeue_front(gid, aid, messages)
-                    return False
+                    if (now - float(started_at)) < PTY_STARTUP_MAX_WAIT_SECONDS:
+                        return False
+                # Wait for bracketed paste mode for the preamble (best-effort; fall back after max wait).
+                if not is_preamble_sent(group, aid):
+                    enabled, changed_at = pty_runner.SUPERVISOR.bracketed_paste_status(group_id=gid, actor_id=aid)
+                    if not enabled and (now - float(started_at)) < PTY_STARTUP_MAX_WAIT_SECONDS:
+                        return False
+                    if enabled and changed_at is not None and (now - float(changed_at)) < PTY_STARTUP_READY_GRACE_SECONDS:
+                        return False
         except Exception:
+            pass
+
+        messages = THROTTLE.take_pending(gid, aid)
+        if not messages:
+            return False
+
+        # Filter messages based on group state
+        deliverable: List[PendingMessage] = []
+        requeue: List[PendingMessage] = []
+
+        for msg in messages:
+            if should_deliver_message(group, msg.kind):
+                deliverable.append(msg)
+            else:
+                # Message blocked by state - requeue for later
+                requeue.append(msg)
+
+        if not deliverable:
+            # Nothing is deliverable in the current group state; keep everything queued.
             THROTTLE.requeue_front(gid, aid, messages)
             return False
 
-    # Render batched messages
-    message_text = render_batched_messages(deliverable, reminder_after_index=reminder_after_index)
-
-    # If preamble was just sent, schedule message delivery after delay (non-blocking)
-    # pty_submit_text has 1.5s delayed submit, we need to wait for that + processing time
-    if preamble_just_sent and message_text:
-        logger.debug(f"[flush] {gid}/{aid} preamble sent, scheduling delayed message delivery")
-
-        def delayed_message_send():
-            time.sleep(PREAMBLE_TO_MESSAGE_DELAY_SECONDS)  # Wait for preamble submit + CLI processing buffer
-            if not pty_runner.SUPERVISOR.actor_running(gid, aid):
-                # Actor stopped before we could deliver; keep messages queued for next restart.
-                logger.warning(f"[flush] {gid}/{aid} actor no longer running, re-queueing delayed message(s)")
-                THROTTLE.requeue_front(gid, aid, messages)
-                return
-            logger.debug(f"[flush] {gid}/{aid} sending delayed message now")
-            ok = bool(pty_submit_text(group, actor_id=aid, text=message_text))
-            if ok:
-                THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
-                THROTTLE.mark_delivered(gid, aid)
-                # Auto-mark as read if enabled
-                if _get_auto_mark_on_delivery(group) and deliverable:
-                    last_msg = deliverable[-1]
-                    try:
-                        set_cursor(group, aid, event_id=last_msg.event_id, ts=last_msg.ts)
-                        logger.debug(f"[flush] {gid}/{aid} auto-marked {len(deliverable)} messages as read")
-                    except Exception as e:
-                        logger.warning(f"[flush] {gid}/{aid} auto-mark failed: {e}")
-                if requeue:
-                    THROTTLE.requeue_front(gid, aid, requeue)
-            else:
-                # Failed, requeue for retry
-                THROTTLE.requeue_front(gid, aid, messages)
-
-        send_thread = threading.Thread(target=delayed_message_send, daemon=True)
-        send_thread.start()
-        return True  # Preamble delivered, message scheduled
-
-    # Send message (no preamble delay needed)
-    delivered = False
-    if message_text:
-        delivered = bool(pty_submit_text(group, actor_id=aid, text=message_text))
-        if delivered:
-            THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
-            THROTTLE.mark_delivered(gid, aid)
-            # Auto-mark as read if enabled
-            if _get_auto_mark_on_delivery(group) and deliverable:
-                last_msg = deliverable[-1]
-                try:
-                    set_cursor(group, aid, event_id=last_msg.event_id, ts=last_msg.ts)
-                    logger.debug(f"[flush] {gid}/{aid} auto-marked {len(deliverable)} messages as read")
-                except Exception as e:
-                    logger.warning(f"[flush] {gid}/{aid} auto-mark failed: {e}")
-            # Keep blocked messages queued for later.
-            if requeue:
-                THROTTLE.requeue_front(gid, aid, requeue)
-        else:
-            # Delivery failed: keep everything queued for retry.
+        actor = find_actor(group, aid)
+        if not isinstance(actor, dict):
             THROTTLE.requeue_front(gid, aid, messages)
-    
-    return delivered
+            return False
+
+        chat_total = sum(1 for m in deliverable if m.kind == "chat.message")
+        reminder_after_index: Optional[int] = None
+        if chat_total > 0:
+            delivered_before = THROTTLE.get_delivered_chat_count(gid, aid)
+            delivered_after = delivered_before + chat_total
+            # Remind every N delivered chat messages per actor (count is in-memory).
+            if (delivered_after // REMINDER_EVERY_N_MESSAGES) > (delivered_before // REMINDER_EVERY_N_MESSAGES):
+                reminder_after_index = len(deliverable)
+
+        message_text = render_batched_messages(deliverable, reminder_after_index=reminder_after_index)
+
+        # First PTY delivery is fully backgrounded so HTTP only observes durable append + enqueue.
+        # The in-flight gate above preserves ordering while that background chain owns the actor.
+        if not is_preamble_sent(group, aid):
+            background_started = True
+            _start_async_first_delivery(
+                group,
+                actor_id=aid,
+                messages=messages,
+                deliverable=deliverable,
+                requeue=requeue,
+                message_text=message_text,
+                chat_total=chat_total,
+                actor=actor,
+            )
+            return True
+
+        # Send message (no preamble delay needed)
+        delivered = False
+        if message_text:
+            delivered = bool(pty_submit_text(group, actor_id=aid, text=message_text))
+            if delivered:
+                _finalize_delivery_success(
+                    group,
+                    actor_id=aid,
+                    chat_total=chat_total,
+                    deliverable=deliverable,
+                    requeue=requeue,
+                )
+            else:
+                # Delivery failed: keep everything queued for retry.
+                THROTTLE.requeue_front(gid, aid, messages)
+
+        return delivered
+    finally:
+        if not background_started:
+            THROTTLE.end_delivery(gid, aid)
+
+
+def request_flush_pending_messages(group: Group, *, actor_id: str) -> bool:
+    """Kick a background flush attempt without blocking the caller."""
+    gid = str(group.group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    if not gid or not aid:
+        return False
+    key = (gid, aid)
+    with _ASYNC_FLUSH_LOCK:
+        if key in _ASYNC_FLUSH_IN_FLIGHT:
+            return False
+        _ASYNC_FLUSH_IN_FLIGHT.add(key)
+
+    def _run() -> None:
+        try:
+            deadline = time.monotonic() + ASYNC_FLUSH_MAX_WAIT_SECONDS
+            while True:
+                delivered = flush_pending_messages(group, actor_id=aid)
+                if delivered:
+                    return
+                if not THROTTLE.has_pending(gid, aid):
+                    return
+                if not pty_runner.SUPERVISOR.actor_running(gid, aid):
+                    return
+                try:
+                    if str(get_group_state(group) or "").strip() == "paused":
+                        return
+                except Exception:
+                    pass
+                min_interval = int(_get_delivery_config(group).get("min_interval_seconds", 0) or 0)
+                delay = THROTTLE.next_retry_delay(gid, aid, min_interval)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                time.sleep(min(max(delay, ASYNC_FLUSH_POLL_SECONDS), remaining))
+        except Exception:
+            logger.exception("[flush] async flush failed gid=%s aid=%s", gid, aid)
+        finally:
+            with _ASYNC_FLUSH_LOCK:
+                _ASYNC_FLUSH_IN_FLIGHT.discard(key)
+
+    threading.Thread(target=_run, name=f"cccc-delivery-flush-{gid}-{aid}", daemon=True).start()
+    return True
 
 
 def tick_delivery(group: Group) -> None:

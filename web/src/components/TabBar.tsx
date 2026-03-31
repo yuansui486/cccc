@@ -2,8 +2,12 @@ import { useRef, useEffect, useState, useCallback, type CSSProperties } from "re
 import { useTranslation } from "react-i18next";
 import { Actor } from "../types";
 import { classNames } from "../utils/classNames";
+import { useTerminalSignalsStore, getTerminalSignalKey } from "../stores";
+import { getActorDisplayWorkingState } from "../utils/terminalWorkingState";
+import { getRuntimeIndicatorState } from "../utils/statusIndicators";
 
 interface TabBarProps {
+  groupId: string;
   actors: Actor[];
   activeTab: string; // "chat" or actor id
   onTabChange: (tab: string) => void;
@@ -13,7 +17,27 @@ interface TabBarProps {
   canAddAgent?: boolean;
 }
 
-export function TabBar({ actors, activeTab, onTabChange, unreadChatCount, isDark: _isDark, onAddAgent, canAddAgent = true }: TabBarProps) {
+type ActorTabIndicator = {
+  dotClass: string;
+  labelClass: string;
+  pulse: boolean;
+  strongPulse: boolean;
+};
+
+export function getActorTabIndicatorState(input: {
+  isRunning: boolean;
+  workingState: string;
+}): ActorTabIndicator {
+  const indicator = getRuntimeIndicatorState(input);
+  return {
+    dotClass: indicator.dotClass,
+    labelClass: indicator.labelClass,
+    pulse: indicator.pulse,
+    strongPulse: indicator.strongPulse,
+  };
+}
+
+export function TabBar({ groupId, actors, activeTab, onTabChange, unreadChatCount, isDark: _isDark, onAddAgent, canAddAgent = true }: TabBarProps) {
   const { t } = useTranslation("layout");
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -23,6 +47,7 @@ export function TabBar({ actors, activeTab, onTabChange, unreadChatCount, isDark
   const [isOverflowing, setIsOverflowing] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const terminalSignals = useTerminalSignalsStore((state) => state.signals);
 
   // Check if content overflows
   const checkOverflow = useCallback(() => {
@@ -114,6 +139,13 @@ export function TabBar({ actors, activeTab, onTabChange, unreadChatCount, isDark
     </button>
   );
 
+  const getActorIndicator = (actor: Actor) => {
+    const terminalSignal = terminalSignals[getTerminalSignalKey(groupId, actor.id)];
+    const workingState = getActorDisplayWorkingState(actor, terminalSignal);
+    const isRunning = actor.running ?? actor.enabled ?? false;
+    return getActorTabIndicatorState({ isRunning: Boolean(isRunning), workingState });
+  };
+
   return (
     <div
       ref={rootRef}
@@ -167,7 +199,7 @@ export function TabBar({ actors, activeTab, onTabChange, unreadChatCount, isDark
           {/* Agent Tabs */}
           {actors.map((actor) => {
             const isActive = activeTab === actor.id;
-            const isRunning = actor.running ?? actor.enabled ?? false;
+            const indicator = getActorIndicator(actor);
 
             return (
               <button
@@ -182,22 +214,30 @@ export function TabBar({ actors, activeTab, onTabChange, unreadChatCount, isDark
                 )}
                 role="tab"
                 aria-selected={isActive}
-              >
+                >
                 {/* Run Indicator */}
                 <span
                   className={classNames(
-                    "relative inline-flex w-2.5 h-2.5 rounded-full flex-shrink-0 transition-all ring-2",
-                    isRunning
-                      ? "bg-emerald-500 ring-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.28)]"
-                      : "bg-slate-400/70 ring-slate-400/15 opacity-70"
+                    "relative inline-flex w-2.5 h-2.5 rounded-full flex-shrink-0 transition-all",
+                    indicator.dotClass
                   )}
                 >
-                  {isRunning && (
-                    <span className="absolute inset-0 rounded-full animate-ping bg-emerald-400/35 motion-reduce:animate-none" />
+                  {indicator.pulse && (
+                    <span
+                      className={classNames(
+                        "absolute inset-[-3px] rounded-full motion-reduce:animate-none",
+                        indicator.strongPulse
+                          ? "animate-ping bg-emerald-300/35"
+                          : "animate-pulse bg-current/20"
+                      )}
+                    />
+                  )}
+                  {indicator.strongPulse && (
+                    <span className="absolute inset-[-7px] rounded-full border border-emerald-300/35 animate-ping motion-reduce:animate-none [animation-duration:1.6s]" />
                   )}
                 </span>
 
-                <span>{actor.title || actor.id}</span>
+                <span className={indicator.labelClass}>{actor.title || actor.id}</span>
 
                 {actor.role === "foreman" && (
                   <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 dark:text-amber-400">

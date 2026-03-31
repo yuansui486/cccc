@@ -53,7 +53,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
 
             def fake_call_daemon(req: dict):
                 nonlocal actor_list_calls
-                if str(req.get("op") or "") == "actor_list":
+                op = str(req.get("op") or "")
+                if op == "actor_list":
                     with call_lock:
                         actor_list_calls += 1
                     time.sleep(0.12)
@@ -80,6 +81,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
 
                     follow_up = client.get(path)
                     self.assertEqual(follow_up.status_code, 200)
+                    self.assertEqual(actor_list_calls, 1)
+
+                    second_follow_up = client.get(path)
+                    self.assertEqual(second_follow_up.status_code, 200)
                     self.assertEqual(actor_list_calls, 2)
         finally:
             cleanup()
@@ -204,5 +209,45 @@ class TestWebActorRoutesCache(unittest.TestCase):
                         self.assertFalse(bool(stale_resp.json()["result"]["actors"][0]["running"]))
 
                     self.assertEqual(actor_list_calls, 2)
+        finally:
+            cleanup()
+
+    def test_actor_list_route_uses_daemon_effective_working_state_projection(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            os.environ.pop("CCCC_WEB_MODE", None)
+            group_id = self._create_group()
+
+            def fake_call_daemon(req: dict):
+                if str(req.get("op") or "") != "actor_list":
+                    return {"ok": True, "result": {}}
+                return {
+                    "ok": True,
+                    "result": {
+                        "actors": [
+                            {
+                                "id": "peer-1",
+                                "title": "Peer 1",
+                                "runtime": "codex",
+                                "runner": "pty",
+                                "runner_effective": "pty",
+                                "running": True,
+                                "idle_seconds": 301.0,
+                                "effective_working_state": "stuck",
+                                "effective_working_reason": "pty_idle_timeout_with_active_task",
+                                "effective_active_task_id": "T123",
+                            }
+                        ]
+                    },
+                }
+
+            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+                with self._client() as client:
+                    resp = client.get(f"/api/v1/groups/{group_id}/actors")
+                    self.assertEqual(resp.status_code, 200)
+                    actor = resp.json()["result"]["actors"][0]
+                    self.assertEqual(actor["effective_working_state"], "stuck")
+                    self.assertEqual(actor["effective_working_reason"], "pty_idle_timeout_with_active_task")
+                    self.assertEqual(actor["effective_active_task_id"], "T123")
         finally:
             cleanup()

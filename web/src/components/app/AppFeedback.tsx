@@ -41,16 +41,16 @@ export function AppFeedback({
       {errorMsg ? (
         <div
           className={classNames(
-            "pointer-events-auto flex w-full max-w-xl items-start gap-3 rounded-2xl px-4 py-3 text-sm shadow-2xl glass-modal animate-slide-up",
+            "pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-2xl px-4 py-3 text-sm shadow-2xl glass-modal animate-slide-up",
             isDark ? "border-rose-500/20 text-rose-300" : "border-rose-200/50 text-rose-700"
           )}
           role="alert"
         >
-          <span className="min-w-0 flex-1 break-words">{errorMsg}</span>
+          <span className="min-w-0 flex-1 break-words leading-6">{errorMsg}</span>
           <button
             type="button"
             className={classNames(
-              "glass-btn flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg p-2 transition-all",
+              "glass-btn flex h-10 w-10 shrink-0 items-center justify-center rounded-lg p-2 transition-all",
               isDark ? "text-rose-400" : "text-rose-600"
             )}
             onClick={dismissError}
@@ -64,7 +64,7 @@ export function AppFeedback({
       {notice ? (
         <div
           className={classNames(
-            "pointer-events-auto flex w-full max-w-xl items-start gap-3 rounded-2xl px-4 py-3 text-sm shadow-2xl glass-modal animate-slide-up",
+            "pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-2xl px-4 py-3 text-sm shadow-2xl glass-modal animate-slide-up",
             isDark ? "border-white/10 text-slate-200" : "border-black/10 text-gray-800"
           )}
           role="status"

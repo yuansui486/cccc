@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -35,10 +37,12 @@ from ...kernel.context import (
     Task,
     TaskStatus,
     WaitingOn,
+    normalize_task_type,
     _utc_now_iso,
 )
 from ...kernel.actors import get_effective_role, list_actors
 from ...kernel.group import load_group
+from ...kernel.query_projections import get_actor_list_projection
 from ...kernel.ledger import append_event
 from ...kernel.prompt_files import (
     HELP_FILENAME,
@@ -47,10 +51,15 @@ from ...kernel.prompt_files import (
     read_group_prompt_file,
     write_group_prompt_file,
 )
+from ...kernel.working_state import DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES, derive_effective_working_state
 from ...util.conv import coerce_bool
 from ...util.fs import atomic_write_json, read_json
 from ..space.group_space_projection import sync_group_space_projection
 from ..space.group_space_store import enqueue_space_job, get_space_binding, get_space_provider_state
+from ..pet.profile_refresh import mark_pet_profile_refresh_applied
+from ..pet.review_scheduler import request_pet_review
+from ...runners import headless as headless_runner
+from ...runners import pty as pty_runner
 
 _CURATED_SPACE_SYNC_PREFIXES = (
     "coordination.",
@@ -60,6 +69,8 @@ _CURATED_SPACE_SYNC_PREFIXES = (
 logger = logging.getLogger(__name__)
 _CONTEXT_DETAIL_FULL = "full"
 _CONTEXT_DETAIL_SUMMARY = "summary"
+_SUMMARY_REBUILD_LOCK = threading.Lock()
+_SUMMARY_REBUILD_IN_FLIGHT: Set[str] = set()
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -94,6 +105,13 @@ def _parse_checklist_status(value: Any) -> ChecklistStatus:
         return ChecklistStatus(s)
     except ValueError as exc:
         raise ValueError(f"Invalid checklist status: {value}") from exc
+
+
+def _parse_task_type(value: Any) -> str:
+    normalized = normalize_task_type(value)
+    if normalized is None:
+        raise ValueError(f"Invalid task_type value: {value}")
+    return normalized
 
 
 def _normalize_text(value: Any, *, max_len: int = 4000) -> str:
@@ -146,7 +164,7 @@ def _get_storage(group_id: str) -> Optional[ContextStorage]:
 
 def _task_to_dict(task: Task) -> Dict[str, Any]:
     current_item = task.current_checklist_item
-    return {
+    result = {
         "id": task.id,
         "title": task.title,
         "outcome": task.outcome,
@@ -158,6 +176,7 @@ def _task_to_dict(task: Task) -> Dict[str, Any]:
         "blocked_by": list(task.blocked_by or []),
         "waiting_on": task.waiting_on.value if isinstance(task.waiting_on, WaitingOn) else str(task.waiting_on),
         "handoff_to": task.handoff_to,
+        "task_type": normalize_task_type(task.task_type),
         "notes": task.notes,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
@@ -181,10 +200,13 @@ def _task_to_dict(task: Task) -> Dict[str, Any]:
         "progress": task.progress,
         "is_root": task.is_root,
     }
+    if result.get("task_type") is None:
+        result.pop("task_type", None)
+    return result
 
 
 def _task_to_summary_dict(task: Task) -> Dict[str, Any]:
-    return {
+    result = {
         "id": task.id,
         "title": task.title,
         "parent_id": task.parent_id,
@@ -195,11 +217,63 @@ def _task_to_summary_dict(task: Task) -> Dict[str, Any]:
         "blocked_by": list(task.blocked_by or []),
         "waiting_on": task.waiting_on.value if isinstance(task.waiting_on, WaitingOn) else str(task.waiting_on),
         "handoff_to": task.handoff_to,
+        "task_type": normalize_task_type(task.task_type),
         "created_at": task.created_at,
         "updated_at": task.updated_at,
         "progress": task.progress,
         "is_root": task.is_root,
     }
+    if result.get("task_type") is None:
+        result.pop("task_type", None)
+    return result
+
+
+_EMPTY_TASK_PET_SIGNATURE: Tuple[str, str, Tuple[str, ...], str] = ("", "", (), "")
+_EMPTY_TASK_PET_REASONS: frozenset[str] = frozenset()
+
+
+def _task_pet_profile(task: Optional[Task]) -> Tuple[Tuple[str, str, Tuple[str, ...], str], frozenset[str]]:
+    if task is None:
+        return _EMPTY_TASK_PET_SIGNATURE, _EMPTY_TASK_PET_REASONS
+    status = _status_value(getattr(task, "status", ""))
+    waiting_on = _status_value(getattr(task, "waiting_on", ""))
+    blocked_by = tuple(
+        item
+        for item in (str(raw or "").strip() for raw in list(getattr(task, "blocked_by", []) or []))
+        if item
+    )
+    handoff_to = str(getattr(task, "handoff_to", "") or "").strip()
+    signature = (status, waiting_on, blocked_by, handoff_to)
+    if status in {"done", "completed", "archived"}:
+        return signature, _EMPTY_TASK_PET_REASONS
+    reasons: set[str] = set()
+    if waiting_on == "user":
+        reasons.add("task_waiting_user")
+    if blocked_by or waiting_on in {"actor", "external"}:
+        reasons.add("task_blocked")
+    if handoff_to:
+        reasons.add("task_handoff")
+    return signature, frozenset(reasons)
+
+
+def _task_pet_review_delta(
+    before: Tuple[Tuple[str, str, Tuple[str, ...], str], frozenset[str]],
+    after: Tuple[Tuple[str, str, Tuple[str, ...], str], frozenset[str]],
+) -> Tuple[set[str], bool]:
+    before_signature, before_reasons = before
+    after_signature, after_reasons = after
+    if not before_reasons and not after_reasons:
+        return set(), False
+    if before_signature == after_signature and before_reasons == after_reasons:
+        return set(), False
+    after_status = str(after_signature[0] or "").strip().lower()
+    immediate = False
+    if after_reasons:
+        if not before_reasons or after_reasons != before_reasons:
+            immediate = True
+        elif before_signature != after_signature and after_status == TaskStatus.ACTIVE.value:
+            immediate = True
+    return set(before_reasons | after_reasons), immediate
 
 
 def _agent_state_to_dict(agent: AgentState) -> Dict[str, Any]:
@@ -222,6 +296,81 @@ def _agent_state_to_dict(agent: AgentState) -> Dict[str, Any]:
         },
         "updated_at": agent.updated_at,
     }
+
+
+def _actor_runtime_state_to_dict(
+    *,
+    group_id: str,
+    actor_doc: Dict[str, Any],
+    agent_state_by_id: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    actor_id = str(actor_doc.get("id") or "").strip()
+    runner_kind = str(actor_doc.get("runner") or "pty").strip() or "pty"
+    effective_runner = "headless" if runner_kind == "headless" else "pty"
+    running = False
+    idle_seconds = None
+    headless_state = None
+    if effective_runner == "headless":
+        state = headless_runner.SUPERVISOR.get_state(group_id=group_id, actor_id=actor_id)
+        headless_state = state.model_dump() if state is not None else None
+        running = bool(state is not None and headless_runner.SUPERVISOR.actor_running(group_id, actor_id))
+    else:
+        running = pty_runner.SUPERVISOR.actor_running(group_id, actor_id)
+        idle_seconds = pty_runner.SUPERVISOR.idle_seconds(group_id=group_id, actor_id=actor_id) if running else None
+    pty_terminal_text = ""
+    if effective_runner == "pty" and running:
+        try:
+            pty_terminal_text = pty_runner.SUPERVISOR.tail_output(
+                group_id=group_id,
+                actor_id=actor_id,
+                max_bytes=DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES,
+            ).decode("utf-8", errors="replace")
+        except Exception:
+            pty_terminal_text = ""
+
+    result = {
+        "id": actor_id,
+        "runtime": str(actor_doc.get("runtime") or "").strip() or "codex",
+        "runner": runner_kind,
+        "runner_effective": effective_runner,
+        "running": bool(running),
+        "idle_seconds": idle_seconds,
+    }
+    result.update(
+        derive_effective_working_state(
+            running=running,
+            effective_runner=effective_runner,
+            runtime=str(actor_doc.get("runtime") or "").strip(),
+            idle_seconds=idle_seconds,
+            pty_terminal_text=pty_terminal_text,
+            agent_state=agent_state_by_id.get(actor_id),
+            headless_state=headless_state,
+        )
+    )
+    return result
+
+
+def _build_actor_runtime_states(storage: ContextStorage, ordered_agents: List[AgentState]) -> List[Dict[str, Any]]:
+    actors = get_actor_list_projection(storage.group)
+    if not actors:
+        return []
+    agent_state_by_id = {
+        str(item.get("id") or "").strip(): item
+        for item in (_agent_state_to_dict(agent) for agent in ordered_agents)
+        if str(item.get("id") or "").strip()
+    }
+    result: List[Dict[str, Any]] = []
+    for actor in actors:
+        if not isinstance(actor, dict) or not str(actor.get("id") or "").strip():
+            continue
+        result.append(
+            _actor_runtime_state_to_dict(
+                group_id=storage.group.group_id,
+                actor_doc=actor,
+                agent_state_by_id=agent_state_by_id,
+            )
+        )
+    return result
 
 
 def _note_to_dict(note: CoordinationNote) -> Dict[str, Any]:
@@ -657,6 +806,7 @@ def _build_context_full_result(
     attention: Dict[str, List[Dict[str, Any]]],
     board: Dict[str, List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
+    actors_runtime = _build_actor_runtime_states(storage, ordered_agents)
     return {
         "version": storage.compute_version(),
         "coordination": {
@@ -666,6 +816,7 @@ def _build_context_full_result(
             "recent_handoffs": [_note_to_dict(note) for note in context.coordination.recent_handoffs],
         },
         "agent_states": [_agent_state_to_dict(agent) for agent in ordered_agents],
+        "actors_runtime": actors_runtime,
         "attention": attention,
         "board": board,
         "tasks_summary": _tasks_summary(tasks, attention=attention),
@@ -681,6 +832,7 @@ def _build_context_summary_result(
     ordered_agents: List[AgentState],
     attention: Dict[str, List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
+    actors_runtime = _build_actor_runtime_states(storage, ordered_agents)
     return {
         "version": storage.compute_version(),
         "coordination": {
@@ -688,11 +840,132 @@ def _build_context_summary_result(
             "tasks": [_task_to_summary_dict(task) for task in _sort_tasks(tasks)],
         },
         "agent_states": [_agent_state_to_dict(agent) for agent in ordered_agents],
+        "actors_runtime": actors_runtime,
         "attention": attention,
         "tasks_summary": _tasks_summary(tasks, attention=attention),
         "meta": context.meta if isinstance(context.meta, dict) else {},
     }
 
+
+def _with_summary_snapshot_meta(result: Dict[str, Any], *, state: str) -> Dict[str, Any]:
+    out = dict(result)
+    meta = dict(out.get("meta")) if isinstance(out.get("meta"), dict) else {}
+    snapshot_meta = dict(meta.get("summary_snapshot")) if isinstance(meta.get("summary_snapshot"), dict) else {}
+    snapshot_meta["state"] = str(state or "").strip() or "hit"
+    meta["summary_snapshot"] = snapshot_meta
+    out["meta"] = meta
+    return out
+
+
+def _empty_context_summary_result(storage: ContextStorage) -> Dict[str, Any]:
+    return {
+        "version": storage.compute_version(),
+        "coordination": {
+            "brief": _coordination_brief_to_dict(CoordinationBrief()),
+            "tasks": [],
+        },
+        "agent_states": [],
+        "actors_runtime": [],
+        "attention": {},
+        "tasks_summary": _tasks_summary([], attention={}),
+        "meta": {},
+    }
+
+
+def _rebuild_summary_snapshot(group_id: str, *, max_attempts: int = 3) -> bool:
+    storage = _get_storage(group_id)
+    if storage is None:
+        return False
+    attempts = max(1, int(max_attempts or 1))
+    last_result: Optional[Dict[str, Any]] = None
+    last_basis: Optional[Dict[str, Any]] = None
+    last_version = ""
+    for _ in range(attempts):
+        before_basis = storage.summary_basis()
+        before_version = storage.compute_version()
+        context = storage.load_context()
+        tasks = storage.list_tasks()
+        agents_state = _filter_agents_to_group(storage, storage.load_agents())
+        ordered_agents = _sort_agents_for_group(storage, agents_state)
+        attention = _attention_projection(tasks)
+        result = _build_context_summary_result(
+            storage=storage,
+            context=context,
+            tasks=tasks,
+            ordered_agents=ordered_agents,
+            attention=attention,
+        )
+        after_basis = storage.summary_basis()
+        after_version = storage.compute_version()
+        last_result = result
+        last_basis = after_basis
+        last_version = after_version
+        if before_basis == after_basis and before_version == after_version:
+            storage.save_summary_snapshot(
+                basis=after_basis,
+                version=after_version,
+                result=_with_summary_snapshot_meta(result, state="hit"),
+            )
+            return True
+    if last_result is not None and last_basis is not None:
+        storage.save_summary_snapshot(
+            basis=last_basis,
+            version=last_version,
+            result=_with_summary_snapshot_meta(last_result, state="hit"),
+        )
+        return True
+    return False
+
+
+def _schedule_summary_snapshot_rebuild(group_id: str) -> bool:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return False
+    with _SUMMARY_REBUILD_LOCK:
+        if gid in _SUMMARY_REBUILD_IN_FLIGHT:
+            return False
+        _SUMMARY_REBUILD_IN_FLIGHT.add(gid)
+
+    def _run() -> None:
+        try:
+            _rebuild_summary_snapshot(gid)
+        except Exception:
+            logger.exception("summary_snapshot_rebuild_failed group_id=%s", gid)
+        finally:
+            with _SUMMARY_REBUILD_LOCK:
+                _SUMMARY_REBUILD_IN_FLIGHT.discard(gid)
+
+    threading.Thread(target=_run, name=f"cccc-summary-{gid}", daemon=True).start()
+    return True
+
+
+def _wait_for_summary_snapshot_rebuild(group_id: str, *, timeout_s: float = 1.0) -> bool:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return True
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    while True:
+        with _SUMMARY_REBUILD_LOCK:
+            in_flight = gid in _SUMMARY_REBUILD_IN_FLIGHT
+        if not in_flight:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+
+
+def _get_summary_context_fast(storage: ContextStorage, *, group_id: str) -> Dict[str, Any]:
+    snapshot = storage.load_summary_snapshot()
+    basis = storage.summary_basis()
+    snapshot_basis = snapshot.get("basis") if isinstance(snapshot.get("basis"), dict) else {}
+    snapshot_result = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+    if snapshot_result and snapshot_basis == basis:
+        return _with_summary_snapshot_meta(snapshot_result, state="hit")
+    if snapshot_result:
+        _schedule_summary_snapshot_rebuild(group_id)
+        return _with_summary_snapshot_meta(snapshot_result, state="stale")
+    _schedule_summary_snapshot_rebuild(group_id)
+    return _with_summary_snapshot_meta(_empty_context_summary_result(storage), state="missing")
 
 def _sync_agents_mind_context_runtime(storage: ContextStorage, agents_state: AgentsData) -> None:
     state = _load_automation_state(storage)
@@ -733,21 +1006,14 @@ def handle_context_get(args: Dict[str, Any]) -> DaemonResponse:
     if storage is None:
         return _error("group_not_found", f"group not found: {group_id}")
 
+    if detail == _CONTEXT_DETAIL_SUMMARY:
+        return DaemonResponse(ok=True, result=_get_summary_context_fast(storage, group_id=group_id))
+
     context = storage.load_context()
     tasks = storage.list_tasks()
     agents_state = _filter_agents_to_group(storage, storage.load_agents())
     ordered_agents = _sort_agents_for_group(storage, agents_state)
     attention = _attention_projection(tasks)
-    if detail == _CONTEXT_DETAIL_SUMMARY:
-        result = _build_context_summary_result(
-            storage=storage,
-            context=context,
-            tasks=tasks,
-            ordered_agents=ordered_agents,
-            attention=attention,
-        )
-        return DaemonResponse(ok=True, result=result)
-
     board = _board_projection(tasks)
     result = _build_context_full_result(
         storage=storage,
@@ -792,7 +1058,12 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
     agents_dirty = False
     dirty_task_ids: List[str] = []
     deleted_task_ids: List[str] = []
+    pet_user_model_updates: Dict[str, str] = {}
+    pet_review_reasons: Set[str] = set()
+    pet_review_immediate = False
     changes: List[Dict[str, Any]] = []
+    tasks_changed = False
+    agents_changed = False
 
     def _mark_change(index: int, op_name: str, detail: str) -> None:
         changes.append({"index": index, "op": op_name, "detail": detail})
@@ -832,6 +1103,8 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     brief.updated_at = _utc_now_iso()
                     context.coordination.brief = brief
                     context_dirty = True
+                    pet_review_reasons.add("coordination_brief_changed")
+                    pet_review_immediate = True
                     _mark_change(idx, op_name, "Updated coordination brief")
                 continue
 
@@ -894,6 +1167,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 parent_id = str(raw.get("parent_id") or "").strip() or None
                 if parent_id and parent_id not in tasks_by_id:
                     raise ValueError(f"op[{idx}] parent task not found: {parent_id}")
+                task_type = _parse_task_type(raw.get("task_type")) if "task_type" in raw else None
                 task = Task(
                     id=task_id,
                     title=title,
@@ -906,12 +1180,21 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     blocked_by=_normalize_string_list(raw.get("blocked_by"), max_items=8, max_len=120),
                     waiting_on=_parse_waiting_on(raw.get("waiting_on")),
                     handoff_to=str(raw.get("handoff_to") or "").strip() or None,
+                    task_type=task_type,
                     notes=_normalize_text(raw.get("notes"), max_len=4000),
                     checklist=_normalize_checklist(raw.get("checklist")),
                 )
                 task.updated_at = _utc_now_iso()
                 tasks_by_id[task.id] = task
                 dirty_task_ids.append(task.id)
+                tasks_changed = True
+                review_reasons, review_immediate = _task_pet_review_delta(
+                    (_EMPTY_TASK_PET_SIGNATURE, _EMPTY_TASK_PET_REASONS),
+                    _task_pet_profile(task),
+                )
+                if review_reasons:
+                    pet_review_reasons.update(review_reasons)
+                    pet_review_immediate = pet_review_immediate or review_immediate
                 _mark_change(idx, op_name, f"Created task {task.id}: {task.title}")
                 continue
 
@@ -923,6 +1206,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 perm_err = _check_permission(by, op_name, group_id, task=task)
                 if perm_err:
                     raise ValueError(perm_err)
+                before_pet_profile = _task_pet_profile(task)
                 updated = False
                 if "title" in raw:
                     value = _normalize_text(raw.get("title"), max_len=240)
@@ -972,6 +1256,11 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     if task.handoff_to != value:
                         task.handoff_to = value
                         updated = True
+                if "task_type" in raw:
+                    value = _parse_task_type(raw.get("task_type"))
+                    if task.task_type != value:
+                        task.task_type = value
+                        updated = True
                 if "notes" in raw:
                     value = _normalize_text(raw.get("notes"), max_len=4000)
                     if task.notes != value:
@@ -988,6 +1277,14 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     task.updated_at = _utc_now_iso()
                     if task.id not in dirty_task_ids:
                         dirty_task_ids.append(task.id)
+                    tasks_changed = True
+                    review_reasons, review_immediate = _task_pet_review_delta(
+                        before_pet_profile,
+                        _task_pet_profile(task),
+                    )
+                    if review_reasons:
+                        pet_review_reasons.update(review_reasons)
+                        pet_review_immediate = pet_review_immediate or review_immediate
                     _mark_change(idx, op_name, f"Updated task {task.id}")
                 continue
 
@@ -996,9 +1293,21 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 task = tasks_by_id.get(task_id)
                 if task is None:
                     raise ValueError(f"Task not found: {task_id}")
+                unexpected_fields = sorted(
+                    key
+                    for key in raw.keys()
+                    if key not in {"op", "task_id", "status"}
+                )
+                if unexpected_fields:
+                    joined = ", ".join(unexpected_fields)
+                    raise ValueError(
+                        f"op[{idx}] task.move only accepts task_id and status; "
+                        f"use task.update for other fields: {joined}"
+                    )
                 perm_err = _check_permission(by, op_name, group_id, task=task)
                 if perm_err:
                     raise ValueError(perm_err)
+                before_pet_profile = _task_pet_profile(task)
                 new_status = _parse_task_status(raw.get("status"))
                 prev_status = task.status
                 if prev_status == new_status:
@@ -1011,6 +1320,14 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 task.updated_at = _utc_now_iso()
                 if task.id not in dirty_task_ids:
                     dirty_task_ids.append(task.id)
+                tasks_changed = True
+                review_reasons, review_immediate = _task_pet_review_delta(
+                    before_pet_profile,
+                    _task_pet_profile(task),
+                )
+                if review_reasons:
+                    pet_review_reasons.update(review_reasons)
+                    pet_review_immediate = pet_review_immediate or review_immediate
                 _mark_change(idx, op_name, f"Moved task {task.id} to {new_status.value}")
 
                 assignee_id = str(task.assignee or "").strip()
@@ -1041,6 +1358,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     if auto_changed:
                         agent.updated_at = _utc_now_iso()
                         agents_dirty = True
+                        agents_changed = True
                         _mark_change(idx, "agent_state.autosync", f"Auto-synced agent {assignee_id} from {task.id}")
 
                 if not dry_run:
@@ -1101,6 +1419,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     raise ValueError(perm_err)
                 if task.status != TaskStatus.ARCHIVED:
                     raise ValueError(f"op[{idx}] task.restore requires archived task")
+                before_pet_profile = _task_pet_profile(task)
                 restore_to = str(task.archived_from or TaskStatus.PLANNED.value).strip().lower() or TaskStatus.PLANNED.value
                 try:
                     task.status = TaskStatus(restore_to)
@@ -1110,6 +1429,14 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 task.updated_at = _utc_now_iso()
                 if task.id not in dirty_task_ids:
                     dirty_task_ids.append(task.id)
+                tasks_changed = True
+                review_reasons, review_immediate = _task_pet_review_delta(
+                    before_pet_profile,
+                    _task_pet_profile(task),
+                )
+                if review_reasons:
+                    pet_review_reasons.update(review_reasons)
+                    pet_review_immediate = pet_review_immediate or review_immediate
                 _mark_change(idx, op_name, f"Restored task {task.id}")
                 continue
 
@@ -1124,6 +1451,10 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 delete_targets, delete_reason = _task_delete_plan(task, tasks_by_id, group_id=group_id, by=by)
                 if delete_reason:
                     raise ValueError(f"op[{idx}] task.delete rejected: {delete_reason}")
+                delete_pet_reasons: Set[str] = set()
+                for delete_task in delete_targets:
+                    _, reasons = _task_pet_profile(delete_task)
+                    delete_pet_reasons.update(reasons)
 
                 delete_ids = {item.id for item in delete_targets}
                 delete_titles = {str(item.title or "").strip() for item in delete_targets if str(item.title or "").strip()}
@@ -1145,12 +1476,16 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                         agent.warm = warm
                         agent.updated_at = _utc_now_iso()
                         agents_dirty = True
+                        agents_changed = True
 
                 for delete_task in delete_targets:
                     tasks_by_id.pop(delete_task.id, None)
                     if delete_task.id in dirty_task_ids:
                         dirty_task_ids.remove(delete_task.id)
                     deleted_task_ids.append(delete_task.id)
+                tasks_changed = True
+                if delete_pet_reasons:
+                    pet_review_reasons.update(delete_pet_reasons)
                 if len(delete_targets) == 1:
                     _mark_change(idx, op_name, f"Deleted task {task_id}")
                 else:
@@ -1215,6 +1550,8 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     if warm.user_model != value:
                         warm.user_model = value
                         updated = True
+                        if value:
+                            pet_user_model_updates[actor_id] = value
                 if "persona_notes" in raw or "notes" in raw:
                     source = raw.get("persona_notes") if "persona_notes" in raw else raw.get("notes")
                     value = _normalize_text(source, max_len=600)
@@ -1231,6 +1568,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     agent.warm = warm
                     agent.updated_at = _utc_now_iso()
                     agents_dirty = True
+                    agents_changed = True
                     _mark_change(idx, op_name, f"Updated agent state {actor_id}")
                 continue
 
@@ -1246,6 +1584,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 agent.warm = AgentStateWarm()
                 agent.updated_at = _utc_now_iso()
                 agents_dirty = True
+                agents_changed = True
                 _mark_change(idx, op_name, f"Cleared agent state {actor_id}")
                 continue
 
@@ -1331,12 +1670,33 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
             if agents_dirty:
                 storage.save_agents(agents_state)
                 _sync_agents_mind_context_runtime(storage, agents_state)
+                for actor_id, user_model in pet_user_model_updates.items():
+                    try:
+                        mark_pet_profile_refresh_applied(
+                            group_id,
+                            actor_id=actor_id,
+                            user_model=user_model,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "pet_profile_refresh_apply_mark_failed group_id=%s actor_id=%s",
+                            group_id,
+                            actor_id,
+                        )
+            if context_dirty or tasks_changed or agents_changed:
+                storage.bump_version_state(
+                    context_changed=context_dirty,
+                    tasks_changed=tasks_changed,
+                    agents_changed=agents_changed,
+                )
+                _schedule_summary_snapshot_rebuild(group_id)
 
         version = storage.compute_version() if not dry_run else current_version
 
+        sync_event_id = ""
         if not dry_run and changes:
             try:
-                append_event(
+                event = append_event(
                     storage.group.ledger_path,
                     kind="context.sync",
                     group_id=group_id,
@@ -1344,8 +1704,22 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     by=by,
                     data={"version": version, "changes": changes},
                 )
+                if isinstance(event, dict):
+                    sync_event_id = str(event.get("id") or "").strip()
             except Exception:
                 pass
+
+        if not dry_run and pet_review_reasons:
+            for reason in sorted(pet_review_reasons):
+                try:
+                    request_pet_review(
+                        group_id,
+                        reason=reason,
+                        source_event_id=sync_event_id,
+                        immediate=pet_review_immediate,
+                    )
+                except Exception:
+                    logger.exception("pet_review_request_failed group_id=%s reason=%s", group_id, reason)
 
         space_sync: Optional[Dict[str, Any]] = None
         if not dry_run and changes and _should_trigger_group_space_context_sync(changes):

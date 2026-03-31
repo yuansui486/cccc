@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Optional
 from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, DaemonResponse
 from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
-from ...kernel.inbox import find_event, get_quote_text, has_chat_ack, is_message_for_actor
+from ...kernel.inbox import find_event_with_chat_ack, is_message_for_actor
 from ...kernel.ledger import append_event
 from ...kernel.messaging import (
     default_reply_recipients,
@@ -19,10 +19,16 @@ from ...kernel.messaging import (
     get_default_send_to,
     targets_any_agent,
 )
-from ...kernel.registry import load_registry
 from ...kernel.scope import detect_scope
 from ...util.time import utc_now_iso
-from .delivery import get_headless_targets_for_message, queue_chat_message
+from .delivery import (
+    flush_pending_messages,
+    get_headless_targets_for_message,
+    queue_chat_message,
+    request_flush_pending_messages,
+)
+from ..pet.review_scheduler import request_pet_review
+from ..pet.profile_refresh import record_user_chat_message
 
 logger = logging.getLogger("cccc.daemon.server")
 
@@ -35,11 +41,15 @@ def _wake_group_on_human_message(
     group: Any,
     *,
     by: str,
+    state_at_accept: str = "",
     automation_on_resume: Callable[[Any], None],
     clear_pending_system_notifies: Callable[[str, set[str]], None],
 ) -> Any:
     # Keep idle stable against agent chatter / throttled deliveries.
     try:
+        accept_state = str(state_at_accept or "").strip().lower()
+        if accept_state and accept_state != "idle":
+            return group
         if get_group_state(group) != "idle":
             return group
         is_actor_sender = isinstance(find_actor(group, by), dict)
@@ -204,18 +214,6 @@ def _render_delivery_refs(refs: list[dict[str, Any]]) -> list[str]:
         lines.append(f"- … ({len(refs) - rendered} more)")
     return lines
 
-
-def _touch_registry_updated_at(group_id: str, ts: str) -> None:
-    try:
-        reg = load_registry()
-        meta = reg.groups.get(group_id)
-        if isinstance(meta, dict):
-            meta["updated_at"] = str(ts or utc_now_iso())
-            reg.save()
-    except Exception:
-        pass
-
-
 def _normalize_refs(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
@@ -224,6 +222,18 @@ def _normalize_refs(raw: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             refs.append(item)
     return refs
+
+
+def _quote_text_from_message_data(data: dict[str, Any], *, max_len: int = 100) -> Optional[str]:
+    text = data.get("text")
+    if not isinstance(text, str):
+        return None
+    snippet = text.strip()
+    if not snippet:
+        return None
+    if len(snippet) > max_len:
+        return snippet[:max_len] + "..."
+    return snippet
 
 
 def _notify_headless_targets(
@@ -322,6 +332,7 @@ def handle_send(
     group = _wake_group_on_human_message(
         group,
         by=by,
+        state_at_accept=str(args.get("__group_state_at_accept") or ""),
         automation_on_resume=automation_on_resume,
         clear_pending_system_notifies=clear_pending_system_notifies,
     )
@@ -419,8 +430,6 @@ def handle_send(
             client_id=client_id or None,
         ).model_dump(),
     )
-    _touch_registry_updated_at(group.group_id, str(event.get("ts") or utc_now_iso()))
-
     effective_to = to if to else ["@all"]
     event_id = str(event.get("id") or "").strip()
     event_ts = str(event.get("ts") or "").strip()
@@ -463,6 +472,7 @@ def handle_send(
                 source_user_id=source_user_id or None,
                 ts=event_ts,
             )
+            request_flush_pending_messages(group, actor_id=actor_id)
 
     event_for_headless = dict(event)
     event_for_headless["data"] = dict(event.get("data") or {})
@@ -478,6 +488,25 @@ def handle_send(
 
     try:
         automation_on_new_message(group)
+    except Exception:
+        pass
+    try:
+        request_pet_review(
+            group.group_id,
+            reason="chat_message",
+            source_event_id=event_id,
+            immediate=reply_required,
+        )
+    except Exception:
+        pass
+    try:
+        if by == "user":
+            record_user_chat_message(
+                group.group_id,
+                event_id=event_id,
+                ts=event_ts,
+                text=text,
+            )
     except Exception:
         pass
 
@@ -521,15 +550,17 @@ def handle_reply(
     group = _wake_group_on_human_message(
         group,
         by=by,
+        state_at_accept=str(args.get("__group_state_at_accept") or ""),
         automation_on_resume=automation_on_resume,
         clear_pending_system_notifies=clear_pending_system_notifies,
     )
 
-    original = find_event(group, reply_to)
+    original, existing_ack = find_event_with_chat_ack(group, event_id=reply_to, actor_id=by)
     if original is None:
         return _error("event_not_found", f"event not found: {reply_to}")
-    quote_text = get_quote_text(group, reply_to, max_len=100)
+    target_event_id = str(original.get("id") or "").strip()
     original_data = original.get("data") if isinstance(original.get("data"), dict) else {}
+    quote_text = _quote_text_from_message_data(original_data, max_len=100)
     original_source_platform = str(original_data.get("source_platform") or "").strip()
     original_source_user_name = str(original_data.get("source_user_name") or "").strip()
     original_source_user_id = str(original_data.get("source_user_id") or "").strip()
@@ -586,7 +617,7 @@ def handle_reply(
             priority=priority,
             reply_required=reply_required,
             to=to,
-            reply_to=reply_to,
+            reply_to=target_event_id or reply_to,
             quote_text=quote_text,
             refs=refs,
             attachments=attachments,
@@ -606,8 +637,7 @@ def handle_reply(
             original_priority = str(original_data.get("priority") or "normal").strip()
             if by and by != original_by and original_priority == "attention":
                 if is_message_for_actor(group, actor_id=by, event=original):
-                    target_event_id = str(original.get("id") or "").strip()
-                    if target_event_id and not has_chat_ack(group, event_id=target_event_id, actor_id=by):
+                    if target_event_id and not existing_ack:
                         ack_event = append_event(
                             group.ledger_path,
                             kind="chat.ack",
@@ -618,8 +648,6 @@ def handle_reply(
                         )
     except Exception:
         ack_event = None
-
-    _touch_registry_updated_at(group.group_id, str(event.get("ts") or utc_now_iso()))
 
     effective_to = to if to else ["@all"]
     event_with_effective_to = dict(event)
@@ -653,10 +681,11 @@ def handle_reply(
                 by=by,
                 to=effective_to,
                 text=delivery_text,
-                reply_to=reply_to,
+                reply_to=target_event_id or reply_to,
                 quote_text=quote_text,
                 ts=event_ts,
             )
+            request_flush_pending_messages(group, actor_id=actor_id)
 
     _notify_headless_targets(
         group=group,
@@ -669,6 +698,25 @@ def handle_reply(
 
     try:
         automation_on_new_message(group)
+    except Exception:
+        pass
+    try:
+        request_pet_review(
+            group.group_id,
+            reason="chat_reply",
+            source_event_id=event_id,
+            immediate=reply_required,
+        )
+    except Exception:
+        pass
+    try:
+        if by == "user":
+            record_user_chat_message(
+                group.group_id,
+                event_id=event_id,
+                ts=event_ts,
+                text=text,
+            )
     except Exception:
         pass
 

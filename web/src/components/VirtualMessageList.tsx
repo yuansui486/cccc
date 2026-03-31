@@ -6,6 +6,17 @@ import { LedgerEvent, Actor, AgentState, PresentationMessageRef } from "../types
 import { MessageBubble } from "./MessageBubble";
 import { useActorDisplayNameMap } from "../hooks/useActorDisplayName";
 
+function getStableMessageKey(message: LedgerEvent | undefined, index: number): string | number {
+  if (message?.kind === "chat.message" && message.data && typeof message.data === "object") {
+    const clientId = typeof (message.data as { client_id?: unknown }).client_id === "string"
+      ? String((message.data as { client_id?: string }).client_id || "").trim()
+      : "";
+    if (clientId) return `client:${clientId}`;
+  }
+  const eventId = typeof message?.id === "string" ? String(message.id || "").trim() : "";
+  return eventId || index;
+}
+
 export interface VirtualMessageListProps {
   messages: LedgerEvent[];
   actors: Actor[];
@@ -20,9 +31,11 @@ export interface VirtualMessageListProps {
   initialScrollAnchorOffsetPx?: number;
   highlightEventId?: string;
   scrollRef?: MutableRefObject<HTMLDivElement | null>;
+  followBottomRef?: MutableRefObject<boolean>;
   onReply: (ev: LedgerEvent) => void;
   onShowRecipients: (eventId: string) => void;
   onCopyLink?: (eventId: string) => void;
+  onCopyContent?: (ev: LedgerEvent) => void;
   onRelay?: (ev: LedgerEvent) => void;
   onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
   onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
@@ -41,6 +54,118 @@ type VirtualMessageListInnerProps = VirtualMessageListProps & {
   resetKey: string;
 };
 
+type VirtualMessageRowProps = {
+  virtualRow: { key: React.Key; index: number; start: number };
+  message: LedgerEvent;
+  actorById: Map<string, Actor>;
+  actors: Actor[];
+  displayNameMap: Map<string, string>;
+  agentState: AgentState | null;
+  isDark: boolean;
+  readOnly?: boolean;
+  groupId: string;
+  groupLabelById: Record<string, string>;
+  highlightEventId?: string;
+  onReply: (ev: LedgerEvent) => void;
+  onShowRecipients: (eventId: string) => void;
+  onCopyLink?: (eventId: string) => void;
+  onCopyContent?: (ev: LedgerEvent) => void;
+  onRelay?: (ev: LedgerEvent) => void;
+  onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
+  onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
+  measureElement: (node: Element | null) => void;
+  onRowLayoutChange: (node: HTMLDivElement | null) => void;
+};
+
+const VirtualMessageRow = memo(function VirtualMessageRow({
+  virtualRow,
+  message,
+  actorById,
+  actors,
+  displayNameMap,
+  agentState,
+  isDark,
+  readOnly,
+  groupId,
+  groupLabelById,
+  highlightEventId,
+  onReply,
+  onShowRecipients,
+  onCopyLink,
+  onCopyContent,
+  onRelay,
+  onOpenSource,
+  onOpenPresentationRef,
+  measureElement,
+  onRowLayoutChange,
+}: VirtualMessageRowProps) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+
+    let rafId: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (rafId != null) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        measureElement(el);
+        onRowLayoutChange(el);
+      });
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (rafId != null) window.cancelAnimationFrame(rafId);
+    };
+  }, [measureElement, onRowLayoutChange]);
+
+  return (
+    <div
+      data-index={virtualRow.index}
+      data-message-row="true"
+      data-message-id={message.id ? String(message.id) : ""}
+      ref={(node) => {
+        rowRef.current = node;
+        measureElement(node);
+      }}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${virtualRow.start}px)`,
+      }}
+      className="pb-6"
+    >
+      <MessageBubble
+        event={message}
+        actorById={actorById}
+        actors={actors}
+        displayNameMap={displayNameMap}
+        agentState={agentState}
+        isDark={isDark}
+        readOnly={readOnly}
+        groupId={groupId}
+        groupLabelById={groupLabelById}
+        isHighlighted={!!highlightEventId && String(message.id || "") === String(highlightEventId)}
+        onReply={() => onReply(message)}
+        onShowRecipients={() => {
+          if (message.id) {
+            onShowRecipients(String(message.id));
+          }
+        }}
+        onCopyLink={onCopyLink}
+        onCopyContent={onCopyContent}
+        onRelay={onRelay}
+        onOpenSource={onOpenSource}
+        onOpenPresentationRef={onOpenPresentationRef}
+      />
+    </div>
+  );
+});
+
 const VirtualMessageListInner = function VirtualMessageListInner({
   messages,
   actors,
@@ -55,9 +180,11 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   initialScrollAnchorOffsetPx,
   highlightEventId,
   scrollRef,
+  followBottomRef,
   onReply,
   onShowRecipients,
   onCopyLink,
+  onCopyContent,
   onRelay,
   onOpenSource,
   onOpenPresentationRef,
@@ -73,12 +200,32 @@ const VirtualMessageListInner = function VirtualMessageListInner({
 }: VirtualMessageListInnerProps) {
   const { t } = useTranslation(["chat", "common"]);
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const remeasureRafRef = useRef<number | null>(null);
+  const shouldVirtualize = messages.length >= 80;
 
   const agentStateById = useMemo(() => {
     const m = new Map<string, AgentState>();
     for (const p of agentStates || []) m.set(String(p.id || ""), p);
     return m;
   }, [agentStates]);
+
+  const actorById = useMemo(() => {
+    const map = new Map<string, Actor>();
+    for (const actor of actors || []) {
+      const actorId = String(actor.id || "").trim();
+      if (actorId) map.set(actorId, actor);
+
+      const actorTitle = String(actor.title || "").trim();
+      if (actorTitle && !map.has(actorTitle)) map.set(actorTitle, actor);
+
+      const actorIdLower = actorId.toLowerCase();
+      if (actorIdLower && !map.has(actorIdLower)) map.set(actorIdLower, actor);
+
+      const actorTitleLower = actorTitle.toLowerCase();
+      if (actorTitleLower && !map.has(actorTitleLower)) map.set(actorTitleLower, actor);
+    }
+    return map;
+  }, [actors]);
 
   // Create display name map once at the list level (not per-message)
   const displayNameMap = useActorDisplayNameMap(actors);
@@ -89,7 +236,9 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   messagesRef.current = messages;
 
   const prevMessageCountRef = useRef(messages.length);
+  const prevTailMessageIdRef = useRef<string>(messages[messages.length - 1]?.id ? String(messages[messages.length - 1]?.id) : "");
   const isAtBottomRef = useRef(true);
+  const shouldFollowBottomRef = useRef(true);
   const didInitialScrollRef = useRef(false);
   const scrollTimeoutRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
@@ -105,6 +254,12 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   const scrollEventSeqRef = useRef(0);
   const anchorMessageIdRef = useRef<string>("");
   const anchorOffsetRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
+  const touchClientYRef = useRef<number | null>(null);
+  const userScrollIntentUntilRef = useRef(0);
+  // 标记容器正在处理 resize（如 footer 回复栏出现/消失），
+  // 防止 handleScroll 将浏览器裁剪 scrollTop 误判为用户上滑
+  const isContainerResizingRef = useRef(false);
 
   // Track previous resetKey for scroll snapshot before group switch
   const prevResetKeyRef = useRef<string | undefined>(undefined);
@@ -172,7 +327,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,
-    getItemKey: (index) => messages[index]?.id ?? index,
+    getItemKey: (index) => getStableMessageKey(messages[index], index),
     estimateSize: getEstimatedSize,
     overscan: 10,
     paddingStart: 72,
@@ -183,6 +338,97 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   // the old queueMicrotask wrapper (which deferred measurement by one frame,
   // making the first paint use the stale estimate height).
   const measureElement = virtualizer.measureElement;
+
+  const getMessageRowById = useCallback((eventId: string): HTMLDivElement | null => {
+    const container = parentRef.current;
+    if (!container || !eventId) return null;
+    return container.querySelector(`[data-message-row="true"][data-message-id="${CSS.escape(eventId)}"]`);
+  }, []);
+
+  const getAnchorSnapshot = useCallback((scrollTop: number) => {
+    const container = parentRef.current;
+    if (!container) return null;
+
+    if (shouldVirtualize) {
+      const vItems = virtualizer.getVirtualItems();
+      if (vItems.length <= 0) return null;
+      const anchorItem = vItems.find((v) => v.start + v.size > scrollTop + 1) || vItems[0];
+      const msg = messages[anchorItem.index];
+      const anchorId = msg?.id ? String(msg.id) : "";
+      if (!anchorId) return null;
+      return {
+        anchorId,
+        offsetPx: Math.max(0, scrollTop - anchorItem.start),
+      };
+    }
+
+    const rows = Array.from(container.querySelectorAll<HTMLDivElement>('[data-message-row="true"]'));
+    if (rows.length <= 0) return null;
+    const anchorRow =
+      rows.find((row) => row.offsetTop + row.offsetHeight > scrollTop + 1) || rows[0];
+    const anchorId = String(anchorRow.dataset.messageId || "").trim();
+    if (!anchorId) return null;
+    return {
+      anchorId,
+      offsetPx: Math.max(0, scrollTop - anchorRow.offsetTop),
+    };
+  }, [messages, shouldVirtualize, virtualizer]);
+
+  const setFollowBottom = useCallback((next: boolean) => {
+    shouldFollowBottomRef.current = next;
+    if (followBottomRef) followBottomRef.current = next;
+  }, [followBottomRef]);
+
+  const setAtBottom = useCallback((next: boolean) => {
+    isAtBottomRef.current = next;
+  }, []);
+
+  const stickToBottomIfNeeded = useCallback(() => {
+    // 将 ref 检查推迟到 rAF 内执行，确保 handleScroll 中的同步方向检测
+    // 有机会先将 shouldFollowBottomRef 设为 false，避免竞态导致弹回抖动
+    window.requestAnimationFrame(() => {
+      // 容器 resize 期间（如回复栏出现/消失）不做任何滚动
+      if (isContainerResizingRef.current) return;
+      if (performance.now() < userScrollIntentUntilRef.current) return;
+      if (!shouldFollowBottomRef.current) return;
+      const el = parentRef.current;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+    });
+  }, []);
+
+  const scrollToMessageAnchor = useCallback((eventId: string, offsetPx = 0) => {
+    const el = parentRef.current;
+    if (!el || !eventId) return false;
+
+    if (shouldVirtualize) {
+      const idx = messages.findIndex((m) => String(m?.id || "") === String(eventId));
+      if (idx < 0) return false;
+      const offsetInfo = virtualizer.getOffsetForIndex(idx, "start");
+      if (offsetInfo) {
+        virtualizer.scrollToOffset(offsetInfo[0] + Math.max(0, offsetPx), { align: "start", behavior: "auto" });
+      } else {
+        virtualizer.scrollToIndex(idx, { align: "start", behavior: "auto" });
+      }
+      return true;
+    }
+
+    const row = getMessageRowById(String(eventId));
+    if (!row) return false;
+    el.scrollTo({ top: row.offsetTop + Math.max(0, offsetPx), behavior: "auto" });
+    return true;
+  }, [getMessageRowById, messages, shouldVirtualize, virtualizer]);
+
+  const handleRowLayoutChange = useCallback((node: HTMLDivElement | null) => {
+    if (shouldVirtualize && node) {
+      measureElement(node);
+    }
+    // 容器 resize 期间跳过 stickToBottom，
+    // 避免滚动条出现/消失导致的行宽变化触发不必要的滚动
+    if (!isContainerResizingRef.current) {
+      stickToBottomIfNeeded();
+    }
+  }, [measureElement, shouldVirtualize, stickToBottomIfNeeded]);
 
   const checkIsAtBottom = useCallback(() => {
     const el = parentRef.current;
@@ -218,6 +464,13 @@ const VirtualMessageListInner = function VirtualMessageListInner({
       window.clearTimeout(fid);
     }
   }, []);
+
+  const interruptBottomFollow = useCallback(() => {
+    userScrollIntentUntilRef.current = performance.now() + 280;
+    setAtBottom(false);
+    setFollowBottom(false);
+    cancelScheduledScroll();
+  }, [cancelScheduledScroll, setAtBottom, setFollowBottom]);
 
   const scheduleScroll = useCallback(
     (fn: () => void) => {
@@ -295,6 +548,18 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   );
 
   const handleScroll = useCallback(() => {
+    // 同步检测上滑方向，立即解除底部跟随，防止与 stickToBottomIfNeeded 竞态
+    // 跳过容器 resize 引起的 scrollTop 变化（如回复栏出现/消失）
+    const elSync = parentRef.current;
+    if (elSync && !isContainerResizingRef.current) {
+      const curTopSync = elSync.scrollTop;
+      const prevTopSync = lastScrollTopRef.current;
+      if (curTopSync < prevTopSync - 4) {
+        setFollowBottom(false);
+        setAtBottom(false);
+      }
+    }
+
     if (scrollRafScheduledRef.current) return;
     scrollRafScheduledRef.current = true;
 
@@ -307,12 +572,23 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     scrollEventSeqRef.current += 1;
     lastScrollEventAtRef.current = performance.now();
     const curTop = el.scrollTop;
+    const prevTop = lastScrollTopRef.current;
+    lastScrollTopRef.current = curTop;
 
     const atBottom = checkIsAtBottom();
+    const scrollingUp = !isContainerResizingRef.current && curTop < prevTop - 4;
+    if (scrollingUp) {
+      userScrollIntentUntilRef.current = performance.now() + 280;
+      setAtBottom(false);
+      setFollowBottom(false);
+      onScrollChange?.(false);
+    } else if (atBottom) {
+      setFollowBottom(true);
+    }
     // Only notify parent when atBottom state actually changes (not on every scroll event)
     // to avoid triggering store updates and re-renders during inertia scrolling.
     const wasAtBottom = isAtBottomRef.current;
-    isAtBottomRef.current = atBottom;
+    setAtBottom(atBottom);
     if (atBottom !== wasAtBottom) {
       onScrollChange?.(atBottom);
     }
@@ -321,25 +597,18 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     // so the parent can restore scroll position when switching groups.
     // Save to ref only during scroll; flush to store via debounce (not every frame)
     // to prevent zustand state churn that kills browser scroll inertia.
-    const vItems = virtualizer.getVirtualItems();
-    if (vItems.length > 0) {
-      const anchorItem =
-        vItems.find((v) => v.start + v.size > curTop + 1) || vItems[0];
-      const msg = messages[anchorItem.index];
-      const anchorId = msg?.id ? String(msg.id) : "";
-      if (anchorId) {
-        const offsetPx = Math.max(0, curTop - anchorItem.start);
-        const snap = { atBottom, anchorId, offsetPx };
-        latestSnapshotRef.current = snap;
-        // Debounced flush to store — only after 300ms idle
-        if (snapshotFlushTimerRef.current) window.clearTimeout(snapshotFlushTimerRef.current);
-        snapshotFlushTimerRef.current = window.setTimeout(() => {
-          snapshotFlushTimerRef.current = null;
-          if (latestSnapshotRef.current) {
-            onScrollSnapshot?.(latestSnapshotRef.current);
-          }
-        }, 300);
-      }
+    const anchor = getAnchorSnapshot(curTop);
+    if (anchor) {
+      const snap = { atBottom, anchorId: anchor.anchorId, offsetPx: anchor.offsetPx };
+      latestSnapshotRef.current = snap;
+      // Debounced flush to store — only after 300ms idle
+      if (snapshotFlushTimerRef.current) window.clearTimeout(snapshotFlushTimerRef.current);
+      snapshotFlushTimerRef.current = window.setTimeout(() => {
+        snapshotFlushTimerRef.current = null;
+        if (latestSnapshotRef.current) {
+          onScrollSnapshot?.(latestSnapshotRef.current);
+        }
+      }, 300);
     }
 
     // Top detection for loading more history.
@@ -357,15 +626,14 @@ const VirtualMessageListInner = function VirtualMessageListInner({
       pendingRestoreRef.current = true;
       pendingRestoreSeqRef.current = scrollEventSeqRef.current;
 
-      const first = vItems[0];
-      const firstMsg = first ? messages[first.index] : null;
-      anchorMessageIdRef.current = firstMsg?.id ? String(firstMsg.id) : "";
-      anchorOffsetRef.current = first ? Math.max(0, curTop - first.start) : 0;
+      const pendingAnchor = getAnchorSnapshot(curTop);
+      anchorMessageIdRef.current = pendingAnchor?.anchorId || "";
+      anchorOffsetRef.current = pendingAnchor?.offsetPx || 0;
 
       onLoadMore();
     }
     });
-  }, [checkIsAtBottom, hasMoreHistory, isLoadingHistory, messages, onLoadMore, onScrollChange, onScrollSnapshot, virtualizer]);
+  }, [checkIsAtBottom, getAnchorSnapshot, hasMoreHistory, isLoadingHistory, onLoadMore, onScrollChange, onScrollSnapshot, setAtBottom, setFollowBottom]);
 
   // When switching views (group or window-mode), reset internal scroll bookkeeping.
   //
@@ -394,7 +662,9 @@ const VirtualMessageListInner = function VirtualMessageListInner({
 
     scrollTokenRef.current += 1;
     prevMessageCountRef.current = 0;
-    isAtBottomRef.current = true;
+    prevTailMessageIdRef.current = "";
+    setAtBottom(true);
+    setFollowBottom(true);
     didInitialScrollRef.current = false;
     topLoadArmedRef.current = true;
     cancelScheduledScroll();
@@ -406,50 +676,119 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     pendingRestoreSeqRef.current = null;
     anchorMessageIdRef.current = "";
     anchorOffsetRef.current = 0;
+    lastScrollTopRef.current = 0;
 
     // Without key-based remount, the virtualizer keeps stale measurement
     // caches from the previous group. Force a full re-measure so item
     // sizes are recalculated for the new messages.
-    virtualizer.measure();
-  }, [resetKey, cancelScheduledScroll, onScrollSnapshot, virtualizer]);
+    if (shouldVirtualize) {
+      virtualizer.measure();
+    }
+  }, [resetKey, cancelScheduledScroll, onScrollSnapshot, setAtBottom, setFollowBottom, shouldVirtualize, virtualizer]);
 
   useEffect(() => {
-    prevMessageCountRef.current = messages.length;
+    const prevCount = prevMessageCountRef.current;
+    const prevTailId = prevTailMessageIdRef.current;
+    const nextTailId = messages[messages.length - 1]?.id ? String(messages[messages.length - 1]?.id) : "";
 
-    // Scroll to bottom on any messages change while at bottom.
-    // Watches `messages` reference (not just length) so that loadGroup replacements
-    // with the same count still trigger re-positioning.
-    if (messages.length > 0 && isAtBottomRef.current) {
+    // Only auto-follow when the tail actually advances while the user is still
+    // considered at the bottom. Re-renders, re-measurement, or same-size list
+    // replacements should not steal scroll when the user is trying to read up.
+    const appendedAtTail =
+      messages.length > 0 &&
+      (
+        messages.length > prevCount ||
+        (nextTailId !== "" && nextTailId !== prevTailId)
+      );
+
+    prevMessageCountRef.current = messages.length;
+    prevTailMessageIdRef.current = nextTailId;
+
+    const shouldAutoFollow = isAtBottomRef.current;
+    if (appendedAtTail && shouldAutoFollow) {
+      setAtBottom(true);
+      setFollowBottom(true);
       scheduleScrollToBottom({ requireAtBottom: true });
     }
-  }, [messages, scheduleScrollToBottom]);
+  }, [messages, scheduleScrollToBottom, setAtBottom, setFollowBottom]);
 
   useEffect(() => {
     if (didInitialScrollRef.current) return;
     if (messages.length <= 0) return;
     didInitialScrollRef.current = true;
+    setFollowBottom(!initialScrollTargetId && !initialScrollAnchorId);
     scheduleScroll(() => {
       if (initialScrollTargetId) {
-        isAtBottomRef.current = false;
-        const idx = messages.findIndex((m) => String(m?.id || "") === String(initialScrollTargetId));
-        if (idx >= 0) {
-          scrollToIndexStable(idx);
+        setAtBottom(false);
+        setFollowBottom(false);
+        if (shouldVirtualize) {
+          const idx = messages.findIndex((m) => String(m?.id || "") === String(initialScrollTargetId));
+          if (idx >= 0) {
+            scrollToIndexStable(idx);
+            return;
+          }
+        } else if (scrollToMessageAnchor(String(initialScrollTargetId), 0)) {
           return;
         }
       }
       if (initialScrollAnchorId) {
-        const idx = messages.findIndex((m) => String(m?.id || "") === String(initialScrollAnchorId));
-        if (idx >= 0) {
-          isAtBottomRef.current = false;
-          scrollToAnchorStable(idx, Number(initialScrollAnchorOffsetPx || 0));
+        if (shouldVirtualize) {
+          const idx = messages.findIndex((m) => String(m?.id || "") === String(initialScrollAnchorId));
+          if (idx >= 0) {
+            setAtBottom(false);
+            setFollowBottom(false);
+            scrollToAnchorStable(idx, Number(initialScrollAnchorOffsetPx || 0));
+            return;
+          }
+        } else if (scrollToMessageAnchor(String(initialScrollAnchorId), Number(initialScrollAnchorOffsetPx || 0))) {
+          setAtBottom(false);
+          setFollowBottom(false);
           return;
         }
       }
       scrollToBottom();
     });
-  }, [initialScrollAnchorId, initialScrollAnchorOffsetPx, initialScrollTargetId, messages, scheduleScroll, scrollToAnchorStable, scrollToBottom, scrollToIndexStable]);
+  }, [initialScrollAnchorId, initialScrollAnchorOffsetPx, initialScrollTargetId, messages, scheduleScroll, scrollToAnchorStable, scrollToBottom, scrollToIndexStable, scrollToMessageAnchor, setAtBottom, setFollowBottom, shouldVirtualize]);
 
   useEffect(() => cancelScheduledScroll, [cancelScheduledScroll]);
+
+  useEffect(() => {
+    if (!shouldVirtualize) return;
+    const el = parentRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      // 容器高度变化（如 footer 回复栏出现/消失）时，不做任何滚动，
+      // 让消息列表的可视位置完全不变。
+      // virtualizer 内部已有自己的 ResizeObserver 处理视口重算，无需重复调用 measure()。
+      isContainerResizingRef.current = true;
+
+      // 同步更新 lastScrollTopRef，避免浏览器裁剪 scrollTop 后
+      // handleScroll 将其误判为用户上滑方向
+      lastScrollTopRef.current = el.scrollTop;
+
+      // 双帧 rAF 延迟清除标记，确保覆盖行 ResizeObserver 的异步回调
+      // （行宽可能因滚动条出现/消失而变化，触发 handleRowLayoutChange）
+      window.requestAnimationFrame(() => {
+        lastScrollTopRef.current = el.scrollTop;
+        window.requestAnimationFrame(() => {
+          isContainerResizingRef.current = false;
+          lastScrollTopRef.current = el.scrollTop;
+        });
+      });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shouldVirtualize, virtualizer]);
+
+  useEffect(() => {
+    return () => {
+      if (remeasureRafRef.current != null) {
+        window.cancelAnimationFrame(remeasureRafRef.current);
+        remeasureRafRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -503,21 +842,15 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     anchorOffsetRef.current = 0;
 
     if (anchorId) {
-      const idx = messages.findIndex((m) => String(m.id || "") === anchorId);
-      if (idx >= 0) {
+      const restored = scrollToMessageAnchor(anchorId, offsetInRow);
+      if (restored) {
         // Keep topLoad disarmed so the restored position (which may still be
         // near the top) doesn't immediately re-trigger another load.
         topLoadArmedRef.current = false;
-
-        const offsetInfo = virtualizer.getOffsetForIndex(idx, "start");
-        if (offsetInfo) {
-          virtualizer.scrollToOffset(offsetInfo[0] + offsetInRow, { align: "start", behavior: "auto" });
-        } else {
-          virtualizer.scrollToIndex(idx, { align: "start", behavior: "auto" });
-        }
+        setFollowBottom(false);
       }
     }
-  }, [isLoadingHistory, messages, virtualizer]);
+  }, [isLoadingHistory, scrollToMessageAnchor, setFollowBottom]);
 
   useEffect(() => {
     if (isLoadingHistory) return;
@@ -533,6 +866,23 @@ const VirtualMessageListInner = function VirtualMessageListInner({
       }}
       className="flex-1 min-h-0 overflow-auto px-4 py-4 relative"
       style={{ overflowAnchor: "none" }}
+      onWheelCapture={(event) => {
+        if (event.deltaY < -2) interruptBottomFollow();
+      }}
+      onTouchStart={(event) => {
+        touchClientYRef.current = event.touches[0]?.clientY ?? null;
+      }}
+      onTouchMove={(event) => {
+        const nextY = event.touches[0]?.clientY;
+        const prevY = touchClientYRef.current;
+        touchClientYRef.current = nextY ?? null;
+        if (typeof nextY === "number" && typeof prevY === "number" && nextY > prevY + 4) {
+          interruptBottomFollow();
+        }
+      }}
+      onTouchEnd={() => {
+        touchClientYRef.current = null;
+      }}
       onScroll={messages.length > 0 ? handleScroll : undefined}
       role="log"
       aria-label="Chat messages"
@@ -579,33 +929,56 @@ const VirtualMessageListInner = function VirtualMessageListInner({
             </div>
           )}
 
-          {/* Virtual list container */}
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-              contain: "layout paint",
-            }}
-          >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const message = messages[virtualRow.index];
-              return (
+          {shouldVirtualize ? (
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+                contain: "layout paint",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const message = messages[virtualRow.index];
+                return (
+                  <VirtualMessageRow
+                    key={virtualRow.key}
+                    virtualRow={virtualRow}
+                    message={message}
+                    actorById={actorById}
+                    actors={actors}
+                    displayNameMap={displayNameMap}
+                    agentState={agentStateById.get(String(message.by || "")) || null}
+                    isDark={isDark}
+                    readOnly={readOnly}
+                    groupId={groupId}
+                    groupLabelById={groupLabelById}
+                    highlightEventId={highlightEventId}
+                    onReply={onReply}
+                    onShowRecipients={onShowRecipients}
+                    onCopyLink={onCopyLink}
+                    onCopyContent={onCopyContent}
+                    onRelay={onRelay}
+                    onOpenSource={onOpenSource}
+                    onOpenPresentationRef={onOpenPresentationRef}
+                    measureElement={measureElement}
+                    onRowLayoutChange={handleRowLayoutChange}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <div className="w-full">
+              {messages.map((message) => (
                 <div
-                  key={virtualRow.key}
-                  data-index={virtualRow.index}
-                  ref={measureElement}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
+                  key={message.id ? String(message.id) : `${message.ts}-${String(message.by || "")}`}
+                  data-message-row="true"
+                  data-message-id={message.id ? String(message.id) : ""}
                   className="pb-6"
                 >
                   <MessageBubble
                     event={message}
+                    actorById={actorById}
                     actors={actors}
                     displayNameMap={displayNameMap}
                     agentState={agentStateById.get(String(message.by || "")) || null}
@@ -621,14 +994,15 @@ const VirtualMessageListInner = function VirtualMessageListInner({
                       }
                     }}
                     onCopyLink={onCopyLink}
-                    onRelay={onRelay}
-                    onOpenSource={onOpenSource}
-                    onOpenPresentationRef={onOpenPresentationRef}
-                  />
-                </div>
-              );
-            })}
-          </div>
+                  onCopyContent={onCopyContent}
+                  onRelay={onRelay}
+                  onOpenSource={onOpenSource}
+                  onOpenPresentationRef={onOpenPresentationRef}
+                />
+              </div>
+            ))}
+            </div>
+          )}
 
           {/* Scroll Button */}
           {!readOnly && showScrollButton && (

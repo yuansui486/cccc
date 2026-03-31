@@ -5,7 +5,8 @@ from typing import Any, Optional
 
 
 _HELP_ROLE_HEADER_RE = re.compile(r"^##\s*@role:\s*(\w+)\s*$", re.IGNORECASE)
-_HELP_ACTOR_HEADER_RE = re.compile(r"^##\s*@actor:\s*(.+?)\s*$", re.IGNORECASE)
+_HELP_ACTOR_HEADER_RE = re.compile(r"^##\s*@actor:\s*(\S+)(?:\s+(.*\S))?\s*$", re.IGNORECASE)
+_HELP_PET_HEADER_RE = re.compile(r"^##\s*@pet\s*:?\s*$", re.IGNORECASE)
 _HELP_H2_RE = re.compile(r"^##(?!#)\s+.*$")
 _HELP_LEGACY_ROLE_SECTION_RE = re.compile(r"^##\s+Role Notes\s*$", re.IGNORECASE)
 _HELP_H3_RE = re.compile(r"^###\s+(.+?)\s*$")
@@ -46,9 +47,19 @@ def _parse_tagged_section(section: str) -> Optional[dict[str, str]]:
     actor_match = _HELP_ACTOR_HEADER_RE.match(header)
     if actor_match:
         actor_id = str(actor_match.group(1) or "").strip()
+        inline_body = str(actor_match.group(2) or "").strip()
+        body_lines = [inline_body] if inline_body else []
+        body_lines.extend(lines[1:])
         return {
             "kind": "actor" if actor_id else "extra",
             "key": f"actor:{actor_id}" if actor_id else "actor:",
+            "raw": _trim_block(normalized),
+            "body": _trim_block("\n".join(body_lines)),
+        }
+    if _HELP_PET_HEADER_RE.match(header):
+        return {
+            "kind": "pet",
+            "key": "pet",
             "raw": _trim_block(normalized),
             "body": _trim_block("\n".join(lines[1:])),
         }
@@ -128,6 +139,7 @@ def parse_help_markdown(markdown: str) -> dict[str, Any]:
     extra_tagged_blocks: list[str] = []
     foreman = ""
     peer = ""
+    pet = ""
 
     for section in sections:
         raw = _trim_block(section)
@@ -155,6 +167,9 @@ def parse_help_markdown(markdown: str) -> dict[str, Any]:
             else:
                 extra_tagged_blocks.append(str(tagged.get("raw") or ""))
             continue
+        if kind == "pet":
+            pet = body
+            continue
         extra_tagged_blocks.append(str(tagged.get("raw") or ""))
 
     common = "\n\n".join(common_sections).strip()
@@ -170,6 +185,7 @@ def parse_help_markdown(markdown: str) -> dict[str, Any]:
         "common": common,
         "foreman": foreman,
         "peer": peer,
+        "pet": pet,
         "actor_notes": actor_notes,
         "extra_tagged_blocks": extra_tagged_blocks,
         "used_legacy_role_notes": used_legacy_role_notes,
@@ -181,6 +197,7 @@ def build_help_markdown(
     common: str,
     foreman: str,
     peer: str,
+    pet: str,
     actor_notes: dict[str, str],
     actor_order: Optional[list[str]] = None,
     extra_tagged_blocks: Optional[list[str]] = None,
@@ -189,6 +206,7 @@ def build_help_markdown(
     common_text = _trim_block(common)
     foreman_text = _trim_block(foreman)
     peer_text = _trim_block(peer)
+    pet_text = _trim_block(pet)
     actor_notes_map = dict(actor_notes or {})
     extra_blocks = [_trim_block(item) for item in list(extra_tagged_blocks or []) if _trim_block(item)]
 
@@ -198,6 +216,8 @@ def build_help_markdown(
         parts.append(f"## @role: foreman\n\n{foreman_text}")
     if peer_text:
         parts.append(f"## @role: peer\n\n{peer_text}")
+    if pet_text:
+        parts.append(f"## @pet\n\n{pet_text}")
 
     seen: set[str] = set()
     ordered_actor_ids: list[str] = []
@@ -235,18 +255,20 @@ def update_actor_help_note(markdown: str, actor_id: str, note: str, actor_order:
         common=str(parsed.get("common") or ""),
         foreman=str(parsed.get("foreman") or ""),
         peer=str(parsed.get("peer") or ""),
+        pet=str(parsed.get("pet") or ""),
         actor_notes=next_actor_notes,
         actor_order=actor_order,
         extra_tagged_blocks=list(parsed.get("extra_tagged_blocks") or []),
     )
 
 
-def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optional[str]) -> str:
+def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optional[str], include_pet: bool = False) -> str:
     """Filter CCCC_HELP markdown by optional conditional blocks.
 
     Supported markers (level-2 headings):
     - "## @role: foreman|peer"
     - "## @actor: <actor_id>"
+    - "## @pet"
 
     Untagged content is always included. Tagged blocks are filtered only when the selector is known.
 
@@ -278,6 +300,8 @@ def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optio
             if not actor_norm:
                 return False
             return actor_norm == str(tag_value or "").strip()
+        if tag_kind == "pet":
+            return bool(include_pet)
         return True
 
     def _flush() -> None:
@@ -289,9 +313,10 @@ def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optio
     for ln in lines:
         m_role = _HELP_ROLE_HEADER_RE.match(ln)
         m_actor = _HELP_ACTOR_HEADER_RE.match(ln)
+        m_pet = _HELP_PET_HEADER_RE.match(ln)
         is_h2 = bool(_HELP_H2_RE.match(ln))
 
-        if m_role or m_actor:
+        if m_role or m_actor or m_pet:
             _flush()
             if m_role:
                 tag_kind = "role"
@@ -304,9 +329,14 @@ def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optio
                 else:
                     ln = f"## Role: {tag_value}"
             else:
-                tag_kind = "actor"
-                tag_value = str(m_actor.group(1) or "").strip()
-                ln = "## Notes for you"
+                if m_actor:
+                    tag_kind = "actor"
+                    tag_value = str(m_actor.group(1) or "").strip()
+                    ln = "## Notes for you"
+                else:
+                    tag_kind = "pet"
+                    tag_value = ""
+                    ln = "## Pet Persona"
             buf.append(ln)
             continue
 

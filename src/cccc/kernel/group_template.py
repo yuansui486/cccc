@@ -8,7 +8,7 @@ import yaml  # type: ignore
 
 from ..contracts.v1.automation import AutomationRuleSet
 from ..contracts.v1.group_template import GroupTemplate, GroupTemplateActor
-from .group import Group
+from .group import Group, stored_automation_snippets
 from .prompt_files import (
     DEFAULT_PREAMBLE_BODY,
     HELP_FILENAME,
@@ -146,7 +146,7 @@ def build_group_template_from_group(group: Group, *, cccc_version: str = "") -> 
 
     ruleset: AutomationRuleSet
     raw_rules = automation.get("rules") if isinstance(automation.get("rules"), list) else []
-    raw_snippets = automation.get("snippets") if isinstance(automation.get("snippets"), dict) else {}
+    raw_snippets = stored_automation_snippets(automation)
     try:
         ruleset = AutomationRuleSet.model_validate({"rules": raw_rules, "snippets": raw_snippets})
     except Exception:

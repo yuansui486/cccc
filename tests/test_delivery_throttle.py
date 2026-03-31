@@ -62,6 +62,48 @@ class TestDeliveryThrottle(unittest.TestCase):
         cfg = _get_delivery_config(_G())
         self.assertEqual(cfg.get("min_interval_seconds"), 0)
 
+    def test_next_retry_delay_reflects_pending_retry_backoff(self) -> None:
+        from cccc.daemon.messaging.delivery import DeliveryThrottle
+
+        t = DeliveryThrottle()
+        t.queue_message(
+            "g1",
+            "a1",
+            event_id="e1",
+            by="user",
+            to=["@all"],
+            text="hello",
+            kind="chat.message",
+        )
+        pending = t.take_pending("g1", "a1")
+        t.requeue_front("g1", "a1", pending)
+
+        delay = t.next_retry_delay("g1", "a1", 0)
+
+        self.assertGreater(delay, 4.0)
+        self.assertLessEqual(delay, 5.0)
+
+    def test_debug_summary_includes_delivery_inflight(self) -> None:
+        from cccc.daemon.messaging.delivery import DeliveryThrottle
+
+        t = DeliveryThrottle()
+        t.queue_message(
+            "g1",
+            "a1",
+            event_id="e1",
+            by="user",
+            to=["@all"],
+            text="hello",
+            kind="chat.message",
+        )
+
+        self.assertTrue(t.try_begin_delivery("g1", "a1"))
+        summary = t.debug_summary("g1")
+        actor = summary.get("actors", {}).get("a1", {})
+        self.assertEqual(actor.get("delivery_inflight"), True)
+
+        t.end_delivery("g1", "a1")
+
 
 if __name__ == "__main__":
     unittest.main()

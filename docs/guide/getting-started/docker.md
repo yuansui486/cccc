@@ -105,6 +105,7 @@ The build uses a multi-stage approach: first compiles the Web UI (Node.js), then
 
 ```bash
 docker run -d \
+  --init \
   -p 127.0.0.1:8848:8848 \
   -v cccc-data:/data \
   -v /path/to/your/projects:/workspace \
@@ -114,6 +115,8 @@ docker run -d \
 ```
 
 Open `http://localhost:8848` in your browser. The sample command binds the host port to `127.0.0.1` on purpose, so you can safely create an **Admin Access Token** in **Settings > Web Access** before any broader exposure.
+
+The image now includes the minimal shared libraries plus `Xvfb` needed for projected browser surfaces such as NotebookLM sign-in and Presentation browser sessions. Playwright and Chromium binaries are still installed lazily on first use instead of being pre-baked into the image.
 
 ### 3. Verify
 
@@ -162,6 +165,7 @@ If you need to access the daemon IPC from outside the container (e.g. for SDK in
 
 ```bash
 docker run -d \
+  --init \
   -p 127.0.0.1:8848:8848 \
   -p 127.0.0.1:9765:9765 \
   -v cccc-data:/data \
@@ -171,6 +175,8 @@ docker run -d \
   --name cccc \
   cccc
 ```
+
+Projected browser sessions now default to a headed browser for better site compatibility. In server/container environments without a native display, CCCC uses `Xvfb` automatically. If you use projected browser features heavily and see Chromium renderer crashes inside the container, add `--ipc=host` to the `docker run` command. Playwright's Docker guidance recommends a larger shared-memory budget for Chromium workloads.
 
 ### Custom Claude CLI Configuration
 
@@ -220,6 +226,8 @@ docker compose up -d --build
 :::
 
 The `.env` file controls ports, volumes, API keys, and build-time proxy. See `docker/.env.example` for all options.
+
+The bundled Compose file already enables `init: true`, which helps reap short-lived browser helper processes cleanly.
 
 ::: tip Build Behind a Proxy
 Set `HTTP_PROXY` and `HTTPS_PROXY` in `.env` to pass proxy settings during `docker compose build`. Both build stages (Node.js and Python) will use the proxy for `curl`, `npm`, and `pip`.

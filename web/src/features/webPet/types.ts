@@ -1,12 +1,11 @@
 // Web Pet type definitions
 
-export type CatState = "napping" | "working" | "busy" | "needs_you";
+export type CatState = "napping" | "working" | "busy";
 
 export const CAT_STATES: readonly CatState[] = [
   "napping",
   "working",
   "busy",
-  "needs_you",
 ] as const;
 
 export interface AgentSummary {
@@ -15,38 +14,40 @@ export interface AgentSummary {
   focus: string;
 }
 
-export interface ActionItem {
-  id: string;
-  agent: string;
-  summary: string;
-  action?: ReminderAction;
-}
-
 export type ReminderKind =
-  | "waiting_user"
-  | "reply_required"
-  | "stalled_peer"
-  | "mention";
+  | "suggestion"
+  | "actor_down"
+  ;
 
 export type ReminderAction =
   | {
-      type: "open_chat";
+      type: "draft_message";
       groupId: string;
-      eventId: string;
+      text: string;
+      to?: string[];
+      replyTo?: string;
     }
   | {
-      type: "open_task";
+      type: "task_proposal";
       groupId: string;
-      taskId: string;
+      operation: "create" | "update" | "move" | "handoff" | "archive";
+      taskId?: string;
+      title?: string;
+      status?: string;
+      assignee?: string;
+      text?: string;
     }
   | {
-      type: "open_panel";
+      type: "automation_proposal";
       groupId: string;
+      title?: string;
+      summary?: string;
+      actions: Array<Record<string, unknown>>;
     }
   | {
-      type: "complete_task";
+      type: "restart_actor";
       groupId: string;
-      taskId: string;
+      actorId: string;
     };
 
 export interface PetReminder {
@@ -60,6 +61,9 @@ export interface PetReminder {
     eventId?: string;
     taskId?: string;
     actorId?: string;
+    actorRole?: string;
+    errorReason?: string;
+    suggestionKind?: "mention" | "reply_required";
   };
   fingerprint: string;
   action: ReminderAction;
@@ -73,7 +77,6 @@ export interface ConnectionStatus {
 export interface PanelData {
   teamName: string;
   agents: AgentSummary[];
-  actionItems: ActionItem[];
   connection: ConnectionStatus;
   taskProgress?: {
     total: number;

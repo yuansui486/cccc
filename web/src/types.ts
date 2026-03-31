@@ -22,14 +22,27 @@ export type GroupDoc = {
   state?: "active" | "idle" | "paused";
 };
 
-// Event attachment metadata
+// Server-backed attachment metadata carried by canonical ledger events.
 export type EventAttachment = {
   kind?: string;
   path?: string;
   title?: string;
   bytes?: number;
   mime_type?: string;
+  local_preview_url?: string;
 };
+
+// Local-only preview attachment used by optimistic messages before upload confirmation.
+export type OptimisticAttachment = {
+  kind?: string;
+  path?: string;
+  title?: string;
+  bytes?: number;
+  mime_type?: string;
+  local_preview_url: string;
+};
+
+export type MessageAttachment = EventAttachment | OptimisticAttachment;
 
 export type MessageRef = {
   kind?: string;
@@ -77,7 +90,7 @@ export type ChatMessageData = {
   dst_group_id?: string;
   dst_to?: string[];
   refs?: MessageRef[];
-  attachments?: EventAttachment[];
+  attachments?: MessageAttachment[];
 };
 
 export type ObligationStatus = {
@@ -112,9 +125,15 @@ export type Actor = {
   id: string;
   role?: string;
   title?: string;
+  avatar_url?: string | null;
+  has_custom_avatar?: boolean;
   enabled?: boolean;
   running?: boolean;  // Actual process running status
   idle_seconds?: number | null;  // Seconds since last PTY output (null if not running/headless)
+  effective_working_state?: "stopped" | "idle" | "working" | "waiting" | "stuck" | string;
+  effective_working_reason?: string;
+  effective_working_updated_at?: string | null;
+  effective_active_task_id?: string | null;
   command?: string[];
   env?: Record<string, string>;
   capability_autoload?: string[];
@@ -294,6 +313,19 @@ export type AgentState = {
   updated_at?: string | null;
 };
 
+export type ActorRuntimeState = {
+  id: string;
+  runtime?: string;
+  runner?: string;
+  runner_effective?: string;
+  running?: boolean;
+  idle_seconds?: number | null;
+  effective_working_state?: "stopped" | "idle" | "working" | "waiting" | "stuck" | string;
+  effective_working_reason?: string;
+  effective_working_updated_at?: string | null;
+  effective_active_task_id?: string | null;
+};
+
 export type RuntimeInfo = {
   name: string;
   display_name: string;
@@ -338,6 +370,7 @@ export type Task = {
   blocked_by?: string[];
   waiting_on?: TaskWaitingOn | null;
   handoff_to?: string | null;
+  task_type?: string | null;
   notes?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -462,6 +495,7 @@ export type GroupContext = {
     recent_handoffs?: CoordinationNote[];
   };
   agent_states?: AgentState[];
+  actors_runtime?: ActorRuntimeState[];
   attention?: ContextAttention | null;
   board?: ContextBoard | null;
   tasks_summary?: GroupTasksSummary;
@@ -642,12 +676,14 @@ export type GroupSpaceProviderAuthStatus = {
   provider: "notebooklm" | string;
   state: GroupSpaceProviderAuthState;
   phase?: string;
+  delivery?: "local_browser" | "projected_browser" | string;
   session_id?: string;
   started_at?: string;
   updated_at?: string;
   finished_at?: string;
   message?: string;
   error?: { code?: string; message?: string } | null;
+  projected_browser?: PresentationBrowserSurfaceState | null;
 };
 
 export type GroupSpaceLane = "work" | "memory" | string;
@@ -826,6 +862,12 @@ export type AutomationRuleSet = {
   snippets: Record<string, string>;
 };
 
+export type AutomationSnippetCatalog = {
+  built_in: Record<string, string>;
+  built_in_overrides: Record<string, string>;
+  custom: Record<string, string>;
+};
+
 export type AutomationRuleStatus = {
   last_fired_at?: string;
   last_error_at?: string;
@@ -837,6 +879,7 @@ export type AutomationRuleStatus = {
 
 export type GroupAutomation = {
   ruleset: AutomationRuleSet;
+  snippet_catalog?: AutomationSnippetCatalog;
   status: Record<string, AutomationRuleStatus>;
   config_path: string;
   supported_vars: string[];

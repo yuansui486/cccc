@@ -24,6 +24,7 @@ AgentRuntime = Literal[
     "neovate",
     "custom",
 ]
+InternalActorKind = Literal["pet"]
 
 # Group state controls automation/runtime behavior.
 # - active/idle/paused are logical workflow states
@@ -46,6 +47,8 @@ class Actor(BaseModel):
     enabled: bool = True
     runner: RunnerKind = "pty"  # "pty" for interactive, "headless" for MCP-driven
     runtime: AgentRuntime = "codex"  # Agent CLI runtime
+    internal_kind: Optional[InternalActorKind] = None
+    avatar_asset_path: str = ""
     profile_id: str = ""
     profile_scope: Literal["global", "user"] = "global"
     profile_owner: str = ""

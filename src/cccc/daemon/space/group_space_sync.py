@@ -1340,6 +1340,38 @@ def mark_group_space_sync_pending(
     return state_doc
 
 
+def restore_group_space_sync_state(
+    group_id: str,
+    snapshot: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return {"ok": False, "code": "missing_group_id", "message": "missing group_id"}
+    group = load_group(gid)
+    if group is None:
+        return {"ok": False, "code": "group_not_found", "message": f"group not found: {gid}"}
+
+    space_root = resolve_space_root_from_group(group, create=True)
+    if space_root is None:
+        return {"ok": False, "code": "no_local_scope", "message": "group has no local scope"}
+
+    clean_snapshot = dict(snapshot or {})
+    if clean_snapshot.get("available"):
+        clean_snapshot.pop("available", None)
+        clean_snapshot.pop("space_root", None)
+        clean_snapshot.pop("ok", None)
+        _save_state(space_root, clean_snapshot)
+        clean_snapshot["available"] = True
+        clean_snapshot["space_root"] = str(space_root)
+        clean_snapshot["ok"] = True
+        return clean_snapshot
+
+    state_path = space_state_path(space_root)
+    if state_path.exists():
+        state_path.unlink()
+    return {"ok": True, "available": False, "space_root": str(space_root)}
+
+
 def sync_group_space_files(
     group_id: str,
     *,

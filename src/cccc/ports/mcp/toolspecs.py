@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .task_types import TASK_TYPE_IDS
+
 _CCCC_HELP_DESCRIPTION = (
     "Load the effective collaboration playbook for this group "
     "(role-aware, on-demand, with runtime quick-use hints). "
@@ -144,6 +146,18 @@ MCP_TOOLS = [
                 "refs": {"type": "array", "items": {"type": "object"}},
             },
             required=["text"],
+        ),
+    },
+    {
+        "name": "cccc_pet_decisions",
+        "description": "Pet-only decision surface: action=get|replace|clear. The pet actor should write structured Web Pet decisions here instead of sending reminder-like chat messages.",
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "action": {"type": "string", "enum": ["get", "replace", "clear"], "default": "get"},
+                "decisions": {"type": "array", "items": {"type": "object"}},
+            }
         ),
     },
     {
@@ -589,10 +603,15 @@ MCP_TOOLS = [
                 "include_archived": {"type": "boolean", "default": False},
                 "title": {"type": "string"},
                 "outcome": {"type": "string"},
+                "type": {
+                    "type": "string",
+                    "enum": list(TASK_TYPE_IDS),
+                    "description": "Optional durable task type. Use `free` for lightweight work, `standard` for normal closed-loop tasks, or `optimization` for metric-sensitive work.",
+                },
                 "status": {
                     "type": "string",
                     "enum": ["planned", "active", "done", "archived"],
-                    "description": "Lifecycle status. Required for action=move. If passed with action=update, the wrapper also applies the corresponding lifecycle transition.",
+                    "description": "Lifecycle status. Required for action=move. If passed with action=update, the wrapper also applies the corresponding lifecycle transition. Use action=update when the same call must also change outcome, notes, checklist, or type.",
                 },
                 "parent_id": {"type": "string"},
                 "assignee": {"type": "string"},
@@ -600,7 +619,10 @@ MCP_TOOLS = [
                 "blocked_by": {"type": "array", "items": {"type": "string"}},
                 "waiting_on": {"type": "string", "enum": ["none", "user", "actor", "external"]},
                 "handoff_to": {"type": "string"},
-                "notes": {"type": "string"},
+                "notes": {
+                    "type": "string",
+                    "description": "Freeform task notes. Keep them compact; use structured sections only when the workflow genuinely needs them.",
+                },
                 "checklist": {
                     "type": "array",
                     "items": {

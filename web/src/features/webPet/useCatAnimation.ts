@@ -5,13 +5,11 @@ import type { CatState, CatEngine, PetReaction } from "./types";
 import nappingSpriteUrl from "../../assets/webPet/napping.png";
 import workingSpriteUrl from "../../assets/webPet/working.png";
 import busySpriteUrl from "../../assets/webPet/busy.png";
-import needsYouSpriteUrl from "../../assets/webPet/needs_you.png";
 
 const SPRITE_URLS = {
   napping: nappingSpriteUrl,
   working: workingSpriteUrl,
   busy: busySpriteUrl,
-  needs_you: needsYouSpriteUrl,
 } as const;
 
 interface UseCatAnimationOptions {

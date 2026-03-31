@@ -21,7 +21,6 @@ from ..schemas import (
     require_group,
 )
 
-
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}", dependencies=[Depends(require_group)])
 
@@ -41,26 +40,67 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 refs.append(item)
         return refs
 
+    def _normalize_priority(raw: str) -> str:
+        prio = str(raw or "normal").strip() or "normal"
+        if prio not in ("normal", "attention"):
+            raise HTTPException(status_code=400, detail={"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"})
+        return prio
+
+    def _normalize_client_id(raw: str) -> str:
+        return str(raw or "").strip()
+
+    def _build_message_request(op: str, *, group_id: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        return {"op": op, "args": {"group_id": group_id, **args}}
+
+    async def _submit_message(req: Dict[str, Any]) -> Dict[str, Any]:
+        return await ctx.daemon(req)
+
+    async def _store_upload_attachments(group: Any, files: list[UploadFile]) -> list[dict[str, Any]]:
+        attachments: list[dict[str, Any]] = []
+        for upload in files or []:
+            raw = await upload.read()
+            if len(raw) > WEB_MAX_FILE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail={"code": "file_too_large", "message": f"file too large (> {WEB_MAX_FILE_MB}MB)"},
+                )
+            attachments.append(
+                store_blob_bytes(
+                    group,
+                    data=raw,
+                    filename=str(getattr(upload, "filename", "") or "file"),
+                    mime_type=str(getattr(upload, "content_type", "") or ""),
+                )
+            )
+        return attachments
+
+    def _message_text_for_upload(*, text: str, attachments: list[dict[str, Any]]) -> str:
+        msg_text = str(text or "").strip()
+        if msg_text or not attachments:
+            return msg_text
+        if len(attachments) == 1:
+            return f"[file] {attachments[0].get('title') or 'file'}"
+        return f"[files] {len(attachments)} attachments"
+
     @group_router.post("/send")
     async def send(group_id: str, req: SendRequest) -> Dict[str, Any]:
-        return await ctx.daemon(
-            {
-                "op": "send",
-                "args": {
-                    "group_id": group_id,
-                    "text": req.text,
-                    "by": req.by,
-                    "to": list(req.to),
-                    "path": req.path,
-                    "priority": req.priority,
-                    "reply_required": _normalize_reply_required(req.reply_required),
-                    "src_group_id": req.src_group_id,
-                    "src_event_id": req.src_event_id,
-                    "client_id": req.client_id,
-                    "refs": list(req.refs),
-                },
-            }
+        daemon_req = _build_message_request(
+            "send",
+            group_id=group_id,
+            args={
+                "text": req.text,
+                "by": req.by,
+                "to": list(req.to),
+                "path": req.path,
+                "priority": req.priority,
+                "reply_required": _normalize_reply_required(req.reply_required),
+                "src_group_id": req.src_group_id,
+                "src_event_id": req.src_event_id,
+                "client_id": _normalize_client_id(req.client_id),
+                "refs": list(req.refs),
+            },
         )
+        return await _submit_message(daemon_req)
 
     @group_router.post("/send_cross_group")
     async def send_cross_group(request: Request, group_id: str, req: SendCrossGroupRequest) -> Dict[str, Any]:
@@ -87,22 +127,21 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/reply")
     async def reply(group_id: str, req: ReplyRequest) -> Dict[str, Any]:
-        return await ctx.daemon(
-            {
-                "op": "reply",
-                "args": {
-                    "group_id": group_id,
-                    "text": req.text,
-                    "by": req.by,
-                    "to": list(req.to),
-                    "reply_to": req.reply_to,
-                    "priority": req.priority,
-                    "reply_required": _normalize_reply_required(req.reply_required),
-                    "client_id": req.client_id,
-                    "refs": list(req.refs),
-                },
-            }
+        daemon_req = _build_message_request(
+            "reply",
+            group_id=group_id,
+            args={
+                "text": req.text,
+                "by": req.by,
+                "to": list(req.to),
+                "reply_to": req.reply_to,
+                "priority": req.priority,
+                "reply_required": _normalize_reply_required(req.reply_required),
+                "client_id": _normalize_client_id(req.client_id),
+                "refs": list(req.refs),
+            },
         )
+        return await _submit_message(daemon_req)
 
     @group_router.post("/events/{event_id}/ack")
     async def chat_ack(group_id: str, event_id: str, req: UserAckRequest) -> Dict[str, Any]:
@@ -140,7 +179,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         to_list = [str(x).strip() for x in (parsed_to if isinstance(parsed_to, list) else []) if str(x).strip()]
 
         # Preflight recipients before storing attachments (avoid orphan blobs on invalid/no-op sends).
-        from ....kernel.actors import resolve_recipient_tokens, list_actors
+        from ....kernel.actors import list_visible_actors, resolve_recipient_tokens
         from ....kernel.messaging import get_default_send_to
         try:
             canonical_to = resolve_recipient_tokens(group, to_list)
@@ -155,7 +194,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             mention_pattern = re.compile(r"@(\w[\w-]*)")
             mentions = mention_pattern.findall(raw_text)
             if mentions:
-                actor_ids = {str(a.get("id") or "").strip() for a in list_actors(group) if isinstance(a, dict)}
+                actor_ids = {str(a.get("id") or "").strip() for a in list_visible_actors(group) if isinstance(a, dict)}
                 mention_tokens: list[str] = []
                 for m in mentions:
                     if not m:
@@ -175,52 +214,27 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         # Note: enabled-recipient validation + auto-wake is handled by the daemon.
 
-        attachments: list[dict[str, Any]] = []
-        for f in files or []:
-            raw = await f.read()
-            if len(raw) > WEB_MAX_FILE_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail={"code": "file_too_large", "message": f"file too large (> {WEB_MAX_FILE_MB}MB)"},
-                )
-            attachments.append(
-                store_blob_bytes(
-                    group,
-                    data=raw,
-                    filename=str(getattr(f, "filename", "") or "file"),
-                    mime_type=str(getattr(f, "content_type", "") or ""),
-                )
-            )
-
-        msg_text = str(text or "").strip()
-        if not msg_text and attachments:
-            if len(attachments) == 1:
-                msg_text = f"[file] {attachments[0].get('title') or 'file'}"
-            else:
-                msg_text = f"[files] {len(attachments)} attachments"
-
-        prio = str(priority or "normal").strip() or "normal"
-        if prio not in ("normal", "attention"):
-            raise HTTPException(status_code=400, detail={"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"})
+        attachments = await _store_upload_attachments(group, files)
+        msg_text = _message_text_for_upload(text=text, attachments=attachments)
+        prio = _normalize_priority(priority)
         refs = _parse_refs_json(refs_json)
-
-        return await ctx.daemon(
-            {
-                "op": "send",
-                "args": {
-                    "group_id": group_id,
-                    "text": msg_text,
-                    "by": by,
-                    "to": canonical_to,
-                    "path": path,
-                    "attachments": attachments,
-                    "priority": prio,
-                    "reply_required": _normalize_reply_required(reply_required),
-                    "client_id": str(client_id or "").strip(),
-                    "refs": refs,
-                },
-            }
+        normalized_client_id = _normalize_client_id(client_id)
+        daemon_req = _build_message_request(
+            "send",
+            group_id=group_id,
+            args={
+                "text": msg_text,
+                "by": by,
+                "to": canonical_to,
+                "path": path,
+                "attachments": attachments,
+                "priority": prio,
+                "reply_required": _normalize_reply_required(reply_required),
+                "client_id": normalized_client_id,
+                "refs": refs,
+            },
         )
+        return await _submit_message(daemon_req)
 
     @group_router.post("/reply_upload")
     async def reply_upload(
@@ -270,52 +284,27 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         # Note: enabled-recipient validation + auto-wake is handled by the daemon.
 
-        attachments: list[dict[str, Any]] = []
-        for f in files or []:
-            raw = await f.read()
-            if len(raw) > WEB_MAX_FILE_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail={"code": "file_too_large", "message": f"file too large (> {WEB_MAX_FILE_MB}MB)"},
-                )
-            attachments.append(
-                store_blob_bytes(
-                    group,
-                    data=raw,
-                    filename=str(getattr(f, "filename", "") or "file"),
-                    mime_type=str(getattr(f, "content_type", "") or ""),
-                )
-            )
-
-        msg_text = str(text or "").strip()
-        if not msg_text and attachments:
-            if len(attachments) == 1:
-                msg_text = f"[file] {attachments[0].get('title') or 'file'}"
-            else:
-                msg_text = f"[files] {len(attachments)} attachments"
-
-        prio = str(priority or "normal").strip() or "normal"
-        if prio not in ("normal", "attention"):
-            raise HTTPException(status_code=400, detail={"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"})
+        attachments = await _store_upload_attachments(group, files)
+        msg_text = _message_text_for_upload(text=text, attachments=attachments)
+        prio = _normalize_priority(priority)
         refs = _parse_refs_json(refs_json)
-
-        return await ctx.daemon(
-            {
-                "op": "reply",
-                "args": {
-                    "group_id": group_id,
-                    "text": msg_text,
-                    "by": by,
-                    "to": canonical_to,
-                    "reply_to": reply_to_id,
-                    "attachments": attachments,
-                    "priority": prio,
-                    "reply_required": _normalize_reply_required(reply_required),
-                    "client_id": str(client_id or "").strip(),
-                    "refs": refs,
-                },
-            }
+        normalized_client_id = _normalize_client_id(client_id)
+        daemon_req = _build_message_request(
+            "reply",
+            group_id=group_id,
+            args={
+                "text": msg_text,
+                "by": by,
+                "to": canonical_to,
+                "reply_to": reply_to_id,
+                "attachments": attachments,
+                "priority": prio,
+                "reply_required": _normalize_reply_required(reply_required),
+                "client_id": normalized_client_id,
+                "refs": refs,
+            },
         )
+        return await _submit_message(daemon_req)
 
     @group_router.get("/blobs/{blob_name}")
     async def blob_download(group_id: str, blob_name: str) -> FileResponse:

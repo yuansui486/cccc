@@ -10,8 +10,10 @@ from ...kernel.actors import find_actor, list_actors, update_actor
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
 from ...kernel.permissions import require_actor_permission
+from ...kernel.runtime import runtime_start_preflight_error
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
+from ...runners.platform_support import pty_support_error_message
 from ...util.conv import coerce_bool
 from .actor_profile_runtime import (
     PROFILE_CONTROLLED_FIELDS,
@@ -72,6 +74,7 @@ def handle_actor_update(
     allowed = {
         "role",
         "title",
+        "avatar_asset_path",
         "command",
         "env",
         "default_scope_key",
@@ -259,12 +262,18 @@ def handle_actor_update(
                         },
                     )
                 if runner_effective != "headless":
+                    if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):
+                        return _error("actor_update_failed", pty_support_error_message() or "PTY runner is not supported in this environment.")
                     try:
                         mcp_ready = bool(ensure_mcp_installed(runtime, cwd))
                     except Exception as e:
                         return _error("actor_update_failed", f"failed to install MCP: {e}")
                     if not mcp_ready:
                         return _error("actor_update_failed", f"failed to install MCP for runtime: {runtime}")
+                    effective_cmd = normalize_runtime_command(runtime, list(cmd or []))
+                    runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=runner_effective)
+                    if runtime_error:
+                        return _error("runtime_unavailable", runtime_error)
 
                 if runner_effective == "headless":
                     effective_env = merge_actor_env_with_private(group.group_id, actor_id, env)

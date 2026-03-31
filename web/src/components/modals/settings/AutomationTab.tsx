@@ -4,7 +4,14 @@ import { useTranslation } from "react-i18next";
 
 import * as api from "../../../services/api";
 import { getRecipientTokenLabel } from "../../../utils/displayText";
-import type { Actor, AutomationRule, AutomationRuleAction, AutomationRuleSet, AutomationRuleStatus } from "../../../types";
+import type {
+  Actor,
+  AutomationRule,
+  AutomationRuleAction,
+  AutomationRuleSet,
+  AutomationRuleStatus,
+  AutomationSnippetCatalog,
+} from "../../../types";
 import {
   Section,
   SparkIcon,
@@ -86,6 +93,11 @@ export function AutomationTab(props: AutomationTabProps) {
   const [rulesBusy, setRulesBusy] = useState(false);
   const [rulesErr, setRulesErr] = useState("");
   const [ruleset, setRuleset] = useState<AutomationRuleSet | null>(null);
+  const [snippetCatalog, setSnippetCatalog] = useState<AutomationSnippetCatalog>({
+    built_in: {},
+    built_in_overrides: {},
+    custom: {},
+  });
   const [rulesVersion, setRulesVersion] = useState<number | undefined>(undefined);
   const [status, setStatus] = useState<Record<string, AutomationRuleStatus>>({});
   const [supportedVars, setSupportedVars] = useState<string[]>([]);
@@ -114,6 +126,7 @@ export function AutomationTab(props: AutomationTabProps) {
         return;
       }
       setRuleset(resp.result.ruleset);
+      setSnippetCatalog(resp.result.snippet_catalog || { built_in: {}, built_in_overrides: {}, custom: {} });
       setRulesVersion(typeof resp.result.version === "number" ? resp.result.version : undefined);
       setStatus(resp.result.status || {});
       setSupportedVars(Array.isArray(resp.result.supported_vars) ? resp.result.supported_vars.map(String) : []);
@@ -130,7 +143,29 @@ export function AutomationTab(props: AutomationTabProps) {
   }, [props.groupId]);
 
   const draft: AutomationRuleSet = ruleset || { rules: [], snippets: {} };
-  const snippetIds = useMemo(() => Object.keys(draft.snippets || {}).sort(), [draft.snippets]);
+  const builtinSnippetDefaults = useMemo(() => ({ ...(snippetCatalog.built_in || {}) }), [snippetCatalog.built_in]);
+  const builtinOverrideIds = useMemo(
+    () => new Set(Object.keys(snippetCatalog.built_in_overrides || {})),
+    [snippetCatalog.built_in_overrides],
+  );
+  const snippetIds = useMemo(() => {
+    const all = new Set<string>([
+      ...Object.keys(builtinSnippetDefaults || {}),
+      ...Object.keys(draft.snippets || {}),
+    ]);
+    const builtInIds = Array.from(all).filter((id) => builtinSnippetDefaults[id] !== undefined).sort();
+    const customIds = Array.from(all).filter((id) => builtinSnippetDefaults[id] === undefined).sort();
+    return [...builtInIds, ...customIds];
+  }, [builtinSnippetDefaults, draft.snippets]);
+  const snippetModalIds = useMemo(() => {
+    const all = new Set<string>([
+      ...Object.keys(builtinSnippetDefaults || {}),
+      ...Object.keys(snippetDrafts || {}),
+    ]);
+    const builtInIds = Array.from(all).filter((id) => builtinSnippetDefaults[id] !== undefined).sort();
+    const customIds = Array.from(all).filter((id) => builtinSnippetDefaults[id] === undefined).sort();
+    return [...builtInIds, ...customIds];
+  }, [builtinSnippetDefaults, snippetDrafts]);
 
   const actorTargetOptions = useMemo(() => {
     const out: Array<{ value: string; label: string }> = [
@@ -253,7 +288,7 @@ export function AutomationTab(props: AutomationTabProps) {
     setTemplateErr("");
     setRulesErr("");
     setNewSnippetId("");
-    setSnippetDrafts({ ...(draft.snippets || {}) });
+    setSnippetDrafts({ ...builtinSnippetDefaults, ...(draft.snippets || {}) });
     setSnippetManagerOpen(true);
   };
 
@@ -273,6 +308,10 @@ export function AutomationTab(props: AutomationTabProps) {
       setTemplateErr(t("automation.snippetInvalid"));
       return;
     }
+    if (builtinSnippetDefaults[id] !== undefined) {
+      setTemplateErr(t("automation.builtInSnippetReserved", { id }));
+      return;
+    }
     if (snippetDrafts[id] !== undefined) {
       setTemplateErr(t("automation.snippetExists", { id }));
       return;
@@ -287,6 +326,9 @@ export function AutomationTab(props: AutomationTabProps) {
   };
 
   const deleteSnippet = (id: string) => {
+    if (builtinSnippetDefaults[id] !== undefined) {
+      return;
+    }
     const ok = window.confirm(t("automation.deleteSnippetConfirm", { id }));
     if (!ok) return;
     setSnippetDrafts((prev) => {
@@ -294,6 +336,12 @@ export function AutomationTab(props: AutomationTabProps) {
       delete next[id];
       return next;
     });
+  };
+
+  const resetBuiltinSnippet = (id: string) => {
+    const fallback = builtinSnippetDefaults[id];
+    if (fallback === undefined) return;
+    setSnippetDrafts((prev) => ({ ...prev, [id]: fallback }));
   };
 
   const validateRuleset = (candidate: AutomationRuleSet): string | null => {
@@ -419,7 +467,7 @@ export function AutomationTab(props: AutomationTabProps) {
 
   const saveSnippetManager = async (): Promise<void> => {
     const ok = await persistRuleset(
-      { ...draft, snippets: { ...snippetDrafts } },
+      { ...draft, snippets: { ...builtinSnippetDefaults, ...snippetDrafts } },
       {
         failureMessage: t("automation.failedToSave"),
         versionConflictMessage: t("automation.versionConflict"),
@@ -635,12 +683,15 @@ export function AutomationTab(props: AutomationTabProps) {
         saveBusy={rulesBusy}
         newSnippetId={newSnippetId}
         supportedVars={supportedVars}
-        snippetIds={Object.keys(snippetDrafts).sort()}
+        snippetIds={snippetModalIds}
         snippets={snippetDrafts}
+        builtinSnippetDefaults={builtinSnippetDefaults}
+        builtinOverrideIds={Array.from(builtinOverrideIds)}
         onClose={closeSnippetManager}
         onNewSnippetIdChange={setNewSnippetId}
         onAddSnippet={addSnippet}
         onDeleteSnippet={deleteSnippet}
+        onResetBuiltinSnippet={resetBuiltinSnippet}
         onUpdateSnippet={updateSnippet}
         onSave={saveSnippetManager}
       />

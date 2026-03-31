@@ -17,10 +17,26 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from ..browser.projected_browser_runtime import (
+    collect_storage_state as _shared_collect_storage_state,
+    ensure_sync_playwright as _shared_ensure_sync_playwright,
+    get_cookies_for_urls as _shared_get_cookies_for_urls,
+    install_playwright_chromium as _shared_install_playwright_chromium,
+    install_playwright_package as _shared_install_playwright_package,
+    seed_context_with_storage_state as _shared_seed_context_with_storage_state,
+)
 from ...providers.notebooklm.health import parse_notebooklm_auth_json
 from ...providers.notebooklm.compat import probe_notebooklm_vendor
 from ...providers.notebooklm.errors import NotebookLMProviderError
 from ...paths import ensure_home
+from .notebooklm_auth_browser_runtime import (
+    close_notebooklm_auth_browser_session,
+    get_notebooklm_auth_browser_session_state,
+    notebooklm_auth_browser_google_cookies,
+    notebooklm_auth_browser_page_urls,
+    notebooklm_auth_browser_storage_state,
+    open_notebooklm_auth_browser_session,
+)
 from .group_space_store import (
     get_space_provider_state,
     load_space_provider_secrets,
@@ -33,6 +49,7 @@ _FLOW_STATE: Dict[str, Any] = {
     "provider": "notebooklm",
     "state": "idle",
     "phase": "idle",
+    "delivery": "",
     "session_id": "",
     "started_at": "",
     "updated_at": "",
@@ -45,6 +62,8 @@ _FLOW_CANCEL_EVENT: Optional[threading.Event] = None
 _SPACE_PROVIDER_SECRET_KEY = "NOTEBOOKLM_AUTH_JSON"
 _LIGHT_LOGIN_PROBE_INTERVAL_SECONDS = 6.0
 _CREDENTIAL_RETRY_INTERVAL_SECONDS = 8.0
+_PROJECTED_BROWSER_DEFAULT_WIDTH = 1366
+_PROJECTED_BROWSER_DEFAULT_HEIGHT = 900
 
 
 def _now_iso() -> str:
@@ -54,6 +73,19 @@ def _now_iso() -> str:
 def _snapshot_state() -> Dict[str, Any]:
     with _FLOW_LOCK:
         out = deepcopy(_FLOW_STATE)
+    return _decorate_snapshot(out)
+
+
+def _decorate_snapshot(out: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        out["projected_browser"] = get_notebooklm_auth_browser_session_state()
+    except Exception:
+        out["projected_browser"] = {
+            "active": False,
+            "state": "idle",
+            "message": "No projected NotebookLM auth browser session is active.",
+            "error": {},
+        }
     return out
 
 
@@ -116,37 +148,16 @@ def _cancel_requested(cancel_event: threading.Event, *, session_id: str) -> bool
 
 
 def _install_playwright_chromium() -> None:
-    cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    if proc.returncode != 0:
-        stderr = str(proc.stderr or "").strip()
-        stdout = str(proc.stdout or "").strip()
-        detail = stderr or stdout or "playwright install chromium failed"
-        raise RuntimeError(detail[:800])
+    _shared_install_playwright_chromium()
 
 
 def _install_playwright_package() -> None:
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--disable-pip-version-check",
-        "playwright>=1.40,<2",
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-    if proc.returncode != 0:
-        stderr = str(proc.stderr or "").strip()
-        stdout = str(proc.stdout or "").strip()
-        detail = stderr or stdout or "pip install playwright failed"
-        raise RuntimeError(detail[:1000])
+    _shared_install_playwright_package()
 
 
 def _ensure_sync_playwright():
     try:
-        from playwright.sync_api import sync_playwright
-
-        return sync_playwright
+        return _shared_ensure_sync_playwright()
     except Exception:
         _update_state(
             state="running",
@@ -154,13 +165,10 @@ def _ensure_sync_playwright():
             message="Installing Playwright (first run only)...",
             error={},
         )
-        _install_playwright_package()
-    try:
-        from playwright.sync_api import sync_playwright
-
-        return sync_playwright
-    except Exception as e:
-        raise RuntimeError(f"failed to initialize Playwright after auto-install: {e}") from e
+        try:
+            return _shared_ensure_sync_playwright()
+        except Exception as e:
+            raise RuntimeError(f"failed to initialize Playwright after auto-install: {e}") from e
 
 
 class _AuthBrowserSession:
@@ -270,6 +278,29 @@ def _remove_tree_with_retries(path: Path, *, strict: bool) -> None:
 def _clear_managed_browser_profile_dir(*, strict: bool = True) -> None:
     root = ensure_home() / "state" / "notebooklm_auth" / "browser_profile"
     _remove_tree_with_retries(root, strict=strict)
+
+
+def _clear_managed_browser_profile_session_dir(path: Path | None, *, strict: bool = False) -> None:
+    if path is None:
+        return
+    try:
+        target = Path(path)
+    except Exception:
+        return
+    try:
+        root = _managed_browser_profile_dir().resolve()
+    except Exception:
+        root = None
+    try:
+        resolved = target.resolve()
+    except Exception:
+        resolved = target
+    if root is not None:
+        try:
+            resolved.relative_to(root)
+        except Exception:
+            return
+    _remove_tree_with_retries(target, strict=strict)
 
 
 def _fresh_managed_browser_profile_session_dir() -> Path:
@@ -478,27 +509,20 @@ def _page_urls(context: Any) -> list[str]:
 
 
 def _collect_storage_state(context: Any) -> Dict[str, Any]:
-    state: Dict[str, Any] = {}
-    try:
-        raw_state = context.storage_state()
-        if isinstance(raw_state, dict):
-            state = dict(raw_state)
-    except Exception:
-        state = {}
+    state: Dict[str, Any] = _shared_collect_storage_state(context)
     cookies = state.get("cookies")
     has_cookies = isinstance(cookies, list) and len(cookies) > 0
     if not has_cookies:
         fallback_cookies: list[Dict[str, Any]] = []
         try:
-            fetched = context.cookies(
+            fallback_cookies = _shared_get_cookies_for_urls(
+                context,
                 [
                     "https://notebooklm.google.com",
                     "https://accounts.google.com",
                     "https://www.google.com",
-                ]
+                ],
             )
-            if isinstance(fetched, list):
-                fallback_cookies = [item for item in fetched if isinstance(item, dict)]
         except Exception:
             fallback_cookies = []
         if fallback_cookies:
@@ -512,59 +536,18 @@ def _collect_storage_state(context: Any) -> Dict[str, Any]:
 
 
 def _peek_google_cookies(context: Any) -> list[Dict[str, Any]]:
-    try:
-        fetched = context.cookies(
-            [
-                "https://notebooklm.google.com",
-                "https://accounts.google.com",
-                "https://www.google.com",
-            ]
-        )
-    except Exception:
-        return []
-    if not isinstance(fetched, list):
-        return []
-    return [item for item in fetched if isinstance(item, dict)]
+    return _shared_get_cookies_for_urls(
+        context,
+        [
+            "https://notebooklm.google.com",
+            "https://accounts.google.com",
+            "https://www.google.com",
+        ],
+    )
 
 
 def _seed_context_with_storage_state(context: Any, storage_state: Dict[str, Any]) -> int:
-    cookies = storage_state.get("cookies") if isinstance(storage_state, dict) else None
-    if not isinstance(cookies, list) or not cookies:
-        return 0
-    payload: list[Dict[str, Any]] = []
-    for item in cookies:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        value = str(item.get("value") or "")
-        domain = str(item.get("domain") or "").strip()
-        path = str(item.get("path") or "/").strip() or "/"
-        if not name or not domain:
-            continue
-        row: Dict[str, Any] = {
-            "name": name,
-            "value": value,
-            "domain": domain,
-            "path": path,
-        }
-        expires = item.get("expires")
-        if isinstance(expires, (int, float)):
-            row["expires"] = float(expires)
-        if "httpOnly" in item:
-            row["httpOnly"] = bool(item.get("httpOnly"))
-        if "secure" in item:
-            row["secure"] = bool(item.get("secure"))
-        same_site = str(item.get("sameSite") or "").strip()
-        if same_site:
-            row["sameSite"] = same_site
-        payload.append(row)
-    if not payload:
-        return 0
-    try:
-        context.add_cookies(payload)
-        return len(payload)
-    except Exception:
-        return 0
+    return _shared_seed_context_with_storage_state(context, storage_state)
 
 
 def _load_saved_storage_state() -> Dict[str, Any] | None:
@@ -650,12 +633,20 @@ def _persist_storage_state(storage_state: Dict[str, Any]) -> None:
     )
 
 
+def _close_projected_browser_if_any() -> None:
+    try:
+        _ = close_notebooklm_auth_browser_session()
+    except Exception:
+        pass
+
+
 def _connect_worker(
     *,
     session_id: str,
     timeout_seconds: int,
     cancel_event: threading.Event,
     force_reauth: bool = False,
+    projected: bool = False,
 ) -> None:
     prior_state = get_space_provider_state("notebooklm")
     prior_enabled = bool(prior_state.get("enabled"))
@@ -716,46 +707,60 @@ def _connect_worker(
         _update_state(
             state="running",
             phase="preparing_browser",
-            message=("Preparing browser for account switch..." if force_reauth else "Preparing browser..."),
+            message=(
+                "Preparing interactive sign-in..." if projected else ("Preparing browser for account switch..." if force_reauth else "Preparing browser...")
+            ),
             error={},
+            delivery="projected_browser" if projected else "local_browser",
         )
-        try:
-            sync_playwright = _ensure_sync_playwright()
-        except Exception as e:
-            message = f"Failed to prepare browser runtime for Google sign-in: {e}"
-            _mark_provider_error(message)
-            _set_failed(
-                code="space_provider_auth_flow_dependency_missing",
-                message=message,
-            )
-            return
-
         deadline = time.time() + max(60, min(timeout_seconds, 1800))
-        profile_root = _fresh_managed_browser_profile_session_dir()
-        with sync_playwright() as pw:
-            browser_session = _start_browser_session(pw, profile_root=profile_root)
+        saved_state = None if force_reauth else _load_saved_storage_state()
+        restored_count = 0
+        next_probe_at = 0.0
+
+        if projected:
+            profile_root: Path | None = None
             try:
-                context = browser_session.context
-                saved_state = None if force_reauth else _load_saved_storage_state()
-                restored_count = 0
-                if isinstance(saved_state, dict):
-                    restored_count = _seed_context_with_storage_state(context, saved_state)
-                pages = list(getattr(context, "pages", []) or [])
-                page = pages[0] if pages else context.new_page()
-                next_probe_at = 0.0
+                profile_root = _fresh_managed_browser_profile_session_dir()
+                restored_count = len(saved_state.get("cookies") or []) if isinstance(saved_state, dict) else 0
+                browser_surface = open_notebooklm_auth_browser_session(
+                    profile_dir=profile_root,
+                    url="https://notebooklm.google.com/",
+                    width=_PROJECTED_BROWSER_DEFAULT_WIDTH,
+                    height=_PROJECTED_BROWSER_DEFAULT_HEIGHT,
+                    seed_storage_state=saved_state if isinstance(saved_state, dict) else None,
+                )
+            except Exception as e:
+                message = f"Failed to prepare projected sign-in browser: {e}"
+                _mark_provider_error(message)
+                _set_failed(
+                    code="space_provider_auth_flow_dependency_missing",
+                    message=message,
+                )
+                return
+            if str(browser_surface.get("state") or "") == "failed":
+                browser_error = browser_surface.get("error") if isinstance(browser_surface.get("error"), dict) else {}
+                message = str(browser_error.get("message") or browser_surface.get("message") or "Failed to prepare projected sign-in browser.")
+                _mark_provider_error(message)
+                _set_failed(
+                    code=str(browser_error.get("code") or "space_provider_auth_flow_dependency_missing"),
+                    message=message,
+                )
+                return
+
+            try:
                 _update_state(
                     state="running",
                     phase="waiting_user_login",
                     message=(
-                        f"Browser opened ({browser_session.strategy}). "
+                        f"Interactive sign-in ready ({str(browser_surface.get('strategy') or 'chromium')}). "
                         f"{'Restored previous session cookies. ' if restored_count > 0 else ''}"
                         f"{'Previous browser sign-in was cleared. ' if force_reauth else ''}"
-                        "Sign in with Google in the opened window."
+                        "Continue sign-in in CCCC Web."
                     ),
                     error={},
+                    delivery="projected_browser",
                 )
-                if not _is_notebooklm_url(str(getattr(page, "url", "") or "")):
-                    page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded", timeout=120000)
                 while True:
                     if _cancel_requested(cancel_event, session_id=session_id):
                         return
@@ -772,23 +777,36 @@ def _connect_worker(
                         time.sleep(0.5)
                         continue
 
-                    urls = _page_urls(context)
-                    has_notebook_page = any(_is_notebooklm_url(u) for u in urls)
-                    cookie_peek: list[Dict[str, Any]] = []
-                    if not has_notebook_page:
-                        cookie_peek = _peek_google_cookies(context)
-                    if not has_notebook_page and not cookie_peek:
-                        _update_state(
-                            state="running",
-                            phase="waiting_user_login",
-                            message="Browser opened. Waiting for NotebookLM sign-in to complete...",
-                            error={},
-                        )
-                        next_probe_at = now_ts + _LIGHT_LOGIN_PROBE_INTERVAL_SECONDS
-                        time.sleep(0.5)
-                        continue
+                    try:
+                        urls = notebooklm_auth_browser_page_urls()
+                        has_notebook_page = any(_is_notebooklm_url(u) for u in urls)
+                        cookie_peek: list[Dict[str, Any]] = []
+                        if not has_notebook_page:
+                            cookie_peek = notebooklm_auth_browser_google_cookies()
+                        if not has_notebook_page and not cookie_peek:
+                            _update_state(
+                                state="running",
+                                phase="waiting_user_login",
+                                message="Interactive sign-in is open. Waiting for NotebookLM sign-in to complete...",
+                                error={},
+                                delivery="projected_browser",
+                            )
+                            next_probe_at = now_ts + _LIGHT_LOGIN_PROBE_INTERVAL_SECONDS
+                            time.sleep(0.5)
+                            continue
 
-                    storage_state = _collect_storage_state(context)
+                        storage_state = notebooklm_auth_browser_storage_state()
+                    except Exception as e:
+                        browser_state = get_notebooklm_auth_browser_session_state()
+                        browser_error = browser_state.get("error") if isinstance(browser_state.get("error"), dict) else {}
+                        message = str(browser_error.get("message") or browser_state.get("message") or e or "Interactive sign-in browser became unavailable.")
+                        _mark_provider_error(message)
+                        _set_failed(
+                            code=str(browser_error.get("code") or "space_provider_auth_flow_failed"),
+                            message=message,
+                        )
+                        return
+
                     cookies = storage_state.get("cookies") if isinstance(storage_state, dict) else None
                     has_any_cookies = isinstance(cookies, list) and len(cookies) > 0
                     if not has_any_cookies and cookie_peek:
@@ -807,11 +825,170 @@ def _connect_worker(
                             phase="waiting_user_login",
                             message="NotebookLM opened. Waiting for Google session cookies...",
                             error={},
+                            delivery="projected_browser",
                         )
                         next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
                         time.sleep(0.5)
                         continue
-                    if has_any_cookies:
+                    persisted = False
+                    try:
+                        _ = parse_notebooklm_auth_json(
+                            json.dumps(storage_state, ensure_ascii=False),
+                            label=_SPACE_PROVIDER_SECRET_KEY,
+                        )
+                        _persist_storage_state(storage_state)
+                        persisted = True
+                    except NotebookLMProviderError:
+                        _update_state(
+                            state="running",
+                            phase="waiting_user_login",
+                            message="Waiting for complete Google session cookies...",
+                            error={},
+                            delivery="projected_browser",
+                        )
+                        next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
+                        time.sleep(0.5)
+                        continue
+                    _update_state(
+                        state="running",
+                        phase="verifying_session",
+                        message=f"Verifying session and saving credential... (cookies={len(cookies)})",
+                        error={},
+                        delivery="projected_browser",
+                    )
+                    try:
+                        _verify_storage_state(storage_state)
+                    except NotebookLMProviderError:
+                        _update_state(
+                            state="running",
+                            phase="waiting_user_login",
+                            message="Sign-in detected but session is incomplete. Keep the NotebookLM tab open for a moment...",
+                            error={},
+                            delivery="projected_browser",
+                        )
+                        next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
+                        time.sleep(0.5)
+                        continue
+                    except Exception as e:
+                        msg = str(e)
+                        if "vendor package unavailable" in msg or "compatibility mismatch" in msg:
+                            raise
+                        if persisted and (not _is_hard_auth_failure(msg)):
+                            _mark_provider_connected(mode="active", last_error="")
+                            _set_succeeded("Google account connected.")
+                            return
+                        brief = (msg or "verification pending").replace("\n", " ").strip()
+                        if len(brief) > 160:
+                            brief = brief[:160] + "..."
+                        _update_state(
+                            state="running",
+                            phase="waiting_user_login",
+                            message=f"Sign-in detected, verification pending: {brief}",
+                            error={},
+                            delivery="projected_browser",
+                        )
+                        next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
+                        time.sleep(0.5)
+                        continue
+                    _mark_provider_connected(mode="active", last_error="")
+                    _set_succeeded("Google account connected.")
+                    return
+            finally:
+                _close_projected_browser_if_any()
+                _clear_managed_browser_profile_session_dir(profile_root, strict=False)
+
+        try:
+            sync_playwright = _ensure_sync_playwright()
+        except Exception as e:
+            message = f"Failed to prepare browser runtime for Google sign-in: {e}"
+            _mark_provider_error(message)
+            _set_failed(
+                code="space_provider_auth_flow_dependency_missing",
+                message=message,
+            )
+            return
+
+        profile_root = _fresh_managed_browser_profile_session_dir()
+        try:
+            with sync_playwright() as pw:
+                browser_session = _start_browser_session(pw, profile_root=profile_root)
+                try:
+                    context = browser_session.context
+                    if isinstance(saved_state, dict):
+                        restored_count = _seed_context_with_storage_state(context, saved_state)
+                    pages = list(getattr(context, "pages", []) or [])
+                    page = pages[0] if pages else context.new_page()
+                    _update_state(
+                        state="running",
+                        phase="waiting_user_login",
+                        message=(
+                            f"Browser opened ({browser_session.strategy}). "
+                            f"{'Restored previous session cookies. ' if restored_count > 0 else ''}"
+                            f"{'Previous browser sign-in was cleared. ' if force_reauth else ''}"
+                            "Sign in with Google in the opened window."
+                        ),
+                        error={},
+                        delivery="local_browser",
+                    )
+                    if not _is_notebooklm_url(str(getattr(page, "url", "") or "")):
+                        page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded", timeout=120000)
+                    while True:
+                        if _cancel_requested(cancel_event, session_id=session_id):
+                            return
+                        if time.time() >= deadline:
+                            message = "Google sign-in timed out. Please retry Connect."
+                            _mark_provider_error(message)
+                            _set_failed(
+                                code="space_provider_auth_flow_timeout",
+                                message=message,
+                            )
+                            return
+                        now_ts = time.time()
+                        if now_ts < next_probe_at:
+                            time.sleep(0.5)
+                            continue
+
+                        urls = _page_urls(context)
+                        has_notebook_page = any(_is_notebooklm_url(u) for u in urls)
+                        cookie_peek: list[Dict[str, Any]] = []
+                        if not has_notebook_page:
+                            cookie_peek = _peek_google_cookies(context)
+                        if not has_notebook_page and not cookie_peek:
+                            _update_state(
+                                state="running",
+                                phase="waiting_user_login",
+                                message="Browser opened. Waiting for NotebookLM sign-in to complete...",
+                                error={},
+                                delivery="local_browser",
+                            )
+                            next_probe_at = now_ts + _LIGHT_LOGIN_PROBE_INTERVAL_SECONDS
+                            time.sleep(0.5)
+                            continue
+
+                        storage_state = _collect_storage_state(context)
+                        cookies = storage_state.get("cookies") if isinstance(storage_state, dict) else None
+                        has_any_cookies = isinstance(cookies, list) and len(cookies) > 0
+                        if not has_any_cookies and cookie_peek:
+                            storage_state = {
+                                **(storage_state if isinstance(storage_state, dict) else {}),
+                                "cookies": list(cookie_peek),
+                                "origins": list(storage_state.get("origins") or [])
+                                if isinstance(storage_state, dict) and isinstance(storage_state.get("origins"), list)
+                                else [],
+                            }
+                            cookies = cookie_peek
+                            has_any_cookies = True
+                        if not has_any_cookies:
+                            _update_state(
+                                state="running",
+                                phase="waiting_user_login",
+                                message="NotebookLM opened. Waiting for Google session cookies...",
+                                error={},
+                                delivery="local_browser",
+                            )
+                            next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
+                            time.sleep(0.5)
+                            continue
                         persisted = False
                         try:
                             _ = parse_notebooklm_auth_json(
@@ -826,6 +1003,7 @@ def _connect_worker(
                                 phase="waiting_user_login",
                                 message="Waiting for complete Google session cookies...",
                                 error={},
+                                delivery="local_browser",
                             )
                             next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
                             time.sleep(0.5)
@@ -835,6 +1013,7 @@ def _connect_worker(
                             phase="verifying_session",
                             message=f"Verifying session and saving credential... (cookies={len(cookies)})",
                             error={},
+                            delivery="local_browser",
                         )
                         try:
                             _verify_storage_state(storage_state)
@@ -844,6 +1023,7 @@ def _connect_worker(
                                 phase="waiting_user_login",
                                 message="Sign-in detected but session is incomplete. Keep the NotebookLM tab open for a moment...",
                                 error={},
+                                delivery="local_browser",
                             )
                             next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
                             time.sleep(0.5)
@@ -864,6 +1044,7 @@ def _connect_worker(
                                 phase="waiting_user_login",
                                 message=f"Sign-in detected, verification pending: {brief}",
                                 error={},
+                                delivery="local_browser",
                             )
                             next_probe_at = now_ts + _CREDENTIAL_RETRY_INTERVAL_SECONDS
                             time.sleep(0.5)
@@ -871,21 +1052,21 @@ def _connect_worker(
                         _mark_provider_connected(mode="active", last_error="")
                         _set_succeeded("Google account connected.")
                         return
-                    next_probe_at = now_ts + _LIGHT_LOGIN_PROBE_INTERVAL_SECONDS
-                    time.sleep(0.5)
-            finally:
-                browser_session.close()
+                finally:
+                    browser_session.close()
+        finally:
+            _clear_managed_browser_profile_session_dir(profile_root, strict=False)
     except Exception as e:
         _mark_provider_error(str(e))
         _set_failed(code="space_provider_auth_flow_failed", message=str(e))
 
 
-def start_notebooklm_auth_flow(*, timeout_seconds: int = 900, force_reauth: bool = False) -> Dict[str, Any]:
+def start_notebooklm_auth_flow(*, timeout_seconds: int = 900, force_reauth: bool = False, projected: bool = False) -> Dict[str, Any]:
     global _FLOW_THREAD, _FLOW_CANCEL_EVENT
     with _FLOW_LOCK:
         active = _FLOW_THREAD is not None and _FLOW_THREAD.is_alive()
         if active:
-            return deepcopy(_FLOW_STATE)
+            return _decorate_snapshot(deepcopy(_FLOW_STATE))
         session_id = f"nbl_auth_{secrets.token_hex(6)}"
         cancel_event = threading.Event()
         _FLOW_CANCEL_EVENT = cancel_event
@@ -897,6 +1078,7 @@ def start_notebooklm_auth_flow(*, timeout_seconds: int = 900, force_reauth: bool
                 "timeout_seconds": int(timeout_seconds or 900),
                 "cancel_event": cancel_event,
                 "force_reauth": bool(force_reauth),
+                "projected": bool(projected),
             },
             daemon=True,
         )
@@ -915,10 +1097,11 @@ def start_notebooklm_auth_flow(*, timeout_seconds: int = 900, force_reauth: bool
                     else "Starting Google connect flow..."
                 ),
                 "error": {},
+                "delivery": "projected_browser" if projected else "local_browser",
             }
         )
         _FLOW_THREAD.start()
-        return deepcopy(_FLOW_STATE)
+        return _decorate_snapshot(deepcopy(_FLOW_STATE))
 
 
 def get_notebooklm_auth_flow_status() -> Dict[str, Any]:
@@ -931,11 +1114,12 @@ def cancel_notebooklm_auth_flow() -> Dict[str, Any]:
         running = _FLOW_THREAD is not None and _FLOW_THREAD.is_alive()
     if running and isinstance(cancel_event, threading.Event):
         cancel_event.set()
-        return _update_state(
+        _ = _update_state(
             state="running",
             phase="canceling",
             message="Cancel requested...",
         )
+        return _snapshot_state()
     return _snapshot_state()
 
 
@@ -952,6 +1136,7 @@ def disconnect_notebooklm_auth_flow() -> Dict[str, Any]:
         clear=True,
     )
     os.environ.pop("CCCC_NOTEBOOKLM_AUTH_JSON", None)
+    _close_projected_browser_if_any()
     _clear_managed_browser_profile_dir(strict=False)
     with _FLOW_LOCK:
         _FLOW_THREAD = None
@@ -967,6 +1152,7 @@ def disconnect_notebooklm_auth_flow() -> Dict[str, Any]:
                 "finished_at": "",
                 "message": "",
                 "error": {},
+                "delivery": "",
             }
         )
-        return deepcopy(_FLOW_STATE)
+        return _decorate_snapshot(deepcopy(_FLOW_STATE))

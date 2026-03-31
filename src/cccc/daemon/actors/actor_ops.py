@@ -5,8 +5,12 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import find_actor, get_effective_role, list_actors
+from ...kernel.actors import find_actor
+from ...kernel.context import ContextStorage
 from ...kernel.group import load_group
+from ...kernel.query_projections import get_actor_list_projection
+from ...kernel.working_state import DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES, derive_effective_working_state
+from ..context.context_ops import _agent_state_to_dict
 from .private_env_ops import mask_private_env_value
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
@@ -29,31 +33,62 @@ def handle_actor_list(
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    actors = list_actors(group)
+    actors = get_actor_list_projection(group)
+    storage = ContextStorage(group)
+    agent_rows = [_agent_state_to_dict(agent) for agent in storage.load_agents().agents]
+    agent_state_by_id = {
+        str(item.get("id") or "").strip(): item
+        for item in agent_rows
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    } if isinstance(agent_rows, list) else {}
     for actor in actors:
         aid = str(actor.get("id") or "")
         if not aid:
             continue
-        actor["role"] = get_effective_role(group, aid)
         runner_kind = str(actor.get("runner") or "pty").strip()
         effective_runner = effective_runner_kind(runner_kind)
+        idle_seconds = None
+        headless_state = None
         if effective_runner == "headless":
             actor["running"] = headless_runner.SUPERVISOR.actor_running(group_id, aid)
+            state = headless_runner.SUPERVISOR.get_state(group_id=group_id, actor_id=aid)
+            headless_state = state.model_dump() if state is not None else None
             actor["idle_seconds"] = None
         else:
             actor["running"] = pty_runner.SUPERVISOR.actor_running(group_id, aid)
-            actor["idle_seconds"] = (
+            idle_seconds = (
                 pty_runner.SUPERVISOR.idle_seconds(group_id=group_id, actor_id=aid)
                 if actor["running"]
                 else None
             )
+            actor["idle_seconds"] = idle_seconds
+        pty_terminal_text = ""
+        if effective_runner == "pty" and actor["running"]:
+            try:
+                pty_terminal_text = pty_runner.SUPERVISOR.tail_output(
+                    group_id=group_id,
+                    actor_id=aid,
+                    max_bytes=DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES,
+                ).decode("utf-8", errors="replace")
+            except Exception:
+                pty_terminal_text = ""
         if effective_runner != runner_kind:
             actor["runner_effective"] = effective_runner
+        actor.update(
+            derive_effective_working_state(
+                running=bool(actor.get("running")),
+                effective_runner=effective_runner,
+                runtime=str(actor.get("runtime") or ""),
+                idle_seconds=idle_seconds,
+                pty_terminal_text=pty_terminal_text,
+                agent_state=agent_state_by_id.get(aid),
+                headless_state=headless_state,
+            )
+        )
     if include_unread:
-        from ...kernel.inbox import batch_unread_counts
+        from ...kernel.inbox import get_indexed_unread_counts
 
-        actor_ids = [str(a.get("id") or "") for a in actors if a.get("id")]
-        counts = batch_unread_counts(group, actor_ids=actor_ids)
+        counts = get_indexed_unread_counts(group, actors=actors)
         for actor in actors:
             aid = str(actor.get("id") or "")
             if aid:

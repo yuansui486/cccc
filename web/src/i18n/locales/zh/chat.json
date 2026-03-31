@@ -65,6 +65,7 @@
   "needReply": "需回复",
   "copyText": "复制文本",
   "copyLink": "复制链接",
+  "contentCopied": "已复制内容",
   "relay": "转发",
   "relayToGroup": "转发到其他工作组",
   "download": "下载 {{name}}",

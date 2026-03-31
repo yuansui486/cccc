@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -135,12 +136,21 @@ class TestEnabledFlagCoercion(unittest.TestCase):
                     )
 
                 self.assertTrue(send_resp.ok, getattr(send_resp, "error", None))
+                deadline = time.monotonic() + 1.0
+                while time.monotonic() < deadline and start_mock.call_count < 1:
+                    time.sleep(0.01)
                 self.assertEqual(start_mock.call_count, 1)
 
-                after = load_group(gid)
-                self.assertIsNotNone(after)
-                assert after is not None
-                actor_after = find_actor(after, "peer1")
+                actor_after = None
+                deadline = time.monotonic() + 1.0
+                while time.monotonic() < deadline:
+                    after = load_group(gid)
+                    self.assertIsNotNone(after)
+                    assert after is not None
+                    actor_after = find_actor(after, "peer1")
+                    if actor_after is not None and coerce_bool((actor_after or {}).get("enabled"), default=False):
+                        break
+                    time.sleep(0.01)
                 self.assertIsNotNone(actor_after)
                 self.assertTrue(coerce_bool((actor_after or {}).get("enabled"), default=False))
         finally:

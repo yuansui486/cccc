@@ -12,6 +12,8 @@ from ..contracts.v1 import Event
 from ..contracts.v1.event import normalize_event_data
 from ..util.fs import atomic_write_text
 from ..util.file_lock import acquire_lockfile, release_lockfile
+from .ledger_index import append_event_to_index
+from .ledger_segments import read_last_lines_across_sources
 
 
 MAX_EVENT_BYTES = 256_000
@@ -96,9 +98,15 @@ def append_event(
     lk = acquire_lockfile(lock, blocking=True)
     try:
         with ledger_path.open("a", encoding="utf-8") as f:
+            start_offset = int(f.tell() or 0)
             f.write(line + "\n")
+            next_offset = start_offset + len((line + "\n").encode("utf-8", errors="replace"))
     finally:
         release_lockfile(lk)
+    try:
+        append_event_to_index(ledger_path, out, next_offset_bytes=next_offset)
+    except Exception:
+        pass
     _notify_append(out)
     return out
 
@@ -106,23 +114,12 @@ def append_event(
 def read_last_lines(path: Path, n: int) -> list[str]:
     if n <= 0:
         return []
-    if not path.exists():
-        return []
     try:
-        with path.open("rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            block = 8192
-            data = b""
-            while size > 0 and data.count(b"\n") <= n:
-                step = min(block, size)
-                f.seek(size - step)
-                data = f.read(step) + data
-                size -= step
-        lines = data.splitlines()[-n:]
-        return [ln.decode("utf-8", errors="replace") for ln in lines]
+        return read_last_lines_across_sources(path.parent, n)
     except Exception as e:
-        LOGGER.warning("failed to read ledger tail with binary scan: path=%s err=%s", path, e)
+        LOGGER.warning("failed to read ledger tail across sources: path=%s err=%s", path, e)
+        if not path.exists():
+            return []
         try:
             return path.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
         except Exception as e2:

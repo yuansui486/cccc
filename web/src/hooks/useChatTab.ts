@@ -1,7 +1,8 @@
 // useChatTab - Encapsulates ChatTab business logic and state.
 // Reduces prop drilling by providing state from stores and computed values directly.
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   useGroupStore,
   useUIStore,
@@ -10,9 +11,10 @@ import {
   useFormStore,
   selectChatBucketState,
 } from "../stores";
+import { getEffectiveComposerDestGroupId } from "../stores/useComposerStore";
 import { getChatSession } from "../stores/useUIStore";
 import { useChatOutboxStore, selectOutboxEntries } from "../stores/chatOutboxStore";
-import type { Actor, LedgerEvent, ChatMessageData, MessageRef } from "../types";
+import type { Actor, LedgerEvent, ChatMessageData, MessageRef, OptimisticAttachment } from "../types";
 import * as api from "../services/api";
 
 interface UseChatTabOptions {
@@ -42,8 +44,9 @@ export function useChatTab({
   chatAtBottomRef,
   scrollRef,
 }: UseChatTabOptions) {
+  const { t } = useTranslation(["chat", "common"]);
   // ============ Stores ============
-  const { events, chatWindow, hasMoreHistory, isLoadingHistory, isChatWindowLoading } = useGroupStore(
+  const { events, chatWindow, hasMoreHistory, hasLoadedTail, isLoadingHistory, isChatWindowLoading } = useGroupStore(
     useCallback((state) => selectChatBucketState(state, selectedGroupId), [selectedGroupId])
   );
   const appendEvent = useGroupStore((state) => state.appendEvent);
@@ -56,7 +59,6 @@ export function useChatTab({
 
   const busy = useUIStore((s) => s.busy);
   const chatSessions = useUIStore((s) => s.chatSessions);
-  const setBusy = useUIStore((s) => s.setBusy);
   const setChatFilter = useUIStore((s) => s.setChatFilter);
   const setShowScrollButton = useUIStore((s) => s.setShowScrollButton);
   const setChatUnreadCount = useUIStore((s) => s.setChatUnreadCount);
@@ -71,6 +73,7 @@ export function useChatTab({
   const { chatFilter, showScrollButton, chatUnreadCount, scrollSnapshot } = chatSession;
 
   const {
+    activeGroupId,
     composerText,
     composerFiles,
     toText,
@@ -100,12 +103,13 @@ export function useChatTab({
   );
   const enqueueOutbox = useChatOutboxStore((s) => s.enqueue);
   const removeOutbox = useChatOutboxStore((s) => s.remove);
+  const sendInFlightRef = useRef(false);
 
   // ============ Computed Values ============
 
   // Valid recipient tokens
   const validRecipientSet = useMemo(() => {
-    const out = new Set<string>(["@all", "@foreman", "@peers", "@user", "user"]);
+    const out = new Set<string>(["@all", "@foreman", "@peers"]);
     for (const a of recipientActors) {
       const id = String(a.id || "").trim();
       if (id) out.add(id);
@@ -123,27 +127,25 @@ export function useChatTab({
     const seen = new Set<string>();
     for (const token of raw) {
       if (token === "@") continue;
-      const normalized = token === "user" ? "@user" : token;
-      if (!validRecipientSet.has(normalized)) continue;
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
-      out.push(normalized);
+      if (!validRecipientSet.has(token)) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      out.push(token);
     }
     return out;
   }, [toText, validRecipientSet]);
 
   // Mention suggestions
   const mentionSuggestions = useMemo(() => {
-    const base = ["@all", "@foreman", "@peers", "@user"];
+    const base = ["@all", "@foreman", "@peers"];
     const actorIds = recipientActors.map((a) => String(a.id || "")).filter((id) => id);
     return [...base, ...actorIds];
   }, [recipientActors]);
 
   // Send group ID (respects cross-group destination)
   const sendGroupId = useMemo(() => {
-    const raw = String(destGroupId || "").trim();
-    return raw || selectedGroupId;
-  }, [destGroupId, selectedGroupId]);
+    return getEffectiveComposerDestGroupId(destGroupId, activeGroupId, selectedGroupId);
+  }, [destGroupId, activeGroupId, selectedGroupId]);
 
   // Project root
   const projectRoot = useMemo(() => {
@@ -178,7 +180,17 @@ export function useChatTab({
   // Filtered live chat messages (canonical + optimistic pending merged)
   const liveChatMessages = useMemo(() => {
     const all = events.filter((ev) => ev.kind === "chat.message");
-    const pendingEvents = outboxEntries.map((entry) => entry.event);
+    const canonicalClientIds = new Set(
+      all
+        .map((ev) => {
+          const data = ev.data && typeof ev.data === "object" ? (ev.data as { client_id?: unknown }) : null;
+          return data && typeof data.client_id === "string" ? data.client_id.trim() : "";
+        })
+        .filter((clientId) => clientId.length > 0)
+    );
+    const pendingEvents = outboxEntries
+      .filter((entry) => !canonicalClientIds.has(entry.localId))
+      .map((entry) => entry.event);
     const merged = pendingEvents.length > 0 ? [...all, ...pendingEvents] : all;
 
     if (chatFilter === "attention") {
@@ -260,7 +272,7 @@ export function useChatTab({
   }, [inChatWindow, chatWindow]);
 
   const effectiveIsLoadingHistory = inChatWindow ? isChatWindowLoading : isLoadingHistory;
-  const effectiveHasMoreHistory = inChatWindow ? false : hasMoreHistory;
+  const effectiveHasMoreHistory = inChatWindow ? false : (!hasLoadedTail || hasMoreHistory);
 
   const hasHydratedGroupDoc = useMemo(() => {
     if (!groupDoc || String(groupDoc.group_id || "") !== String(selectedGroupId || "")) return false;
@@ -344,7 +356,7 @@ export function useChatTab({
   );
 
   const sendMessage = useCallback(async () => {
-    if (busy === "send") return; // re-entrancy guard (keyboard shortcut can bypass disabled button)
+    if (sendInFlightRef.current) return; // keyboard shortcut can bypass UI state; keep send single-flight locally
     const txt = composerText.trim();
     if (!selectedGroupId) return;
     if (!txt && composerFiles.length === 0) return;
@@ -407,6 +419,14 @@ export function useChatTab({
     // Optimistic: enqueue to outbox immediately for same-group sends.
     // If the request fails, we remove the pending entry and restore the composer.
     if (!isCrossGroup) {
+      const optimisticAttachments: OptimisticAttachment[] = composerFilesSnapshot.map((file) => ({
+        kind: "file",
+        path: "",
+        title: String(file.name || "file"),
+        bytes: Number(file.size || 0),
+        mime_type: String(file.type || ""),
+        local_preview_url: String(URL.createObjectURL(file)),
+      }));
       const optimisticEvent: LedgerEvent = {
         id: localId,
         kind: "chat.message",
@@ -423,9 +443,7 @@ export function useChatTab({
           quote_text: replyTargetSnapshot?.text || undefined,
           refs: refsSnapshot,
           format: "plain",
-          // Keep optimistic events schema-compatible with real ledger events.
-          // Attachment previews should only render after the server returns blob paths.
-          attachments: [],
+          attachments: optimisticAttachments,
           _optimistic: true,
         } as LedgerEvent["data"],
       };
@@ -433,7 +451,7 @@ export function useChatTab({
     }
 
     applyImmediateComposerFeedback();
-    setBusy("send");
+    sendInFlightRef.current = true;
     try {
       const to = toTokens;
       let resp;
@@ -472,10 +490,26 @@ export function useChatTab({
         showError(`${resp.error.code}: ${resp.error.message}`);
         return;
       }
-      // HTTP success: remove optimistic entry, append canonical server event
-      removeOutbox(selectedGroupId, localId);
-      if (!isCrossGroup && resp.result && typeof resp.result === "object" && "event" in resp.result && resp.result.event) {
-        appendEvent(resp.result.event as LedgerEvent, selectedGroupId);
+      const canonicalEvent =
+        !isCrossGroup && resp.result && typeof resp.result === "object" && "event" in resp.result
+          ? (resp.result.event as LedgerEvent | null | undefined)
+          : undefined;
+
+      // Cross-group sends do not deliver a canonical event into the current
+      // group's stream, so clear the optimistic entry on HTTP success.
+      //
+      // Same-group sends keep the optimistic row until SSE reconciliation by
+      // client_id. Replacing an optimistic attachment preview with the HTTP
+      // response event causes a second image load/layout pass, which produces
+      // a visible jump while the list is following bottom.
+      if (isCrossGroup) {
+        removeOutbox(selectedGroupId, localId);
+      }
+      // For same-group sends, rely on SSE to append the canonical event and
+      // clear the matching optimistic row. Cross-group sends still need the
+      // returned event because they do not stream back into the current group.
+      if (canonicalEvent && isCrossGroup) {
+        appendEvent(canonicalEvent, selectedGroupId);
       }
       setDestGroupId(selectedGroupId);
       clearDraft(selectedGroupId);
@@ -498,10 +532,9 @@ export function useChatTab({
       restoreComposerState();
       showError(message);
     } finally {
-      setBusy("");
+      sendInFlightRef.current = false;
     }
   }, [
-    busy,
     composerText,
     composerFiles,
     selectedGroupId,
@@ -516,7 +549,6 @@ export function useChatTab({
     appendEvent,
     enqueueOutbox,
     removeOutbox,
-    setBusy,
     showError,
     clearComposer,
     setComposerText,
@@ -574,6 +606,42 @@ export function useChatTab({
       }
     },
     [selectedGroupId, showNotice, showError]
+  );
+
+  const copyMessageText = useCallback(
+    async (ev: LedgerEvent) => {
+      if (ev.kind !== "chat.message") return;
+      const data = ev.data as ChatMessageData | undefined;
+      const text = String(data?.text || "");
+      if (!text.trim()) return;
+
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          ta.style.top = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+        } catch {
+          ok = false;
+        }
+      }
+
+      if (ok) {
+        showNotice({ message: t("chat:contentCopied", { defaultValue: "Content copied" }) });
+      } else {
+        showError(t("common:copyFailed", { defaultValue: "Copy failed" }));
+      }
+    },
+    [showError, showNotice, t]
   );
 
   const startReply = useCallback(
@@ -757,6 +825,7 @@ export function useChatTab({
     // Actions
     sendMessage,
     copyMessageLink,
+    copyMessageText,
     startReply,
     showRecipients,
     relayMessage,

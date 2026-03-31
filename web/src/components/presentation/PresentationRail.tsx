@@ -190,7 +190,7 @@ export function PresentationRail({
             isDark ? "border-white/5" : "border-black/5"
           )}
         >
-          <div>
+          <div className="min-w-0">
             <h2 className={classNames("text-sm font-semibold", isDark ? "text-slate-100" : "text-gray-900")}>
               {t("presentationTitle", { defaultValue: "Presentation" })}
             </h2>
@@ -205,8 +205,27 @@ export function PresentationRail({
                   })}
             </p>
           </div>
-          <div className={classNames("text-xs font-medium", isDark ? "text-slate-400" : "text-gray-500")}>
-            {filledSlots.length}/{normalizedPresentation.slots.length}
+          <div className="flex items-center gap-3">
+            <div className={classNames("text-xs font-medium", isDark ? "text-slate-400" : "text-gray-500")}>
+              {filledSlots.length}/{normalizedPresentation.slots.length}
+            </div>
+            {onOpenChange ? (
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className={classNames(
+                  "flex h-10 w-10 items-center justify-center rounded-full border backdrop-blur-xl transition-all duration-200",
+                  isDark
+                    ? "border-white/10 bg-slate-950/62 text-slate-100 hover:border-white/16 hover:bg-slate-900/82"
+                    : "border-black/10 bg-white/78 text-gray-900 hover:border-black/14 hover:bg-white/92"
+                )}
+                title={t("presentationCloseDockAction", { defaultValue: "Hide presentation" })}
+                aria-label={t("presentationCloseDockAction", { defaultValue: "Hide presentation" })}
+                aria-expanded={isOpen}
+              >
+                <BookmarkIcon size={18} />
+              </button>
+            ) : null}
           </div>
         </div>
 

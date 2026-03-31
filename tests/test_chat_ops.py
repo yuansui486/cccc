@@ -43,6 +43,42 @@ class TestChatOps(unittest.TestCase):
             )
         )
 
+    def test_wake_group_on_human_message_skips_execution_time_idle_when_accept_was_active(self) -> None:
+        from cccc.daemon.messaging.chat_ops import _wake_group_on_human_message
+
+        group = object()
+        with patch("cccc.daemon.messaging.chat_ops.get_group_state", return_value="idle"), patch(
+            "cccc.daemon.messaging.chat_ops.find_actor", return_value=None
+        ), patch("cccc.daemon.messaging.chat_ops.set_group_state") as set_state:
+            out = _wake_group_on_human_message(
+                group,
+                by="user",
+                state_at_accept="active",
+                automation_on_resume=lambda _group: None,
+                clear_pending_system_notifies=lambda _group_id, _kinds: None,
+            )
+
+        self.assertIs(out, group)
+        set_state.assert_not_called()
+
+    def test_wake_group_on_human_message_wakes_when_accept_was_idle(self) -> None:
+        from cccc.daemon.messaging.chat_ops import _wake_group_on_human_message
+
+        fake_group = type("G", (), {"group_id": "g1"})()
+        with patch("cccc.daemon.messaging.chat_ops.get_group_state", return_value="idle"), patch(
+            "cccc.daemon.messaging.chat_ops.find_actor", return_value=None
+        ), patch("cccc.daemon.messaging.chat_ops.set_group_state", return_value=fake_group) as set_state:
+            out = _wake_group_on_human_message(
+                fake_group,
+                by="user",
+                state_at_accept="idle",
+                automation_on_resume=lambda _group: None,
+                clear_pending_system_notifies=lambda _group_id, _kinds: None,
+            )
+
+        self.assertIs(out, fake_group)
+        set_state.assert_called_once_with(fake_group, state="active")
+
     def test_attention_reply_still_writes_chat_ack(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -113,6 +149,62 @@ class TestChatOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_reply_accepts_unique_short_event_id_prefix(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "chat-short-reply", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "enabled": False,
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            send, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "to": ["peer1"],
+                    "text": "original message",
+                },
+            )
+            self.assertTrue(send.ok, getattr(send, "error", None))
+            sent_event = (send.result or {}).get("event") if isinstance(send.result, dict) else {}
+            self.assertIsInstance(sent_event, dict)
+            assert isinstance(sent_event, dict)
+            sent_event_id = str(sent_event.get("id") or "").strip()
+            self.assertGreaterEqual(len(sent_event_id), 8)
+
+            reply, _ = self._call(
+                "reply",
+                {
+                    "group_id": group_id,
+                    "by": "peer1",
+                    "reply_to": sent_event_id[:8],
+                    "text": "reply via short id",
+                },
+            )
+            self.assertTrue(reply.ok, getattr(reply, "error", None))
+            reply_event = (reply.result or {}).get("event") if isinstance(reply.result, dict) else {}
+            self.assertIsInstance(reply_event, dict)
+            assert isinstance(reply_event, dict)
+            data = reply_event.get("data") if isinstance(reply_event.get("data"), dict) else {}
+            self.assertEqual(str(data.get("reply_to") or ""), sent_event_id)
+        finally:
+            cleanup()
+
     def test_reply_preserves_im_source_identity_and_mentions(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -172,6 +264,98 @@ class TestChatOps(unittest.TestCase):
             self.assertEqual(str(data.get("source_user_name") or ""), "Alice")
             self.assertEqual(str(data.get("source_user_id") or ""), "staff_001")
             self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
+        finally:
+            cleanup()
+
+    def test_send_pet_review_immediate_follows_reply_required(self) -> None:
+        group_id, cleanup = self._setup_group_with_actors()
+        try:
+            with patch("cccc.daemon.messaging.chat_ops.request_pet_review") as review_mock:
+                resp, _ = self._call(
+                    "send",
+                    {
+                        "group_id": group_id,
+                        "by": "user",
+                        "to": ["peer1"],
+                        "text": "normal send",
+                    },
+                )
+                self.assertTrue(resp.ok, getattr(resp, "error", None))
+
+                review_mock.assert_called_once()
+                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_message")
+                self.assertFalse(bool(review_mock.call_args.kwargs.get("immediate")))
+
+                review_mock.reset_mock()
+                resp, _ = self._call(
+                    "send",
+                    {
+                        "group_id": group_id,
+                        "by": "user",
+                        "to": ["peer1"],
+                        "text": "urgent send",
+                        "reply_required": True,
+                    },
+                )
+                self.assertTrue(resp.ok, getattr(resp, "error", None))
+
+                review_mock.assert_called_once()
+                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_message")
+                self.assertTrue(bool(review_mock.call_args.kwargs.get("immediate")))
+        finally:
+            cleanup()
+
+    def test_reply_pet_review_immediate_follows_reply_required(self) -> None:
+        group_id, cleanup = self._setup_group_with_actors()
+        try:
+            send, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "to": ["peer1"],
+                    "text": "original",
+                },
+            )
+            self.assertTrue(send.ok, getattr(send, "error", None))
+            original_event = (send.result or {}).get("event") if isinstance(send.result, dict) else {}
+            self.assertIsInstance(original_event, dict)
+            assert isinstance(original_event, dict)
+            original_event_id = str(original_event.get("id") or "").strip()
+            self.assertTrue(original_event_id)
+
+            with patch("cccc.daemon.messaging.chat_ops.request_pet_review") as review_mock:
+                reply, _ = self._call(
+                    "reply",
+                    {
+                        "group_id": group_id,
+                        "by": "peer1",
+                        "reply_to": original_event_id,
+                        "text": "normal reply",
+                    },
+                )
+                self.assertTrue(reply.ok, getattr(reply, "error", None))
+
+                review_mock.assert_called_once()
+                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_reply")
+                self.assertFalse(bool(review_mock.call_args.kwargs.get("immediate")))
+
+                review_mock.reset_mock()
+                reply, _ = self._call(
+                    "reply",
+                    {
+                        "group_id": group_id,
+                        "by": "peer1",
+                        "reply_to": original_event_id,
+                        "text": "urgent reply",
+                        "reply_required": True,
+                    },
+                )
+                self.assertTrue(reply.ok, getattr(reply, "error", None))
+
+                review_mock.assert_called_once()
+                self.assertEqual(review_mock.call_args.kwargs.get("reason"), "chat_reply")
+                self.assertTrue(bool(review_mock.call_args.kwargs.get("immediate")))
         finally:
             cleanup()
 
@@ -421,7 +605,9 @@ class TestChatOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as send_queue:
+            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as send_queue, patch(
+                "cccc.daemon.messaging.chat_ops.request_flush_pending_messages"
+            ) as send_flush:
                 send_resp, _ = self._call(
                     "send",
                     {
@@ -434,6 +620,7 @@ class TestChatOps(unittest.TestCase):
                 )
             self.assertTrue(send_resp.ok, getattr(send_resp, "error", None))
             send_queue.assert_called_once()
+            send_flush.assert_called_once_with(unittest.mock.ANY, actor_id="peer1")
             send_delivery_text = str(send_queue.call_args.kwargs.get("text") or "")
             self.assertIn("[cccc] References:", send_delivery_text)
             self.assertIn("P2 (slot-2) · PDF p.12 — Revenue deck", send_delivery_text)
@@ -447,7 +634,9 @@ class TestChatOps(unittest.TestCase):
             reply_to = str(send_event.get("id") or "").strip()
             self.assertTrue(reply_to)
 
-            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as reply_queue:
+            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as reply_queue, patch(
+                "cccc.daemon.messaging.chat_ops.request_flush_pending_messages"
+            ) as reply_flush, patch("cccc.daemon.messaging.chat_ops.flush_pending_messages") as reply_sync_flush:
                 reply_resp, _ = self._call(
                     "reply",
                     {
@@ -461,6 +650,8 @@ class TestChatOps(unittest.TestCase):
                 )
             self.assertTrue(reply_resp.ok, getattr(reply_resp, "error", None))
             reply_queue.assert_called_once()
+            reply_flush.assert_called_once_with(unittest.mock.ANY, actor_id="peer1")
+            reply_sync_flush.assert_not_called()
             reply_delivery_text = str(reply_queue.call_args.kwargs.get("text") or "")
             self.assertIn("[cccc] References:", reply_delivery_text)
             self.assertIn("P2 (slot-2) · PDF p.12 — Revenue deck", reply_delivery_text)

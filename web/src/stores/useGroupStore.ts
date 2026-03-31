@@ -11,6 +11,7 @@ import type {
   GroupPresentation,
 } from "../types";
 import * as api from "../services/api";
+import { mergeLedgerEvents } from "../utils/mergeLedgerEvents";
 
 type ChatWindowState = {
   groupId: string;
@@ -25,6 +26,7 @@ type GroupChatBucket = {
   events: LedgerEvent[];
   chatWindow: ChatWindowState | null;
   hasMoreHistory: boolean;
+  hasLoadedTail: boolean;
   isLoadingHistory: boolean;
   isChatWindowLoading: boolean;
 };
@@ -33,6 +35,7 @@ const EMPTY_CHAT_BUCKET: GroupChatBucket = {
   events: [],
   chatWindow: null,
   hasMoreHistory: false,
+  hasLoadedTail: false,
   isLoadingHistory: false,
   isChatWindowLoading: false,
 };
@@ -41,6 +44,7 @@ interface GroupState {
   // Data
   groups: GroupMeta[];
   groupOrder: string[]; // Group IDs in user-defined order
+  archivedGroupIds: string[]; // Local-only sidebar archive bucket
   selectedGroupId: string;
   chatByGroup: Record<string, GroupChatBucket>;
   groupDoc: GroupDoc | null;
@@ -58,7 +62,9 @@ interface GroupState {
   // Actions
   setGroups: (groups: GroupMeta[]) => void;
   setGroupOrder: (order: string[]) => void;
-  reorderGroups: (fromIndex: number, toIndex: number) => void;
+  reorderGroupsInSection: (section: "working" | "archived", fromIndex: number, toIndex: number) => void;
+  archiveGroup: (groupId: string) => void;
+  restoreGroup: (groupId: string) => void;
   getOrderedGroups: () => GroupMeta[];
   setSelectedGroupId: (id: string) => void;
   setGroupDoc: (doc: GroupDoc | null) => void;
@@ -68,7 +74,15 @@ interface GroupState {
   setChatWindow: (w: GroupState["chatWindow"], groupId?: string) => void;
   setActors: (actors: Actor[]) => void;
   incrementActorUnread: (actorIds: string[]) => void;
-  updateActorActivity: (updates: Array<{ id: string; idle_seconds: number; running: boolean }>) => void;
+  updateActorActivity: (updates: Array<{
+    id: string;
+    idle_seconds?: number | null;
+    running: boolean;
+    effective_working_state?: string;
+    effective_working_reason?: string;
+    effective_working_updated_at?: string | null;
+    effective_active_task_id?: string | null;
+  }>) => void;
   setGroupContext: (ctx: GroupContext | null) => void;
   setGroupSettings: (settings: GroupSettings | null) => void;
   setGroupPresentation: (presentation: GroupPresentation | null) => void;
@@ -83,8 +97,8 @@ interface GroupState {
   // Async actions
   refreshGroups: () => Promise<void>;
   refreshActors: (groupId?: string, opts?: { includeUnread?: boolean }) => Promise<void>;
+  refreshSettings: (groupId?: string) => Promise<void>;
   refreshPresentation: (groupId?: string) => Promise<void>;
-  scheduleActorUnreadRefresh: (groupId?: string, delayMs?: number) => void;
   loadGroup: (groupId: string) => Promise<void>;
   warmGroup: (groupId: string) => Promise<void>;
   loadMoreHistory: (groupId?: string) => Promise<void>;
@@ -97,13 +111,27 @@ const GROUP_VIEW_CACHE_TTL_MS = 300_000;
 
 // localStorage key for group order
 const GROUP_ORDER_KEY = "cccc-group-order";
+const ARCHIVED_GROUP_IDS_KEY = "cccc-archived-group-ids";
+const SELECTED_GROUP_ID_KEY = "cccc-selected-group-id";
+
+function normalizeGroupIdList(ids: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    const id = String(raw || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
 
 function loadGroupOrder(): string[] {
   try {
     const stored = localStorage.getItem(GROUP_ORDER_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return normalizeGroupIdList(parsed);
     }
   } catch (e) {
     console.warn("Failed to read group order from localStorage:", e);
@@ -111,11 +139,59 @@ function loadGroupOrder(): string[] {
   return [];
 }
 
+function loadArchivedGroupIds(): string[] {
+  try {
+    const stored = localStorage.getItem(ARCHIVED_GROUP_IDS_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return normalizeGroupIdList(parsed);
+    }
+  } catch (e) {
+    console.warn("Failed to read archived groups from localStorage:", e);
+  }
+  return [];
+}
+
 function saveGroupOrder(order: string[]): void {
   try {
-    localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(order));
+    localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(normalizeGroupIdList(order)));
   } catch (e) {
     console.warn("Failed to persist group order to localStorage:", e);
+  }
+}
+
+function saveArchivedGroupIds(groupIds: string[]): void {
+  try {
+    const next = normalizeGroupIdList(groupIds);
+    if (next.length === 0) {
+      localStorage.removeItem(ARCHIVED_GROUP_IDS_KEY);
+      return;
+    }
+    localStorage.setItem(ARCHIVED_GROUP_IDS_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("Failed to persist archived groups to localStorage:", e);
+  }
+}
+
+function loadSelectedGroupId(): string {
+  try {
+    return String(localStorage.getItem(SELECTED_GROUP_ID_KEY) || "").trim();
+  } catch (e) {
+    console.warn("Failed to read selected group from localStorage:", e);
+  }
+  return "";
+}
+
+function saveSelectedGroupId(groupId: string): void {
+  try {
+    const gid = String(groupId || "").trim();
+    if (!gid) {
+      localStorage.removeItem(SELECTED_GROUP_ID_KEY);
+      return;
+    }
+    localStorage.setItem(SELECTED_GROUP_ID_KEY, gid);
+  } catch (e) {
+    console.warn("Failed to persist selected group to localStorage:", e);
   }
 }
 
@@ -132,14 +208,43 @@ function mergeGroupOrder(storedOrder: string[], groups: GroupMeta[]): string[] {
   return [...validOrder, ...newIds];
 }
 
+function mergeArchivedGroupIds(storedIds: string[], groups: GroupMeta[]): string[] {
+  const currentIds = new Set(groups.map((g) => String(g.group_id || "").trim()).filter(Boolean));
+  return normalizeGroupIdList(storedIds).filter((id) => currentIds.has(id));
+}
+
+function reorderGroupSubset(globalOrder: string[], subsetIds: string[], fromIndex: number, toIndex: number): string[] {
+  if (fromIndex === toIndex) return globalOrder;
+  if (fromIndex < 0 || toIndex < 0) return globalOrder;
+  if (fromIndex >= subsetIds.length || toIndex >= subsetIds.length) return globalOrder;
+
+  const nextSubset = subsetIds.slice();
+  const [moved] = nextSubset.splice(fromIndex, 1);
+  if (!moved) return globalOrder;
+  nextSubset.splice(toIndex, 0, moved);
+
+  const subsetSet = new Set(subsetIds);
+  let cursor = 0;
+  return globalOrder.map((id) => {
+    if (!subsetSet.has(id)) return id;
+    const replacement = nextSubset[cursor];
+    cursor += 1;
+    return replacement || id;
+  });
+}
+
 // In-flight guards
 let refreshGroupsInFlight = false;
 let refreshGroupsQueued = false;
 const refreshActorsInFlight = new Set<string>();
-const refreshActorsQueued = new Set<string>();
+const refreshActorsQueued = new Map<string, boolean>();
 const warmGroupInFlight = new Set<string>();
+const loadGroupInFlight = new Map<string, Promise<void>>();
 let loadGroupToken = 0;
 const deferredUnreadRefreshTimers = new Map<string, number>();
+const settingsRequestEpochByGroup = new Map<string, number>();
+const presentationRequestEpochByGroup = new Map<string, number>();
+const chatWindowRequestEpochByGroup = new Map<string, number>();
 
 type GroupViewSnapshot = {
   groupDoc: GroupDoc | null;
@@ -154,6 +259,20 @@ type GroupViewSnapshot = {
 
 const groupViewCache = new Map<string, GroupViewSnapshot>();
 const contextRequestEpochByGroup = new Map<string, number>();
+
+function beginGroupRequestEpoch(map: Map<string, number>, groupId: string): number {
+  const gid = String(groupId || "").trim();
+  if (!gid) return 0;
+  const next = Number(map.get(gid) || 0) + 1;
+  map.set(gid, next);
+  return next;
+}
+
+function isLatestGroupRequestEpoch(map: Map<string, number>, groupId: string, epoch: number): boolean {
+  const gid = String(groupId || "").trim();
+  if (!gid || epoch <= 0) return false;
+  return Number(map.get(gid) || 0) === epoch;
+}
 
 export function beginContextRequest(groupId: string): number {
   const gid = String(groupId || "").trim();
@@ -263,17 +382,13 @@ function clearDeferredUnreadRefresh(groupId: string): void {
 }
 
 function scheduleDeferredUnreadRefresh(groupId: string, task: () => void): void {
-  scheduleDeferredUnreadRefreshWithDelay(groupId, 0, task);
-}
-
-function scheduleDeferredUnreadRefreshWithDelay(groupId: string, delayMs: number, task: () => void): void {
   const gid = String(groupId || "").trim();
   if (!gid) return;
   clearDeferredUnreadRefresh(gid);
   const timer = globalThis.setTimeout(() => {
     deferredUnreadRefreshTimers.delete(gid);
     task();
-  }, Math.max(0, delayMs));
+  }, 0);
   deferredUnreadRefreshTimers.set(gid, timer);
 }
 
@@ -320,6 +435,7 @@ function getGroupChatBucket(chatByGroup: Record<string, GroupChatBucket>, groupI
     events: cached?.events ? [...cached.events] : [],
     chatWindow: null,
     hasMoreHistory: cached?.hasMoreHistory ?? true,
+    hasLoadedTail: false,
     isLoadingHistory: false,
     isChatWindowLoading: false,
   };
@@ -349,13 +465,22 @@ function buildChatBucketPatch(
   if (!gid) return null;
 
   const prev = state.chatByGroup[gid] || EMPTY_CHAT_BUCKET;
+  const nextEvents = patch.events !== undefined ? patch.events : prev.events;
+  const nextHasMoreHistory = patch.hasMoreHistory !== undefined ? patch.hasMoreHistory : prev.hasMoreHistory;
+  if (patch.events !== undefined || patch.hasMoreHistory !== undefined) {
+    saveGroupView(gid, {
+      events: nextEvents,
+      hasMoreHistory: nextHasMoreHistory,
+    });
+  }
   return {
     chatByGroup: {
       ...state.chatByGroup,
       [gid]: {
-        events: patch.events !== undefined ? patch.events : prev.events,
+        events: nextEvents,
         chatWindow: patch.chatWindow !== undefined ? patch.chatWindow : prev.chatWindow,
-        hasMoreHistory: patch.hasMoreHistory !== undefined ? patch.hasMoreHistory : prev.hasMoreHistory,
+        hasMoreHistory: nextHasMoreHistory,
+        hasLoadedTail: patch.hasLoadedTail !== undefined ? patch.hasLoadedTail : prev.hasLoadedTail,
         isLoadingHistory: patch.isLoadingHistory !== undefined ? patch.isLoadingHistory : prev.isLoadingHistory,
         isChatWindowLoading: patch.isChatWindowLoading !== undefined ? patch.isChatWindowLoading : prev.isChatWindowLoading,
       },
@@ -507,7 +632,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   // Initial state
   groups: [],
   groupOrder: loadGroupOrder(),
-  selectedGroupId: "",
+  archivedGroupIds: loadArchivedGroupIds(),
+  selectedGroupId: loadSelectedGroupId(),
   chatByGroup: {},
   groupDoc: null,
   events: [],
@@ -524,20 +650,41 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   // Sync actions
   setGroups: (groups) => {
     const storedOrder = get().groupOrder;
+    const storedArchived = get().archivedGroupIds;
     const mergedOrder = mergeGroupOrder(storedOrder, groups);
+    const mergedArchived = mergeArchivedGroupIds(storedArchived, groups);
     saveGroupOrder(mergedOrder);
-    set({ groups, groupOrder: mergedOrder });
+    saveArchivedGroupIds(mergedArchived);
+    set({ groups, groupOrder: mergedOrder, archivedGroupIds: mergedArchived });
   },
   setGroupOrder: (order) => {
     saveGroupOrder(order);
     set({ groupOrder: order });
   },
-  reorderGroups: (fromIndex, toIndex) => {
-    const order = get().groupOrder.slice();
-    const [moved] = order.splice(fromIndex, 1);
-    order.splice(toIndex, 0, moved);
-    saveGroupOrder(order);
-    set({ groupOrder: order });
+  reorderGroupsInSection: (section, fromIndex, toIndex) => {
+    const { groupOrder, archivedGroupIds } = get();
+    const archivedSet = new Set(archivedGroupIds);
+    const subsetIds = groupOrder.filter((id) =>
+      section === "archived" ? archivedSet.has(id) : !archivedSet.has(id)
+    );
+    const nextOrder = reorderGroupSubset(groupOrder, subsetIds, fromIndex, toIndex);
+    if (nextOrder === groupOrder) return;
+    saveGroupOrder(nextOrder);
+    set({ groupOrder: nextOrder });
+  },
+  archiveGroup: (groupId) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return;
+    const next = normalizeGroupIdList([...get().archivedGroupIds, gid]);
+    saveArchivedGroupIds(next);
+    set({ archivedGroupIds: next });
+  },
+  restoreGroup: (groupId) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return;
+    const next = get().archivedGroupIds.filter((id) => id !== gid);
+    saveArchivedGroupIds(next);
+    set({ archivedGroupIds: next });
   },
   getOrderedGroups: () => {
     const { groups, groupOrder } = get();
@@ -554,9 +701,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }
     return ordered;
   },
-  setSelectedGroupId: (id) =>
+  setSelectedGroupId: (id) => {
+    const gid = String(id || "").trim();
+    saveSelectedGroupId(gid);
     set((state) => {
-      const gid = String(id || "").trim();
       const prevGid = String(state.selectedGroupId || "").trim();
 
       // 切组前先把当前视图快照落到缓存，回切时才能做到秒开。
@@ -570,7 +718,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         chatByGroup: nextChatByGroup,
         ...buildPrimedGroupState(gid, state.groups),
       };
-    }),
+    });
+  },
   setGroupDoc: (doc) => set({ groupDoc: doc }),
   setEvents: (events, groupId) =>
     set((state) => buildChatBucketPatch(state, resolveChatGroupId(state, groupId), { events }) ?? state),
@@ -626,20 +775,46 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       let changed = false;
       const next = state.actors.map((a) => {
         const u = map.get(a.id);
-        if (u && a.idle_seconds !== u.idle_seconds) {
+        if (
+          u && (
+            a.idle_seconds !== (u.idle_seconds ?? null)
+            || a.running !== u.running
+            || a.effective_working_state !== u.effective_working_state
+            || a.effective_working_reason !== u.effective_working_reason
+            || a.effective_working_updated_at !== (u.effective_working_updated_at ?? null)
+            || a.effective_active_task_id !== (u.effective_active_task_id ?? null)
+          )
+        ) {
           changed = true;
-          return { ...a, idle_seconds: u.idle_seconds };
+          return {
+            ...a,
+            idle_seconds: u.idle_seconds ?? null,
+            running: u.running,
+            effective_working_state: u.effective_working_state,
+            effective_working_reason: u.effective_working_reason,
+            effective_working_updated_at: u.effective_working_updated_at ?? null,
+            effective_active_task_id: u.effective_active_task_id ?? null,
+          };
         }
         return a;
       });
       return changed ? { actors: next } : state;
     }),
   setGroupContext: (ctx) => set({ groupContext: ctx }),
-  setGroupSettings: (settings) => set({ groupSettings: settings }),
+  setGroupSettings: (settings) =>
+    set((state) => {
+      const gid = String(state.selectedGroupId || "").trim();
+      if (gid) {
+        beginGroupRequestEpoch(settingsRequestEpochByGroup, gid);
+        saveGroupView(gid, { groupSettings: settings });
+      }
+      return { groupSettings: settings };
+    }),
   setGroupPresentation: (presentation) =>
     set((state) => {
       const gid = String(state.selectedGroupId || "").trim();
       if (gid) {
+        beginGroupRequestEpoch(presentationRequestEpochByGroup, gid);
         saveGroupView(gid, { groupPresentation: presentation });
       }
       return { groupPresentation: presentation };
@@ -774,13 +949,17 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         // Use setGroups to ensure groupOrder is updated
         get().setGroups(next);
 
-        const cur = get().selectedGroupId;
+        const cur = String(get().selectedGroupId || "").trim();
         const curExists = !!cur && next.some((g) => String(g.group_id || "") === cur);
         if (!curExists) {
           if (next.length > 0) {
-            // Selected group disappeared (or none selected): switch to first group
-            // and clear stale per-group caches so UI does not render old data while switching.
-            const nextGroupId = String(next[0].group_id || "");
+            // Selected group disappeared (or none selected): restore the persisted
+            // selection when it still exists, otherwise fall back to the first group.
+            // Also clear stale per-group caches so UI does not render old data while switching.
+            const persisted = loadSelectedGroupId();
+            const persistedExists = !!persisted && next.some((g) => String(g.group_id || "") === persisted);
+            const nextGroupId = persistedExists ? persisted : String(next[0].group_id || "");
+            saveSelectedGroupId(nextGroupId);
             const nextChatByGroup = ensureGroupChatBucket(get().chatByGroup, nextGroupId);
             set({
               selectedGroupId: nextGroupId,
@@ -790,6 +969,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           } else {
             // No groups remain: clear selection + per-group caches.
             groupViewCache.clear();
+            saveSelectedGroupId("");
             set({
               selectedGroupId: "",
               chatByGroup: {},
@@ -807,6 +987,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           }
           return;
         }
+
+        saveSelectedGroupId(cur);
 
         // Keep groupDoc's basic fields in sync with the group list. This matters when
         // group state/title/topic is changed externally (CLI/MCP/etc.), since groupDoc
@@ -843,11 +1025,9 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     const gid = String(groupId || get().selectedGroupId || "").trim();
     if (!gid) return;
     const includeUnread = opts?.includeUnread !== false;
-    if (includeUnread) {
-      clearDeferredUnreadRefresh(gid);
-    }
     if (refreshActorsInFlight.has(gid)) {
-      refreshActorsQueued.add(gid);
+      const queuedIncludeUnread = refreshActorsQueued.get(gid) ?? false;
+      refreshActorsQueued.set(gid, queuedIncludeUnread || includeUnread);
       return;
     }
     refreshActorsInFlight.add(gid);
@@ -867,19 +1047,40 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       console.error(`Failed to refresh actors for group=${gid}:`, e);
     } finally {
       refreshActorsInFlight.delete(gid);
-      if (refreshActorsQueued.has(gid)) {
+      const queuedIncludeUnread = refreshActorsQueued.get(gid);
+      if (queuedIncludeUnread !== undefined) {
         refreshActorsQueued.delete(gid);
-        void get().refreshActors(gid);
+        void get().refreshActors(gid, { includeUnread: queuedIncludeUnread });
       }
+    }
+  },
+
+  refreshSettings: async (groupId?: string) => {
+    const gid = String(groupId || get().selectedGroupId || "").trim();
+    if (!gid) return;
+    const epoch = beginGroupRequestEpoch(settingsRequestEpochByGroup, gid);
+    try {
+      const resp = await api.fetchSettings(gid);
+      if (!resp.ok) return;
+      if (!isLatestGroupRequestEpoch(settingsRequestEpochByGroup, gid, epoch)) return;
+      const nextSettings = resp.result.settings || null;
+      saveGroupView(gid, { groupSettings: nextSettings });
+      if (String(get().selectedGroupId || "").trim() === gid) {
+        set({ groupSettings: nextSettings });
+      }
+    } catch (error) {
+      console.error(`Failed to refresh settings for group=${gid}:`, error);
     }
   },
 
   refreshPresentation: async (groupId?: string) => {
     const gid = String(groupId || get().selectedGroupId || "").trim();
     if (!gid) return;
+    const epoch = beginGroupRequestEpoch(presentationRequestEpochByGroup, gid);
     try {
       const resp = await api.fetchPresentation(gid);
       if (!resp.ok) return;
+      if (!isLatestGroupRequestEpoch(presentationRequestEpochByGroup, gid, epoch)) return;
       const nextPresentation = resp.result.presentation || null;
       saveGroupView(gid, { groupPresentation: nextPresentation });
       if (String(get().selectedGroupId || "").trim() === gid) {
@@ -890,19 +1091,13 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }
   },
 
-  scheduleActorUnreadRefresh: (groupId?: string, delayMs = 0) => {
-    const gid = String(groupId || get().selectedGroupId || "").trim();
-    if (!gid) return;
-    scheduleDeferredUnreadRefreshWithDelay(gid, delayMs, () => {
-      if (String(get().selectedGroupId || "").trim() === gid) {
-        void get().refreshActors(gid);
-      }
-    });
-  },
-
   loadGroup: async (groupId: string) => {
     const gid = String(groupId || "").trim();
     if (!gid) return;
+    const inFlight = loadGroupInFlight.get(gid);
+    if (inFlight) {
+      return;
+    }
 
     const token = ++loadGroupToken;
     const isLatestSelection = () => get().selectedGroupId === gid && loadGroupToken === token;
@@ -923,7 +1118,6 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         set((state) => buildChatBucketPatch(state, gid, patch) ?? state);
       }
     };
-
     const state = get();
     const currentDocGroupId = String(state.groupDoc?.group_id || "").trim();
     if (currentDocGroupId !== gid) {
@@ -962,6 +1156,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             events: [],
             chatWindow: null,
             hasMoreHistory: false,
+            hasLoadedTail: true,
             isLoadingHistory: false,
             isChatWindowLoading: false,
           }) || {}),
@@ -981,13 +1176,23 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     });
 
     void tailPromise.then((tail) => {
-      if (!tail.ok) return;
+      if (!tail.ok) {
+        commitChatPatch({ hasLoadedTail: true });
+        return;
+      }
+      const mergedEvents = mergeLedgerEvents(
+        getGroupChatBucket(get().chatByGroup, gid).events,
+        filterUiEvents(tail.result.events || []),
+        MAX_UI_EVENTS
+      );
       commitChatPatch({
-        events: filterUiEvents(tail.result.events || []),
+        events: mergedEvents,
         hasMoreHistory: !!tail.result.has_more,
+        hasLoadedTail: true,
       });
     }).catch((error) => {
       console.error(`Failed to load ledger tail for group=${gid}:`, error);
+      commitChatPatch({ hasLoadedTail: true });
     });
 
     void actorsPromise.then((actorsResp) => {
@@ -996,30 +1201,58 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }).catch((error) => {
       console.error(`Failed to load actors for group=${gid}:`, error);
     }).finally(() => {
-      // Wait until the pure-read actor snapshot has settled before enqueueing
-      // the unread refresh, so the lighter first response cannot overwrite the
-      // newer unread-bearing result later.
       scheduleDeferredUnreadRefresh(gid, () => {
         if (isLatestSelection()) {
-          void get().refreshActors(gid);
+          void get().refreshActors(gid, { includeUnread: true });
         }
       });
     });
 
-    // 首屏稳定后再补 context/settings/presentation，避免它们拖住切组体感。
-    void Promise.allSettled([showPromise, tailPromise, actorsPromise]).then(() => {
+    const initialLoad = Promise.allSettled([showPromise, tailPromise, actorsPromise]);
+    const initialLoadDone = initialLoad.then(() => undefined);
+    loadGroupInFlight.set(gid, initialLoadDone);
+    void initialLoad.then(() => {
       const contextEpoch = beginContextRequest(gid);
       void api.fetchContext(gid, { detail: "summary" }).then((ctx) => {
         if (!ctx.ok) return;
         if (!isLatestContextRequest(gid, contextEpoch)) return;
-        commitViewPatch({ groupContext: ctx.result as GroupContext });
+        const summary = ctx.result as GroupContext;
+        const meta = summary && typeof summary === "object" ? (summary as { meta?: unknown }).meta : null;
+        const summarySnapshot = meta && typeof meta === "object"
+          ? ((meta as { summary_snapshot?: unknown }).summary_snapshot ?? null)
+          : null;
+        const snapshotState = summarySnapshot && typeof summarySnapshot === "object"
+          ? String((summarySnapshot as { state?: unknown }).state || "").trim().toLowerCase()
+          : "";
+        const currentState = get();
+        const hasCachedContext =
+          String(currentState.groupDoc?.group_id || "").trim() === gid &&
+          currentState.groupContext !== null;
+
+        if (snapshotState === "stale" && hasCachedContext) {
+          return;
+        }
+        if (snapshotState === "missing" || (snapshotState === "stale" && !hasCachedContext)) {
+          void api.fetchContext(gid, { detail: "full", fresh: true }).then((fullCtx) => {
+            if (!fullCtx.ok) return;
+            if (!isLatestContextRequest(gid, contextEpoch)) return;
+            commitViewPatch({ groupContext: fullCtx.result as GroupContext });
+          }).catch((error) => {
+            console.error(`Failed to load fresh context for group=${gid}:`, error);
+          });
+          return;
+        }
+
+        commitViewPatch({ groupContext: summary });
       }).catch((error) => {
         console.error(`Failed to load context for group=${gid}:`, error);
       });
 
+      const settingsEpoch = beginGroupRequestEpoch(settingsRequestEpochByGroup, gid);
       void api.fetchSettings(gid).then((settings) => {
-        if (!settings.ok || !settings.result.settings) return;
-        commitViewPatch({ groupSettings: settings.result.settings });
+        if (!settings.ok) return;
+        if (!isLatestGroupRequestEpoch(settingsRequestEpochByGroup, gid, settingsEpoch)) return;
+        commitViewPatch({ groupSettings: settings.result.settings || null });
       }).catch((error) => {
         console.error(`Failed to load settings for group=${gid}:`, error);
       });
@@ -1030,6 +1263,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       }).catch((error) => {
         console.error(`Failed to load presentation for group=${gid}:`, error);
       });
+    }).finally(() => {
+      if (loadGroupInFlight.get(gid) === initialLoadDone) {
+        loadGroupInFlight.delete(gid);
+      }
     });
   },
 
@@ -1095,10 +1332,11 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         const currentBucket = getGroupChatBucket(get().chatByGroup, gid);
         const existingIds = new Set(currentBucket.events.map((event) => event.id).filter(Boolean));
         const uniqueNew = olderChatEvents.filter((event) => event.id && !existingIds.has(event.id));
+        const exhaustedHistory = olderChatEvents.length === 0 || uniqueNew.length === 0;
         const merged = [...uniqueNew, ...currentBucket.events];
         set((state) => buildChatBucketPatch(state, gid, {
           events: merged.length > MAX_UI_EVENTS ? merged.slice(0, MAX_UI_EVENTS) : merged,
-          hasMoreHistory: resp.result.has_more,
+          hasMoreHistory: exhaustedHistory ? false : !!resp.result.has_more,
         }) ?? state);
       }
     } finally {
@@ -1110,6 +1348,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     const gid = String(groupId || "").trim();
     const eid = String(centerEventId || "").trim();
     if (!gid || !eid) return;
+    const epoch = beginGroupRequestEpoch(chatWindowRequestEpochByGroup, gid);
 
     set((state) => buildChatBucketPatch(state, gid, {
       isChatWindowLoading: true,
@@ -1124,6 +1363,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }) ?? state);
     try {
       const resp = await api.fetchMessageWindow(gid, eid, { before: 30, after: 30 });
+      if (!isLatestGroupRequestEpoch(chatWindowRequestEpochByGroup, gid, epoch)) return;
       if (!resp.ok) {
         set((state) => buildChatBucketPatch(state, gid, { chatWindow: null }) ?? state);
         return;
@@ -1141,13 +1381,19 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         },
       }) ?? state);
     } finally {
-      set((state) => buildChatBucketPatch(state, gid, { isChatWindowLoading: false }) ?? state);
+      if (isLatestGroupRequestEpoch(chatWindowRequestEpochByGroup, gid, epoch)) {
+        set((state) => buildChatBucketPatch(state, gid, { isChatWindowLoading: false }) ?? state);
+      }
     }
   },
 
   closeChatWindow: (groupId?: string) =>
-    set((state) => buildChatBucketPatch(state, resolveChatGroupId(state, groupId), {
-      chatWindow: null,
-      isChatWindowLoading: false,
-    }) ?? state),
+    set((state) => {
+      const gid = resolveChatGroupId(state, groupId);
+      beginGroupRequestEpoch(chatWindowRequestEpochByGroup, gid);
+      return buildChatBucketPatch(state, gid, {
+        chatWindow: null,
+        isChatWindowLoading: false,
+      }) ?? state;
+    }),
 }));

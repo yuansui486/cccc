@@ -1,25 +1,34 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
+from .context import ContextStorage
 from ..util.fs import atomic_write_json, read_json
 from ..util.time import parse_utc_iso, utc_now_iso
-from .actors import find_actor, get_effective_role, list_actors
+from .actors import find_actor, get_effective_role, is_internal_actor, list_actors
 from .group import Group
+from .ledger_index import has_chat_ack_indexed, lookup_event_by_id, lookup_events_by_ids, search_event_ids_indexed
+from .ledger_segments import iter_source_lines, list_ledger_sources
+from .ledger_state_snapshot import can_replay_from_basis, current_ledger_basis, load_latest_ledger_snapshot
 
 
 # Message kind filter
 MessageKindFilter = Literal["all", "chat", "notify"]
 
+_UNREAD_INDEX_SCHEMA = 1
+
 
 def iter_events(ledger_path: Path) -> Iterable[Dict[str, Any]]:
-    """Iterate over all events in a ledger file."""
-    if not ledger_path.exists():
-        return
-    with ledger_path.open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
+    """Iterate over all events in sealed segments followed by the active ledger."""
+    for source in list_ledger_sources(ledger_path.parent):
+        abs_path = source.get("abs_path")
+        if not isinstance(abs_path, Path) or not abs_path.exists():
+            continue
+        for line in iter_source_lines(abs_path):
             line = line.strip()
             if not line:
                 continue
@@ -31,8 +40,362 @@ def iter_events(ledger_path: Path) -> Iterable[Dict[str, Any]]:
                 yield obj
 
 
+def iter_events_reverse(ledger_path: Path, *, block_size: int = 65536) -> Iterable[Dict[str, Any]]:
+    """Iterate over ledger events from newest to oldest across all sources."""
+    sources = list_ledger_sources(ledger_path.parent)
+    for source in reversed(sources):
+        abs_path = source.get("abs_path")
+        if not isinstance(abs_path, Path) or not abs_path.exists():
+            continue
+        if str(abs_path.name).endswith(".gz"):
+            events: List[Dict[str, Any]] = []
+            for line in iter_source_lines(abs_path):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    events.append(obj)
+            for ev in reversed(events):
+                if isinstance(ev, dict):
+                    yield ev
+            continue
+        try:
+            with abs_path.open("rb") as f:
+                f.seek(0, os.SEEK_END)
+                file_size = f.tell()
+                buffer = b""
+                pos = file_size
+                while pos > 0:
+                    read_size = min(max(1024, int(block_size or 65536)), pos)
+                    pos -= read_size
+                    f.seek(pos)
+                    chunk = f.read(read_size)
+                    if not chunk:
+                        continue
+                    buffer = chunk + buffer
+                    parts = buffer.split(b"\n")
+                    buffer = parts[0]
+                    for raw_line in reversed(parts[1:]):
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line.decode("utf-8", errors="replace"))
+                        except Exception:
+                            continue
+                        if isinstance(obj, dict):
+                            yield obj
+                tail = buffer.strip()
+                if tail:
+                    try:
+                        obj = json.loads(tail.decode("utf-8", errors="replace"))
+                    except Exception:
+                        obj = None
+                    if isinstance(obj, dict):
+                        yield obj
+        except Exception:
+            events: List[Dict[str, Any]] = []
+            for line in iter_source_lines(abs_path):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    events.append(obj)
+            for ev in reversed(events):
+                yield ev
+
+
 def _cursor_path(group: Group) -> Path:
     return group.path / "state" / "read_cursors.json"
+
+
+def _unread_index_path(group: Group) -> Path:
+    return group.path / "state" / "unread_index.json"
+
+
+def _load_unread_index(group: Group) -> Dict[str, Any]:
+    raw = read_json(_unread_index_path(group))
+    if not isinstance(raw, dict):
+        raw = {}
+    counts_raw = raw.get("counts")
+    counts: Dict[str, int] = {}
+    if isinstance(counts_raw, dict):
+        for actor_id, value in counts_raw.items():
+            aid = str(actor_id or "").strip()
+            if not aid:
+                continue
+            try:
+                counts[aid] = max(0, int(value or 0))
+            except Exception:
+                counts[aid] = 0
+    ledger_basis_raw = raw.get("ledger_basis") if isinstance(raw.get("ledger_basis"), dict) else {}
+    ledger_basis = {
+        "segment_ids": [str(item).strip() for item in (ledger_basis_raw.get("segment_ids") if isinstance(ledger_basis_raw.get("segment_ids"), list) else []) if str(item).strip()],
+        "active_size": max(0, int(ledger_basis_raw.get("active_size") or 0)) if isinstance(ledger_basis_raw, dict) else 0,
+        "active_mtime_ns": max(0, int(ledger_basis_raw.get("active_mtime_ns") or 0)) if isinstance(ledger_basis_raw, dict) else 0,
+        "active_prefix_sha256": str(ledger_basis_raw.get("active_prefix_sha256") or "") if isinstance(ledger_basis_raw, dict) else "",
+    }
+    if not ledger_basis["segment_ids"] and not ledger_basis["active_size"]:
+        try:
+            legacy_size = max(0, int(raw.get("ledger_size") or 0))
+        except Exception:
+            legacy_size = 0
+        ledger_basis = {"segment_ids": [], "active_size": legacy_size, "active_mtime_ns": 0}
+    try:
+        actors_rev = max(0, int(raw.get("actors_rev") or 0))
+    except Exception:
+        actors_rev = 0
+    return {
+        "schema": int(raw.get("schema", _UNREAD_INDEX_SCHEMA) or _UNREAD_INDEX_SCHEMA),
+        "actors_rev": actors_rev,
+        "cursor_sig": str(raw.get("cursor_sig") or ""),
+        "ledger_basis": ledger_basis,
+        "counts": counts,
+        "updated_at": str(raw.get("updated_at") or ""),
+    }
+
+
+def _save_unread_index(
+    group: Group,
+    *,
+    actors_rev: int,
+    cursor_sig: str,
+    ledger_basis: Dict[str, Any],
+    counts: Dict[str, int],
+) -> Dict[str, Any]:
+    out = {
+        "schema": _UNREAD_INDEX_SCHEMA,
+        "actors_rev": max(0, int(actors_rev or 0)),
+        "cursor_sig": str(cursor_sig or ""),
+        "ledger_basis": {
+            "segment_ids": [
+                str(item).strip()
+                for item in (ledger_basis.get("segment_ids") if isinstance(ledger_basis.get("segment_ids"), list) else [])
+                if str(item).strip()
+            ],
+            "active_size": max(0, int(ledger_basis.get("active_size") or 0)),
+            "active_mtime_ns": max(0, int(ledger_basis.get("active_mtime_ns") or 0)),
+            "active_prefix_sha256": str(ledger_basis.get("active_prefix_sha256") or ""),
+        },
+        "counts": {str(actor_id): max(0, int(value or 0)) for actor_id, value in counts.items() if str(actor_id or "").strip()},
+        "updated_at": utc_now_iso(),
+    }
+    p = _unread_index_path(group)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(p, out)
+    return out
+
+
+def _current_actors_rev(group: Group) -> int:
+    try:
+        return max(0, int(ContextStorage(group).load_version_state().get("actors_rev") or 0))
+    except Exception:
+        return 0
+
+
+def _cursor_sig_for_actor_ids(group: Group, actor_ids: List[str]) -> str:
+    cursors = load_cursors(group)
+    digest = hashlib.sha256()
+    for actor_id in sorted({str(item or "").strip() for item in actor_ids if str(item or "").strip()}):
+        cur = cursors.get(actor_id)
+        event_id = str(cur.get("event_id") or "") if isinstance(cur, dict) else ""
+        ts = str(cur.get("ts") or "") if isinstance(cur, dict) else ""
+        digest.update(actor_id.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(event_id.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(ts.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _iter_events_from_offset(ledger_path: Path, start: int) -> Tuple[List[Dict[str, Any]], int]:
+    out: List[Dict[str, Any]] = []
+    if not ledger_path.exists():
+        return out, 0
+    offset = max(0, int(start or 0))
+    with ledger_path.open("rb") as handle:
+        handle.seek(offset, os.SEEK_SET)
+        while True:
+            line = handle.readline()
+            if not line:
+                break
+            try:
+                obj = json.loads(line.decode("utf-8", errors="replace").strip())
+            except Exception:
+                return [], -1
+            if isinstance(obj, dict):
+                out.append(obj)
+        return out, int(handle.tell())
+
+
+def _seed_unread_index_from_snapshot(
+    group: Group,
+    *,
+    actors_rev: int,
+    cursor_sig: str,
+    ledger_basis: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    snapshot = load_latest_ledger_snapshot(group)
+    state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
+    unread_index = state.get("unread_index") if isinstance(state.get("unread_index"), dict) else {}
+    if not unread_index:
+        return None
+    if int(unread_index.get("actors_rev") or 0) != actors_rev:
+        return None
+    if str(unread_index.get("cursor_sig") or "") != cursor_sig:
+        return None
+    snapshot_basis = unread_index.get("ledger_basis") if isinstance(unread_index.get("ledger_basis"), dict) else {}
+    if not can_replay_from_basis(snapshot_basis, ledger_basis):
+        return None
+    counts = unread_index.get("counts") if isinstance(unread_index.get("counts"), dict) else {}
+    return {
+        "actors_rev": actors_rev,
+        "cursor_sig": cursor_sig,
+        "ledger_basis": snapshot_basis,
+        "counts": {str(actor_id): max(0, int(value or 0)) for actor_id, value in counts.items() if str(actor_id or "").strip()},
+    }
+
+
+def _apply_unread_delta(
+    group: Group,
+    *,
+    actors: List[Dict[str, Any]],
+    counts: Dict[str, int],
+    events: List[Dict[str, Any]],
+    kind_filter: MessageKindFilter,
+) -> Dict[str, int]:
+    next_counts = {aid: max(0, int(counts.get(aid, 0))) for aid in counts}
+    actor_ids = [str(actor.get("id") or "").strip() for actor in actors if str(actor.get("id") or "").strip()]
+    actor_roles = {aid: get_effective_role(group, aid) for aid in actor_ids}
+    cursors = load_cursors(group)
+    actor_cursor_dts: Dict[str, Optional[Any]] = {}
+    for aid in actor_ids:
+        cur = cursors.get(aid)
+        cursor_ts = str(cur.get("ts") or "") if isinstance(cur, dict) else ""
+        actor_cursor_dts[aid] = parse_utc_iso(cursor_ts) if cursor_ts else None
+
+    if kind_filter == "chat":
+        allowed_kinds = {"chat.message"}
+    elif kind_filter == "notify":
+        allowed_kinds = {"system.notify"}
+    else:
+        allowed_kinds = {"chat.message", "system.notify"}
+
+    for ev in events:
+        ev_kind = str(ev.get("kind") or "")
+        if ev_kind not in allowed_kinds:
+            continue
+        ev_by = str(ev.get("by") or "").strip()
+        ev_ts = str(ev.get("ts") or "")
+        ev_dt = parse_utc_iso(ev_ts) if ev_ts else None
+        for aid in actor_ids:
+            if ev_kind == "chat.message" and ev_by == aid:
+                continue
+            cursor_dt = actor_cursor_dts.get(aid)
+            if cursor_dt is not None and ev_dt is not None and ev_dt <= cursor_dt:
+                continue
+            if not is_message_for_actor(group, actor_id=aid, event=ev, role=actor_roles.get(aid)):
+                continue
+            next_counts[aid] = max(0, int(next_counts.get(aid, 0)) + 1)
+    return next_counts
+
+
+def get_indexed_unread_counts(
+    group: Group,
+    *,
+    actors: List[Dict[str, Any]],
+    kind_filter: MessageKindFilter = "all",
+) -> Dict[str, int]:
+    """Return unread counts from the persisted unread snapshot when possible.
+
+    Semantics are intentionally bound to current actor topology via `actors_rev`.
+    If actor membership/order changes, the snapshot is rebuilt from ledger truth.
+    """
+    actor_ids = [str(actor.get("id") or "").strip() for actor in actors if str(actor.get("id") or "").strip()]
+    if not actor_ids:
+        return {}
+
+    actors_rev = _current_actors_rev(group)
+    cursor_sig = _cursor_sig_for_actor_ids(group, actor_ids)
+    ledger_basis = current_ledger_basis(group)
+    snapshot = _load_unread_index(group)
+    snapshot_counts = snapshot.get("counts") if isinstance(snapshot.get("counts"), dict) else {}
+    snapshot_basis = snapshot.get("ledger_basis") if isinstance(snapshot.get("ledger_basis"), dict) else {}
+
+    if (
+        int(snapshot.get("actors_rev") or 0) == actors_rev
+        and str(snapshot.get("cursor_sig") or "") == cursor_sig
+        and snapshot_basis == ledger_basis
+    ):
+        return {aid: max(0, int(snapshot_counts.get(aid, 0))) for aid in actor_ids}
+
+    if (
+        int(snapshot.get("actors_rev") or 0) == actors_rev
+        and str(snapshot.get("cursor_sig") or "") == cursor_sig
+        and can_replay_from_basis(snapshot_basis, ledger_basis)
+    ):
+        delta_events, end_offset = _iter_events_from_offset(group.ledger_path, int(snapshot_basis.get("active_size") or 0))
+        if end_offset >= 0:
+            next_counts = _apply_unread_delta(
+                group,
+                actors=actors,
+                counts={aid: max(0, int(snapshot_counts.get(aid, 0))) for aid in actor_ids},
+                events=delta_events,
+                kind_filter=kind_filter,
+            )
+            _save_unread_index(
+                group,
+                actors_rev=actors_rev,
+                cursor_sig=cursor_sig,
+                ledger_basis={**ledger_basis, "active_size": end_offset},
+                counts=next_counts,
+            )
+            return next_counts
+
+    seeded = _seed_unread_index_from_snapshot(
+        group,
+        actors_rev=actors_rev,
+        cursor_sig=cursor_sig,
+        ledger_basis=ledger_basis,
+    )
+    if seeded is not None:
+        delta_events, end_offset = _iter_events_from_offset(group.ledger_path, int(((seeded.get("ledger_basis") if isinstance(seeded.get("ledger_basis"), dict) else {}) or {}).get("active_size") or 0))
+        if end_offset >= 0:
+            next_counts = _apply_unread_delta(
+                group,
+                actors=actors,
+                counts={aid: max(0, int((seeded.get("counts") if isinstance(seeded.get("counts"), dict) else {}).get(aid, 0))) for aid in actor_ids},
+                events=delta_events,
+                kind_filter=kind_filter,
+            )
+            _save_unread_index(
+                group,
+                actors_rev=actors_rev,
+                cursor_sig=cursor_sig,
+                ledger_basis={**ledger_basis, "active_size": end_offset},
+                counts=next_counts,
+            )
+            return next_counts
+
+    rebuilt = batch_unread_counts(group, actor_ids=actor_ids, kind_filter=kind_filter)
+    out = {aid: max(0, int(rebuilt.get(aid, 0))) for aid in actor_ids}
+    _save_unread_index(
+        group,
+        actors_rev=actors_rev,
+        cursor_sig=cursor_sig,
+        ledger_basis=ledger_basis,
+        counts=out,
+    )
+    return out
 
 
 def load_cursors(group: Group) -> Dict[str, Any]:
@@ -409,6 +772,8 @@ def is_message_for_actor(
               If None, will be computed via get_effective_role().
     """
     kind = str(event.get("kind") or "")
+    actor = find_actor(group, actor_id)
+    actor_internal = isinstance(actor, dict) and is_internal_actor(actor)
 
     # system.notify: check target_actor_id
     if kind == "system.notify":
@@ -416,6 +781,8 @@ def is_message_for_actor(
         if not isinstance(data, dict):
             return False
         target = str(data.get("target_actor_id") or "").strip()
+        if actor_internal:
+            return bool(target) and target == actor_id
         # Empty target = broadcast to everyone
         if not target:
             return True
@@ -424,6 +791,8 @@ def is_message_for_actor(
     # chat.message: check the "to" field
     targets = _message_targets(event)
 
+    # Internal actors observe normal chat routing but still require explicit
+    # targeting for system.notify to avoid picking up background noise.
     # Empty targets = broadcast (everyone can see)
     if not targets:
         return True
@@ -641,15 +1010,85 @@ def latest_unread_event(
     return last
 
 
-def find_event(group: Group, event_id: str) -> Optional[Dict[str, Any]]:
-    """Find an event by event_id."""
-    wanted = event_id.strip()
+def resolve_event_id(group: Group, event_id: str) -> str:
+    """Resolve an event id from an exact id or a unique id prefix."""
+    wanted = str(event_id or "").strip()
     if not wanted:
+        return ""
+
+    event = lookup_event_by_id(group.ledger_path, wanted)
+    if event is not None:
+        return str(event.get("id") or "").strip()
+
+    exact_match = ""
+    prefix_match = ""
+    prefix_ambiguous = False
+    for ev in iter_events_reverse(group.ledger_path):
+        candidate = str(ev.get("id") or "").strip()
+        if not candidate:
+            continue
+        if candidate == wanted:
+            exact_match = candidate
+            break
+        if candidate.startswith(wanted):
+            if not prefix_match:
+                prefix_match = candidate
+            elif prefix_match != candidate:
+                prefix_ambiguous = True
+                break
+    if exact_match:
+        return exact_match
+    if prefix_match and not prefix_ambiguous:
+        return prefix_match
+    return ""
+
+
+def find_event(group: Group, event_id: str) -> Optional[Dict[str, Any]]:
+    """Find an event by exact id or a unique id prefix."""
+    resolved = resolve_event_id(group, event_id)
+    if not resolved:
         return None
-    for ev in iter_events(group.ledger_path):
-        if str(ev.get("id") or "") == wanted:
+    event = lookup_event_by_id(group.ledger_path, resolved)
+    if event is not None:
+        return event
+    for ev in iter_events_reverse(group.ledger_path):
+        if str(ev.get("id") or "").strip() == resolved:
             return ev
     return None
+
+
+def find_event_with_chat_ack(group: Group, *, event_id: str, actor_id: str) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """Find an event and whether a matching chat.ack already exists."""
+    wanted = resolve_event_id(group, event_id)
+    actor = str(actor_id or "").strip()
+    if not wanted:
+        return None, False
+
+    found_event = lookup_event_by_id(group.ledger_path, wanted)
+    found_ack = has_chat_ack_indexed(group.ledger_path, event_id=wanted, actor_id=actor)
+    if found_event is not None:
+        return found_event, found_ack
+
+    for ev in iter_events_reverse(group.ledger_path):
+        kind = str(ev.get("kind") or "").strip()
+        if found_event is None and str(ev.get("id") or "").strip() == wanted:
+            found_event = ev
+            if found_ack:
+                break
+            continue
+        if found_ack or kind != "chat.ack":
+            continue
+        data = ev.get("data")
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("event_id") or "").strip() != wanted:
+            continue
+        if actor and str(data.get("actor_id") or "").strip() != actor:
+            continue
+        found_ack = True
+        if found_event is not None:
+            break
+    return found_event, found_ack
 
 
 def get_quote_text(group: Group, event_id: str, max_len: int = 100) -> Optional[str]:
@@ -807,7 +1246,54 @@ def search_messages(
     query_lower = query.lower().strip() if query else ""
     by_filter = by_filter.strip()
     
-    # Collect all matching events
+    if not query_lower:
+        event_ids, has_more = search_event_ids_indexed(
+            group.ledger_path,
+            allowed_kinds=allowed_kinds,
+            query="",
+            by_filter=by_filter,
+            before_id=before_id,
+            after_id=after_id,
+            limit=limit,
+        )
+        if event_ids:
+            events: List[Dict[str, Any]] = []
+            for ev in lookup_events_by_ids(group.ledger_path, event_ids):
+                if isinstance(ev, dict):
+                    events.append(ev)
+            return events, has_more
+        if before_id or after_id:
+            return [], False
+
+    event_ids, has_more = search_event_ids_indexed(
+        group.ledger_path,
+        allowed_kinds=allowed_kinds,
+        query=query_lower,
+        by_filter=by_filter,
+        before_id=before_id,
+        after_id=after_id,
+        limit=limit,
+    )
+    if event_ids:
+        events = []
+        for ev in lookup_events_by_ids(group.ledger_path, event_ids):
+            if isinstance(ev, dict):
+                data = ev.get("data")
+                if isinstance(data, dict):
+                    text = str(data.get("text") or "").lower()
+                    title = str(data.get("title") or "").lower()
+                    message = str(data.get("message") or "").lower()
+                    if query_lower not in text and query_lower not in title and query_lower not in message:
+                        continue
+                else:
+                    continue
+                events.append(ev)
+        if events:
+            return events, has_more
+        if before_id or after_id:
+            return [], False
+
+    # Fallback: collect all matching events
     all_events: List[Dict[str, Any]] = []
     for ev in iter_events(group.ledger_path):
         ev_kind = str(ev.get("kind") or "")

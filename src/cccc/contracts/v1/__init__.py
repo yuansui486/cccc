@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .actor import Actor, ActorRole, ActorSubmit, AgentRuntime, HeadlessState, RunnerKind
 from .actor_profile import ActorProfile, ActorProfileRef
-from .automation import AutomationAction, AutomationRule, AutomationRuleSet, AutomationTrigger
+from .automation import AutomationAction, AutomationRule, AutomationRuleSet, AutomationSnippetCatalog, AutomationTrigger
 from .event import Event
 from .group_space import (
     SpaceBinding,
@@ -45,6 +45,7 @@ __all__ = [
     "AutomationAction",
     "AutomationRule",
     "AutomationRuleSet",
+    "AutomationSnippetCatalog",
     "AutomationTrigger",
     "Attachment",
     "ChatMessageData",

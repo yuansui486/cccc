@@ -103,6 +103,7 @@ class ActorUpdateRequest(BaseModel):
     by: str = Field(default="user")
     # Note: role is ignored - auto-determined by position
     title: Optional[str] = None
+    avatar_asset_path: Optional[str] = None
     command: Optional[Union[str, list[str]]] = None
     env: Optional[Dict[str, str]] = None
     capability_autoload: Optional[list[str]] = None
@@ -207,6 +208,16 @@ class GroupSettingsRequest(BaseModel):
     panorama_enabled: Optional[bool] = None
     desktop_pet_enabled: Optional[bool] = None
 
+    by: str = Field(default="user")
+
+
+class PetDecisionOutcomeRequest(BaseModel):
+    fingerprint: str
+    outcome: Literal["executed", "dismissed"]
+    decision_id: str = Field(default="")
+    action_type: str = Field(default="")
+    cooldown_ms: int = Field(default=0)
+    source_event_id: str = Field(default="")
     by: str = Field(default="user")
 
 
@@ -377,6 +388,7 @@ class GroupSpaceProviderAuthRequest(BaseModel):
     action: Literal["status", "start", "cancel", "disconnect"] = "status"
     timeout_seconds: int = 900
     force_reauth: bool = False
+    projected: bool = False
 
 
 class IMSetRequest(BaseModel):

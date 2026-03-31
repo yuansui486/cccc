@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import {
   ActorProfile,
   RuntimeInfo,
@@ -11,6 +12,7 @@ import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
+import { ActorAvatarField } from "../ActorAvatarField";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 
@@ -59,7 +61,7 @@ export interface AddActorModalProps {
   canAddActor: boolean;
   addActorDisabledReason: string;
 
-  onAddActor: () => void;
+  onAddActor: (avatarFile?: File | null) => Promise<boolean> | boolean;
   onSaveAsProfile: () => void;
   onClose: () => void;
   onCancelAndReset: () => void;
@@ -128,6 +130,15 @@ export function AddActorModal({
 }: AddActorModalProps) {
   const { t } = useTranslation("actors");
   const { modalRef } = useModalA11y(isOpen, onClose);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+    };
+  }, [avatarPreviewUrl]);
+
   if (!isOpen) return null;
 
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
@@ -138,6 +149,8 @@ export function AddActorModal({
   const selectedProfileCommand = commandPreview(selectedProfile?.command);
   const showRuntimeSetup = !newActorUseProfile && newActorRuntime === "custom";
   const showCommandEditor = !newActorUseProfile && (newActorRuntime === "custom" || !newActorUseDefaultCommand);
+  const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
+  const previewTitle = String(newActorId || "").trim() || suggestedActorId;
 
   const sectionCardClass = "rounded-2xl p-4 sm:p-5 glass-panel";
   const sectionTitleClass = "text-sm font-semibold text-[var(--color-text-primary)]";
@@ -148,6 +161,20 @@ export function AddActorModal({
   const collapsibleChevronClass =
     "text-sm transition-transform group-open:rotate-180 text-[var(--color-text-tertiary)]";
   const nestedCardClass = "rounded-xl border p-3 border-[var(--glass-border-subtle)] bg-[var(--glass-bg)]";
+
+  const handleSubmit = async () => {
+    try {
+      const ok = await Promise.resolve(onAddActor(avatarFile));
+      if (ok) setAvatarFile(null);
+    } catch (e) {
+      setAddActorError(e instanceof Error ? e.message : t("failedToAddAgent"));
+    }
+  };
+
+  const handleCancel = () => {
+    setAvatarFile(null);
+    onCancelAndReset();
+  };
 
   return (
     <div
@@ -177,21 +204,39 @@ export function AddActorModal({
               <div className={sectionHintClass}>{t("addSectionBasicsHint")}</div>
 
               <div className="mt-4 space-y-4">
-                <div>
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                    {t("agentName")} <span className="text-[var(--color-text-muted)]">{t("unicodeSupport")}</span>
-                  </label>
-                  <input
-                    className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
-                    value={newActorId}
-                    onChange={(e) => setNewActorId(e.target.value)}
-                    placeholder={suggestedActorId}
-                  />
-                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                    {t("leaveEmptyToUse")}{" "}
-                    <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                      {suggestedActorId}
-                    </code>
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                  <div className="sm:w-[104px] sm:flex-shrink-0">
+                    <ActorAvatarField
+                      label={null}
+                      avatarUrl={undefined}
+                      previewUrl={avatarPreviewUrl}
+                      runtime={previewRuntime}
+                      title={previewTitle}
+                      isDark={isDark}
+                      sizeClassName="h-14 w-14"
+                      disabled={busy === "actor-add"}
+                      resetDisabled={!avatarFile}
+                      onSelectFile={setAvatarFile}
+                      onReset={() => setAvatarFile(null)}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                      {t("agentName")} <span className="text-[var(--color-text-muted)]">{t("unicodeSupport")}</span>
+                    </label>
+                    <input
+                      className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                      value={newActorId}
+                      onChange={(e) => setNewActorId(e.target.value)}
+                      placeholder={suggestedActorId}
+                    />
+                    <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                      {t("leaveEmptyToUse")}{" "}
+                      <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                        {suggestedActorId}
+                      </code>
+                    </div>
                   </div>
                 </div>
 
@@ -495,7 +540,7 @@ export function AddActorModal({
                         className="w-full rounded-xl border px-3 py-2 text-sm font-mono min-h-[112px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
                         value={newActorSecretsSetText}
                         onChange={(e) => setNewActorSecretsSetText(e.target.value)}
-                        placeholder={'export OPENAI_API_KEY="...";\nexport ANTHROPIC_API_KEY="...";'}
+                        placeholder={'OPENAI_API_KEY="..."\nANTHROPIC_API_KEY="..."'}
                         spellCheck={false}
                       />
                       <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
@@ -556,19 +601,21 @@ export function AddActorModal({
           ) : null}
 
           <div className="flex flex-col-reverse sm:flex-row gap-3">
-            <button
-              type="button"
-              className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
-              onClick={onCancelAndReset}
-            >
-              {t("common:cancel")}
-            </button>
+              <button
+                type="button"
+                className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                onClick={handleCancel}
+              >
+                {t("common:cancel")}
+              </button>
 
             <div className="flex-1 min-w-0">
               <button
                 type="button"
                 className="w-full rounded-xl bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 text-sm font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all min-h-[44px]"
-                onClick={onAddActor}
+                onClick={() => {
+                  void handleSubmit();
+                }}
                 disabled={!canAddActor}
               >
                 {busy === "actor-add" ? t("adding") : newActorUseProfile ? t("createFromProfile") : t("addAgent")}

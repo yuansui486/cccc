@@ -25,10 +25,13 @@ interface AutomationSnippetModalProps {
   supportedVars: string[];
   snippetIds: string[];
   snippets: Record<string, string>;
+  builtinSnippetDefaults: Record<string, string>;
+  builtinOverrideIds: string[];
   onClose: () => void;
   onNewSnippetIdChange: (next: string) => void;
   onAddSnippet: () => void;
   onDeleteSnippet: (snippetId: string) => void;
+  onResetBuiltinSnippet: (snippetId: string) => void;
   onUpdateSnippet: (snippetId: string, content: string) => void;
   onSave: () => void | Promise<void>;
 }
@@ -44,16 +47,20 @@ export function AutomationSnippetModal(props: AutomationSnippetModalProps) {
     supportedVars,
     snippetIds,
     snippets,
+    builtinSnippetDefaults,
+    builtinOverrideIds,
     onClose,
     onNewSnippetIdChange,
     onAddSnippet,
     onDeleteSnippet,
+    onResetBuiltinSnippet,
     onUpdateSnippet,
     onSave,
   } = props;
 
   const { t } = useTranslation("settings");
   const automationVarHelp = getAutomationVarHelp(t);
+  const builtinOverrideSet = new Set(builtinOverrideIds);
 
   if (!open) return null;
 
@@ -123,28 +130,56 @@ export function AutomationSnippetModal(props: AutomationSnippetModalProps) {
             {snippetIds.length === 0 ? <div className="text-sm text-[var(--color-text-tertiary)]">{t("snippetModal.noSnippets")}</div> : null}
 
             <div className="space-y-3">
-              {snippetIds.map((snippetId) => (
-                <div key={snippetId} className={cardClass(isDark)}>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="text-xs font-semibold font-mono text-[var(--color-text-primary)]">{snippetId}</div>
-                    <button
-                      type="button"
-                      className={dangerButtonClass("sm")}
-                      onClick={() => onDeleteSnippet(snippetId)}
-                      title={t("snippetModal.deleteSnippet")}
-                    >
-                      {t("common:delete")}
-                    </button>
+              {snippetIds.map((snippetId) => {
+                const isBuiltIn = builtinSnippetDefaults[snippetId] !== undefined;
+                const isOverridden = builtinOverrideSet.has(snippetId) && isBuiltIn;
+                const content = snippets[snippetId] ?? builtinSnippetDefaults[snippetId] ?? "";
+                return (
+                  <div key={snippetId} className={cardClass(isDark)}>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold font-mono text-[var(--color-text-primary)]">{snippetId}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--color-text-tertiary)]">
+                          <span className="rounded-full border border-[var(--glass-border-subtle)] px-2 py-0.5">
+                            {isBuiltIn ? t("snippetModal.builtInBadge") : t("snippetModal.customBadge")}
+                          </span>
+                          {isOverridden ? (
+                            <span className="rounded-full border border-[var(--glass-border-subtle)] px-2 py-0.5">
+                              {t("snippetModal.overrideBadge")}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      {isBuiltIn ? (
+                        <button
+                          type="button"
+                          className={secondaryButtonClass("sm")}
+                          onClick={() => onResetBuiltinSnippet(snippetId)}
+                          title={t("snippetModal.resetSnippet")}
+                        >
+                          {t("snippetModal.resetSnippet")}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={dangerButtonClass("sm")}
+                          onClick={() => onDeleteSnippet(snippetId)}
+                          title={t("snippetModal.deleteSnippet")}
+                        >
+                          {t("common:delete")}
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={content}
+                      onChange={(e) => onUpdateSnippet(snippetId, e.target.value)}
+                      className={`${inputClass(isDark)} font-mono text-[12px]`}
+                      style={{ minHeight: 140 }}
+                      spellCheck={false}
+                    />
                   </div>
-                  <textarea
-                    value={snippets[snippetId] || ""}
-                    onChange={(e) => onUpdateSnippet(snippetId, e.target.value)}
-                    className={`${inputClass(isDark)} font-mono text-[12px]`}
-                    style={{ minHeight: 140 }}
-                    spellCheck={false}
-                  />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

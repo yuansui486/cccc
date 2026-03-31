@@ -1023,16 +1023,6 @@ select {
   animation: none;
 }
 
-/* Run indicator glow */
-@keyframes run-glow {
-  0%, 100% { box-shadow: 0 0 6px rgba(16, 185, 129, 0.3); }
-  50% { box-shadow: 0 0 12px rgba(16, 185, 129, 0.5); }
-}
-
-.run-indicator-glow {
-  animation: run-glow 2s ease-in-out infinite;
-}
-
 /* Smooth transition for interactive elements */
 .glass-transition {
   transition: background 0.3s cubic-bezier(0.4, 0, 0.2, 1),

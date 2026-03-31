@@ -149,9 +149,8 @@ export function AppHeader({
             {selectedStatus && (
               <span
                 className={classNames(
-                  "w-2 h-2 rounded-full ring-2",
-                  selectedStatus.dotClass,
-                  "ring-black/10 dark:ring-white/10"
+                  "w-2.5 h-2.5 rounded-full",
+                  selectedStatus.dotClass
                 )}
                 title={selectedStatus.label}
               />

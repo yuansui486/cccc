@@ -1,52 +1,18 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation } from 'react-i18next';
-
-import {
-    useFloating,
-    autoUpdate,
-    offset,
-    flip,
-    shift,
-    useHover,
-    useInteractions,
-    useDismiss,
-    FloatingPortal,
-} from "@floating-ui/react";
-import { LedgerEvent, Actor, AgentState, getActorAccentColor, ChatMessageData, EventAttachment, PresentationMessageRef } from "../types";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from "@floating-ui/react";
+import { useTranslation } from "react-i18next";
+import { LedgerEvent, Actor, AgentState, getActorAccentColor, ChatMessageData, MessageAttachment, PresentationMessageRef } from "../types";
 import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
-import { MarkdownRenderer } from "./MarkdownRenderer";
 import { getRecipientDisplayName } from "../hooks/useActorDisplayName";
 import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayText";
-import { ImageIcon, FileIcon, CloseIcon } from "./Icons";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
+import { MessageAttachments } from "./messageBubble/MessageAttachments";
+import { ActorAvatar } from "./ActorAvatar";
 
-const RUNTIME_LOGO_BASE = import.meta.env.BASE_URL;
-const RUNTIME_LOGO: Record<string, string> = {
-    claude: `${RUNTIME_LOGO_BASE}logos/claude.png`,
-    codex: `${RUNTIME_LOGO_BASE}logos/codex.png`,
-    gemini: `${RUNTIME_LOGO_BASE}logos/gemini.png`,
-};
-
-function resolveSenderActor(actors: Actor[], senderId: string): Actor | null {
-    const key = String(senderId || "").trim();
-    if (!key) return null;
-
-    const exactId = actors.find((actor) => String(actor.id || "").trim() === key);
-    if (exactId) return exactId;
-
-    // 兼容历史消息：旧 `by` 可能已经不是现行 actor id，但仍等于当前 title。
-    const exactTitle = actors.find((actor) => String(actor.title || "").trim() === key);
-    if (exactTitle) return exactTitle;
-
-    const lower = key.toLowerCase();
-    return actors.find((actor) => {
-        const actorId = String(actor.id || "").trim().toLowerCase();
-        const actorTitle = String(actor.title || "").trim().toLowerCase();
-        return actorId === lower || actorTitle === lower;
-    }) || null;
-}
-
+const LazyMarkdownRenderer = lazy(() =>
+    import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
+);
 
 function formatEventLine(ev: LedgerEvent): string {
     if (ev.kind === "chat.message" && ev.data && typeof ev.data === "object") {
@@ -54,6 +20,31 @@ function formatEventLine(ev: LedgerEvent): string {
         return String(msg.text || "");
     }
     return "";
+}
+
+function mayContainMarkdown(text: string): boolean {
+    const value = String(text || "");
+    if (!value.trim()) return false;
+    return /(```|`[^`\n]+`|\[[^\]]+\]\([^)]+\)|^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>\s)/m.test(value);
+}
+
+function PlainMessageText({
+    text,
+    className,
+}: {
+    text: string;
+    className?: string;
+}) {
+    return (
+        <div
+            className={classNames(
+                "break-words whitespace-pre-wrap [overflow-wrap:anywhere]",
+                className
+            )}
+        >
+            {text}
+        </div>
+    );
 }
 
 async function copyText(value: string): Promise<boolean> {
@@ -115,168 +106,9 @@ function buildMessageCopyText({
     return sections.join("\n\n").trim();
 }
 
-// Image preview component with loading state and error handling
-function ImagePreview({
-    href,
-    alt,
-    isUserMessage,
-    isDark,
-}: {
-    href: string;
-    alt: string;
-    isUserMessage: boolean;
-    isDark: boolean;
-}) {
-    const [loadError, setLoadError] = useState(false);
-    const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-    const { t } = useTranslation('chat');
-
-    useEffect(() => {
-        if (!isLightboxOpen) {
-            return undefined;
-        }
-
-        // 支持 ESC 关闭，保持图片预览可快速退出。
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                setIsLightboxOpen(false);
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isLightboxOpen]);
-
-    if (loadError) {
-        // Fallback to file download link on error
-        return (
-            <a
-                href={href}
-                className={classNames(
-                    "inline-flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors max-w-full",
-                    isUserMessage
-                        ? "bg-blue-700/50 hover:bg-blue-700 text-white border border-blue-500"
-                        : isDark
-                            ? "bg-slate-900/50 hover:bg-slate-900 text-slate-300 border border-slate-700"
-                            : "bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200"
-                )}
-                title={t('download', { name: alt })}
-                download
-            >
-                <ImageIcon size={14} className="opacity-70 flex-shrink-0" />
-                <span className="truncate">{alt}</span>
-            </a>
-        );
-    }
-
-    return (
-        <>
-            <button
-                type="button"
-                className="group block max-w-full overflow-hidden rounded-lg"
-                onClick={() => setIsLightboxOpen(true)}
-                aria-label={t('openImagePreview', { name: alt })}
-                title={t('openImagePreview', { name: alt })}
-            >
-                <img
-                    src={href}
-                    alt={alt}
-                    className="max-w-full max-h-64 cursor-zoom-in object-contain rounded-lg transition-opacity group-hover:opacity-95 sm:max-h-80"
-                    loading="lazy"
-                    onError={() => setLoadError(true)}
-                />
-            </button>
-
-            {isLightboxOpen && (
-                <FloatingPortal>
-                    <div className="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-                        <button
-                            type="button"
-                            className={classNames(
-                                "absolute inset-0",
-                                "glass-overlay"
-                            )}
-                            onClick={() => setIsLightboxOpen(false)}
-                            aria-label={t('common:close')}
-                        />
-
-                        <div
-                            className={classNames(
-                                "relative z-[81] flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border shadow-2xl",
-                                "glass-modal"
-                            )}
-                            role="dialog"
-                            aria-modal="true"
-                            aria-label={t('imagePreviewDialog')}
-                            onClick={(event) => event.stopPropagation()}
-                        >
-                            <div className={classNames(
-                                "flex items-center justify-between gap-3 border-b px-4 py-3",
-                                "border-[var(--glass-border-subtle)]"
-                            )}>
-                                <div className="min-w-0">
-                                    <p className={classNames(
-                                        "truncate text-sm font-medium",
-                                        "text-[var(--color-text-primary)]"
-                                    )}>
-                                        {alt}
-                                    </p>
-                                    <p className={classNames(
-                                        "text-xs",
-                                        "text-[var(--color-text-tertiary)]"
-                                    )}>
-                                        {t('imagePreviewHint')}
-                                    </p>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <a
-                                        href={href}
-                                        download
-                                        className={classNames(
-                                            "inline-flex items-center rounded-lg px-3 py-2 text-xs font-medium transition-colors",
-                                            isDark
-                                                ? "bg-slate-800 text-slate-100 hover:bg-slate-700"
-                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                                        )}
-                                        title={t('download', { name: alt })}
-                                    >
-                                        {t('download', { name: alt })}
-                                    </a>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsLightboxOpen(false)}
-                                        className={classNames(
-                                            "inline-flex items-center justify-center rounded-lg p-2 transition-colors",
-                                            isDark
-                                                ? "text-slate-300 hover:bg-slate-800 hover:text-slate-100"
-                                                : "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                                        )}
-                                        aria-label={t('common:close')}
-                                    >
-                                        <CloseIcon size={18} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-center overflow-auto p-4 sm:p-6">
-                                <img
-                                    src={href}
-                                    alt={alt}
-                                    className="max-h-[75vh] w-auto max-w-full rounded-xl object-contain"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </FloatingPortal>
-            )}
-        </>
-    );
-}
-
 export interface MessageBubbleProps {
     event: LedgerEvent;
+    actorById: Map<string, Actor>;
     actors: Actor[];
     displayNameMap: Map<string, string>;
     agentState: AgentState | null;
@@ -288,6 +120,7 @@ export interface MessageBubbleProps {
     onReply: () => void;
     onShowRecipients: () => void;
     onCopyLink?: (eventId: string) => void;
+    onCopyContent?: (ev: LedgerEvent) => void;
     onRelay?: (ev: LedgerEvent) => void;
     onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
     onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
@@ -295,6 +128,7 @@ export interface MessageBubbleProps {
 
 export const MessageBubble = memo(function MessageBubble({
     event: ev,
+    actorById,
     actors,
     displayNameMap,
     agentState,
@@ -306,6 +140,7 @@ export const MessageBubble = memo(function MessageBubble({
     onReply,
     onShowRecipients,
     onCopyLink,
+    onCopyContent: _onCopyContent,
     onRelay,
     onOpenSource,
     onOpenPresentationRef,
@@ -315,9 +150,23 @@ export const MessageBubble = memo(function MessageBubble({
     const senderAccent = !isUserMessage ? getActorAccentColor(String(ev.by || ""), isDark) : null;
     const messageText = useMemo(() => formatEventLine(ev), [ev]);
 
-    // Floating UI for agent-state tooltip
     const [isAgentStateOpen, setIsAgentStateOpen] = useState(false);
     const [copiedMessageText, setCopiedMessageText] = useState(false);
+    const { refs, floatingStyles, context } = useFloating({
+        open: isAgentStateOpen,
+        onOpenChange: setIsAgentStateOpen,
+        placement: "bottom-start",
+        middleware: [offset(8), flip(), shift({ padding: 8 })],
+        whileElementsMounted: autoUpdate,
+        strategy: "fixed",
+    });
+    const isAgentStatePositioned = context.isPositioned;
+    const setAgentStateReference = useCallback((node: HTMLElement | null) => {
+        refs.setReference(node);
+    }, [refs]);
+    const setAgentStateFloating = useCallback((node: HTMLElement | null) => {
+        refs.setFloating(node);
+    }, [refs]);
 
     const canShowAgentState = useMemo(() => {
         if (isUserMessage) return false;
@@ -326,38 +175,6 @@ export const MessageBubble = memo(function MessageBubble({
         return true;
     }, [ev.by, isUserMessage]);
 
-    const { refs: floatingRefs, floatingStyles, context } = useFloating({
-        open: isAgentStateOpen && canShowAgentState,
-        onOpenChange: setIsAgentStateOpen,
-        placement: "bottom-start",
-        middleware: [
-            offset(10),
-            flip({ fallbackPlacements: ["top-start", "bottom-end", "top-end"] }),
-            shift({ padding: 10 }),
-        ],
-        whileElementsMounted: autoUpdate,
-    });
-
-    const setAgentStateReference = useCallback(
-        (node: HTMLElement | null) => {
-            floatingRefs.setReference(node);
-        },
-        [floatingRefs]
-    );
-
-    const setAgentStateFloating = useCallback(
-        (node: HTMLElement | null) => {
-            floatingRefs.setFloating(node);
-        },
-        [floatingRefs]
-    );
-
-    const hover = useHover(context, {
-        delay: { open: 100, close: 150 },
-        enabled: canShowAgentState,
-    });
-    const dismiss = useDismiss(context);
-    const { getReferenceProps, getFloatingProps } = useInteractions([hover, dismiss]);
     const { t } = useTranslation('chat');
     const agentStateText = String(agentState?.hot?.focus || "").trim();
     const agentStateDisplay = agentStateText || t('noAgentStateYet');
@@ -382,25 +199,36 @@ export const MessageBubble = memo(function MessageBubble({
         return raw.map((t) => String(t || "").trim()).filter((t) => t);
     }, [msgData?.dst_to]);
     const hasDestination = !!dstGroupId;
-    const rawAttachments: EventAttachment[] = Array.isArray(msgData?.attachments) ? msgData.attachments : [];
+    const rawAttachments: MessageAttachment[] = Array.isArray(msgData?.attachments) ? msgData.attachments : [];
     const blobAttachments = rawAttachments
-        .filter((a): a is EventAttachment => a != null && typeof a === "object")
+        .filter((a): a is MessageAttachment => a != null && typeof a === "object")
         .map((a) => ({
             kind: String(a.kind || "file"),
             path: String(a.path || ""),
             title: String(a.title || ""),
             bytes: Number(a.bytes || 0),
             mime_type: String(a.mime_type || ""),
+            local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
         }))
-        .filter((a) => a.path.startsWith("state/blobs/"));
+        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
     const presentationRefs = useMemo(() => getPresentationMessageRefs(msgData?.refs), [msgData?.refs]);
+    const shouldRenderMarkdown = useMemo(() => mayContainMarkdown(messageText), [messageText]);
+    const stableMessageAttachmentKey = useMemo(() => {
+        const clientId = typeof msgData?.client_id === "string" ? String(msgData.client_id || "").trim() : "";
+        if (clientId) return `client:${clientId}`;
+        const eventId = typeof ev.id === "string" ? String(ev.id || "").trim() : "";
+        return eventId || `row:${String(ev.ts || "")}:${String(ev.by || "")}`;
+    }, [ev.id, ev.ts, ev.by, msgData]);
     const copyableMessageText = useMemo(
         () =>
             buildMessageCopyText({
                 quoteText,
                 messageText,
                 presentationRefs,
-                attachments: blobAttachments,
+                attachments: blobAttachments.map((attachment) => ({
+                    title: attachment.title,
+                    path: attachment.path || attachment.local_preview_url,
+                })),
             }),
         [blobAttachments, messageText, presentationRefs, quoteText]
     );
@@ -482,8 +310,10 @@ export const MessageBubble = memo(function MessageBubble({
     // Sender display name (use title if available)
     const senderActor = useMemo(() => {
         if (isUserMessage) return null;
-        return resolveSenderActor(actors, String(ev.by || ""));
-    }, [actors, ev.by, isUserMessage]);
+        const senderId = String(ev.by || "").trim();
+        if (!senderId) return null;
+        return actorById.get(senderId) || null;
+    }, [actorById, ev.by, isUserMessage]);
 
     const senderDisplayName = useMemo(() => {
         const by = String(ev.by || "");
@@ -491,14 +321,6 @@ export const MessageBubble = memo(function MessageBubble({
         if (by === "user") return getRecipientDisplayLabel(by, displayNameMap);
         return String(senderActor?.title || "").trim() || displayNameMap.get(by) || by;
     }, [displayNameMap, ev.by, senderActor]);
-
-    // Sender runtime logo path (for actor avatars)
-    const senderLogoSrc = useMemo(() => {
-        if (isUserMessage) return null;
-        const runtime = String(senderActor?.runtime || "").toLowerCase();
-        if (!runtime) return null;
-        return RUNTIME_LOGO[runtime] || null;
-    }, [isUserMessage, senderActor]);
 
     const readPreviewEntries = visibleReadStatusEntries.slice(0, 3);
     const readPreviewOverflow = Math.max(0, visibleReadStatusEntries.length - readPreviewEntries.length);
@@ -524,7 +346,7 @@ export const MessageBubble = memo(function MessageBubble({
     return (
         <div
             className={classNames(
-                "flex gap-2 sm:gap-3 group",
+                "relative flex w-full min-w-0 gap-2 sm:gap-3 group",
                 isUserMessage
                     ? "flex-col items-end sm:items-start sm:flex-row-reverse"
                     : "flex-col items-start sm:flex-row",
@@ -532,28 +354,95 @@ export const MessageBubble = memo(function MessageBubble({
             )}
         >
             {/* Desktop Avatar (Hidden on mobile) */}
-            <div
-                className={classNames(
-                    "hidden sm:flex flex-shrink-0 w-8 h-8 rounded-full items-center justify-center text-xs font-bold shadow-sm mt-1 overflow-hidden",
-                    isUserMessage
-                        ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white"
-                        : isDark
-                            ? "bg-slate-700 text-slate-200"
-                            : "bg-white border border-gray-200 text-gray-700",
-                    !isUserMessage && senderAccent ? `ring-1 ring-inset ${senderAccent.ring}` : ""
-                )}
-                ref={setAgentStateReference}
-                {...getReferenceProps()}
-            >
-                {senderLogoSrc
-                    ? <img src={senderLogoSrc} alt="" className="w-full h-full object-cover" />
-                    : isUserMessage ? "U" : (senderDisplayName || "?")[0].toUpperCase()}
+            <div className="relative hidden sm:block">
+                <div
+                    className={classNames(
+                        "mt-1 h-8 w-8 flex-shrink-0",
+                        canShowAgentState ? "cursor-help" : ""
+                    )}
+                    ref={canShowAgentState ? setAgentStateReference : undefined}
+                    onMouseEnter={canShowAgentState ? () => setIsAgentStateOpen(true) : undefined}
+                    onMouseLeave={canShowAgentState ? () => setIsAgentStateOpen(false) : undefined}
+                    onFocus={canShowAgentState ? () => setIsAgentStateOpen(true) : undefined}
+                    onBlur={canShowAgentState ? () => setIsAgentStateOpen(false) : undefined}
+                    tabIndex={canShowAgentState ? 0 : undefined}
+                    aria-label={canShowAgentState ? t('agentStateTooltipLabel', { defaultValue: 'View agent state' }) : undefined}
+                >
+                    <ActorAvatar
+                        avatarUrl={senderActor?.avatar_url}
+                        runtime={senderActor?.runtime}
+                        title={senderDisplayName}
+                        isUser={isUserMessage}
+                        isDark={isDark}
+                        accentRingClassName={senderAccent?.ring}
+                    />
+                </div>
             </div>
+            <FloatingPortal>
+                {isAgentStateOpen && canShowAgentState ? (
+                    <div
+                        ref={setAgentStateFloating}
+                        style={floatingStyles}
+                        className={classNames(
+                            "pointer-events-none z-[80] w-[min(360px,calc(100vw-32px))] rounded-2xl px-3 py-2 shadow-2xl transition-opacity duration-150",
+                            "glass-modal text-[var(--color-text-primary)]",
+                            isAgentStatePositioned ? "opacity-100" : "opacity-0"
+                        )}
+                        role="status"
+                    >
+                        <div className="flex items-center gap-2">
+                            <div className="text-xs font-semibold text-[var(--color-text-primary)]">
+                                {senderDisplayName}
+                            </div>
+                            {agentState?.updated_at ? (
+                                <div
+                                    className={classNames(
+                                        "ml-auto text-xs tabular-nums",
+                                        "text-[var(--color-text-tertiary)]"
+                                    )}
+                                    title={formatFullTime(agentState.updated_at)}
+                                >
+                                    {t('updated', { time: formatTime(agentState.updated_at) })}
+                                </div>
+                            ) : null}
+                        </div>
+                        <div className="mt-1 text-xs whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                            {agentStateDisplay}
+                        </div>
+                        {(stateTask || blockerCount > 0 || stateNext || stateChanged) ? (
+                            <div className="mt-2 space-y-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    {stateTask ? (
+                                        <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                                            {t("taskShort", { id: stateTask })}
+                                        </span>
+                                    ) : null}
+                                    {blockerCount > 0 ? (
+                                        <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300">
+                                            {t("blockersShort", { count: blockerCount })}
+                                        </span>
+                                    ) : null}
+                                </div>
+                                {stateNext ? (
+                                    <div className="text-[11px] text-[var(--color-text-tertiary)]">
+                                        {t("nextShort", { value: stateNext })}
+                                    </div>
+                                ) : null}
+                                {stateChanged ? (
+                                    <div className={classNames("text-[11px]", "text-[var(--color-text-tertiary)]")}>
+                                        {t("changedShort", { value: stateChanged })}
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
+            </FloatingPortal>
 
             {/* Message Content */}
             <div
                 className={classNames(
-                    "flex flex-col w-full sm:w-auto sm:max-w-[75%] min-w-0",
+                    "flex min-w-0 flex-col w-full md:w-auto md:max-w-[82%] xl:max-w-[75%]",
                     isUserMessage ? "items-end" : "items-start"
                 )}
             >
@@ -564,21 +453,16 @@ export const MessageBubble = memo(function MessageBubble({
                         isUserMessage ? "justify-end" : "justify-start"
                     )}
                 >
-                    <div
-                        className={classNames(
-                            "flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm overflow-hidden",
-                            isUserMessage
-                                ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white"
-                                : isDark
-                                    ? "bg-slate-700 text-slate-200"
-                                    : "bg-white border border-gray-200 text-gray-700",
-                            !isUserMessage && senderAccent ? `ring-1 ring-inset ${senderAccent.ring}` : ""
-                        )}
-                    >
-                        {senderLogoSrc
-                            ? <img src={senderLogoSrc} alt="" className="w-full h-full object-cover" />
-                            : isUserMessage ? "U" : (senderDisplayName || "?")[0].toUpperCase()}
-                    </div>
+                    <ActorAvatar
+                        avatarUrl={senderActor?.avatar_url}
+                        runtime={senderActor?.runtime}
+                        title={senderDisplayName}
+                        isUser={isUserMessage}
+                        isDark={isDark}
+                        accentRingClassName={senderAccent?.ring}
+                        sizeClassName="h-6 w-6"
+                        textClassName="text-[10px]"
+                    />
                     <span
                         className={classNames(
                             "text-xs font-medium flex-shrink-0",
@@ -640,7 +524,7 @@ export const MessageBubble = memo(function MessageBubble({
 
                 {/* Bubble wrapper (allows badge to overflow) */}
                 <div
-                    className="relative max-w-[85vw] sm:max-w-full min-w-0"
+                    className="relative w-full max-w-full min-w-0 md:w-auto"
                     style={isAttention ? { minWidth: "min(8.5rem, 85vw)" } : undefined}
                 >
                     {isAttention && (
@@ -656,7 +540,7 @@ export const MessageBubble = memo(function MessageBubble({
                     )}
                 <div
                     className={classNames(
-                        "px-4 py-2.5 text-sm leading-relaxed",
+                        "inline-flex max-w-full flex-col px-4 py-2.5 text-sm leading-relaxed",
                         isUserMessage
                             ? "bg-blue-600 text-white rounded-2xl rounded-tr-none shadow-sm"
                             : "glass-bubble rounded-2xl rounded-tl-none text-[var(--color-text-primary)]"
@@ -737,74 +621,38 @@ export const MessageBubble = memo(function MessageBubble({
                     ) : null}
 
                     {/* Text Content */}
-                    <MarkdownRenderer
-                        content={messageText}
-                        isDark={isDark}
-                        invertText={isUserMessage}
-                        className="break-words [overflow-wrap:anywhere] max-w-full"
-                    />
+                    {shouldRenderMarkdown ? (
+                        <Suspense
+                            fallback={
+                                <PlainMessageText
+                                    text={messageText}
+                                    className="max-w-full"
+                                />
+                            }
+                        >
+                            <LazyMarkdownRenderer
+                                content={messageText}
+                                isDark={isDark}
+                                invertText={isUserMessage}
+                                className="break-words [overflow-wrap:anywhere] max-w-full"
+                            />
+                        </Suspense>
+                    ) : (
+                        <PlainMessageText
+                            text={messageText}
+                            className="max-w-full"
+                        />
+                    )}
 
                     {/* Attachments */}
-                    {blobAttachments.length > 0 && blobGroupId && (() => {
-                        const imageAttachments = blobAttachments.filter((a) =>
-                            a.mime_type.startsWith("image/")
-                        );
-                        const fileAttachments = blobAttachments.filter((a) =>
-                            !a.mime_type.startsWith("image/")
-                        );
-                        return (
-                            <>
-                                {/* Image previews */}
-                                {imageAttachments.length > 0 && (
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        {imageAttachments.map((a, i) => {
-                                            const parts = a.path.split("/");
-                                            const blobName = parts[parts.length - 1] || "";
-                                            const href = `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`;
-                                            const label = a.title || blobName;
-                                            return (
-                                                <ImagePreview
-                                                    key={`img-${blobName}:${i}`}
-                                                    href={href}
-                                                    alt={label}
-                                                    isUserMessage={isUserMessage}
-                                                    isDark={isDark}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                                {/* File attachments */}
-                                {fileAttachments.length > 0 && (
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        {fileAttachments.map((a, i) => {
-                                            const parts = a.path.split("/");
-                                            const blobName = parts[parts.length - 1] || "";
-                                            const href = `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`;
-                                            const label = a.title || blobName || "file";
-                                            return (
-                                                <a
-                                                    key={`file-${blobName}:${i}`}
-                                                    href={href}
-                                                    className={classNames(
-                                                        "inline-flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors max-w-full",
-                                                        isUserMessage
-                                                            ? "bg-blue-700/50 hover:bg-blue-700 text-white border border-blue-500"
-                                                            : "glass-btn border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)]"
-                                                    )}
-                                                    title={t('download', { name: label })}
-                                                    download
-                                                >
-                                                    <FileIcon size={14} className="opacity-70 flex-shrink-0" />
-                                                    <span className="truncate">{label}</span>
-                                                </a>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </>
-                        );
-                    })()}
+                    <MessageAttachments
+                        attachments={blobAttachments}
+                        blobGroupId={blobGroupId}
+                        isUserMessage={isUserMessage}
+                        isDark={isDark}
+                        attachmentKeyPrefix={stableMessageAttachmentKey}
+                        downloadTitle={(name) => t('download', { name })}
+                    />
                 </div>
                 </div>
 
@@ -1026,70 +874,6 @@ export const MessageBubble = memo(function MessageBubble({
                     )}
                 </div>
             </div>
-
-            {isAgentStateOpen && canShowAgentState && (
-                <FloatingPortal>
-                    <div
-                        ref={setAgentStateFloating}
-                        style={floatingStyles}
-                        {...getFloatingProps()}
-                        className={classNames(
-                            "glass-modal z-tooltip w-[min(360px,calc(100vw-32px))] px-3 py-2 text-[var(--color-text-primary)]"
-                        )}
-                        role="status"
-                    >
-                        <div className="flex items-center gap-2">
-                            <div
-                                className="text-xs font-semibold text-[var(--color-text-primary)]"
-                            >
-                                {senderDisplayName}
-                            </div>
-                            {agentState?.updated_at ? (
-                                <div
-                                    className={classNames(
-                                        "ml-auto text-xs tabular-nums",
-                                        "text-[var(--color-text-tertiary)]"
-                                    )}
-                                    title={formatFullTime(agentState.updated_at)}
-                                >
-                                    {t('updated', { time: formatTime(agentState.updated_at) })}
-                                </div>
-                            ) : null}
-                        </div>
-                        <div
-                            className="mt-1 text-xs whitespace-pre-wrap text-[var(--color-text-secondary)]"
-                        >
-                            {agentStateDisplay}
-                        </div>
-                        {(stateTask || blockerCount > 0 || stateNext || stateChanged) ? (
-                            <div className="mt-2 space-y-1">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                    {stateTask ? (
-                                        <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                                            {t("taskShort", { id: stateTask })}
-                                        </span>
-                                    ) : null}
-                                    {blockerCount > 0 ? (
-                                        <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300">
-                                            {t("blockersShort", { count: blockerCount })}
-                                        </span>
-                                    ) : null}
-                                </div>
-                                {stateNext ? (
-                                    <div className="text-[11px] text-[var(--color-text-tertiary)]">
-                                        {t("nextShort", { value: stateNext })}
-                                    </div>
-                                ) : null}
-                                {stateChanged ? (
-                                    <div className={classNames("text-[11px]", "text-[var(--color-text-tertiary)]")}>
-                                        {t("changedShort", { value: stateChanged })}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ) : null}
-                    </div>
-                </FloatingPortal>
-            )}
         </div>
     );
 }, (prevProps, nextProps) => {

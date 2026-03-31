@@ -9,6 +9,7 @@ services:
     image: cccc
     container_name: cccc
     restart: unless-stopped
+    init: true
     ports:
       - "127.0.0.1:${CCCC_PORT:-8848}:8848"
     volumes:

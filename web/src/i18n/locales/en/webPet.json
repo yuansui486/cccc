@@ -4,6 +4,13 @@
   "dismissReminderAria": "Dismiss reminder",
   "bubbleAria": "Web Pet",
   "bubbleAriaHint": "Web Pet. {{hint}}",
+  "panelTitle": "Web Pet",
+  "panelIdle": "No current reminders",
+  "reminderCount": "{{count}} reminders",
+  "reviewNow": "Review now",
+  "reviewing": "Reviewing…",
+  "moreReminders": "More reminders",
+  "moreCount": "+{{count}} more",
   "teamFallback": "Team",
   "systemAgent": "System",
   "taskFallback": "this task",
@@ -14,26 +21,54 @@
   },
   "countWorking": "{{count}} working",
   "countBusy": "{{count}} busy",
-  "countNeedsYou": "{{count}} needs you",
-  "noActionItems": "No action items right now.",
+  "petPeerLabel": "Pet Peer",
+  "petPersonaSourceHelp": "Persona loaded",
+  "petPersonaSourceDefault": "Default seed",
+  "noActionItems": "No suggestions or issues right now.",
+  "hintPetContextLoading": "Syncing pet context…",
+  "hintPetContextUnavailable": "Pet context unavailable",
   "kind": {
-    "waiting_user": "waiting user",
-    "reply_required": "reply required",
-    "stalled_peer": "stalled peer",
+    "suggestion": "suggestion",
+    "actor_down": "actor down",
     "mention": "mention"
   },
   "action": {
-    "complete": "Done",
-    "view": "View",
-    "reply": "Reply"
+    "draft": "Draft in chat",
+    "applyRule": "Apply rule",
+    "restart": "Restart",
+    "restartPeer": "Restart peer",
+    "restartForeman": "Restart foreman",
+    "dismiss": "Dismiss"
   },
+  "notice": {
+    "suggestionDrafted": "Draft added to composer",
+    "restartRequested": "Restart requested",
+    "actorRestartFailed": "Failed to restart actor",
+    "automationProposalApplied": "Automation proposal applied",
+    "automationProposalApplyFailed": "Failed to apply automation proposal",
+    "reviewRequested": "Pet review requested",
+    "reviewNoReminders": "No current reminders",
+    "reviewPetUnavailable": "Pet runtime is unavailable",
+    "reviewPetNotRunning": "Pet runtime is not running",
+    "reviewPetAuthExpired": "Pet runtime authentication expired. Re-login and retry."
+  },
+  "suggestionLabel": "Suggestion",
   "taskProgress": "{{done}}/{{total}} done",
   "taskActive": "{{count}} active",
   "hintTaskProgress": "{{done}}/{{total}} tasks done",
-  "hintTaskWithAction": "{{done}}/{{total}} done, {{count}} need you",
   "reminderSummary": {
-    "mention": "{{actor}} mentioned you.",
-    "replyRequired": "{{actor}} is waiting for your reply.",
-    "stalledPeer": "{{actor}} has been idle for a while on {{taskId}}."
+    "mention": "{{actor}} prepared a draft you can review in chat.",
+    "replyRequired": "{{actor}} prepared a reply draft you can review in chat."
+  },
+  "snapshot": {
+    "group": "Group: {{value}}",
+    "groupState": "Group State: {{value}}",
+    "tasks": "Tasks: total={{total}}, active={{active}}, done={{done}}, archived={{archived}}",
+    "agentSnapshot": "Agent Snapshot: {{value}}",
+    "blockedTasks": "Blocked Tasks: {{value}}",
+    "waitingUserTasks": "Waiting User Tasks: {{value}}",
+    "handoffTasks": "Handoff Tasks: {{value}}",
+    "plannedBacklog": "Planned Backlog: {{value}}",
+    "taskProposals": "Task Proposals: {{value}}"
   }
 }

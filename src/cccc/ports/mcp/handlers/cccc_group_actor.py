@@ -189,7 +189,7 @@ def actor_stop(*, group_id: str, by: str, actor_id: str) -> Dict[str, Any]:
 
 
 def actor_restart(*, group_id: str, by: str, actor_id: str) -> Dict[str, Any]:
-    """Restart an actor (stop + start, clears context). Foreman can restart any; peer can only restart self."""
+    """Restart an actor (stop + start, clears context). Foreman and peer can restart any actor."""
     return _call_daemon_or_raise({
         "op": "actor_restart",
         "args": {"group_id": group_id, "actor_id": actor_id, "by": by},

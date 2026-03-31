@@ -1,7 +1,8 @@
-import React, { lazy, Suspense, useMemo } from "react";
+import React, { lazy, Suspense, useEffect, useMemo } from "react";
 import { DropOverlay } from "./components/DropOverlay";
 const AppModals = lazy(() => import("./components/AppModals").then((m) => ({ default: m.AppModals })));
 import { DoneHubLoginGate } from "./components/DoneHubLoginGate";
+const WebPet = lazy(() => import("./features/webPet/WebPet").then((m) => ({ default: m.WebPet })));
 import { AppBackground } from "./components/app/AppBackground";
 import { AppFeedback } from "./components/app/AppFeedback";
 import { AppShell } from "./components/app/AppShell";
@@ -18,7 +19,6 @@ import { useViewportHeight } from "./hooks/useViewportHeight";
 import { useAppChrome } from "./hooks/useAppChrome";
 import { useAppGroupLifecycle } from "./hooks/useAppGroupLifecycle";
 import { useAppTabState } from "./hooks/useAppTabState";
-import { WebPet } from "./features/webPet/WebPet";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
 import {
@@ -30,6 +30,7 @@ import {
   useObservabilityStore,
   useDoneHubStore,
 } from "./stores";
+import { useChatOutboxStore } from "./stores/chatOutboxStore";
 import type { ChatMessageData, LedgerEvent } from "./types";
 
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
 
   const groups = useGroupStore((state) => state.groups);
   const groupOrder = useGroupStore((state) => state.groupOrder);
+  const archivedGroupIds = useGroupStore((state) => state.archivedGroupIds);
   const selectedGroupId = useGroupStore((state) => state.selectedGroupId);
   const groupDoc = useGroupStore((state) => state.groupDoc);
   const actors = useGroupStore((state) => state.actors);
@@ -50,7 +52,9 @@ export default function App() {
   const warmGroup = useGroupStore((state) => state.warmGroup);
   const openChatWindow = useGroupStore((state) => state.openChatWindow);
   const closeChatWindow = useGroupStore((state) => state.closeChatWindow);
-  const reorderGroups = useGroupStore((state) => state.reorderGroups);
+  const reorderGroupsInSection = useGroupStore((state) => state.reorderGroupsInSection);
+  const archiveGroup = useGroupStore((state) => state.archiveGroup);
+  const restoreGroup = useGroupStore((state) => state.restoreGroup);
   const getOrderedGroups = useGroupStore((state) => state.getOrderedGroups);
 
   const busy = useUIStore((s) => s.busy);
@@ -102,6 +106,7 @@ export default function App() {
   } = useComposerStore();
 
   const { setNewActorRole, setEditGroupTitle, setEditGroupTopic, setDirSuggestions } = useFormStore();
+  const clearAllOutbox = useChatOutboxStore((state) => state.clearAll);
 
   const {
     getTermEpoch,
@@ -122,6 +127,15 @@ export default function App() {
   const [showMentionMenu, setShowMentionMenu] = React.useState(false);
   const [_mentionFilter, setMentionFilter] = React.useState("");
   const [mentionSelectedIndex, setMentionSelectedIndex] = React.useState(0);
+
+  useEffect(() => {
+    const handlePageHide = () => clearAllOutbox();
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      clearAllOutbox();
+    };
+  }, [clearAllOutbox]);
 
   const {
     composerRef,
@@ -213,7 +227,11 @@ export default function App() {
     showError,
   });
 
-  useGlobalEvents({ refreshGroups });
+  useGlobalEvents({
+    refreshGroups,
+    refreshActors,
+    selectedGroupId,
+  });
 
   const { canManageGroups, ccccHome, fetchDirSuggestions } = useAppChrome({
     parseUrlDeepLink,
@@ -314,7 +332,7 @@ export default function App() {
 
       <AppShell
         orderedGroups={orderedGroups}
-        groupOrder={groupOrder}
+        archivedGroupIds={archivedGroupIds}
         groups={groups}
         selectedGroupId={selectedGroupId}
         groupDoc={groupDoc}
@@ -360,7 +378,9 @@ export default function App() {
         onCloseSidebar={() => setSidebarOpen(false)}
         onToggleSidebar={toggleSidebarCollapsed}
         onResizeSidebar={setSidebarWidth}
-        onReorderGroups={reorderGroups}
+        onReorderGroupsInSection={reorderGroupsInSection}
+        onArchiveGroup={archiveGroup}
+        onRestoreGroup={restoreGroup}
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenGroupEdit={
           canManageGroups
@@ -408,7 +428,11 @@ export default function App() {
         onTouchEnd={handleTouchEnd}
       />
 
-      <WebPet />
+      {selectedGroupId ? (
+        <Suspense fallback={null}>
+          <WebPet key={selectedGroupId} groupId={selectedGroupId} />
+        </Suspense>
+      ) : null}
 
       <AppFeedback
         isDark={isDark}

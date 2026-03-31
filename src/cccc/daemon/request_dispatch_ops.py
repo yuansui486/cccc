@@ -26,6 +26,7 @@ from .group.group_state_ops import try_handle_group_state_op
 from .group.group_lifecycle_ops import try_handle_group_lifecycle_op
 from .automation.automation_ops import try_handle_group_automation_op
 from .group.group_settings_ops import try_handle_group_settings_op
+from .pet.pet_decision_ops import try_handle_pet_decision_op
 from .group.presentation_ops import try_handle_presentation_op
 from .group.presentation_browser_ops import try_handle_presentation_browser_op
 from .space.group_space_ops import try_handle_group_space_op
@@ -84,6 +85,7 @@ class RequestDispatchDeps:
     private_env_max_keys: int
     start_actor_process: Callable[..., dict[str, Any]]
     delete_actor_private_env: Callable[[str, str], None]
+    delete_actor_avatar: Callable[[str], None]
     get_actor_profile: Callable[[str], dict[str, Any] | None]
     load_actor_profile_secrets: Callable[[str], dict[str, str]]
     remove_headless_state: Callable[[str, str], None]
@@ -92,9 +94,10 @@ class RequestDispatchDeps:
     daemon_request_factory: Type[DaemonRequest]
     coerce_bool_default_false: Callable[[Any], bool]
     normalize_attachments: Callable[..., list[dict[str, Any]]]
-    auto_wake_recipients: Callable[..., None]
+    auto_wake_recipients: Callable[..., list[str]]
     automation_on_new_message: Callable[[Any], None]
     clear_pending_system_notifies_chat: Callable[[str, set[str]], None]
+    enqueue_group_space_sync_run: Callable[..., dict[str, Any]]
     error_factory: Callable[[str, str], DaemonResponse]
 
 
@@ -161,9 +164,20 @@ def dispatch_request(
     if group_core_resp is not None:
         return group_core_resp, False
 
-    group_settings_resp = try_handle_group_settings_op(op, args)
+    group_settings_resp = try_handle_group_settings_op(
+        op,
+        args,
+        effective_runner_kind=deps.effective_runner_kind,
+        start_actor_process=deps.start_actor_process,
+        remove_headless_state=deps.remove_headless_state,
+        remove_pty_state_if_pid=deps.remove_pty_state_if_pid,
+    )
     if group_settings_resp is not None:
         return group_settings_resp, False
+
+    pet_decision_resp = try_handle_pet_decision_op(op, args)
+    if pet_decision_resp is not None:
+        return pet_decision_resp, False
 
     presentation_resp = try_handle_presentation_op(op, args)
     if presentation_resp is not None:
@@ -173,7 +187,11 @@ def dispatch_request(
     if presentation_browser_resp is not None:
         return presentation_browser_resp, False
 
-    group_space_resp = try_handle_group_space_op(op, args)
+    group_space_resp = try_handle_group_space_op(
+        op,
+        args,
+        enqueue_group_space_sync_run=deps.enqueue_group_space_sync_run,
+    )
     if group_space_resp is not None:
         return group_space_resp, False
 
@@ -270,6 +288,7 @@ def dispatch_request(
         remove_pty_state_if_pid=deps.remove_pty_state_if_pid,
         throttle_clear_actor=deps.throttle_clear_actor,
         delete_actor_private_env=deps.delete_actor_private_env,
+        delete_actor_avatar=deps.delete_actor_avatar,
     )
     if actor_membership_resp is not None:
         return actor_membership_resp, False

@@ -1,5 +1,16 @@
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+function unwrapOuterQuotes(value: string): string {
+  const v = String(value || "").trim();
+  if (
+    v.length >= 2 &&
+    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+  ) {
+    return v.slice(1, -1).trim();
+  }
+  return v;
+}
+
 function splitStatements(line: string): string[] {
   // Split by semicolons outside quotes, so shell snippets like
   // `export A="x"; export B='y'` can be pasted directly.
@@ -112,6 +123,55 @@ function unquoteValue(valueRaw: string): string {
   return v;
 }
 
+function normalizeSetStatement(statement: string): { key: string; value: string } | null {
+  let line = String(statement || "").trim();
+  if (!line || line.startsWith("#")) return null;
+  if (line.startsWith("export ")) line = line.slice("export ".length).trim();
+
+  const ps = line.match(/^\$env:([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/i);
+  if (ps) {
+    return {
+      key: String(ps[1] || "").trim(),
+      value: unquoteValue(String(ps[2] ?? "")),
+    };
+  }
+
+  if (/^set\s+/i.test(line)) {
+    line = line.replace(/^set\s+/i, "").trim();
+    line = unwrapOuterQuotes(line);
+  }
+
+  const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+  if (!m) return null;
+  return {
+    key: String(m[1] || "").trim(),
+    value: unquoteValue(String(m[2] ?? "")),
+  };
+}
+
+function normalizeUnsetStatement(statement: string): string | null {
+  let line = String(statement || "").trim();
+  if (!line || line.startsWith("#")) return null;
+  if (line.startsWith("unset ")) line = line.slice("unset ".length).trim();
+  if (line.startsWith("export ")) line = line.slice("export ".length).trim();
+
+  const psRemove = line.match(/^remove-item\s+env:([A-Za-z_][A-Za-z0-9_]*)$/i);
+  if (psRemove) return String(psRemove[1] || "").trim();
+
+  const psNull = line.match(/^\$env:([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\$null$/i);
+  if (psNull) return String(psNull[1] || "").trim();
+
+  if (/^set\s+/i.test(line)) {
+    line = line.replace(/^set\s+/i, "").trim();
+    line = unwrapOuterQuotes(line);
+  }
+
+  // Allow `KEY=` / `set KEY=` to mean unset when users paste shell snippets.
+  if (line.includes("=")) line = line.split("=")[0].trim();
+  if (line.endsWith(";")) line = line.slice(0, -1).trim();
+  return line;
+}
+
 export function parsePrivateEnvSetText(
   text: string,
 ): { ok: true; setVars: Record<string, string> } | { ok: false; error: string } {
@@ -124,24 +184,20 @@ export function parsePrivateEnvSetText(
 
     const statements = splitStatements(trimmed);
     for (const st of statements) {
-      let line = st.trim();
-      if (!line || line.startsWith("#")) continue;
-      if (line.startsWith("export ")) line = line.slice("export ".length).trim();
-
-      const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-      if (!m) {
+      const parsed = normalizeSetStatement(st);
+      if (!parsed) {
         return {
           ok: false,
-          error: `Set line ${i + 1}: expected KEY=VALUE (supports export / quotes / semicolon)`,
+          error: `Set line ${i + 1}: expected KEY=VALUE (supports export / set / $env: / quotes / semicolon)`,
         };
       }
 
-      const key = String(m[1] || "").trim();
+      const key = parsed.key;
       if (!ENV_KEY_RE.test(key)) {
         return { ok: false, error: `Set line ${i + 1}: invalid env key` };
       }
 
-      out[key] = unquoteValue(String(m[2] ?? ""));
+      out[key] = parsed.value;
     }
   }
 
@@ -161,14 +217,8 @@ export function parsePrivateEnvUnsetText(
 
     const statements = splitStatements(trimmed);
     for (const st of statements) {
-      let line = st.trim();
-      if (!line || line.startsWith("#")) continue;
-      if (line.startsWith("unset ")) line = line.slice("unset ".length).trim();
-      if (line.startsWith("export ")) line = line.slice("export ".length).trim();
-
-      // Allow `KEY=` to mean unset when users paste shell snippets.
-      if (line.includes("=")) line = line.split("=")[0].trim();
-      if (line.endsWith(";")) line = line.slice(0, -1).trim();
+      const line = normalizeUnsetStatement(st);
+      if (!line) continue;
 
       if (!ENV_KEY_RE.test(line)) {
         return { ok: false, error: `Unset line ${i + 1}: invalid env key` };

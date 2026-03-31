@@ -9,6 +9,10 @@ from ..group.presentation_browser_runtime import (
     attach_browser_surface_socket,
     can_attach_browser_surface_socket,
 )
+from ..space.notebooklm_auth_browser_runtime import (
+    attach_notebooklm_auth_browser_socket,
+    can_attach_notebooklm_auth_browser_socket,
+)
 
 
 def _set_blocking_io(conn: Any) -> None:
@@ -165,6 +169,38 @@ def try_handle_socket_special_op(
             if resp.ok:
                 _set_blocking_io(conn)
                 if attach_browser_surface_socket(group_id=group_id, slot_id=slot_id, sock=conn):
+                    return True
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return True
+
+    if op == "space_provider_auth_browser_attach":
+        provider = str(args.get("provider") or "").strip().lower()
+        by = str(args.get("by") or "user").strip() or "user"
+        if provider != "notebooklm":
+            resp = error("space_job_invalid", f"unsupported provider auth browser attach: {provider or 'unknown'}")
+        elif by != "user":
+            resp = error("space_permission_denied", "only user can attach provider auth browser surface")
+        else:
+            ok, info = can_attach_notebooklm_auth_browser_socket()
+            if not ok:
+                resp = error(
+                    str(info.get("code") or "browser_surface_attach_failed"),
+                    str(info.get("message") or "browser surface attach failed"),
+                    details=dict(info.get("details") or {}),
+                )
+            else:
+                resp = DaemonResponse(ok=True, result={"provider": "notebooklm"})
+
+        try:
+            send_json(conn, dump_response(resp))
+            if resp.ok:
+                _set_blocking_io(conn)
+                if attach_notebooklm_auth_browser_socket(sock=conn):
                     return True
         except Exception:
             pass

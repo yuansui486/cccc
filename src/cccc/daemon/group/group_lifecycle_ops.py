@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import list_actors, update_actor
+from ...kernel.actors import list_actors, remove_actor, update_actor
+from ...kernel.context import ContextStorage
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
+from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor, sync_pet_actor
 from ...kernel.permissions import require_group_permission
+from ...kernel.runtime import runtime_start_preflight_error
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
 from ..actors.actor_profile_runtime import resolve_linked_actor_before_start
+from ..pet.review_scheduler import cancel_pet_review, request_pet_review
+from ..pet.profile_refresh import maybe_request_pet_profile_refresh
+
+logger = logging.getLogger(__name__)
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -57,6 +65,15 @@ def handle_group_start(
         )
     try:
         require_group_permission(group, by=by, action="group.start")
+        try:
+            sync_pet_actor(group)
+        except Exception as e:
+            logger.warning("Pet actor sync skipped for %s during group start: %s", group.group_id, e)
+            try:
+                if get_pet_actor(group) is not None:
+                    remove_actor(group, PET_ACTOR_ID)
+            except Exception:
+                pass
         actors = list_actors(group)
         start_specs: list[tuple[str, Path, list[str], dict[str, str], Dict[str, Any], str]] = []
         for actor in actors:
@@ -145,6 +162,18 @@ def handle_group_start(
                     raise RuntimeError(f"failed to install MCP for actor {aid}: {e}") from e
                 if not mcp_ready:
                     raise RuntimeError(f"failed to install MCP for actor {aid} (runtime={runtime})")
+                effective_cmd = normalize_runtime_command(runtime, list(cmd or []))
+                runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=runner_effective)
+                if runtime_error:
+                    return _error(
+                        "runtime_unavailable",
+                        runtime_error,
+                        details={
+                            "group_id": group.group_id,
+                            "actor_id": aid,
+                            "runtime": runtime,
+                        },
+                    )
 
             effective_env = merge_actor_env_with_private(group.group_id, aid, env)
             if runner_effective == "headless":
@@ -159,7 +188,6 @@ def handle_group_start(
                 except Exception:
                     pass
             else:
-                effective_cmd = normalize_runtime_command(runtime, list(cmd or []))
                 session = pty_runner.SUPERVISOR.start_actor(
                     group_id=group.group_id,
                     actor_id=aid,
@@ -175,6 +203,10 @@ def handle_group_start(
 
             clear_preamble_sent(group, aid)
             throttle_reset_actor(group.group_id, aid, keep_pending=True)
+            try:
+                ContextStorage(group).clear_agent_status_if_present(aid)
+            except Exception:
+                pass
             started.append(aid)
     except Exception as e:
         msg = str(e)
@@ -184,6 +216,8 @@ def handle_group_start(
 
     if started:
         try:
+            if str(group.doc.get("state") or "").strip() == "stopped":
+                group.doc["state"] = "active"
             group.doc["running"] = True
             group.save()
         except Exception:
@@ -192,6 +226,23 @@ def handle_group_start(
 
     data: Dict[str, Any] = {"started": started}
     event = append_event(group.ledger_path, kind="group.start", group_id=group.group_id, scope_key="", by=by, data=data)
+    try:
+        request_pet_review(
+            group.group_id,
+            reason="group_start",
+            source_event_id=str(event.get("id") or "").strip(),
+            immediate=True,
+        )
+    except Exception:
+        pass
+    try:
+        maybe_request_pet_profile_refresh(
+            group.group_id,
+            source_event_id=str(event.get("id") or "").strip(),
+            reason="group_start",
+        )
+    except Exception:
+        pass
     result: Dict[str, Any] = {"group_id": group.group_id, "started": started, "event": event}
     return DaemonResponse(ok=True, result=result)
 
@@ -249,10 +300,12 @@ def handle_group_stop(
     except Exception as e:
         return _error("group_stop_failed", str(e))
     try:
+        group.doc["state"] = "stopped"
         group.doc["running"] = False
         group.save()
     except Exception:
         pass
+    cancel_pet_review(group.group_id)
     event = append_event(group.ledger_path, kind="group.stop", group_id=group.group_id, scope_key="", by=by, data={"stopped": stopped})
     return DaemonResponse(ok=True, result={"group_id": group.group_id, "stopped": stopped, "event": event})
 

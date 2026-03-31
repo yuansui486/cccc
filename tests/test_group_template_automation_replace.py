@@ -93,6 +93,7 @@ prompts: {}
                 automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
                 self.assertEqual(automation.get("rules"), [])
                 self.assertEqual(automation.get("snippets"), {})
+                self.assertEqual(automation.get("snippet_overrides"), {})
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)

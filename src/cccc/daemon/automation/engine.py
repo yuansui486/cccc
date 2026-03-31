@@ -22,10 +22,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from ...contracts.v1 import AutomationRule, AutomationRuleSet, SystemNotifyData
-from ...kernel.actors import list_actors, find_foreman
+from ...kernel.actors import find_foreman, list_visible_actors
 from ...kernel.agent_state_hygiene import evaluate_agent_state_hygiene, sync_mind_context_runtime_state
 from ...kernel.context import ContextStorage
-from ...kernel.group import Group, load_group, get_group_state, set_group_state
+from ...kernel.group import (
+    Group,
+    effective_automation_snippets,
+    get_group_state,
+    load_group,
+    set_group_state,
+)
 from ...kernel.inbox import iter_events, is_message_for_actor, get_cursor, get_obligation_status_batch
 from ...kernel.ledger import append_event
 from ...kernel.terminal_transcript import get_terminal_transcript_settings
@@ -151,19 +157,7 @@ def _rule_state(doc: Dict[str, Any], rule_id: str) -> Dict[str, Any]:
 def _load_ruleset(group: Group) -> AutomationRuleSet:
     doc = group.doc.get("automation")
     d = doc if isinstance(doc, dict) else {}
-
-    raw_snippets = d.get("snippets")
-    snippets_in = raw_snippets if isinstance(raw_snippets, dict) else {}
-    snippets: Dict[str, str] = {}
-    for k, v in snippets_in.items():
-        if not isinstance(k, str):
-            continue
-        key = k.strip()
-        if not key:
-            continue
-        if not isinstance(v, str):
-            continue
-        snippets[key] = v
+    snippets = effective_automation_snippets(d)
 
     raw_rules = d.get("rules")
     rules_in = raw_rules if isinstance(raw_rules, list) else []
@@ -201,7 +195,7 @@ def _render_snippet(text: str, *, context: Dict[str, str]) -> str:
 
 def _actor_display_names(group: Group) -> str:
     names: List[str] = []
-    for a in list_actors(group):
+    for a in list_visible_actors(group):
         if not isinstance(a, dict):
             continue
         if not coerce_bool(a.get("enabled"), default=True):
@@ -682,6 +676,7 @@ class AutomationManager:
     
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._memory_auto_in_flight: set[str] = set()
 
     def on_resume(self, group: Group) -> None:
         """Reset automation timers on resume (idle/paused -> active).
@@ -708,7 +703,7 @@ class AutomationManager:
                 st_rule["last_fired_at"] = now
                 st_rule["last_error_at"] = ""
                 st_rule["last_error"] = ""
-            for actor in list_actors(group):
+            for actor in list_visible_actors(group):
                 if not isinstance(actor, dict):
                     continue
                 aid = str(actor.get("id") or "").strip()
@@ -806,7 +801,7 @@ class AutomationManager:
         try:
             roster = [
                 a
-                for a in list_actors(group)
+                for a in list_visible_actors(group)
                 if isinstance(a, dict)
                 and str(a.get("id") or "").strip()
                 and coerce_bool(a.get("enabled"), default=True)
@@ -1058,7 +1053,7 @@ class AutomationManager:
 
         with self._lock:
             state = _load_state(group)
-            for actor in list_actors(group):
+            for actor in list_visible_actors(group):
                 if not isinstance(actor, dict):
                     continue
                 aid = str(actor.get("id") or "").strip()
@@ -1163,7 +1158,7 @@ class AutomationManager:
         with self._lock:
             state = _load_state(group)
             resume_dt = parse_utc_iso(str(state.get("resume_at") or "")) if state.get("resume_at") else None
-            for actor in list_actors(group):
+            for actor in list_visible_actors(group):
                 if not isinstance(actor, dict):
                     continue
                 aid = str(actor.get("id") or "").strip()
@@ -1348,7 +1343,7 @@ class AutomationManager:
         return False, msg
 
     def _resolve_actor_control_targets(self, group: Group, targets: List[str]) -> List[str]:
-        actors = list_actors(group)
+        actors = list_visible_actors(group)
         actor_ids: List[str] = []
         for actor in actors:
             if not isinstance(actor, dict):
@@ -1458,7 +1453,7 @@ class AutomationManager:
 
         # Snapshot roster once.
         roster: Dict[str, Dict[str, Any]] = {}
-        for a in list_actors(group):
+        for a in list_visible_actors(group):
             if not isinstance(a, dict):
                 continue
             aid = str(a.get("id") or "").strip()
@@ -1756,7 +1751,7 @@ class AutomationManager:
 
         # Snapshot currently running actors (we only track "work volume" while running).
         running: list[tuple[str, str, str]] = []  # (actor_id, runner_kind, session_key)
-        for actor in list_actors(group):
+        for actor in list_visible_actors(group):
             if not isinstance(actor, dict):
                 continue
             aid = str(actor.get("id") or "").strip()
@@ -2007,6 +2002,7 @@ class AutomationManager:
 
         now = datetime.now(timezone.utc)
         should_run = False
+        group_id = str(group.group_id or "").strip()
         with self._lock:
             state = _load_state(group)
             memory_auto = state.get("memory_auto")
@@ -2025,46 +2021,55 @@ class AutomationManager:
             elapsed_ok = True
             if min_interval_seconds > 0 and last_run_dt is not None:
                 elapsed_ok = (now - last_run_dt).total_seconds() >= float(min_interval_seconds)
-            should_run = (pending >= int(min_new_messages)) and bool(elapsed_ok)
+            should_run = (pending >= int(min_new_messages)) and bool(elapsed_ok) and (group_id not in self._memory_auto_in_flight)
             if should_run:
                 memory_auto["pending_messages"] = 0
                 memory_auto["last_run_at"] = utc_now_iso()
+                if group_id:
+                    self._memory_auto_in_flight.add(group_id)
             _save_state(group, state)
 
         if not should_run:
             return
 
-        try:
-            from ..memory.memory_ops import run_auto_conversation_memory_cycle
+        def _run_memory_auto() -> None:
+            try:
+                from ..memory.memory_ops import run_auto_conversation_memory_cycle
 
-            result = run_auto_conversation_memory_cycle(
-                group_id=group.group_id,
-                actor_id="system",
-                max_messages=max_messages,
-                context_window_tokens=cwt,
-                reserve_tokens=reserve,
-                keep_recent_tokens=keep_recent,
-                signal_pack_token_budget=signal_pack_budget,
-            )
-            status = str(result.get("status") or "")
-            with self._lock:
-                state = _load_state(group)
-                memory_auto = state.get("memory_auto")
-                if not isinstance(memory_auto, dict):
-                    memory_auto = {}
-                    state["memory_auto"] = memory_auto
-                memory_auto["last_result"] = result
-                memory_auto["last_result_at"] = utc_now_iso()
-                if status == "written":
-                    memory_auto["last_written_at"] = utc_now_iso()
-                _save_state(group, state)
-        except Exception as e:
-            with self._lock:
-                state = _load_state(group)
-                memory_auto = state.get("memory_auto")
-                if not isinstance(memory_auto, dict):
-                    memory_auto = {}
-                    state["memory_auto"] = memory_auto
-                memory_auto["last_error_at"] = utc_now_iso()
-                memory_auto["last_error"] = str(e)
-                _save_state(group, state)
+                result = run_auto_conversation_memory_cycle(
+                    group_id=group.group_id,
+                    actor_id="system",
+                    max_messages=max_messages,
+                    context_window_tokens=cwt,
+                    reserve_tokens=reserve,
+                    keep_recent_tokens=keep_recent,
+                    signal_pack_token_budget=signal_pack_budget,
+                )
+                status = str(result.get("status") or "")
+                with self._lock:
+                    state = _load_state(group)
+                    memory_auto = state.get("memory_auto")
+                    if not isinstance(memory_auto, dict):
+                        memory_auto = {}
+                        state["memory_auto"] = memory_auto
+                    memory_auto["last_result"] = result
+                    memory_auto["last_result_at"] = utc_now_iso()
+                    if status == "written":
+                        memory_auto["last_written_at"] = utc_now_iso()
+                    _save_state(group, state)
+            except Exception as e:
+                with self._lock:
+                    state = _load_state(group)
+                    memory_auto = state.get("memory_auto")
+                    if not isinstance(memory_auto, dict):
+                        memory_auto = {}
+                        state["memory_auto"] = memory_auto
+                    memory_auto["last_error_at"] = utc_now_iso()
+                    memory_auto["last_error"] = str(e)
+                    _save_state(group, state)
+            finally:
+                if group_id:
+                    with self._lock:
+                        self._memory_auto_in_flight.discard(group_id)
+
+        threading.Thread(target=_run_memory_auto, name=f"cccc-memory-auto-{group_id or 'group'}", daemon=True).start()

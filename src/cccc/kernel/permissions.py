@@ -56,7 +56,7 @@ def require_actor_permission(
     | actor.add     | ✓    | ✓            | ✗           |
     | actor.start   | ✓    | ✓ (any)      | ✗           |
     | actor.stop    | ✓    | ✓ (any)      | ✓ (self)    |
-    | actor.restart | ✓    | ✓ (any)      | ✓ (self)    |
+    | actor.restart | ✓    | ✓ (any)      | ✓ (any)     |
     | actor.remove  | ✓    | ✓ (self)     | ✓ (self)    |
     | actor.update  | ✓    | ✗            | ✗           |
     """
@@ -83,10 +83,12 @@ def require_actor_permission(
         raise ValueError(f"permission denied: {who} cannot {action}")
 
     if role == "peer":
-        # Peer can: list, stop/restart/remove self
+        # Peer can: list, restart any actor, stop/remove self
         if action == "actor.list":
             return
-        if action in ("actor.stop", "actor.restart", "actor.remove"):
+        if action == "actor.restart":
+            return
+        if action in ("actor.stop", "actor.remove"):
             if target and target == who:
                 return
             raise ValueError(f"permission denied: peer can only {action} self, not {target}")

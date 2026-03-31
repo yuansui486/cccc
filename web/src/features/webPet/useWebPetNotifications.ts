@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { selectChatBucketState, useGroupStore } from "../../stores";
-import type { Actor, GroupContext, LedgerEvent } from "../../types";
-import {
-  createMentionReminder,
-  projectPetReminders,
-  type ReminderActorInput,
-  type ReminderEventInput,
-  type ReminderTaskInput,
-  type ReminderWaitingUserInput,
-  type PetReminder,
-} from "./reminders";
+import type { GroupContext, LedgerEvent } from "../../types";
+import { recordPetDecisionOutcome } from "../../services/api";
+import type { PetReminder } from "./types";
+import { buildTaskProposalMessage } from "./taskProposal";
 import {
   createMentionReaction,
   createTaskReactionSnapshot,
@@ -18,266 +11,351 @@ import {
   type TaskReactionSnapshotMap,
 } from "./reactions";
 
-const SNOOZE_MS = 60 * 1000;
-const ROTATE_MS = 8_000;
-const DISMISS_COOLDOWN_MS = 3_000;
+const HIDDEN_STORAGE_KEY_PREFIX = "cccc:web-pet:hidden:";
+const TASK_PROPOSAL_ECHO_SUPPRESS_MS = 10 * 60 * 1000;
+const RECENT_USER_MESSAGE_SCAN_LIMIT = 12;
+
+type ReminderPriorityMap = Record<string, number>;
 
 export interface UseWebPetNotificationsResult {
   reminders: PetReminder[];
   activeReminder: PetReminder | null;
+  autoPeekReminder: PetReminder | null;
+  unseenReminderCount: number;
   reaction: PetReaction | null;
-  dismissReminder: (fingerprint: string) => void;
+  dismissReminder: (
+    fingerprint: string,
+    opts?: { outcome?: "dismissed" | null; cooldownMs?: number }
+  ) => void;
+  markRemindersSeen: (fingerprints?: string[]) => void;
+}
+
+export function shouldProjectReminderForGroupState(
+  reminder: PetReminder,
+  groupState: string,
+): boolean {
+  const normalizedState = String(groupState || "").trim().toLowerCase();
+  if (normalizedState === "active") return true;
+  return reminder.action.type === "restart_actor" || reminder.action.type === "automation_proposal";
+}
+
+function normalizeCompareText(value: string): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function eventTargetsForeman(event: LedgerEvent): boolean {
+  const data = event.data as Record<string, unknown> | undefined;
+  const to = Array.isArray(data?.to) ? data.to : [];
+  return to.some((entry) => {
+    const normalized = normalizeCompareText(String(entry || ""));
+    return normalized === "@foreman" || normalized === "foreman";
+  });
+}
+
+function eventTextMentionsTask(reminder: PetReminder, text: string): boolean {
+  if (reminder.action.type !== "task_proposal") return false;
+  const normalizedText = normalizeCompareText(text);
+  if (!normalizedText) return false;
+  const expectedText = normalizeCompareText(buildTaskProposalMessage(reminder.action));
+  return !!expectedText && normalizedText === expectedText;
+}
+
+export function shouldSuppressTaskProposalEcho(
+  reminder: PetReminder,
+  events: LedgerEvent[],
+  nowMs: number = Date.now(),
+): boolean {
+  if (reminder.action.type !== "task_proposal") return false;
+
+  let scanned = 0;
+  for (let idx = events.length - 1; idx >= 0; idx -= 1) {
+    const event = events[idx];
+    if (!event || String(event.kind || "").trim() !== "chat.message") continue;
+    if (String(event.by || "").trim() !== "user") continue;
+    if (!eventTargetsForeman(event)) continue;
+    scanned += 1;
+    if (scanned > RECENT_USER_MESSAGE_SCAN_LIMIT) break;
+
+    const eventMs = Date.parse(String(event.ts || ""));
+    if (Number.isFinite(eventMs) && nowMs - eventMs > TASK_PROPOSAL_ECHO_SUPPRESS_MS) {
+      continue;
+    }
+
+    const data = event.data as Record<string, unknown> | undefined;
+    const text = String(data?.text || "");
+    if (eventTextMentionsTask(reminder, text)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getLatestEvent(events: LedgerEvent[]): LedgerEvent | null {
   return events.length > 0 ? events[events.length - 1] ?? null : null;
 }
 
-function mapReminderEvent(event: LedgerEvent | null | undefined): ReminderEventInput | null {
-  if (!event) return null;
-
-  const eventId = String(event.id || "").trim();
-  if (!eventId) return null;
-
-  const data = event.data as Record<string, unknown> | undefined;
-  const userStatus = event._obligation_status?.user;
-  const to = Array.isArray(data?.to)
-    ? data.to.map((entry) => String(entry || "").trim()).filter(Boolean)
-    : [];
-
-  return {
-    eventId,
-    kind: String(event.kind || "").trim(),
-    by: String(event.by || "").trim(),
-    text: String(data?.text || "").trim(),
-    to,
-    replyRequired: !!userStatus?.reply_required,
-    acked: !!userStatus?.acked,
-    replied: !!userStatus?.replied,
-  };
+export function sortProjectedReminders(reminders: PetReminder[]): PetReminder[] {
+  return [...reminders].sort((left, right) => {
+    const priorityDelta = Number(right.priority || 0) - Number(left.priority || 0);
+    if (priorityDelta !== 0) return priorityDelta;
+    const summaryDelta = String(left.summary || "").localeCompare(String(right.summary || ""));
+    if (summaryDelta !== 0) return summaryDelta;
+    return String(left.fingerprint || "").localeCompare(String(right.fingerprint || ""));
+  });
 }
 
-function mapReminderTasks(groupContext: GroupContext | null): ReminderTaskInput[] {
-  const tasks: ReminderTaskInput[] = [];
-
-  for (const task of groupContext?.coordination?.tasks ?? []) {
-    const taskId = String(task.id || "").trim();
-    if (!taskId) continue;
-
-    tasks.push({
-      taskId,
-      title: String(task.title || "").trim(),
-      assignee: String(task.assignee || "").trim() || undefined,
-      waitingOn: String(task.waiting_on || "").trim(),
-      status: String(task.status || "").trim(),
-    });
-  }
-
-  return tasks;
+export function getUnseenReminders(
+  reminders: PetReminder[],
+  seenFingerprints: Record<string, true>,
+): PetReminder[] {
+  return reminders.filter((reminder) => !seenFingerprints[reminder.fingerprint]);
 }
 
-function mapWaitingUser(groupContext: GroupContext | null): ReminderWaitingUserInput[] {
-  const waitingUser = groupContext?.attention?.waiting_user;
-  if (!Array.isArray(waitingUser)) return [];
+export function selectAutoPeekReminder(
+  reminders: PetReminder[],
+  seenFingerprints: Record<string, true>,
+  blockedFingerprints: ReminderPriorityMap,
+): PetReminder | null {
+  return getUnseenReminders(reminders, seenFingerprints).find((reminder) => {
+    const blockedPriority = Number(blockedFingerprints[reminder.fingerprint] || 0);
+    return blockedPriority <= 0 || Number(reminder.priority || 0) > blockedPriority;
+  }) ?? null;
+}
 
-  const entries: ReminderWaitingUserInput[] = [];
+function getHiddenStorageKey(groupId: string): string {
+  return `${HIDDEN_STORAGE_KEY_PREFIX}${String(groupId || "").trim()}`;
+}
 
-  for (const entry of waitingUser) {
-    if (typeof entry === "string") {
-      const label = entry.trim();
-      if (!label) continue;
-      entries.push({
-        label,
-      });
-      continue;
+function loadPersistedHiddenFingerprints(groupId: string): ReminderPriorityMap {
+  if (typeof window === "undefined") return {};
+  const key = getHiddenStorageKey(groupId);
+  if (!key.trim()) return {};
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    const next: ReminderPriorityMap = {};
+    if (Array.isArray(parsed)) {
+      return {};
     }
-
-    const taskId = String(entry.id || "").trim() || undefined;
-    const label = String(entry.title || taskId || "").trim();
-    if (!label) continue;
-
-    entries.push({
-      taskId,
-      label,
-      agent: String(entry.assignee || "").trim() || undefined,
-    });
+    if (!parsed || typeof parsed !== "object") return {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const fingerprint = String(key || "").trim();
+      if (!fingerprint) continue;
+      const priority = Number(value || 0);
+      next[fingerprint] = Number.isFinite(priority) ? priority : Number.MAX_SAFE_INTEGER;
+    }
+    return next;
+  } catch {
+    return {};
   }
-
-  return entries;
 }
 
-function mapReminderActors(
-  actors: Actor[],
-  groupContext: GroupContext | null,
-): ReminderActorInput[] {
-  const activeTaskByActor = new Map(
-    (groupContext?.agent_states ?? []).map((agentState) => [
-      String(agentState.id || "").trim(),
-      String(agentState.hot?.active_task_id || "").trim(),
-    ]),
-  );
-
-  const reminderActors: ReminderActorInput[] = [];
-
-  for (const actor of actors) {
-    const actorId = String(actor.id || "").trim();
-    if (!actorId) continue;
-
-    reminderActors.push({
-      actorId,
-      running: !!actor.running,
-      idleSeconds: Number(actor.idle_seconds || 0),
-      activeTaskId: activeTaskByActor.get(actorId) || undefined,
-    });
+function persistHiddenFingerprints(groupId: string, hidden: ReminderPriorityMap): void {
+  if (typeof window === "undefined") return;
+  const key = getHiddenStorageKey(groupId);
+  if (!key.trim()) return;
+  try {
+    if (Object.keys(hidden).length === 0) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    window.localStorage.setItem(key, JSON.stringify(hidden));
+  } catch (error) {
+    console.warn("failed to persist web pet hidden reminders", error);
   }
-
-  return reminderActors;
 }
 
-function filterExpiredSnoozes(
-  snoozedUntil: Record<string, number>,
-  now: number,
-): Record<string, number> {
-  const next: Record<string, number> = {};
-  for (const [fingerprint, expiresAt] of Object.entries(snoozedUntil)) {
-    if (expiresAt > now) {
-      next[fingerprint] = expiresAt;
+function filterVisibleReminders(
+  reminders: PetReminder[],
+  hiddenFingerprints: ReminderPriorityMap,
+): PetReminder[] {
+  return reminders.filter((reminder) => {
+    const hiddenPriority = Number(hiddenFingerprints[reminder.fingerprint] || 0);
+    if (hiddenPriority <= 0) return true;
+    return Number(reminder.priority || 0) > hiddenPriority;
+  });
+}
+
+function pruneSeenFingerprints(
+  seenFingerprints: Record<string, true>,
+  activeFingerprints: string[],
+): Record<string, true> {
+  const activeSet = new Set(activeFingerprints);
+  const next: Record<string, true> = {};
+  for (const fingerprint of Object.keys(seenFingerprints)) {
+    if (activeSet.has(fingerprint)) {
+      next[fingerprint] = true;
     }
   }
   return next;
 }
 
-export function useWebPetNotifications(): UseWebPetNotificationsResult {
-  const selectedGroupId = useGroupStore((state) => state.selectedGroupId);
-  const groupContext = useGroupStore((state) => state.groupContext);
-  const actors = useGroupStore((state) => state.actors);
-  const events = useGroupStore((state) =>
-    selectChatBucketState(state, state.selectedGroupId).events,
-  );
+function prunePriorityMap(
+  values: ReminderPriorityMap,
+  activeFingerprints: string[],
+): ReminderPriorityMap {
+  const activeSet = new Set(activeFingerprints);
+  const next: ReminderPriorityMap = {};
+  for (const [fingerprint, priority] of Object.entries(values)) {
+    if (activeSet.has(fingerprint)) {
+      next[fingerprint] = Number(priority || 0);
+    }
+  }
+  return next;
+}
 
-  const [ephemeralReminder, setEphemeralReminder] = useState<PetReminder | null>(null);
+function arePriorityMapsEqual(
+  left: ReminderPriorityMap,
+  right: ReminderPriorityMap,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if (Number(left[key] || 0) !== Number(right[key] || 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areSeenMapsEqual(
+  left: Record<string, true>,
+  right: Record<string, true>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if (!right[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getReminderPriorityMap(reminders: PetReminder[]): ReminderPriorityMap {
+  const next: ReminderPriorityMap = {};
+  for (const reminder of reminders) {
+    const fingerprint = String(reminder.fingerprint || "").trim();
+    if (!fingerprint) continue;
+    next[fingerprint] = Number(reminder.priority || 0);
+  }
+  return next;
+}
+
+function getDismissedReminderPriority(reminder: PetReminder | undefined): number {
+  return reminder ? Number(reminder.priority || 0) : Number.MAX_SAFE_INTEGER;
+}
+
+function getInitialNotificationState(groupId: string): {
+  hiddenFingerprints: ReminderPriorityMap;
+} {
+  return {
+    hiddenFingerprints: loadPersistedHiddenFingerprints(groupId),
+  };
+}
+
+export function useWebPetNotifications(input: {
+  groupId: string;
+  groupState?: string;
+  groupContext: GroupContext | null;
+  events: LedgerEvent[];
+  decisions?: PetReminder[];
+}): UseWebPetNotificationsResult {
+  const groupId = String(input.groupId || "").trim();
+  const groupState = String(input.groupState || "").trim().toLowerCase();
+  const groupContext = input.groupContext;
+  const events = input.events;
+  const initialState = useMemo(() => getInitialNotificationState(groupId), [groupId]);
+
   const [reaction, setReaction] = useState<PetReaction | null>(null);
-  const [rotationCursor, setRotationCursor] = useState(0);
-  const [nowTick, setNowTick] = useState(0);
-  const [snoozedUntilSnapshot, setSnoozedUntilSnapshot] = useState<Record<string, number>>({});
-  const [dismissCooldownUntil, setDismissCooldownUntil] = useState(0);
+  const [hiddenFingerprintsSnapshot, setHiddenFingerprintsSnapshot] = useState<ReminderPriorityMap>(
+    () => initialState.hiddenFingerprints,
+  );
+  const [seenFingerprintsSnapshot, setSeenFingerprintsSnapshot] = useState<Record<string, true>>({});
+  const [blockedAutoPeekSnapshot, setBlockedAutoPeekSnapshot] = useState<ReminderPriorityMap>({});
 
   const lastProcessedEventIdRef = useRef("");
   const didHydrateTaskSnapshotRef = useRef(false);
   const previousTaskSnapshotRef = useRef<TaskReactionSnapshotMap>({});
-  const snoozedUntilRef = useRef<Record<string, number>>({});
-  const previousTopPriorityRef = useRef<number | null>(null);
-  const dismissCooldownUntilRef = useRef(0);
-  const dismissCooldownTimerRef = useRef<number | null>(null);
+  const hiddenFingerprintsRef = useRef<ReminderPriorityMap>(initialState.hiddenFingerprints);
+  const seenFingerprintsRef = useRef<Record<string, true>>({});
+  const blockedAutoPeekRef = useRef<ReminderPriorityMap>({});
 
-  const reminderInput = useMemo(
-    () => ({
-      groupId: selectedGroupId,
-      waitingUser: mapWaitingUser(groupContext),
-      tasks: mapReminderTasks(groupContext),
-      actors: mapReminderActors(actors, groupContext),
-      events: events
-        .map((event) => mapReminderEvent(event))
-        .filter((event): event is ReminderEventInput => event !== null),
-    }),
-    [actors, events, groupContext, selectedGroupId],
+  const projected = useMemo(() => {
+    const decisions = Array.isArray(input.decisions) ? input.decisions : [];
+    return sortProjectedReminders(
+      decisions.filter((reminder) =>
+        shouldProjectReminderForGroupState(reminder, groupState) &&
+        !shouldSuppressTaskProposalEcho(reminder, events),
+      ),
+    );
+  }, [events, groupState, input.decisions]);
+
+  const reminderByFingerprint = useMemo(
+    () => new Map(projected.map((reminder) => [reminder.fingerprint, reminder])),
+    [projected],
   );
 
-  const projected = useMemo(
-    () => projectPetReminders(reminderInput),
-    [reminderInput],
+  const reminders = useMemo(
+    () => filterVisibleReminders(projected, hiddenFingerprintsSnapshot),
+    [hiddenFingerprintsSnapshot, projected],
   );
 
-  const reminders = useMemo(() => {
-    const filtered = filterExpiredSnoozes(snoozedUntilSnapshot, nowTick);
-    return projected.filter((reminder) => {
-      const expiresAt = filtered[reminder.fingerprint];
-      return !expiresAt || expiresAt <= nowTick;
-    });
-  }, [nowTick, projected, snoozedUntilSnapshot]);
+  const unseenReminders = useMemo(
+    () => getUnseenReminders(reminders, seenFingerprintsSnapshot),
+    [reminders, seenFingerprintsSnapshot],
+  );
+
+  const activeReminder = useMemo(
+    () => reminders[0] ?? null,
+    [reminders],
+  );
+
+  const autoPeekReminder = useMemo(
+    () => selectAutoPeekReminder(reminders, seenFingerprintsSnapshot, blockedAutoPeekSnapshot),
+    [blockedAutoPeekSnapshot, reminders, seenFingerprintsSnapshot],
+  );
 
   useEffect(() => {
-    const entries = Object.entries(snoozedUntilRef.current);
-    if (entries.length === 0) return;
-
-    const nextExpiry = entries.reduce<number | null>((soonest, [, expiresAt]) => {
-      if (soonest === null || expiresAt < soonest) return expiresAt;
-      return soonest;
-    }, null);
-
-    if (nextExpiry === null) return;
-
-    const delay = Math.max(0, nextExpiry - Date.now());
-    const timeout = window.setTimeout(() => {
-      snoozedUntilRef.current = filterExpiredSnoozes(
-        snoozedUntilRef.current,
-        Date.now(),
-      );
-      setSnoozedUntilSnapshot(snoozedUntilRef.current);
-      setNowTick(Date.now());
-    }, delay + 10);
-
-    return () => window.clearTimeout(timeout);
-  }, [nowTick]);
-
-  useEffect(() => {
-    if (reminders.length === 0) {
-      previousTopPriorityRef.current = null;
-      const frame = window.requestAnimationFrame(() => {
-        setRotationCursor(0);
-      });
-      return () => window.cancelAnimationFrame(frame);
-    }
-
-    const topPriority = reminders[0]?.priority ?? null;
-    const previousTopPriority = previousTopPriorityRef.current;
-    previousTopPriorityRef.current = topPriority;
-
-    if (previousTopPriority === null || (topPriority !== null && topPriority > previousTopPriority)) {
-      const frame = window.requestAnimationFrame(() => {
-        setRotationCursor(0);
-      });
-      return () => window.cancelAnimationFrame(frame);
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      setRotationCursor((cursor) =>
-        reminders.length === 0 ? 0 : Math.min(cursor, reminders.length - 1),
-      );
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [reminders]);
-
-  useEffect(() => {
-    if (reminders.length <= 1) return;
-
-    const interval = window.setInterval(() => {
-      setRotationCursor((cursor) => (cursor + 1) % reminders.length);
-    }, ROTATE_MS);
-
-    return () => window.clearInterval(interval);
-  }, [reminders.length]);
-
-  const activeReminder = useMemo(() => {
-    if (ephemeralReminder) return ephemeralReminder;
-    if (reminders.length === 0) return null;
-    if (nowTick > 0 && dismissCooldownUntil > nowTick) return null;
-    return reminders[rotationCursor % reminders.length] ?? null;
-  }, [dismissCooldownUntil, ephemeralReminder, nowTick, reminders, rotationCursor]);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setEphemeralReminder(null);
-      setReaction(null);
-      setRotationCursor(0);
-    });
+    const nextState = getInitialNotificationState(groupId);
+    hiddenFingerprintsRef.current = nextState.hiddenFingerprints;
+    seenFingerprintsRef.current = {};
+    blockedAutoPeekRef.current = {};
     lastProcessedEventIdRef.current = "";
     didHydrateTaskSnapshotRef.current = false;
     previousTaskSnapshotRef.current = {};
-    previousTopPriorityRef.current = null;
+    const frame = window.requestAnimationFrame(() => {
+      setHiddenFingerprintsSnapshot(nextState.hiddenFingerprints);
+      setSeenFingerprintsSnapshot({});
+      setBlockedAutoPeekSnapshot({});
+      setReaction(null);
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [selectedGroupId]);
+  }, [groupId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = getHiddenStorageKey(groupId);
+    if (!key.trim()) return;
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== key) return;
+      const next = loadPersistedHiddenFingerprints(groupId);
+      hiddenFingerprintsRef.current = next;
+      setHiddenFingerprintsSnapshot(next);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [groupId]);
 
   useEffect(() => {
     const latestEvent = getLatestEvent(events);
@@ -288,24 +366,15 @@ export function useWebPetNotifications(): UseWebPetNotificationsResult {
 
     lastProcessedEventIdRef.current = eventId;
 
-    const mentionReminder = createMentionReminder(
-      selectedGroupId,
-      mapReminderEvent(latestEvent),
-    );
     const mentionReaction = createMentionReaction(latestEvent);
-    if (!mentionReminder && !mentionReaction) return;
+    if (!mentionReaction) return;
 
     const frame = window.requestAnimationFrame(() => {
-      if (mentionReminder) {
-        setEphemeralReminder(mentionReminder);
-      }
-      if (mentionReaction) {
-        setReaction(mentionReaction);
-      }
+      setReaction(mentionReaction);
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [events, selectedGroupId]);
+  }, [events, groupId]);
 
   useEffect(() => {
     const nextSnapshot = createTaskReactionSnapshot(groupContext);
@@ -342,43 +411,83 @@ export function useWebPetNotifications(): UseWebPetNotificationsResult {
     return () => window.clearTimeout(timeout);
   }, [reaction]);
 
-  const dismissReminder = useCallback((fingerprint: string) => {
+  useEffect(() => {
+    const activeFingerprints = reminders.map((reminder) => reminder.fingerprint);
+
+    const nextSeen = pruneSeenFingerprints(seenFingerprintsRef.current, activeFingerprints);
+    if (!areSeenMapsEqual(seenFingerprintsRef.current, nextSeen)) {
+      seenFingerprintsRef.current = nextSeen;
+      setSeenFingerprintsSnapshot(nextSeen);
+    }
+
+    const nextBlocked = prunePriorityMap(blockedAutoPeekRef.current, activeFingerprints);
+    if (!arePriorityMapsEqual(blockedAutoPeekRef.current, nextBlocked)) {
+      blockedAutoPeekRef.current = nextBlocked;
+      setBlockedAutoPeekSnapshot(nextBlocked);
+    }
+  }, [reminders]);
+
+  const markRemindersSeen = useCallback((fingerprints?: string[]) => {
+    const nextFingerprints = Array.isArray(fingerprints) && fingerprints.length > 0
+      ? fingerprints
+      : reminders.map((reminder) => reminder.fingerprint);
+    if (nextFingerprints.length === 0) return;
+
+    const nextSeen: Record<string, true> = { ...seenFingerprintsRef.current };
+    let changed = false;
+    for (const value of nextFingerprints) {
+      const fingerprint = String(value || "").trim();
+      if (!fingerprint || nextSeen[fingerprint]) continue;
+      nextSeen[fingerprint] = true;
+      changed = true;
+    }
+    if (!changed) return;
+    seenFingerprintsRef.current = nextSeen;
+    setSeenFingerprintsSnapshot(nextSeen);
+  }, [reminders]);
+
+  const dismissReminder = useCallback((fingerprint: string, opts?: { outcome?: "dismissed" | null; cooldownMs?: number }) => {
     const normalized = String(fingerprint || "").trim();
     if (!normalized) return;
 
-    const now = Date.now();
-    snoozedUntilRef.current = {
-      ...snoozedUntilRef.current,
-      [normalized]: now + SNOOZE_MS,
+    const reminder = reminderByFingerprint.get(normalized);
+    const nextHidden: ReminderPriorityMap = {
+      ...hiddenFingerprintsRef.current,
+      [normalized]: getDismissedReminderPriority(reminder),
     };
-    dismissCooldownUntilRef.current = now + DISMISS_COOLDOWN_MS;
-    setDismissCooldownUntil(dismissCooldownUntilRef.current);
-    setSnoozedUntilSnapshot(snoozedUntilRef.current);
-    setNowTick(now);
+    hiddenFingerprintsRef.current = nextHidden;
+    persistHiddenFingerprints(groupId, nextHidden);
+    setHiddenFingerprintsSnapshot(nextHidden);
 
-    setEphemeralReminder((current) => {
-      if (!current || current.fingerprint !== normalized) {
-        return current;
-      }
-      return null;
-    });
+    const nextBlocked: ReminderPriorityMap = {
+      ...blockedAutoPeekRef.current,
+      ...getReminderPriorityMap(reminders),
+    };
+    blockedAutoPeekRef.current = nextBlocked;
+    setBlockedAutoPeekSnapshot(nextBlocked);
 
-    // Schedule a tick after cooldown to re-enable reminders
-    if (dismissCooldownTimerRef.current !== null) {
-      window.clearTimeout(dismissCooldownTimerRef.current);
+    markRemindersSeen([normalized]);
+
+    const outcome = opts?.outcome === undefined ? "dismissed" : opts.outcome;
+    if (outcome && reminder) {
+      void recordPetDecisionOutcome(groupId, {
+        fingerprint: normalized,
+        outcome,
+        decisionId: reminder.id,
+        actionType: reminder.action.type,
+        cooldownMs: Math.max(0, Number(opts?.cooldownMs || 0)),
+        sourceEventId: reminder.source.eventId,
+      });
     }
-    dismissCooldownTimerRef.current = window.setTimeout(() => {
-      dismissCooldownTimerRef.current = null;
-      dismissCooldownUntilRef.current = 0;
-      setDismissCooldownUntil(0);
-      setNowTick(Date.now());
-    }, DISMISS_COOLDOWN_MS + 10);
-  }, []);
+  }, [groupId, markRemindersSeen, reminderByFingerprint, reminders]);
 
   return {
     reminders,
     activeReminder,
+    autoPeekReminder,
+    unseenReminderCount: unseenReminders.length,
     reaction,
     dismissReminder,
+    markRemindersSeen,
   };
 }

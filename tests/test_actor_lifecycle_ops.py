@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class TestActorLifecycleOps(unittest.TestCase):
@@ -137,6 +138,98 @@ class TestActorLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_actor_start_clears_stale_execution_state(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "actor-start-clear", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            from cccc.kernel.group import load_group
+            from cccc.kernel.context import ContextStorage
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            storage = ContextStorage(group)  # type: ignore[arg-type]
+            storage.update_agent_state("peer1", "Old focus", active_task_id="T999")
+
+            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(start.ok, getattr(start, "error", None))
+
+            refreshed = load_group(group_id)
+            self.assertIsNotNone(refreshed)
+            refreshed_storage = ContextStorage(refreshed)  # type: ignore[arg-type]
+            agents = refreshed_storage.load_agents().agents
+            agent = next((item for item in agents if getattr(item, "id", "") == "peer1"), None)
+            self.assertIsNotNone(agent)
+            hot = agent.hot if agent is not None else None
+            self.assertEqual(str(getattr(hot, "active_task_id", "") or ""), "")
+            self.assertEqual(str(getattr(hot, "focus", "") or ""), "")
+        finally:
+            cleanup()
+
+    def test_actor_restart_clears_stale_execution_state(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "actor-restart-clear", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            from cccc.kernel.group import load_group
+            from cccc.kernel.context import ContextStorage
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            storage = ContextStorage(group)  # type: ignore[arg-type]
+            storage.update_agent_state("peer1", "Old focus", active_task_id="T999")
+
+            restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(restart.ok, getattr(restart, "error", None))
+
+            refreshed = load_group(group_id)
+            self.assertIsNotNone(refreshed)
+            refreshed_storage = ContextStorage(refreshed)  # type: ignore[arg-type]
+            agents = refreshed_storage.load_agents().agents
+            agent = next((item for item in agents if getattr(item, "id", "") == "peer1"), None)
+            self.assertIsNotNone(agent)
+            hot = agent.hot if agent is not None else None
+            self.assertEqual(str(getattr(hot, "active_task_id", "") or ""), "")
+            self.assertEqual(str(getattr(hot, "focus", "") or ""), "")
+        finally:
+            cleanup()
+
     def test_actor_remove_stops_group_when_last_actor_removed(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -171,6 +264,45 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertIsInstance(group_doc, dict)
             assert isinstance(group_doc, dict)
             self.assertFalse(bool(group_doc.get("running")))
+        finally:
+            cleanup()
+
+    def test_actor_add_and_remove_schedule_summary_snapshot_rebuild(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "actor-summary-rebuild", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            with patch(
+                "cccc.daemon.actors.actor_add_ops._schedule_summary_snapshot_rebuild",
+                return_value=True,
+            ) as add_schedule:
+                add, _ = self._call(
+                    "actor_add",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "title": "Peer 1",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "by": "user",
+                    },
+                )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+            add_schedule.assert_called_once_with(group_id)
+
+            with patch(
+                "cccc.daemon.actors.actor_membership_ops._schedule_summary_snapshot_rebuild",
+                return_value=True,
+            ) as remove_schedule:
+                remove, _ = self._call("actor_remove", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(remove.ok, getattr(remove, "error", None))
+            remove_schedule.assert_called_once_with(group_id)
         finally:
             cleanup()
 
