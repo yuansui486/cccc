@@ -163,7 +163,7 @@ DEFAULT_REMOTE_ACCESS: Dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 DEFAULT_WEB_BRANDING: Dict[str, Any] = {
-    "product_name": "CCCC",
+    "product_name": "一号同事",
     "logo_icon_asset_path": "",
     "favicon_asset_path": "",
     "updated_at": "",

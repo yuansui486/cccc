@@ -94,14 +94,6 @@ export function DesktopPetView({
             <div className={classNames("text-sm font-medium", "text-[var(--color-text-primary)]")}>
               {tr("context.petPersonaTitle", "Pet Persona")}
             </div>
-            <div className={classNames("text-xs", ui.mutedTextClass)}>
-              {tr("context.petPersonaHint", "Stored in this group's CCCC_HELP.md as a `## @pet` block. When empty, the editor starts from the default seed and you can customize the pet's stable coordination style here.")}
-            </div>
-            {petHelpPrompt?.path ? (
-              <div className={classNames("break-all text-[11px] leading-5 font-mono", ui.mutedTextClass)}>
-                {petHelpPrompt.path}
-              </div>
-            ) : null}
           </div>
 
           {!petHelpPrompt && petPersonaBusy ? (

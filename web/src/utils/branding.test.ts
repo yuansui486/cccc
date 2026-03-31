@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyBrandingToDocument,
   DEFAULT_DOCUMENT_TITLE,
+  DEFAULT_PRODUCT_NAME,
   DEFAULT_WEB_BRANDING,
   resolveDocumentTitle,
 } from "./branding";
@@ -39,7 +40,7 @@ describe("branding utils", () => {
   });
 
   it("keeps the default descriptive title for the built-in product name", () => {
-    expect(resolveDocumentTitle("CCCC")).toBe(DEFAULT_DOCUMENT_TITLE);
+    expect(resolveDocumentTitle(DEFAULT_PRODUCT_NAME)).toBe(DEFAULT_DOCUMENT_TITLE);
   });
 
   it("uses the custom product name as the document title", () => {
@@ -59,4 +60,3 @@ describe("branding utils", () => {
     expect((document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement | null)?.href).toContain("/api/v1/branding/assets/favicon?v=test");
   });
 });
-

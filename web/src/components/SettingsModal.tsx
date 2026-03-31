@@ -773,7 +773,6 @@ export function SettingsModal({
     ...(globalSettingsEnabled
       ? [
           { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
-          { id: "branding" as const, label: t("tabs.branding") },
         ]
       : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
