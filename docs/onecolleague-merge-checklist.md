@@ -7,13 +7,13 @@
 ## 1. 基线与范围
 
 - 基线分支：`main`
-- 上轮 refresh 基线提交：`de07912a32415f0661f91cd8fceb4f92416d4c02`
-- 当前需要吸收的 main 提交上界：`cea6324bcd55a4bea4e7fc1ac412aa2ac2bb177d`
+- 上轮 refresh 基线提交：`cea6324bcd55a4bea4e7fc1ac412aa2ac2bb177d`
+- 当前已吸收的 main 提交上界：`c72adb087873905c7ac8786a3ff0cc9665410aba`
 - 当前分支：`OneColleague`
-- 当前 HEAD：`79281d5`
-- 当前 merge-base：`cea6324bcd55a4bea4e7fc1ac412aa2ac2bb177d`
-- 本轮主线增量范围：`de07912..cea6324`
-- 一号同事保留集对照仍以 `main...OneColleague` 为准；本轮完成后，后续 refresh 不应再把 `de07912` 当成主线最新真相。
+- 当前 HEAD：`2231712`
+- 当前 merge-base：`c72adb087873905c7ac8786a3ff0cc9665410aba`
+- 本轮主线增量范围：`cea6324..c72adb0`
+- 一号同事保留集对照仍以 `main...OneColleague` 为准；本轮完成后，后续 refresh 不应再把 `cea6324` 当成主线最新真相。
 
 这段范围内，一号同事定制的主提交为：
 
@@ -32,6 +32,7 @@
 - `df7cefc revert(web): rollback onecolleague branding aliasing`
 - `d6df847 style(web): trim new group button`
 - `79281d5 merge(main): refresh OneColleague onto cea6324`
+- `2231712 merge(main): refresh OneColleague onto c72adb0`
 
 后续 merge 最新 CCCC 时，本文只关注“一号同事相对原版 CCCC 的必保留行为”，不关注上游普通演进本身。
 
@@ -88,6 +89,45 @@
 - `web/src/i18n/locales/{en,ja,zh}/{chat,layout,modals,settings}.json`
 
 这组文件在本轮要继续按“先吃新 main 结构，再回填一号同事 preserve 行为链”处理，尤其不能把新的 branding/presentation shell 回退成旧的一体式 App，也不能让一号同事的登录门禁、品牌壳层、DoneHub 账户入口和 settings 裁剪在新 shell 里丢失。
+
+### 1.3 本轮（3/31）额外吸收框架
+
+这轮额外吸收的是 `cea6324..c72adb0`。口径上要把 OneColleague 继续视为“轻度二开”：
+
+- 默认保留 main 的新功能、新 shell、新运行时能力和新的 WebPet / messaging / archive / actor-avatar / projected-browser 结构
+- 只在品牌配色 / logo / 标识符、DoneHub 登录与账户链、相关配置，以及既有隐藏前端显示这些点上保留 OneColleague 差异
+
+这轮主线新增热点主要是：
+
+- actor avatar 上传与展示、group archive polish、working status 展示
+- WebPet workflow / review / reminder / proposal 链继续演进
+- projected browser / browser surface / NotebookLM auth 流程扩展
+- automation snippet override、messaging/outbox/context freshness 与 delivery 细化
+
+这轮 changed-in-both 的高风险集合主要是：
+
+- `src/cccc/ports/web/app.py`
+- `src/cccc/ports/web/schemas.py`
+- `web/src/App.tsx`
+- `web/src/components/AppModals.tsx`
+- `web/src/components/SettingsModal.tsx`
+- `web/src/components/layout/AppHeader.tsx`
+- `web/src/components/layout/GroupSidebar.tsx`
+- `web/src/pages/chat/ChatComposer.tsx`
+- `web/src/stores/index.ts`
+- `web/src/types.ts`
+- `web/src/i18n/locales/{en,ja,zh}/{chat,layout,modals,settings}.json`
+
+这轮 merge 的正确口径不是“尽量维持旧的一号同事页面骨架”，而是：
+
+- 先吃 `main@c72adb0` 的新结构和新能力
+- 再把一号同事的品牌壳层、浅蓝配色、DoneHub gate / account chain、settings 裁剪、locale 口径回填到这些新结构上
+
+因此这轮尤其不能：
+
+- 为了保住 DoneHub 入口而回退 main 新增的 archived groups / actor status / WebPet / projected browser 结构
+- 为了保住旧 guidance/settings 布局而重新暴露已隐藏模块
+- 为了省事整文件选边，导致 main 的新功能或一号同事的 preserve 链任一侧整体丢失
 
 ## 2. 必须保留的品牌与用户可见裁剪
 
