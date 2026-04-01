@@ -346,15 +346,6 @@ export async function markInboxRead(groupId: string, actorId: string, eventId: s
   });
 }
 
-export async function transcribeAudio(groupId: string, file: File) {
-  const form = new FormData();
-  form.append("file", file);
-  return apiForm<{ text: string; file_name: string; saved_path: string; bytes: number }>(
-    `/api/v1/groups/${encodeURIComponent(groupId)}/transcribe_audio`,
-    form,
-  );
-}
-
 export async function sendMessage(
   groupId: string,
   text: string,

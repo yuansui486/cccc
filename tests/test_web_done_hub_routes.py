@@ -95,7 +95,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         with (
             patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
             patch("cccc.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value=None)),
-            patch("cccc.ports.web.routes.done_hub.prune_old_voice_files") as cleanup_mock,
         ):
             client = self._create_client()
             resp = client.post(
@@ -115,7 +114,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertEqual(str(session.get("access_token") or ""), "token-32")
         self.assertEqual(calls[0][0:2], ("POST", f"{base}/api/user/login"))
         self.assertEqual(calls[1][0:2], ("GET", f"{base}/api/user/self"))
-        cleanup_mock.assert_called_once_with()
 
     def test_done_hub_login_surfaces_business_failure(self) -> None:
         base = "https://peer.shierkeji.com"
@@ -172,10 +170,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 calls,
             )
 
-        with (
-            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-            patch("cccc.ports.web.routes.done_hub.prune_old_voice_files") as cleanup_mock,
-        ):
+        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
             client = self._create_client()
             resp = client.post(
                 "/api/v1/done_hub/self",
@@ -187,7 +182,6 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertTrue(bool(body.get("ok")))
         headers = calls[0][2].get("headers") or {}
         self.assertEqual(headers.get("Authorization"), "Bearer token-32")
-        cleanup_mock.assert_called_once_with()
 
     def test_done_hub_login_provisions_client_files_for_normal_user(self) -> None:
         base = "https://peer.shierkeji.com"

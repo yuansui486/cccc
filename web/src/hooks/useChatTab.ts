@@ -574,34 +574,6 @@ export function useChatTab({
     await sendPreparedMessage(composerText);
   }, [composerText, sendPreparedMessage]);
 
-  const transcribeAndSendVoice = useCallback(
-    async (file: File) => {
-      if (!selectedGroupId) {
-        const message = t("chat:selectGroupFirst", { defaultValue: "Select a group first." });
-        showError(message);
-        throw new Error(message);
-      }
-
-      const response = await api.transcribeAudio(selectedGroupId, file);
-      if (!response.ok) {
-        const message = `${response.error.code}: ${response.error.message}`;
-        showError(message);
-        throw new Error(message);
-      }
-
-      const text = String((response.result as { text?: string } | undefined)?.text || "").trim();
-      if (!text) {
-        const message = t("chat:voiceTranscriptionEmpty", { defaultValue: "Voice transcription returned no text." });
-        showError(message);
-        throw new Error(message);
-      }
-
-      setComposerText(text);
-      await sendPreparedMessage(text);
-    },
-    [selectedGroupId, setComposerText, sendPreparedMessage, showError, t]
-  );
-
   const copyMessageLink = useCallback(
     async (eventId: string) => {
       const eid = String(eventId || "").trim();
@@ -866,7 +838,6 @@ export function useChatTab({
 
     // Actions
     sendMessage,
-    transcribeAndSendVoice,
     reportComposerError,
     copyMessageLink,
     copyMessageText,

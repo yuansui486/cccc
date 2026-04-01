@@ -85,7 +85,6 @@ export interface ChatComposerProps {
   setPriority: (priority: "normal" | "attention") => void;
   setReplyRequired: (value: boolean) => void;
   onSendMessage: () => void;
-  onVoiceTranscribeAndSend: (file: File) => Promise<void>;
   onVoiceError: (message: string) => void;
 
   // Mention menu
@@ -129,7 +128,6 @@ export function ChatComposer({
   setPriority,
   setReplyRequired,
   onSendMessage,
-  onVoiceTranscribeAndSend,
   onVoiceError,
   showMentionMenu,
   setShowMentionMenu,
@@ -142,7 +140,7 @@ export function ChatComposer({
   const composerHeightRef = useRef(0);
   const isUserInputRef = useRef(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
-  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "transcribing">("idle");
+  const [voiceState, setVoiceState] = useState<"idle" | "recording">("idle");
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -484,6 +482,10 @@ export function ChatComposer({
 
   const beginVoiceRecording = async () => {
     if (!selectedGroupId || busy === "send" || voiceBusy || !showVoiceAction) return;
+    if (isCrossGroup) {
+      onVoiceError(fileDisabledReason);
+      return;
+    }
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       onVoiceError(t("voiceUnsupported"));
       return;
@@ -527,13 +529,9 @@ export function ChatComposer({
           `voice-${Date.now()}${guessVoiceFileExtension(resolvedType)}`,
           { type: resolvedType, lastModified: Date.now() }
         );
-        setVoiceState("transcribing");
-        void onVoiceTranscribeAndSend(file)
-          .catch(() => void 0)
-          .finally(() => {
-            setVoiceState("idle");
-            setRecordingSeconds(0);
-          });
+        appendComposerFiles([file]);
+        setVoiceState("idle");
+        setRecordingSeconds(0);
       };
 
       recorder.start();
@@ -558,7 +556,6 @@ export function ChatComposer({
       setVoiceState("idle");
       return;
     }
-    setVoiceState("transcribing");
     try {
       recorder.stop();
     } catch {
@@ -585,11 +582,9 @@ export function ChatComposer({
   const primaryButtonTitle =
     voiceState === "recording"
       ? t("voiceStopRecording")
-      : voiceState === "transcribing"
-        ? t("voiceTranscribing")
-        : showVoiceAction
-          ? t("voiceStartRecording")
-          : t("sendMessage");
+      : showVoiceAction
+        ? t("voiceStartRecording")
+        : t("sendMessage");
 
   return (
     <footer
@@ -1000,7 +995,7 @@ export function ChatComposer({
           className={classNames(
             "rounded-xl sm:rounded-2xl border flex-shrink-0 transition-all duration-300 ease-out",
             showVoiceAction
-              ? voiceState === "recording" || voiceState === "transcribing"
+              ? voiceState === "recording"
                 ? "h-10 w-[8.75rem] sm:h-11 sm:w-[11rem] px-3"
                 : "h-10 w-10 sm:h-11 sm:w-11"
               : "h-10 w-10 sm:min-w-[6.25rem] sm:h-11 sm:px-3",
@@ -1008,13 +1003,11 @@ export function ChatComposer({
             showVoiceAction
               ? voiceState === "recording"
                 ? "border-rose-500 bg-rose-500 text-white shadow-lg shadow-rose-500/30 active:scale-[0.99]"
-                : voiceState === "transcribing"
-                  ? "border-sky-500 bg-sky-500 text-white shadow-lg shadow-sky-500/30"
-                  : selectedGroupId
-                    ? "border-emerald-500 bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-400 active:scale-95"
-                    : isDark
-                      ? "border-white/[0.12] bg-white/[0.08] text-[var(--color-text-tertiary)] shadow-none disabled:opacity-100"
-                      : "border-gray-200 bg-gray-100 text-gray-400 shadow-none disabled:opacity-100"
+                : selectedGroupId && !isCrossGroup
+                  ? "border-emerald-500 bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-400 active:scale-95"
+                  : isDark
+                    ? "border-white/[0.12] bg-white/[0.08] text-[var(--color-text-tertiary)] shadow-none disabled:opacity-100"
+                    : "border-gray-200 bg-gray-100 text-gray-400 shadow-none disabled:opacity-100"
               : busy === "send" || !canSend
                 ? isDark
                   ? "border-white/[0.12] bg-white/[0.08] text-[var(--color-text-tertiary)] shadow-none disabled:opacity-100"
@@ -1022,35 +1015,25 @@ export function ChatComposer({
                 : "border-blue-500 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/30 active:scale-95 active:shadow-sm group"
           )}
           onClick={handlePrimaryAction}
-          disabled={busy === "send" || voiceState === "transcribing" || (!showVoiceAction && !canSend) || !selectedGroupId}
+          disabled={busy === "send" || (showVoiceAction ? (!selectedGroupId || isCrossGroup) : !canSend)}
           aria-label={primaryButtonTitle}
           title={primaryButtonTitle}
         >
           {busy === "send" ? (
             <div className="w-4 h-4 sm:w-5 sm:h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
           ) : showVoiceAction ? (
-            voiceState === "recording" || voiceState === "transcribing" ? (
+            voiceState === "recording" ? (
               <span className="flex w-full items-center justify-between gap-2 overflow-hidden">
                 <span className="flex min-w-0 items-center gap-2">
-                  {voiceState === "recording" ? (
-                    <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-                      <span className="absolute inset-0 rounded-full bg-white/35 animate-ping" />
-                      <span className="relative rounded-full bg-white h-2.5 w-2.5" />
-                    </span>
-                  ) : (
-                    <span className="w-3.5 h-3.5 flex-shrink-0 border-2 border-white/35 border-t-white rounded-full animate-spin" />
-                  )}
+                  <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                    <span className="absolute inset-0 rounded-full bg-white/35 animate-ping" />
+                    <span className="relative rounded-full bg-white h-2.5 w-2.5" />
+                  </span>
                   <span className="truncate text-[11px] font-semibold sm:text-xs">
-                    {voiceState === "recording"
-                      ? t("voiceRecordingActive", { duration: formatRecordingDuration(recordingSeconds) })
-                      : t("voiceTranscribingShort")}
+                    {t("voiceRecordingActive", { duration: formatRecordingDuration(recordingSeconds) })}
                   </span>
                 </span>
-                {voiceState === "recording" ? (
-                  <StopIcon size={16} className="flex-shrink-0" />
-                ) : (
-                  <MicrophoneIcon size={16} className="flex-shrink-0 opacity-90" />
-                )}
+                <StopIcon size={16} className="flex-shrink-0" />
               </span>
             ) : (
               <MicrophoneIcon size={18} className="sm:w-5 sm:h-5" />

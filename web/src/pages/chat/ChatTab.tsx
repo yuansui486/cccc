@@ -142,7 +142,6 @@ export function ChatTab({
 
     // Actions
     sendMessage,
-    transcribeAndSendVoice,
     reportComposerError,
     copyMessageLink,
     copyMessageText,
@@ -575,7 +574,6 @@ export function ChatTab({
               setPriority={setPriority}
               setReplyRequired={setReplyRequired}
               onSendMessage={sendMessage}
-              onVoiceTranscribeAndSend={transcribeAndSendVoice}
               onVoiceError={reportComposerError}
               showMentionMenu={showMentionMenu}
               setShowMentionMenu={setShowMentionMenu}
