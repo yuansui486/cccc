@@ -142,6 +142,8 @@ export function ChatTab({
 
     // Actions
     sendMessage,
+    transcribeAndSendVoice,
+    reportComposerError,
     copyMessageLink,
     copyMessageText,
     startReply,
@@ -570,11 +572,13 @@ export function ChatTab({
             setComposerText={setComposerText}
             priority={priority}
             replyRequired={replyRequired}
-            setPriority={setPriority}
-            setReplyRequired={setReplyRequired}
-            onSendMessage={sendMessage}
-            showMentionMenu={showMentionMenu}
-            setShowMentionMenu={setShowMentionMenu}
+              setPriority={setPriority}
+              setReplyRequired={setReplyRequired}
+              onSendMessage={sendMessage}
+              onVoiceTranscribeAndSend={transcribeAndSendVoice}
+              onVoiceError={reportComposerError}
+              showMentionMenu={showMentionMenu}
+              setShowMentionMenu={setShowMentionMenu}
             mentionSuggestions={mentionSuggestions}
             mentionSelectedIndex={mentionSelectedIndex}
             setMentionSelectedIndex={setMentionSelectedIndex}

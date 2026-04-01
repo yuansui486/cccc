@@ -355,9 +355,9 @@ export function useChatTab({
     [composerFiles, setComposerFiles]
   );
 
-  const sendMessage = useCallback(async () => {
+  const sendPreparedMessage = useCallback(async (rawText: string) => {
     if (sendInFlightRef.current) return; // keyboard shortcut can bypass UI state; keep send single-flight locally
-    const txt = composerText.trim();
+    const txt = String(rawText || "").trim();
     if (!selectedGroupId) return;
     if (!txt && composerFiles.length === 0) return;
 
@@ -525,17 +525,18 @@ export function useChatTab({
         setChatUnreadCount(selectedGroupId, 0);
       }
       onMessageSent?.();
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "send failed";
       // Pending-only outbox: failed sends roll back to the composer.
       removeOutbox(selectedGroupId, localId);
       restoreComposerState();
       showError(message);
+      return false;
     } finally {
       sendInFlightRef.current = false;
     }
   }, [
-    composerText,
     composerFiles,
     selectedGroupId,
     sendGroupId,
@@ -568,6 +569,38 @@ export function useChatTab({
     setChatUnreadCount,
     onMessageSent,
   ]);
+
+  const sendMessage = useCallback(async () => {
+    await sendPreparedMessage(composerText);
+  }, [composerText, sendPreparedMessage]);
+
+  const transcribeAndSendVoice = useCallback(
+    async (file: File) => {
+      if (!selectedGroupId) {
+        const message = t("chat:selectGroupFirst", { defaultValue: "Select a group first." });
+        showError(message);
+        throw new Error(message);
+      }
+
+      const response = await api.transcribeAudio(selectedGroupId, file);
+      if (!response.ok) {
+        const message = `${response.error.code}: ${response.error.message}`;
+        showError(message);
+        throw new Error(message);
+      }
+
+      const text = String((response.result as { text?: string } | undefined)?.text || "").trim();
+      if (!text) {
+        const message = t("chat:voiceTranscriptionEmpty", { defaultValue: "Voice transcription returned no text." });
+        showError(message);
+        throw new Error(message);
+      }
+
+      setComposerText(text);
+      await sendPreparedMessage(text);
+    },
+    [selectedGroupId, setComposerText, sendPreparedMessage, showError, t]
+  );
 
   const copyMessageLink = useCallback(
     async (eventId: string) => {
@@ -760,6 +793,15 @@ export function useChatTab({
     openModal("addActor");
   }, [hasForeman, openModal, setNewActorRole]);
 
+  const reportComposerError = useCallback(
+    (message: string) => {
+      const normalized = String(message || "").trim();
+      if (!normalized) return;
+      showError(normalized);
+    },
+    [showError]
+  );
+
   const loadCurrentGroupHistory = useCallback(() => {
     if (!selectedGroupId) return Promise.resolve();
     return loadMoreHistory(selectedGroupId);
@@ -824,6 +866,8 @@ export function useChatTab({
 
     // Actions
     sendMessage,
+    transcribeAndSendVoice,
+    reportComposerError,
     copyMessageLink,
     copyMessageText,
     startReply,

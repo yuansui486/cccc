@@ -10,6 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, RouteContext
+from ..voice_asr import prune_old_voice_files
 
 _DONE_HUB_TIMEOUT = 15.0
 _TOKEN_PAGE_SIZE = 100
@@ -384,6 +385,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
                 session = _normalize_profile(base_url, self_payload)
                 await _configure_local_clients(client, base_url=base_url, session=session)
+                prune_old_voice_files()
         except _DoneHubClientConfigError:
             return {
                 "ok": False,
@@ -416,6 +418,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 self_ok, self_payload, self_error = _parse_json_response(self_resp)
                 if not self_ok or self_payload is None:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
+                prune_old_voice_files()
         except httpx.HTTPError as exc:
             return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
 

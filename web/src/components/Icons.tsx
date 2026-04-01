@@ -669,6 +669,28 @@ export function GlobeIcon({ className, size = 18 }: IconProps) {
   );
 }
 
+export function MicrophoneIcon({ className, size = 18 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" opacity="0.14" />
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M6.5 10.5a5.5 5.5 0 0 0 11 0" />
+      <path d="M12 16v5" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
 export function GripIcon({ className, size = 18 }: IconProps) {
   return (
     <svg

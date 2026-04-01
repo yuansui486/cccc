@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ....kernel.group import load_group
+from ..voice_asr import VoiceAsrError, persist_voice_upload, transcribe_saved_audio
 from ..schemas import (
     ReplyRequest,
     RouteContext,
@@ -305,6 +306,34 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             },
         )
         return await _submit_message(daemon_req)
+
+    @group_router.post("/transcribe_audio")
+    async def transcribe_audio(group_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+
+        raw = await file.read()
+        try:
+            saved = await persist_voice_upload(
+                raw=raw,
+                filename=str(getattr(file, "filename", "") or "voice.webm"),
+                content_type=str(getattr(file, "content_type", "") or "application/octet-stream"),
+                max_bytes=WEB_MAX_FILE_BYTES,
+            )
+            text = await transcribe_saved_audio(saved)
+        except VoiceAsrError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+
+        return {
+            "ok": True,
+            "result": {
+                "text": text,
+                "file_name": saved.path.name,
+                "saved_path": f"voice/{saved.path.name}",
+                "bytes": saved.bytes_count,
+            },
+        }
 
     @group_router.get("/blobs/{blob_name}")
     async def blob_download(group_id: str, blob_name: str) -> FileResponse:
