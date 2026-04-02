@@ -818,12 +818,16 @@ select {
 .glass-sidebar {
   background: linear-gradient(
     180deg,
-    var(--glass-bg) 0%,
-    rgba(255, 255, 255, 0.68) 100%
+    rgba(244, 250, 255, 0.96) 0%,
+    rgba(233, 244, 252, 0.92) 100%
   );
   backdrop-filter: blur(var(--glass-blur-lg)) saturate(200%);
   -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(200%);
-  box-shadow: var(--glass-shadow), var(--glass-inner-glow);
+  border-right: 1px solid rgba(148, 184, 204, 0.32);
+  box-shadow:
+    10px 0 30px rgba(148, 184, 204, 0.14),
+    var(--glass-shadow),
+    var(--glass-inner-glow);
   position: relative;
 }
 
@@ -840,9 +844,14 @@ select {
 .dark .glass-sidebar {
   background: linear-gradient(
     180deg,
-    rgba(10, 10, 10, 0.85) 0%,
-    rgba(0, 0, 0, 0.75) 100%
+    rgba(19, 27, 36, 0.94) 0%,
+    rgba(12, 18, 26, 0.9) 100%
   );
+  border-right-color: rgba(102, 153, 181, 0.22);
+  box-shadow:
+    10px 0 30px rgba(0, 0, 0, 0.28),
+    var(--glass-shadow),
+    var(--glass-inner-glow);
 }
 
 /* Glass header - enhanced */
