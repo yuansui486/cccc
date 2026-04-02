@@ -1,6 +1,5 @@
 import type { CSSProperties } from "react";
 import { ErrorBoundary } from "../ErrorBoundary";
-import { TabBar } from "../TabBar";
 import { AppHeader } from "../layout/AppHeader";
 import { GroupSidebar } from "../layout/GroupSidebar";
 import { ActorTab } from "../../pages/ActorTab";
@@ -168,6 +167,9 @@ export function AppShell({
         orderedGroups={orderedGroups}
         archivedGroupIds={archivedGroupIds}
         selectedGroupId={selectedGroupId}
+        actors={actors}
+        activeTab={activeTab}
+        unreadChatCount={chatUnreadCount}
         isOpen={sidebarOpen}
         isCollapsed={sidebarCollapsed}
         sidebarWidth={sidebarWidth}
@@ -182,6 +184,8 @@ export function AppShell({
         onReorderSection={onReorderGroupsInSection}
         onArchiveGroup={onArchiveGroup}
         onRestoreGroup={onRestoreGroup}
+        onTabChange={onTabChange}
+        onAddAgent={onAddAgent}
       />
 
       <main
@@ -212,19 +216,6 @@ export function AppShell({
           onOpenDoneHubAuth={onOpenDoneHubAuth}
           onOpenMobileMenu={onOpenMobileMenu}
         />
-
-        {selectedGroupId ? (
-          <TabBar
-            groupId={selectedGroupId}
-            actors={actors}
-            activeTab={activeTab}
-            onTabChange={onTabChange}
-            unreadChatCount={chatUnreadCount}
-            isDark={isDark}
-            onAddAgent={onAddAgent}
-            canAddAgent={!webReadOnly && !!selectedGroupId}
-          />
-        ) : null}
 
         <div
           ref={contentRef}

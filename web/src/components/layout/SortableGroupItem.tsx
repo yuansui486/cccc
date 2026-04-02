@@ -25,6 +25,8 @@ interface SortableGroupItemProps {
   isCollapsed: boolean;
   isArchived?: boolean;
   dragDisabled?: boolean;
+  menuInline?: boolean;
+  menuInlineAction?: boolean;
   menuActionLabel?: string;
   menuAriaLabel?: string;
   onMenuAction?: () => void;
@@ -39,6 +41,8 @@ export function SortableGroupItem({
   isCollapsed,
   isArchived = false,
   dragDisabled = false,
+  menuInline = false,
+  menuInlineAction = false,
   menuActionLabel,
   menuAriaLabel,
   onMenuAction,
@@ -185,7 +189,24 @@ export function SortableGroupItem({
           </span>
         </button>
 
-        {onMenuAction && menuActionLabel && (
+        {onMenuAction && menuActionLabel && menuInlineAction && (
+          <button
+            type="button"
+            className={classNames(
+              "glass-btn shrink-0 rounded-xl px-3 py-2 text-xs font-medium transition-colors",
+              isActive
+                ? "text-cyan-700 dark:text-cyan-300"
+                : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            )}
+            aria-label={menuAriaLabel || menuActionLabel}
+            title={menuAriaLabel || menuActionLabel}
+            onClick={() => onMenuAction()}
+          >
+            {menuActionLabel}
+          </button>
+        )}
+
+        {onMenuAction && menuActionLabel && !menuInlineAction && (
           <>
             <button
               type="button"
@@ -203,30 +224,52 @@ export function SortableGroupItem({
             >
               <MoreIcon size={16} />
             </button>
-            <FloatingPortal>
-              {menuOpen && (
-                <div
-                  ref={setFloating}
-                  style={floatingStyles}
-                  {...getFloatingProps()}
-                  className="z-max min-w-[160px] rounded-xl p-1.5 shadow-2xl glass-panel"
+            {menuOpen && menuInline ? (
+              <div
+                ref={setFloating}
+                {...getFloatingProps()}
+                className="absolute right-0 top-full z-10 mt-2 min-w-[160px] rounded-xl p-1.5 shadow-2xl glass-panel"
+              >
+                <button
+                  type="button"
+                  className={classNames(
+                    "w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
+                    "text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                  )}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onMenuAction();
+                  }}
                 >
-                  <button
-                    type="button"
-                    className={classNames(
-                      "w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
-                      "text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                    )}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onMenuAction();
-                    }}
+                  {menuActionLabel}
+                </button>
+              </div>
+            ) : (
+              <FloatingPortal>
+                {menuOpen && (
+                  <div
+                    ref={setFloating}
+                    style={floatingStyles}
+                    {...getFloatingProps()}
+                    className="z-max min-w-[160px] rounded-xl p-1.5 shadow-2xl glass-panel"
                   >
-                    {menuActionLabel}
-                  </button>
-                </div>
-              )}
-            </FloatingPortal>
+                    <button
+                      type="button"
+                      className={classNames(
+                        "w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
+                        "text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                      )}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onMenuAction();
+                      }}
+                    >
+                      {menuActionLabel}
+                    </button>
+                  </div>
+                )}
+              </FloatingPortal>
+            )}
           </>
         )}
       </div>
