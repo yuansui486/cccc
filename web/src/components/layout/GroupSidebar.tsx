@@ -401,8 +401,8 @@ export function GroupSidebar({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-2">
-          <div className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
+        <div className="-mx-1 space-y-2">
+          <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
             {t("groupPages")}
           </div>
 
@@ -411,13 +411,18 @@ export function GroupSidebar({
               type="button"
               onClick={() => handleTabSelect("chat")}
               className={classNames(
-                "glass-tab flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-all",
+                "glass-tab flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium transition-all",
                 activeTab === "chat"
-                  ? "glass-tab-active text-[var(--color-text-primary)]"
-                  : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  ? "border-sky-200/90 bg-sky-100/95 text-sky-950 shadow-[0_10px_24px_rgba(125,211,252,0.26),inset_0_1px_0_rgba(255,255,255,0.72)] dark:border-sky-300/20 dark:bg-sky-400/18 dark:text-sky-50 dark:shadow-[0_10px_24px_rgba(14,165,233,0.20),inset_0_1px_0_rgba(255,255,255,0.08)]"
+                  : "border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
               )}
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-primary)]">
+              <span
+                className={classNames(
+                  "flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-primary)]",
+                  activeTab === "chat" ? "bg-white/80 dark:bg-sky-300/16" : "bg-[var(--glass-tab-bg-hover)]"
+                )}
+              >
                 <SendIcon size={16} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("chat")}</span>
@@ -437,13 +442,18 @@ export function GroupSidebar({
                   type="button"
                   onClick={() => handleTabSelect(actor.id)}
                   className={classNames(
-                    "glass-tab flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-all",
+                    "glass-tab flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium transition-all",
                     isActive
-                      ? "glass-tab-active text-[var(--color-text-primary)]"
-                      : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                      ? "border-sky-200/90 bg-sky-100/95 text-sky-950 shadow-[0_10px_24px_rgba(125,211,252,0.26),inset_0_1px_0_rgba(255,255,255,0.72)] dark:border-sky-300/20 dark:bg-sky-400/18 dark:text-sky-50 dark:shadow-[0_10px_24px_rgba(14,165,233,0.20),inset_0_1px_0_rgba(255,255,255,0.08)]"
+                      : "border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
                   )}
                 >
-                  <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--glass-tab-bg-hover)]">
+                  <span
+                    className={classNames(
+                      "relative flex h-8 w-8 items-center justify-center rounded-xl",
+                      isActive ? "bg-white/80 dark:bg-sky-300/16" : "bg-[var(--glass-tab-bg-hover)]"
+                    )}
+                  >
                     <span className={classNames("h-2.5 w-2.5 rounded-full", indicator.dotClass)} />
                   </span>
                   <span className={classNames("min-w-0 flex-1 truncate", indicator.labelClass)}>{actor.title || actor.id}</span>
