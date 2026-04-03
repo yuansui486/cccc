@@ -79,6 +79,7 @@
   "addAgent": "添加智能体",
   "navigationTabs": "导航标签",
   "chat": "聊天",
+  "groupChat": "群聊天",
   "groupPages": "组内页面",
   "currentGroup": "当前工作组",
   "switchGroup": "切换工作组",

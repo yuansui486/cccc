@@ -79,6 +79,7 @@
   "addAgent": "エージェントを追加",
   "navigationTabs": "ナビゲーションタブ",
   "chat": "チャット",
+  "groupChat": "グループチャット",
   "groupPages": "グループ内ページ",
   "currentGroup": "現在の作業グループ",
   "switchGroup": "作業グループを切り替え",

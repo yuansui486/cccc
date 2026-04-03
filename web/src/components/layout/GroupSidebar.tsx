@@ -331,8 +331,8 @@ export function GroupSidebar({
           <button
             type="button"
             onClick={() => handleTabSelect("chat")}
-            title={t("chat")}
-            aria-label={t("chat")}
+            title={t("groupChat")}
+            aria-label={t("groupChat")}
             className={classNames(
               "relative flex h-11 w-11 items-center justify-center rounded-xl transition-all",
               activeTab === "chat" ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105"
@@ -425,7 +425,7 @@ export function GroupSidebar({
               >
                 <SendIcon size={16} />
               </span>
-              <span className="min-w-0 flex-1 truncate">{t("chat")}</span>
+              <span className="min-w-0 flex-1 truncate">{t("groupChat")}</span>
               {unreadChatCount > 0 && (
                 <span className="rounded-full border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-primary)]">
                   {unreadChatCount}
