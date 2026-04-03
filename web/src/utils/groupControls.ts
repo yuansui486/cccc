@@ -18,7 +18,7 @@ const CONTROL_BUSY_MAP: Record<string, GroupControlKey> = {
 
 const CONTROL_ACTIVE_CLASS: Record<GroupControlKey, string> = {
   launch:
-    "bg-emerald-700 text-white shadow-[0_10px_24px_rgba(4,120,87,0.28)] ring-1 ring-black/5 dark:ring-white/10",
+    "bg-blue-700 text-white shadow-[0_10px_24px_rgba(29,78,216,0.28)] ring-1 ring-black/5 dark:ring-white/10",
   pause:
     "bg-amber-700 text-white shadow-[0_10px_24px_rgba(180,83,9,0.28)] ring-1 ring-black/5 dark:ring-white/10",
   stop:
@@ -26,7 +26,7 @@ const CONTROL_ACTIVE_CLASS: Record<GroupControlKey, string> = {
 };
 
 const CONTROL_PENDING_CLASS: Record<GroupControlKey, string> = {
-  launch: "ring-2 ring-emerald-300/70 dark:ring-emerald-300/35 animate-pulse",
+  launch: "ring-2 ring-blue-300/70 dark:ring-blue-300/35 animate-pulse",
   pause: "ring-2 ring-amber-300/75 dark:ring-amber-300/35 animate-pulse",
   stop: "ring-2 ring-rose-300/75 dark:ring-rose-300/35 animate-pulse",
 };

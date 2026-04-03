@@ -41,7 +41,7 @@
   "recipientForeman": "@领班",
   "recipientPeers": "@协作者",
   "groupStatusRun": "运行中",
-  "groupStatusPaused": "已暂停",
+  "groupStatusPaused": "暂停中",
   "groupStatusIdle": "空闲中",
   "groupStatusStop": "已停止",
   "justNow": "刚刚",

@@ -61,7 +61,7 @@ export function getGroupStatusLabel(key: "run" | "paused" | "idle" | "stop"): st
     case "run":
       return tr("common:groupStatusRun", "运行中");
     case "paused":
-      return tr("common:groupStatusPaused", "已暂停");
+      return tr("common:groupStatusPaused", "暂停中");
     case "idle":
       return tr("common:groupStatusIdle", "空闲中");
     case "stop":

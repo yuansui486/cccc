@@ -10,7 +10,7 @@ describe("groupControls", () => {
     const visual = getGroupControlVisual("idle", "launch", "");
     expect(visual.active).toBe(true);
     expect(visual.pending).toBe(false);
-    expect(visual.className).toContain("bg-emerald-700");
+    expect(visual.className).toContain("bg-blue-700");
   });
 
   it("keeps pause active only for paused groups", () => {

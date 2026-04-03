@@ -687,7 +687,7 @@ export function ChatComposer({
             recipientActorsBusy ? "opacity-50 pointer-events-none" : ""
           )}>
             {/* Special tokens */}
-            {["@all", "@foreman", "@peers"].map((tok) => {
+            {["@all", "@peers"].map((tok) => {
               const active = toTokens.includes(tok);
               return (
                 <button
@@ -1004,7 +1004,7 @@ export function ChatComposer({
               ? voiceState === "recording"
                 ? "border-rose-500 bg-rose-500 text-white shadow-lg shadow-rose-500/30 active:scale-[0.99]"
                 : selectedGroupId && !isCrossGroup
-                  ? "border-emerald-500 bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-400 active:scale-95"
+                  ? "border-blue-500 bg-blue-600 text-white shadow-lg shadow-blue-500/25 hover:bg-blue-500 active:scale-95"
                   : isDark
                     ? "border-white/[0.12] bg-white/[0.08] text-[var(--color-text-tertiary)] shadow-none disabled:opacity-100"
                     : "border-gray-200 bg-gray-100 text-gray-400 shadow-none disabled:opacity-100"

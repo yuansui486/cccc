@@ -195,6 +195,11 @@ export function AgentTab({
   };
 
   const runtimeIndicator = getRuntimeIndicatorState({ isRunning: Boolean(isRunning), workingState });
+  const headerTone = !isRunning
+    ? isDark
+      ? { bg: "bg-sky-950/35", text: "text-sky-200", border: "border-sky-500/30" }
+      : { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-300" }
+    : color;
   const statusTone = (() => {
     switch (runtimeIndicator.tone) {
       case "stop":
@@ -738,7 +743,7 @@ export function AgentTab({
       {/* Agent Header */}
       <div className={classNames(
         "flex items-center gap-4 px-4 py-3 border-b",
-        color.border, color.bg
+        headerTone.border, headerTone.bg
       )}>
         <span
           className={classNames(
@@ -764,7 +769,7 @@ export function AgentTab({
         <div className="flex items-start gap-3 min-w-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span className={classNames("font-semibold truncate min-w-0", color.text)}>{actor.title || actor.id}</span>
+              <span className={classNames("font-semibold truncate min-w-0", headerTone.text)}>{actor.title || actor.id}</span>
               {actor.role === "foreman" && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 font-medium">
                   {t('foreman')}
@@ -916,7 +921,7 @@ export function AgentTab({
                 <button
                   onClick={onLaunch}
                   disabled={isBusy}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50 min-h-[44px] transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium disabled:opacity-50 min-h-[44px] transition-colors"
                   aria-label={t('launchAgentLabel')}
                 >
                   <PlayIcon size={16} />
@@ -1015,7 +1020,7 @@ export function AgentTab({
               <button
                 onClick={onLaunch}
                 disabled={isBusy}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-sm disabled:opacity-50 min-h-[44px] transition-colors flex-shrink-0 whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm disabled:opacity-50 min-h-[44px] transition-colors flex-shrink-0 whitespace-nowrap"
                 aria-label={t('launchAgentLabel')}
               >
                 <PlayIcon size={16} />

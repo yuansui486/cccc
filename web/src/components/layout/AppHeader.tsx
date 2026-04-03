@@ -137,6 +137,17 @@ export function AppHeader({
             <h1 className="text-sm font-semibold truncate text-[var(--color-text-primary)]">
               {groupDoc?.title || (selectedGroupId ? selectedGroupId : t('selectGroup'))}
             </h1>
+            {selectedStatus && (
+              <span
+                className={classNames(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold flex-shrink-0",
+                  selectedStatus.pillClass
+                )}
+                title={selectedStatus.label}
+              >
+                {selectedStatus.label}
+              </span>
+            )}
             {selectedGroupId && sseStatus !== "connected" && (
               <span
                 className={classNames(
@@ -144,15 +155,6 @@ export function AppHeader({
                   sseStatus === "connecting" ? "bg-amber-400 animate-pulse" : "bg-rose-500"
                 )}
                 title={sseStatus === "connecting" ? t('reconnecting') : t('disconnected')}
-              />
-            )}
-            {selectedStatus && (
-              <span
-                className={classNames(
-                  "w-2.5 h-2.5 rounded-full",
-                  selectedStatus.dotClass
-                )}
-                title={selectedStatus.label}
               />
             )}
           </div>
