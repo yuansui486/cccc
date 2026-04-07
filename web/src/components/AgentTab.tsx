@@ -4,7 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useTranslation } from "react-i18next";
-import { Actor, AgentState, getRuntimeColor, RUNTIME_INFO } from "../types";
+import { Actor, AgentState, RUNTIME_INFO } from "../types";
 import { getTerminalTheme } from "../hooks/useTheme";
 import { classNames } from "../utils/classNames";
 import { formatFullTime, formatTime } from "../utils/time";
@@ -184,7 +184,6 @@ export function AgentTab({
     }
   };
 
-  const color = getRuntimeColor(actor.runtime, isDark);
   const rtInfo = (actor.runtime && RUNTIME_INFO[actor.runtime]) ? RUNTIME_INFO[actor.runtime] : RUNTIME_INFO.codex;
   const unreadCount = actor.unread_count ?? 0;
   const statusClamp2Style: CSSProperties = {
@@ -199,7 +198,9 @@ export function AgentTab({
     ? isDark
       ? { bg: "bg-sky-950/35", text: "text-sky-200", border: "border-sky-500/30" }
       : { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-300" }
-    : color;
+    : isDark
+      ? { bg: "bg-sky-950/35", text: "text-sky-200", border: "border-sky-500/30" }
+      : { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-300" };
   const statusTone = (() => {
     switch (runtimeIndicator.tone) {
       case "stop":
@@ -214,7 +215,7 @@ export function AgentTab({
           dotClass: runtimeIndicator.dotClass,
           pulse: runtimeIndicator.pulse,
           strongPulse: runtimeIndicator.strongPulse,
-          badgeClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+          badgeClass: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
         };
       case "waiting":
         return {
@@ -236,7 +237,7 @@ export function AgentTab({
           dotClass: runtimeIndicator.dotClass,
           pulse: runtimeIndicator.pulse,
           strongPulse: runtimeIndicator.strongPulse,
-          badgeClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+          badgeClass: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
         };
     }
   })();
@@ -756,13 +757,13 @@ export function AgentTab({
               className={classNames(
                 "absolute inset-[-3px] rounded-full motion-reduce:animate-none",
                 statusTone.strongPulse
-                  ? "animate-ping bg-emerald-300/35"
+                  ? "animate-ping bg-sky-300/35"
                   : "animate-pulse bg-current/20"
               )}
             />
           )}
           {statusTone.strongPulse && (
-            <span className="absolute inset-[-7px] rounded-full border border-emerald-300/35 animate-ping motion-reduce:animate-none [animation-duration:1.6s]" />
+            <span className="absolute inset-[-7px] rounded-full border border-sky-300/35 animate-ping motion-reduce:animate-none [animation-duration:1.6s]" />
           )}
         </span>
 

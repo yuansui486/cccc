@@ -37,7 +37,7 @@
     "applyRule": "应用规则",
     "restart": "重启",
     "restartPeer": "重启协作者",
-    "restartForeman": "重启领班",
+    "restartForeman": "重启负责人",
     "dismiss": "忽略"
   },
   "notice": {

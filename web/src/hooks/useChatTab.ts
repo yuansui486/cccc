@@ -46,7 +46,7 @@ export function useChatTab({
 }: UseChatTabOptions) {
   const { t } = useTranslation(["chat", "common"]);
   // ============ Stores ============
-  const { events, chatWindow, hasMoreHistory, hasLoadedTail, isLoadingHistory, isChatWindowLoading } = useGroupStore(
+  const { events, chatWindow, hasMoreHistory, hasLoadedTail, hasLoadedActors, isLoadingHistory, isChatWindowLoading } = useGroupStore(
     useCallback((state) => selectChatBucketState(state, selectedGroupId), [selectedGroupId])
   );
   const appendEvent = useGroupStore((state) => state.appendEvent);
@@ -283,19 +283,12 @@ export function useChatTab({
     );
   }, [groupDoc, selectedGroupId]);
 
-  const hasSettledActorSnapshot = useMemo(() => {
-    if (!selectedGroupId) return false;
-    if (actors.length > 0) return true;
-    // context/settings are loaded only after the first actor snapshot settles.
-    return groupContext !== null || groupSettings !== null;
-  }, [selectedGroupId, actors.length, groupContext, groupSettings]);
-
   const chatEmptyState = useMemo<ChatEmptyState>(() => {
     if (chatMessages.length > 0) return "ready";
     if (!selectedGroupId) return "business_empty";
     if (effectiveIsLoadingHistory || effectiveHasMoreHistory) return "hydrating";
     if (!hasHydratedGroupDoc) return "hydrating";
-    if (needsActors && !hasSettledActorSnapshot) return "hydrating";
+    if (needsActors && !hasLoadedActors) return "hydrating";
     return "business_empty";
   }, [
     chatMessages.length,
@@ -304,7 +297,7 @@ export function useChatTab({
     effectiveHasMoreHistory,
     hasHydratedGroupDoc,
     needsActors,
-    hasSettledActorSnapshot,
+    hasLoadedActors,
   ]);
 
   const updateChatFilter = useCallback(

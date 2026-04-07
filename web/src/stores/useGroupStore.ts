@@ -27,6 +27,7 @@ type GroupChatBucket = {
   chatWindow: ChatWindowState | null;
   hasMoreHistory: boolean;
   hasLoadedTail: boolean;
+  hasLoadedActors: boolean;
   isLoadingHistory: boolean;
   isChatWindowLoading: boolean;
 };
@@ -36,6 +37,7 @@ const EMPTY_CHAT_BUCKET: GroupChatBucket = {
   chatWindow: null,
   hasMoreHistory: false,
   hasLoadedTail: false,
+  hasLoadedActors: false,
   isLoadingHistory: false,
   isChatWindowLoading: false,
 };
@@ -436,6 +438,7 @@ function getGroupChatBucket(chatByGroup: Record<string, GroupChatBucket>, groupI
     chatWindow: null,
     hasMoreHistory: cached?.hasMoreHistory ?? true,
     hasLoadedTail: false,
+    hasLoadedActors: false,
     isLoadingHistory: false,
     isChatWindowLoading: false,
   };
@@ -481,6 +484,7 @@ function buildChatBucketPatch(
         chatWindow: patch.chatWindow !== undefined ? patch.chatWindow : prev.chatWindow,
         hasMoreHistory: nextHasMoreHistory,
         hasLoadedTail: patch.hasLoadedTail !== undefined ? patch.hasLoadedTail : prev.hasLoadedTail,
+        hasLoadedActors: patch.hasLoadedActors !== undefined ? patch.hasLoadedActors : prev.hasLoadedActors,
         isLoadingHistory: patch.isLoadingHistory !== undefined ? patch.isLoadingHistory : prev.isLoadingHistory,
         isChatWindowLoading: patch.isChatWindowLoading !== undefined ? patch.isChatWindowLoading : prev.isChatWindowLoading,
       },
@@ -1157,6 +1161,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             chatWindow: null,
             hasMoreHistory: false,
             hasLoadedTail: true,
+            hasLoadedActors: true,
             isLoadingHistory: false,
             isChatWindowLoading: false,
           }) || {}),
@@ -1201,6 +1206,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }).catch((error) => {
       console.error(`Failed to load actors for group=${gid}:`, error);
     }).finally(() => {
+      commitChatPatch({ hasLoadedActors: true });
       scheduleDeferredUnreadRefresh(gid, () => {
         if (isLatestSelection()) {
           void get().refreshActors(gid, { includeUnread: true });
