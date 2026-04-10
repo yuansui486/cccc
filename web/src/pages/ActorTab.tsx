@@ -7,6 +7,8 @@ const LazyAgentTab = lazy(() => import("../components/AgentTab").then((m) => ({ 
 export interface ActorTabProps {
   actor: Actor | null;
   groupId: string;
+  selectedGroupRunning?: boolean;
+  selectedGroupActorsHydrating?: boolean;
   agentState: AgentState | null;
   termEpoch: number;
   busy: string;
@@ -26,6 +28,8 @@ export interface ActorTabProps {
 export function ActorTab({
   actor,
   groupId,
+  selectedGroupRunning = false,
+  selectedGroupActorsHydrating = false,
   agentState,
   termEpoch,
   busy,
@@ -53,6 +57,8 @@ export function ActorTab({
       <LazyAgentTab
         actor={actor}
         groupId={groupId}
+        selectedGroupRunning={selectedGroupRunning}
+        selectedGroupActorsHydrating={selectedGroupActorsHydrating}
         termEpoch={termEpoch}
         agentState={agentState}
         isVisible={isVisible}

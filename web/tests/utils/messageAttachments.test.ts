@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getAttachmentAwareMessageText,
+  hasRenderableAttachmentSource,
   isImageAttachment,
   isRedundantWecomImagePlaceholder,
   isSvgAttachment,
@@ -78,5 +79,17 @@ describe("messageAttachments", () => {
     };
     expect(getAttachmentAwareMessageText("[image]", [attachment], "wecom")).toBe("");
     expect(getAttachmentAwareMessageText("需要人工确认", [attachment], "wecom")).toBe("需要人工确认");
+  });
+
+  it("treats inbound WeCom media without blob paths as renderable when download_url exists", () => {
+    const attachment = {
+      kind: "image",
+      title: "wx-camera-shot",
+      mime_type: "image/jpeg",
+      download_url: "https://example.test/media/123",
+      decryption_key: "aes-demo",
+    };
+
+    expect(hasRenderableAttachmentSource(attachment)).toBe(true);
   });
 });

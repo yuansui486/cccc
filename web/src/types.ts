@@ -41,6 +41,9 @@ export type EventAttachment = {
   bytes?: number;
   mime_type?: string;
   local_preview_url?: string;
+  download_url?: string;
+  decryption_key?: string;
+  aeskey?: string;
 };
 
 // Local-only preview attachment used by optimistic messages before upload confirmation.
@@ -51,6 +54,9 @@ export type OptimisticAttachment = {
   bytes?: number;
   mime_type?: string;
   local_preview_url: string;
+  download_url?: string;
+  decryption_key?: string;
+  aeskey?: string;
 };
 
 export type MessageAttachment = EventAttachment | OptimisticAttachment;

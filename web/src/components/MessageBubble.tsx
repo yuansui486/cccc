@@ -7,7 +7,7 @@ import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/tim
 import { classNames } from "../utils/classNames";
 import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
-import { getAttachmentAwareMessageText } from "../utils/messageAttachments";
+import { getAttachmentAwareMessageText, hasRenderableAttachmentSource } from "../utils/messageAttachments";
 import { selectStreamingReplySession, useGroupStore } from "../stores";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
 import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
@@ -162,7 +162,7 @@ function MessageBubbleBody({
     isQueuedOnlyPlaceholder,
     streamingPlaceholderLabel,
     shouldRenderMarkdown,
-    blobAttachments,
+    renderableAttachments,
     blobGroupId,
     stableMessageAttachmentKey,
     onOpenSource,
@@ -191,13 +191,14 @@ function MessageBubbleBody({
     isQueuedOnlyPlaceholder: boolean;
     streamingPlaceholderLabel: string;
     shouldRenderMarkdown: boolean;
-    blobAttachments: Array<{
+    renderableAttachments: Array<{
         kind: string;
         path: string;
         title: string;
         bytes: number;
         mime_type: string;
         local_preview_url: string;
+        download_url: string;
     }>;
     blobGroupId: string;
     stableMessageAttachmentKey: string;
@@ -291,7 +292,7 @@ function MessageBubbleBody({
             />
 
             <MessageAttachments
-                attachments={blobAttachments}
+                attachments={renderableAttachments}
                 blobGroupId={blobGroupId}
                 isUserMessage={isUserMessage}
                 isDark={isDark}
@@ -573,7 +574,7 @@ export const MessageBubble = memo(function MessageBubble({
     const hasDestination = !!dstGroupId;
     const rawAttachments: MessageAttachment[] = Array.isArray(msgData?.attachments) ? msgData.attachments : [];
     const sourcePlatform = typeof msgData?.source_platform === "string" ? String(msgData.source_platform || "").trim() : "";
-    const blobAttachments = rawAttachments
+    const renderableAttachments = rawAttachments
         .filter((a): a is MessageAttachment => a != null && typeof a === "object")
         .map((a) => ({
             kind: String(a.kind || "file"),
@@ -582,8 +583,9 @@ export const MessageBubble = memo(function MessageBubble({
             bytes: Number(a.bytes || 0),
             mime_type: String(a.mime_type || ""),
             local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
+            download_url: "download_url" in a ? String(a.download_url || "") : "",
         }))
-        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
+        .filter((a) => hasRenderableAttachmentSource(a));
     const displayMessageText = useMemo(() => {
         return getAttachmentAwareMessageText(messageText, rawAttachments, sourcePlatform);
     }, [messageText, rawAttachments, sourcePlatform]);
@@ -613,11 +615,11 @@ export const MessageBubble = memo(function MessageBubble({
             isStreaming: shouldRenderStreamingBody,
             messageText: displayMessageText,
             liveStreamingText: "",
-            blobAttachmentCount: blobAttachments.length,
+            blobAttachmentCount: renderableAttachments.length,
             presentationRefCount: presentationRefs.length,
             activities: streamingActivities,
         });
-    }, [blobAttachments.length, displayMessageText, presentationRefs.length, shouldRenderStreamingBody, streamingActivities]);
+    }, [displayMessageText, presentationRefs.length, renderableAttachments.length, shouldRenderStreamingBody, streamingActivities]);
     const streamPhase = String((msgData as { stream_phase?: unknown } | undefined)?.stream_phase || "").trim().toLowerCase();
     const bubbleMotionClass = useMemo(() => getMessageBubbleMotionClass({
         isStreaming,
@@ -646,12 +648,12 @@ export const MessageBubble = memo(function MessageBubble({
                 quoteText,
                 messageText: displayMessageText,
                 presentationRefs,
-                attachments: blobAttachments.map((attachment) => ({
+                attachments: renderableAttachments.map((attachment) => ({
                     title: attachment.title,
-                    path: attachment.path || attachment.local_preview_url,
+                    path: attachment.path || attachment.local_preview_url || attachment.download_url,
                 })),
             }),
-        [blobAttachments, displayMessageText, presentationRefs, quoteText]
+        [displayMessageText, presentationRefs, quoteText, renderableAttachments]
     );
     const messageTimestamp = formatMessageTimestamp(ev.ts);
     const fullMessageTimestamp = formatFullTime(ev.ts);
@@ -905,7 +907,7 @@ export const MessageBubble = memo(function MessageBubble({
                         isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
                         streamingPlaceholderLabel={streamingPlaceholderLabel}
                         shouldRenderMarkdown={shouldRenderMarkdown}
-                        blobAttachments={blobAttachments}
+                        renderableAttachments={renderableAttachments}
                         blobGroupId={blobGroupId}
                         stableMessageAttachmentKey={stableMessageAttachmentKey}
                         onOpenSource={onOpenSource}

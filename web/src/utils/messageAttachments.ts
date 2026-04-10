@@ -38,6 +38,14 @@ export function isSvgAttachment(attachment: MessageAttachment): boolean {
   return attachmentExtension(attachment) === ".svg";
 }
 
+export function hasRenderableAttachmentSource(attachment: MessageAttachment): boolean {
+  const previewUrl = String(attachment.local_preview_url || "").trim();
+  if (previewUrl) return true;
+  const downloadUrl = String(attachment.download_url || "").trim();
+  if (downloadUrl) return true;
+  return String(attachment.path || "").trim().startsWith("state/blobs/");
+}
+
 export function isRedundantWecomImagePlaceholder(
   text: string,
   attachments: MessageAttachment[],

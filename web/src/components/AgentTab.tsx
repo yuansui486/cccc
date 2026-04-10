@@ -33,6 +33,8 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 interface AgentTabProps {
   actor: Actor;
   groupId: string;
+  selectedGroupRunning?: boolean;
+  selectedGroupActorsHydrating?: boolean;
   termEpoch?: number;
   agentState: AgentState | null;
   isVisible: boolean;
@@ -53,6 +55,8 @@ interface AgentTabProps {
 export function AgentTab({
   actor,
   groupId,
+  selectedGroupRunning = false,
+  selectedGroupActorsHydrating = false,
   termEpoch = 0,
   agentState,
   isVisible,
@@ -70,7 +74,12 @@ export function AgentTab({
 }: AgentTabProps) {
   const { t } = useTranslation('actors');
   // Derived state (must be defined before refs that use them)
-  const { isRunning, workingState } = useActorDisplayState({ groupId, actor });
+  const { isRunning, workingState } = useActorDisplayState({
+    groupId,
+    actor,
+    selectedGroupRunning,
+    selectedGroupActorsHydrating,
+  });
   const effectiveRunner = getEffectiveActorRunner(actor);
   const isHeadless = effectiveRunner === "headless";
   const canControl = !readOnly;

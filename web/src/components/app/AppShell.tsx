@@ -329,6 +329,8 @@ export function AppShell({
                     <ActorTab
                       actor={actor}
                       groupId={selectedGroupId}
+                      selectedGroupRunning={selectedGroupRunning}
+                      selectedGroupActorsHydrating={selectedGroupActorsHydrating}
                       agentState={agentState}
                       termEpoch={actor ? getTermEpoch(actor.id) : 0}
                       busy={busy}

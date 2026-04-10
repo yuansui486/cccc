@@ -1,9 +1,25 @@
 import type { MessageAttachment } from "../../types";
 import { withAuthToken } from "../../services/api/base";
 import { classNames } from "../../utils/classNames";
-import { isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
+import { hasRenderableAttachmentSource, isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
 import { FileIcon } from "../Icons";
 import { ImagePreview } from "./ImagePreview";
+
+function resolveAttachmentHref(attachment: MessageAttachment, blobGroupId: string): string {
+  const previewUrl = String(attachment.local_preview_url || "").trim();
+  if (previewUrl) return previewUrl;
+
+  const downloadUrl = String(attachment.download_url || "").trim();
+  if (downloadUrl) return downloadUrl;
+
+  const parts = String(attachment.path || "").split("/");
+  const blobName = parts[parts.length - 1] || "";
+  if (!blobName) return "";
+
+  return withAuthToken(
+    `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
+  );
+}
 
 export function MessageAttachments({
   attachments,
@@ -30,11 +46,11 @@ export function MessageAttachments({
       {imageAttachments.length > 0 && (
         <div className="mt-3 flex max-w-full flex-wrap items-start gap-2">
           {imageAttachments.map((attachment, index) => {
+            if (!hasRenderableAttachmentSource(attachment)) return null;
             const parts = String(attachment.path || "").split("/");
             const blobName = parts[parts.length - 1] || "";
-            const href = attachment.local_preview_url || withAuthToken(
-              `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
-            );
+            const href = resolveAttachmentHref(attachment, blobGroupId);
+            if (!href) return null;
             const label = attachment.title || blobName || "image";
             return (
               <ImagePreview
@@ -52,11 +68,11 @@ export function MessageAttachments({
       {fileAttachments.length > 0 && (
         <div className="mt-3 flex max-w-full flex-wrap items-start gap-2">
           {fileAttachments.map((attachment, index) => {
+            if (!hasRenderableAttachmentSource(attachment)) return null;
             const parts = String(attachment.path || "").split("/");
             const blobName = parts[parts.length - 1] || "";
-            const href = attachment.local_preview_url || withAuthToken(
-              `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
-            );
+            const href = resolveAttachmentHref(attachment, blobGroupId);
+            if (!href) return null;
             const label = attachment.title || blobName || "file";
             return (
               <a
