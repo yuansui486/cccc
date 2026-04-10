@@ -7,7 +7,6 @@ import { Actor, GroupMeta, HeadlessPreviewSession, LedgerEvent, PresentationMess
 import { VirtualMessageList } from "../../components/VirtualMessageList";
 import { classNames } from "../../utils/classNames";
 import { ChatComposer } from "./ChatComposer";
-import { RuntimeDock } from "./RuntimeDock";
 import { useChatTab } from "../../hooks/useChatTab";
 import { useTranslation } from 'react-i18next';
 import { useComposerStore, useGroupStore, useModalStore, useUIStore } from "../../stores";
@@ -17,7 +16,6 @@ import { buildPresentationRefForSlot } from "../../utils/presentationRefs";
 import { clearPresentationSlot } from "../../services/api";
 import { clampPresentationSplitWidth } from "../../utils/presentationSplitLayout";
 import type { StreamingReplySession } from "../../stores/chatStreamingSessions";
-import { buildLiveWorkCards } from "./liveWorkCards";
 
 const PresentationRail = lazy(() =>
   import("../../components/presentation/PresentationRail").then((module) => ({ default: module.PresentationRail }))
@@ -52,9 +50,7 @@ export interface ChatTabProps {
   selectedGroupActorsHydrating: boolean;
   groupLabelById: Record<string, string>;
   actors: Actor[];
-  runtimeActors: Actor[];
   groups: GroupMeta[];
-  activeRuntimeActorId?: string;
 
   // Recipient actors for cross-group messaging
   recipientActors: Actor[];
@@ -74,8 +70,6 @@ export interface ChatTabProps {
 
   // Group actions (from useGroupActions)
   onStartGroup: () => void;
-  onOpenRuntimeActor: (actorId: string) => void;
-
   // Mention menu state (local state in App)
   showMentionMenu: boolean;
   setShowMentionMenu: React.Dispatch<React.SetStateAction<boolean>>;
@@ -93,9 +87,7 @@ export function ChatTab({
   selectedGroupActorsHydrating,
   groupLabelById,
   actors,
-  runtimeActors,
   groups,
-  activeRuntimeActorId,
   recipientActors,
   recipientActorsBusy,
   destGroupScopeLabel,
@@ -105,7 +97,6 @@ export function ChatTab({
   chatAtBottomRef,
   appendComposerFiles,
   onStartGroup,
-  onOpenRuntimeActor,
   showMentionMenu,
   setShowMentionMenu,
   mentionSelectedIndex,
@@ -231,27 +222,6 @@ export function ChatTab({
   const listIsLoadingHistory = isLoadingHistory || isHydratingEmptyState;
   const listHasMoreHistory = hasMoreHistory || isHydratingEmptyState;
   const hasPresentationAttention = Object.keys(presentationAttention).length > 0;
-  const liveWorkCards = useMemo(
-    () => buildLiveWorkCards({
-      actors: runtimeActors,
-      events: liveWorkEvents,
-      latestActorPreviewByActorId,
-      previewSessionsByActorId,
-      latestActorTextByActorId,
-      latestActorActivitiesByActorId,
-      replySessionsByPendingEventId,
-    }),
-    [
-      runtimeActors,
-      liveWorkEvents,
-      latestActorPreviewByActorId,
-      previewSessionsByActorId,
-      latestActorActivitiesByActorId,
-      latestActorTextByActorId,
-      replySessionsByPendingEventId,
-    ]
-  );
-
   const preferredPresentationSurface = !isSmallScreen && presentationDisplayMode === "split" ? "split" : "modal";
   const splitPresentationViewer =
     !isSmallScreen &&
@@ -705,24 +675,6 @@ export function ChatTab({
                   onLoadMore={loadMoreHistory}
                 />
               )}
-
-              {!chatWindowProps && runtimeActors.length > 0 ? (
-                <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 sm:bottom-4">
-                  <RuntimeDock
-                    groupId={selectedGroupId}
-                    runtimeActors={runtimeActors}
-                    liveWorkCards={liveWorkCards}
-                    activeRuntimeActorId={activeRuntimeActorId}
-                    isDark={isDark}
-                    isSmallScreen={isSmallScreen}
-                    readOnly={readOnly}
-                    selectedGroupRunning={selectedGroupRunning}
-                    selectedGroupActorsHydrating={selectedGroupActorsHydrating}
-                    onAddAgent={!readOnly ? addAgent : undefined}
-                    onOpenRuntimeActor={onOpenRuntimeActor}
-                  />
-                </div>
-              ) : null}
             </section>
           ) : null}
 

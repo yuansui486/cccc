@@ -292,7 +292,6 @@ export function AppShell({
                 selectedGroupActorsHydrating={selectedGroupActorsHydrating}
                 groupLabelById={groupLabelById}
                 actors={actors}
-                runtimeActors={[]}
                 groups={groups}
                 recipientActors={recipientActors}
                 recipientActorsBusy={recipientActorsBusy}
@@ -303,7 +302,6 @@ export function AppShell({
                 chatAtBottomRef={chatAtBottomRef}
                 appendComposerFiles={appendComposerFiles}
                 onStartGroup={onStartGroup}
-                onOpenRuntimeActor={onTabChange}
                 showMentionMenu={showMentionMenu}
                 setShowMentionMenu={setShowMentionMenu}
                 mentionSelectedIndex={mentionSelectedIndex}
