@@ -5,11 +5,15 @@ import logging
 import socket
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from .actor_runtime_cache import replace_group_runtime
 from ..kernel.context import ContextStorage
-from ..kernel.working_state import DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES, derive_effective_working_state
+from ..kernel.working_state import (
+    derive_effective_working_state,
+)
 
 _LOG = logging.getLogger("cccc.daemon.serve_ops")
 _LOOP_ERROR_LAST_TS: Dict[str, float] = {}
@@ -36,14 +40,21 @@ def start_automation_thread(
     group_running: Callable[[str], bool],
     tick_delivery: Callable[[Any], Any],
     compact_ledgers: Callable[[Path], Any],
+    automation_interval_seconds: float = 5.0,
+    initial_automation_delay_seconds: float = 5.0,
 ) -> threading.Thread:
     def _automation_loop() -> None:
         next_compact = 0.0
+        next_automation = time.time() + max(0.0, float(initial_automation_delay_seconds or 0.0))
+        automation_interval = max(1.0, float(automation_interval_seconds or 5.0))
         while not stop_event.is_set():
-            try:
-                automation_tick(home=home)
-            except Exception as e:
-                _log_loop_error("automation_tick failed", e)
+            now = time.time()
+            if now >= next_automation:
+                try:
+                    automation_tick(home=home)
+                except Exception as e:
+                    _log_loop_error("automation_tick failed", e)
+                next_automation = now + automation_interval
             try:
                 base = home / "groups"
                 if base.exists():
@@ -271,15 +282,17 @@ def start_actor_activity_thread(
     home: Path,
     pty_supervisor: Any,
     headless_supervisor: Any,
+    codex_supervisor: Any,
+    claude_supervisor: Any = None,
     event_broadcaster: Any,
     load_group: Callable[[str], Any],
-    interval_seconds: float = 10.0,
+    interval_seconds: float = 1.0,
 ) -> threading.Thread:
     """Periodically publish actor.activity SSE events with effective runtime status."""
     import uuid
 
     def _actor_activity_loop() -> None:
-        interval = max(5.0, float(interval_seconds or 10.0))
+        interval = max(1.0, float(interval_seconds or 1.0))
         while not stop_event.is_set():
             try:
                 groups_base = home / "groups"
@@ -307,6 +320,7 @@ def start_actor_activity_thread(
                             if isinstance(item, dict) and str(item.get("id") or "").strip()
                         } if isinstance(agent_rows, list) else {}
                         actors_data = []
+                        actors_snapshot: Dict[str, Dict[str, Any]] = {}
                         actor_list = group.doc.get("actors")
                         if not isinstance(actor_list, list):
                             continue
@@ -316,33 +330,37 @@ def start_actor_activity_thread(
                             aid = str(actor.get("id") or "").strip()
                             if not aid:
                                 continue
+                            runtime = str(actor.get("runtime") or "").strip().lower()
                             runner_kind = str(actor.get("runner") or "pty").strip().lower() or "pty"
                             effective_runner = "headless" if runner_kind == "headless" else "pty"
                             running = False
                             idle = None
                             headless_state = None
-                            if effective_runner == "headless":
+                            if runtime == "codex" and effective_runner == "headless":
+                                headless_state = codex_supervisor.get_state(group_id=gid, actor_id=aid)
+                                running = bool(headless_state is not None and codex_supervisor.actor_running(gid, aid))
+                            elif runtime == "claude" and effective_runner == "headless" and claude_supervisor is not None:
+                                headless_state = claude_supervisor.get_state(group_id=gid, actor_id=aid)
+                                running = bool(headless_state is not None and claude_supervisor.actor_running(gid, aid))
+                            elif effective_runner == "headless":
                                 state = headless_supervisor.get_state(group_id=gid, actor_id=aid)
                                 headless_state = state.model_dump() if state is not None else None
                                 running = bool(state is not None and headless_supervisor.actor_running(gid, aid))
                             else:
                                 running = bool(pty_supervisor.actor_running(gid, aid))
                                 idle = pty_supervisor.idle_seconds(group_id=gid, actor_id=aid) if running else None
-                            pty_terminal_text = ""
+                            pty_terminal_override = None
                             if effective_runner == "pty" and running:
                                 try:
-                                    pty_terminal_text = pty_supervisor.tail_output(
-                                        group_id=gid,
-                                        actor_id=aid,
-                                        max_bytes=DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES,
-                                    ).decode("utf-8", errors="replace")
+                                    pty_terminal_override = pty_supervisor.terminal_override(group_id=gid, actor_id=aid)
                                 except Exception:
-                                    pty_terminal_text = ""
+                                    pty_terminal_override = None
                             if not running:
                                 continue
                             payload = {
                                 "id": aid,
                                 "running": True,
+                                "runner_effective": effective_runner,
                                 "idle_seconds": round(float(idle), 1) if idle is not None else None,
                             }
                             payload.update(
@@ -351,12 +369,14 @@ def start_actor_activity_thread(
                                     effective_runner=effective_runner,
                                     runtime=str(actor.get("runtime") or ""),
                                     idle_seconds=idle,
-                                    pty_terminal_text=pty_terminal_text,
+                                    pty_terminal_override=pty_terminal_override,
                                     agent_state=agent_state_by_id.get(aid),
                                     headless_state=headless_state,
                                 )
                             )
                             actors_data.append(payload)
+                            actors_snapshot[aid] = payload
+                        replace_group_runtime(gid, actors_snapshot)
                         if actors_data:
                             event_broadcaster.publish({
                                 "id": uuid.uuid4().hex,
@@ -401,6 +421,8 @@ def cleanup_after_stop(
     home: Path,
     best_effort_killpg: Callable[[int, Any], Any],
     im_stop_all: Callable[..., Any],
+    codex_stop_all: Callable[[], Any],
+    claude_stop_all: Callable[[], Any] = lambda: None,
     pty_stop_all: Callable[[], Any],
     headless_stop_all: Callable[[], Any],
     sock_path: Path,
@@ -412,6 +434,14 @@ def cleanup_after_stop(
     stop_event.set()
     try:
         im_stop_all(home, best_effort_killpg=best_effort_killpg)
+    except Exception:
+        pass
+    try:
+        codex_stop_all()
+    except Exception:
+        pass
+    try:
+        claude_stop_all()
     except Exception:
         pass
     try:

@@ -32,6 +32,19 @@ export function isChatMessageEvent(ev: unknown): ev is LedgerEvent & { kind: "ch
   return ev !== null && typeof ev === "object" && (ev as BaseLedgerEvent).kind === "chat.message";
 }
 
+export function hasRenderableChatMessageContent(event: { kind?: unknown; data?: unknown }): boolean {
+  if (String(event.kind || "").trim() !== "chat.message") return false;
+  const data = event.data && typeof event.data === "object"
+    ? event.data as { text?: unknown; attachments?: unknown; refs?: unknown }
+    : null;
+  const text = typeof data?.text === "string" ? data.text.trim() : "";
+  if (text) return true;
+  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+  if (attachments.length > 0) return true;
+  const refs = Array.isArray(data?.refs) ? data.refs : [];
+  return refs.length > 0;
+}
+
 export function isActorActivityEvent(
   ev: unknown,
 ): ev is BaseLedgerEvent & {

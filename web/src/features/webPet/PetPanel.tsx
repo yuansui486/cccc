@@ -1,12 +1,19 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { getReminderActionButtons } from "./reminderActions";
-import { getPetReminderPrimaryText } from "./reminderText";
-import type { PetReminder } from "./types";
+import {
+  getPetReminderActionPreviewText,
+  getPetReminderPreviewLabel,
+  getPetReminderPrimaryText,
+  getPetReminderRouteInfo,
+} from "./reminderText";
+import type { PetCompanionProfile, PetReminder } from "./types";
 
 interface PetPanelProps {
   reminder: PetReminder | null;
   reminders: PetReminder[];
+  companion: PetCompanionProfile;
+  taskSummaries?: string[];
   reviewInFlight?: boolean;
   onDismiss: (fingerprint: string, opts?: { outcome?: "dismissed" | null; cooldownMs?: number }) => void;
   onAction?: (reminder: PetReminder) => void;
@@ -22,6 +29,8 @@ function buildReminderBody(reminder: PetReminder | null): string {
 export function PetPanel({
   reminder,
   reminders,
+  companion,
+  taskSummaries = [],
   reviewInFlight = false,
   onDismiss,
   onAction,
@@ -42,6 +51,9 @@ export function PetPanel({
   );
 
   const bodyText = buildReminderBody(reminder);
+  const previewText = reminder ? getPetReminderActionPreviewText(reminder) : "";
+  const routeInfo = reminder ? getPetReminderRouteInfo(reminder) : { toText: "", replyInThread: false };
+  const showPreview = !!previewText && previewText !== bodyText;
   const otherReminders = reminder
     ? reminders.filter((item) => item.fingerprint !== reminder.fingerprint)
     : reminders;
@@ -63,7 +75,10 @@ export function PetPanel({
         <div className="flex items-center gap-3 border-b border-[var(--glass-border-subtle)] px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-              {t("panelTitle", { defaultValue: "Web Pet" })}
+              {t("panelTitleNamed", {
+                defaultValue: "{{name}}",
+                name: companion.name,
+              })}
             </div>
             {reminders.length > 0 ? (
               <div className="text-[11px] text-[var(--color-text-secondary)]">
@@ -88,7 +103,7 @@ export function PetPanel({
           >
             {reviewInFlight
               ? t("reviewing", { defaultValue: "Reviewing…" })
-              : t("reviewNow", { defaultValue: "Review now" })}
+              : t("reviewNow", { defaultValue: "Refresh now" })}
           </button>
         </div>
 
@@ -103,6 +118,34 @@ export function PetPanel({
               <div className="mt-2 text-sm leading-6 text-[var(--color-text-primary)]">
                 {bodyText}
               </div>
+              {showPreview ? (
+                <div className="mt-3 rounded-2xl bg-white/6 px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
+                    {getPetReminderPreviewLabel(reminder, companion) ||
+                      t("previewLabel", { defaultValue: "Prepared message" })}
+                  </div>
+                  {routeInfo.toText || routeInfo.replyInThread ? (
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[var(--color-text-secondary)]">
+                      {routeInfo.toText ? (
+                        <span className="rounded-full bg-white/8 px-2 py-1">
+                          {t("routeTo", {
+                            defaultValue: "To: {{value}}",
+                            value: routeInfo.toText,
+                          })}
+                        </span>
+                      ) : null}
+                      {routeInfo.replyInThread ? (
+                        <span className="rounded-full bg-white/8 px-2 py-1">
+                          {t("routeReply", { defaultValue: "Reply in thread" })}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-[var(--color-text-primary)]">
+                    {previewText}
+                  </div>
+                </div>
+              ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 {actionButtons.map((button) => (
                   <button
@@ -132,9 +175,28 @@ export function PetPanel({
               </div>
             </>
           ) : (
-            <div className="text-sm leading-6 text-[var(--color-text-secondary)]">
-              {t("panelIdle", { defaultValue: "No current reminders." })}
-            </div>
+            <>
+              <div className="text-sm leading-6 text-[var(--color-text-secondary)]">
+                {t("panelIdle", { defaultValue: "No current reminders." })}
+              </div>
+              {taskSummaries.length > 0 ? (
+                <div className="mt-4 rounded-2xl border border-[var(--glass-border-subtle)] bg-white/5 px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
+                    {t("currentTasks", { defaultValue: "Current tasks" })}
+                  </div>
+                  <div className="mt-2 space-y-1.5">
+                    {taskSummaries.map((summary) => (
+                      <div
+                        key={summary}
+                        className="rounded-xl bg-white/6 px-3 py-2 text-xs leading-5 text-[var(--color-text-primary)]"
+                      >
+                        {summary}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
 

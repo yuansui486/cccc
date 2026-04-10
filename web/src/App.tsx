@@ -6,8 +6,10 @@ const WebPet = lazy(() => import("./features/webPet/WebPet").then((m) => ({ defa
 import { AppBackground } from "./components/app/AppBackground";
 import { AppFeedback } from "./components/app/AppFeedback";
 import { AppShell } from "./components/app/AppShell";
+import { useTextScale } from "./hooks/useTextScale";
 import { useTheme } from "./hooks/useTheme";
 import { useActorActions } from "./hooks/useActorActions";
+import { useSelectedGroupRuntime } from "./hooks/useSelectedGroupRuntime";
 import { useSSE } from "./hooks/useSSE";
 import { useDragDrop } from "./hooks/useDragDrop";
 import { useGroupActions } from "./hooks/useGroupActions";
@@ -35,6 +37,7 @@ import type { ChatMessageData, LedgerEvent } from "./types";
 
 export default function App() {
   const { theme, setTheme, isDark } = useTheme();
+  const { textScale, setTextScale } = useTextScale();
   useViewportHeight();
 
   const groups = useGroupStore((state) => state.groups);
@@ -45,6 +48,7 @@ export default function App() {
   const actors = useGroupStore((state) => state.actors);
   const groupContext = useGroupStore((state) => state.groupContext);
   const groupSettings = useGroupStore((state) => state.groupSettings);
+  const selectedGroupActorsHydrating = useGroupStore((state) => state.selectedGroupActorsHydrating);
   const setSelectedGroupId = useGroupStore((state) => state.setSelectedGroupId);
   const refreshGroups = useGroupStore((state) => state.refreshGroups);
   const refreshActors = useGroupStore((state) => state.refreshActors);
@@ -122,7 +126,7 @@ export default function App() {
     [selectedGroupId, chatSessions]
   );
   const chatUnreadCount = chatSession.chatUnreadCount;
-  const chatSessionAtBottom = chatSession.scrollSnapshot?.atBottom;
+  const chatSessionAtBottom = chatSession.scrollSnapshot?.mode === "follow";
 
   const [showMentionMenu, setShowMentionMenu] = React.useState(false);
   const [_mentionFilter, setMentionFilter] = React.useState("");
@@ -251,16 +255,18 @@ export default function App() {
     onTabChange: handleTabChange,
   });
 
+  const {
+    selectedGroupRunning,
+    selectedGroupRuntimeStatus,
+  } = useSelectedGroupRuntime({
+    groups,
+    selectedGroupId,
+    groupDoc,
+    actors,
+  });
+
   const hasForeman = useMemo(() => actors.some((a) => a.role === "foreman"), [actors]);
   const orderedGroups = useMemo(() => getOrderedGroups(), [groups, groupOrder, getOrderedGroups]);
-  const selectedGroupMeta = useMemo(
-    () => groups.find((g) => String(g.group_id || "") === selectedGroupId) || null,
-    [groups, selectedGroupId]
-  );
-  const selectedGroupRunning = useMemo(() => {
-    const anyActorRunning = actors.some((a) => !!a.running);
-    return anyActorRunning || (selectedGroupMeta?.running ?? false);
-  }, [actors, selectedGroupMeta]);
 
   const groupLabelById = useMemo(() => {
     const out: Record<string, string> = {};
@@ -353,7 +359,10 @@ export default function App() {
         isSmallScreen={isSmallScreen}
         webReadOnly={webReadOnly}
         selectedGroupRunning={selectedGroupRunning}
+        selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
+        selectedGroupActorsHydrating={selectedGroupActorsHydrating}
         theme={theme}
+        textScale={textScale}
         sseStatus={sseStatus}
         groupLabelById={groupLabelById}
         chatUnreadCount={chatUnreadCount}
@@ -365,6 +374,7 @@ export default function App() {
         contentRef={contentRef}
         chatAtBottomRef={chatAtBottomRef}
         onThemeChange={setTheme}
+        onTextScaleChange={setTextScale}
         onSelectGroup={setSelectedGroupId}
         onWarmGroup={(gid) => void warmGroup(gid)}
         onCreateGroup={
@@ -446,11 +456,14 @@ export default function App() {
       <Suspense fallback={null}>
         <AppModals
           isDark={isDark}
+          theme={theme}
+          textScale={textScale}
           readOnly={webReadOnly}
           ccccHome={ccccHome}
           composerRef={composerRef}
           onStartReply={startReply}
-          onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
+          onThemeChange={setTheme}
+          onTextScaleChange={setTextScale}
           onStartGroup={handleStartGroup}
           onStopGroup={handleStopGroup}
           onSetGroupState={handleSetGroupState}

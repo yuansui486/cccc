@@ -1,9 +1,10 @@
-import type { Actor } from "../types";
 import type { TerminalSignal } from "../stores/useTerminalSignalsStore";
+import { getEffectiveActorRunner } from "./headlessRuntimeSupport";
 
 const MAX_TERMINAL_BUFFER_CHARS = 4000;
 const CODEX_TERMINAL_SIGNAL_WINDOW_CHARS = 1600;
 const WORKING_OUTPUT_TTL_MS = 5000;
+const IDLE_PROMPT_TTL_MS = 3000;
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
 const ANSI_ESCAPE_RE = new RegExp(
@@ -33,15 +34,6 @@ export function appendTerminalSignalBuffer(previous: string, chunk: string): str
   const merged = `${previous || ""}${stripAnsi(String(chunk || ""))}`;
   if (merged.length <= MAX_TERMINAL_BUFFER_CHARS) return merged;
   return merged.slice(-MAX_TERMINAL_BUFFER_CHARS);
-}
-
-function getLastNonEmptyLine(text: string): string {
-  const lines = String(text || "").split("\n");
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]?.trim() || "";
-    if (line) return line;
-  }
-  return "";
 }
 
 function getRecentNonEmptyLines(text: string, maxLines: number = 4): string[] {
@@ -124,20 +116,28 @@ export function getTerminalSignalFromChunk(
   return { nextBuffer, signalKind: null };
 }
 
+export type ActorWorkingStateInput = {
+  running?: boolean;
+  enabled?: boolean;
+  runner?: string;
+  runner_effective?: string;
+  effective_working_state?: string;
+};
+
 export function getActorDisplayWorkingState(
-  actor: Actor,
+  actor: ActorWorkingStateInput,
   signal: TerminalSignal | null | undefined,
   now: number = Date.now(),
 ): string {
   const backendState = String(actor.effective_working_state || "").trim().toLowerCase() || "idle";
-  const effectiveRunner = String(actor.runner_effective || actor.runner || "pty").trim().toLowerCase() || "pty";
+  const effectiveRunner = getEffectiveActorRunner(actor);
   const isRunning = actor.running ?? actor.enabled ?? false;
 
   if (!isRunning || effectiveRunner === "headless") {
     return backendState;
   }
 
-  if (signal?.kind === "idle_prompt") {
+  if (signal?.kind === "idle_prompt" && now - signal.updatedAt <= IDLE_PROMPT_TTL_MS) {
     return "idle";
   }
 

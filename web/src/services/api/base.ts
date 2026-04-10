@@ -206,8 +206,8 @@ export function clearRecentReadRequest(key: string): void {
   clearSharedReadRequest(key);
 }
 
-export function actorsReadOnlyRequestKey(groupId: string): string {
-  return `actors:${String(groupId || "").trim()}:read-only`;
+export function actorsReadOnlyRequestKey(groupId: string, includeInternal = false): string {
+  return `actors:${String(groupId || "").trim()}:read-only:${includeInternal ? "internal" : "standard"}`;
 }
 
 export function groupsRequestKey(): string {
@@ -220,6 +220,11 @@ export function groupPromptsRequestKey(groupId: string): string {
 
 export function petPeerContextRequestKey(groupId: string, fresh: boolean, verbose: boolean): string {
   return `pet-peer-context:${String(groupId || "").trim()}:${fresh ? "fresh" : "default"}:${verbose ? "verbose" : "lite"}`;
+}
+
+export function ledgerStatusesRequestKey(groupId: string, eventIds: string[]): string {
+  const normalizedIds = eventIds.map((eventId) => String(eventId || "").trim()).filter((eventId) => eventId);
+  return `ledger-statuses:${String(groupId || "").trim()}:${normalizedIds.join(",")}`;
 }
 
 export function pingRequestKey(includeHome: boolean): string {
@@ -256,7 +261,8 @@ export function clearWebAccessSessionReadRequest(): void {
 }
 
 export function clearActorsReadOnlyRequest(groupId: string): void {
-  clearSharedReadRequest(actorsReadOnlyRequestKey(groupId));
+  clearSharedReadRequest(actorsReadOnlyRequestKey(groupId, false));
+  clearSharedReadRequest(actorsReadOnlyRequestKey(groupId, true));
 }
 
 export function clearContextRequest(groupId: string, detail?: ContextDetailLevel): void {

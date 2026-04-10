@@ -204,6 +204,68 @@ class TestWebActorProfilesApi(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_standard_web_allows_claude_headless_profile_and_actor(self) -> None:
+        from cccc.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+            member = str(create_access_token("member-user", is_admin=False, allowed_groups=[group_id]).get("token") or "")
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+                client = self._client()
+
+                create_profile = client.put(
+                    "/api/v1/profiles/claude-headless",
+                    headers={"Authorization": f"Bearer {member}"},
+                    json={
+                        "scope": "user",
+                        "owner_id": "member-user",
+                        "name": "Claude Headless",
+                        "runtime": "claude",
+                        "runner": "headless",
+                        "command": [],
+                    },
+                )
+                self.assertEqual(create_profile.status_code, 200)
+                create_profile_body = create_profile.json()
+                self.assertTrue(bool(create_profile_body.get("ok")))
+                created_profile = ((create_profile_body.get("result") or {}).get("profile")) or {}
+                self.assertEqual(str(created_profile.get("runner") or ""), "headless")
+
+                list_profiles = client.get(
+                    "/api/v1/profiles?view=my",
+                    headers={"Authorization": f"Bearer {member}"},
+                )
+                self.assertEqual(list_profiles.status_code, 200)
+                profiles = (((list_profiles.json().get("result") or {}).get("profiles")) or [])
+                listed_profile = next(
+                    item for item in profiles
+                    if str(item.get("id") or "") == "claude-headless"
+                )
+                self.assertEqual(str(listed_profile.get("runner") or ""), "headless")
+                self.assertEqual(str(listed_profile.get("runtime") or ""), "claude")
+
+                create_actor = client.post(
+                    f"/api/v1/groups/{group_id}/actors",
+                    headers={"Authorization": f"Bearer {member}"},
+                    json={
+                        "actor_id": "peer-1",
+                        "runtime": "claude",
+                        "runner": "headless",
+                        "profile_id": "claude-headless",
+                        "profile_scope": "user",
+                        "profile_owner": "member-user",
+                    },
+                )
+                self.assertEqual(create_actor.status_code, 200)
+                create_actor_body = create_actor.json()
+                self.assertTrue(bool(create_actor_body.get("ok")))
+                actor = ((create_actor_body.get("result") or {}).get("actor")) or {}
+                self.assertEqual(str(actor.get("runtime") or ""), "claude")
+                self.assertEqual(str(actor.get("runner") or ""), "headless")
+        finally:
+            cleanup()
+
     def test_actor_create_rejects_user_scoped_headless_profile(self) -> None:
         _, cleanup = self._with_home()
         try:

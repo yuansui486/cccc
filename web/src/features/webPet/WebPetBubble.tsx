@@ -1,13 +1,14 @@
 import { useTranslation } from "react-i18next";
 import { useWebPetDrag } from "./useWebPetDrag";
 import { CatCanvas } from "./CatCanvas";
-import type { CatState, PetReaction } from "./types";
+import type { CatState, PetCompanionProfile, PetReaction } from "./types";
 import { WEB_PET_BUBBLE_SIZE } from "./constants";
 
 interface WebPetBubbleProps {
   groupId: string;
   stackIndex?: number;
   state: CatState;
+  companion: PetCompanionProfile;
   hint: string;
   reaction: PetReaction;
   onPress?: () => void;
@@ -17,6 +18,7 @@ export function WebPetBubble({
   groupId,
   stackIndex = 0,
   state,
+  companion,
   hint,
   reaction,
   onPress,
@@ -39,11 +41,20 @@ export function WebPetBubble({
       tabIndex={0}
       aria-label={
         hint
-          ? t("bubbleAriaHint", {
-              defaultValue: "Web Pet. {{hint}}",
+          ? t("bubbleAriaHintNamed", {
+              defaultValue: "{{name}}, the web pet. {{hint}}",
+              name: companion.name,
               hint,
             })
-          : t("bubbleAria", { defaultValue: "Web Pet" })
+          : t("bubbleAriaNamed", {
+              defaultValue: "{{name}}, the web pet",
+              name: companion.name,
+            })
+      }
+      title={
+        hint
+          ? `${companion.name} · ${companion.species}\n${hint}`
+          : `${companion.name} · ${companion.species}`
       }
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;

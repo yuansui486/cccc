@@ -1,4 +1,4 @@
-export type RuntimeIndicatorTone = "stop" | "run" | "working" | "waiting" | "stuck";
+export type RuntimeIndicatorTone = "stop" | "run" | "working";
 
 export type RuntimeIndicatorState = {
   tone: RuntimeIndicatorTone;
@@ -18,12 +18,6 @@ export const QUIET_RUN_INDICATOR_DOT_CLASS =
 
 const WORKING_INDICATOR_DOT_CLASS =
   "bg-emerald-500 ring-[1.5px] ring-emerald-200/90 shadow-[0_0_0_3px_rgba(16,185,129,0.12),0_0_18px_rgba(52,211,153,0.75)] dark:bg-emerald-400 dark:ring-emerald-400/35 dark:shadow-[0_0_0_3px_rgba(16,185,129,0.10),0_0_18px_rgba(52,211,153,0.75)] scale-110";
-
-const WAITING_INDICATOR_DOT_CLASS =
-  "bg-sky-500 ring-[1.5px] ring-sky-200/90 shadow-[0_0_12px_rgba(56,189,248,0.28)] dark:bg-sky-400 dark:ring-sky-400/25 dark:shadow-[0_0_12px_rgba(56,189,248,0.35)]";
-
-const STUCK_INDICATOR_DOT_CLASS =
-  "bg-amber-500 ring-[1.5px] ring-amber-200/90 shadow-[0_0_0_3px_rgba(245,158,11,0.10),0_0_14px_rgba(251,191,36,0.35)] dark:bg-amber-400 dark:ring-amber-400/30 dark:shadow-[0_0_0_3px_rgba(245,158,11,0.10),0_0_14px_rgba(251,191,36,0.45)]";
 
 const PAUSED_INDICATOR_DOT_CLASS =
   "bg-amber-500 ring-[1.5px] ring-amber-200/90 dark:bg-amber-400 dark:ring-amber-400/25";
@@ -53,26 +47,6 @@ export function getRuntimeIndicatorState(input: {
       labelClass: "text-emerald-700 dark:text-emerald-300",
       pulse: true,
       strongPulse: true,
-    };
-  }
-
-  if (workingState === "stuck") {
-    return {
-      tone: "stuck",
-      dotClass: STUCK_INDICATOR_DOT_CLASS,
-      labelClass: "text-amber-700 dark:text-amber-300",
-      pulse: true,
-      strongPulse: false,
-    };
-  }
-
-  if (workingState === "waiting") {
-    return {
-      tone: "waiting",
-      dotClass: WAITING_INDICATOR_DOT_CLASS,
-      labelClass: "",
-      pulse: true,
-      strongPulse: false,
     };
   }
 

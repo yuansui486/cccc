@@ -14,6 +14,7 @@ from ...kernel.permissions import require_actor_permission
 from ...kernel.runtime import get_runtime_command_with_flags
 from ...util.conv import coerce_bool
 from ..context.context_ops import _schedule_summary_snapshot_rebuild
+from .actor_runtime_ops import resolve_actor_launch_config
 from .actor_profile_runtime import actor_profile_ref, apply_profile_link_to_actor
 from .actor_profile_store import ProfileResolver, get_actor_profile_by_ref, normalize_actor_profile_ref
 
@@ -159,19 +160,24 @@ def handle_actor_add(
             env = {str(key): str(value) for key, value in env_raw.items()}
 
         inherit_foreman_private_env = False
+        foreman_launch: Optional[Dict[str, Any]] = None
         if isinstance(foreman_cfg, dict) and foreman_cfg.get("id") == by and not linked_profile_id:
-            foreman_runtime = str(foreman_cfg.get("runtime") or "").strip()
-            foreman_runner = str(foreman_cfg.get("runner") or "pty").strip() or "pty"
-            foreman_runner_effective = effective_runner_kind(foreman_runner)
+            foreman_launch = resolve_actor_launch_config(
+                group,
+                str(foreman_cfg.get("id") or by).strip(),
+                command=list(foreman_cfg.get("command") or []) if isinstance(foreman_cfg.get("command"), list) else [],
+                env=dict(foreman_cfg.get("env") or {}) if isinstance(foreman_cfg.get("env"), dict) else {},
+                runner=str(foreman_cfg.get("runner") or "pty"),
+                runtime=str(foreman_cfg.get("runtime") or "codex"),
+                effective_runner_kind=effective_runner_kind,
+                load_actor_private_env=load_actor_private_env,
+            )
+            foreman_runtime = str(foreman_launch["runtime"] or "").strip()
+            foreman_runner = str(foreman_launch["runner"] or "pty").strip() or "pty"
+            foreman_runner_effective = str(foreman_launch["effective_runner"])
             runner_effective = effective_runner_kind(runner)
-            foreman_command_raw = foreman_cfg.get("command") if isinstance(foreman_cfg.get("command"), list) else []
-            foreman_command = [str(item) for item in foreman_command_raw if isinstance(item, str) and str(item).strip()]
-            foreman_env_raw = foreman_cfg.get("env") if isinstance(foreman_cfg.get("env"), dict) else {}
-            foreman_env = {
-                str(key): str(value)
-                for key, value in foreman_env_raw.items()
-                if isinstance(key, str) and isinstance(value, str)
-            }
+            foreman_command = list(foreman_launch["command"] or [])
+            foreman_env = dict(foreman_launch["public_env"] or {})
 
             if not foreman_runtime:
                 raise ValueError("foreman config missing runtime")
@@ -230,8 +236,7 @@ def handle_actor_add(
             )
         elif inherit_foreman_private_env and env_private_raw is None:
             # No profile link — copy foreman's per-actor private env (secrets) to new peer.
-            foreman_actor_id = str(foreman_cfg.get("id") or by).strip()  # type: ignore[union-attr]
-            foreman_private = load_actor_private_env(group_id, foreman_actor_id)
+            foreman_private = dict((foreman_launch or {}).get("private_env") or {})
             if foreman_private:
                 update_actor_private_env(
                     group_id,

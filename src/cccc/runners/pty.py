@@ -17,8 +17,10 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional, Tuple
 
 import termios
+from ..kernel.working_state import derive_pty_terminal_override
 
 PTY_SUPPORTED = True
+TERMINAL_SIGNAL_BUFFER_CHARS = 4096
 
 
 def _set_winsize(fd: int, *, cols: int, rows: int) -> None:
@@ -58,6 +60,7 @@ class PtySession:
         command: Iterable[str],
         env: Dict[str, str],
         on_exit: Optional[Callable[["PtySession"], None]] = None,
+        runtime: str = "",
         max_backlog_bytes: int = 2_000_000,
         max_client_buffer_bytes: int = 8_000_000,
         cols: int = 120,
@@ -65,6 +68,7 @@ class PtySession:
     ) -> None:
         self.group_id = group_id
         self.actor_id = actor_id
+        self._runtime = str(runtime or "")
         self._on_exit = on_exit
         self._started_at = time.monotonic()
         self._first_output_at: Optional[float] = None
@@ -86,6 +90,8 @@ class PtySession:
 
         self._backlog: deque[bytes] = deque()
         self._backlog_bytes = 0
+        self._terminal_signal_buffer = ""
+        self._terminal_override: Optional[Dict[str, str]] = None
         self._mode_tail = b""
         self._query_tail = b""
         self._bracketed_paste = False
@@ -171,6 +177,10 @@ class PtySession:
             if self._last_output_at is not None:
                 return now - self._last_output_at
             return now - self._started_at
+
+    def terminal_override(self) -> Optional[Dict[str, str]]:
+        with self._lock:
+            return dict(self._terminal_override) if self._terminal_override else None
 
     def tail_output(self, *, max_bytes: int = 2_000_000) -> bytes:
         """Return the latest PTY output bytes (bounded).
@@ -310,15 +320,26 @@ class PtySession:
         if not chunk:
             return
         now = time.monotonic()
-        if self._first_output_at is None:
-            self._first_output_at = now
-        self._last_output_at = now
-        self._backlog.append(chunk)
-        self._backlog_bytes += len(chunk)
-        limit = max(0, self._max_backlog_bytes)
-        while limit and self._backlog_bytes > limit and self._backlog:
-            drop = self._backlog.popleft()
-            self._backlog_bytes -= len(drop)
+        text = chunk.decode("utf-8", errors="replace")
+        with self._lock:
+            if self._first_output_at is None:
+                self._first_output_at = now
+            self._last_output_at = now
+            self._backlog.append(chunk)
+            self._backlog_bytes += len(chunk)
+            limit = max(0, self._max_backlog_bytes)
+            while limit and self._backlog_bytes > limit and self._backlog:
+                drop = self._backlog.popleft()
+                self._backlog_bytes -= len(drop)
+            merged = f"{self._terminal_signal_buffer}{text}"
+            if len(merged) > TERMINAL_SIGNAL_BUFFER_CHARS:
+                merged = merged[-TERMINAL_SIGNAL_BUFFER_CHARS:]
+            self._terminal_signal_buffer = merged
+            override = derive_pty_terminal_override(runtime=self._runtime, terminal_text=merged)
+            self._terminal_override = (
+                {str(k): str(v) for k, v in override.items() if isinstance(k, str) and isinstance(v, str)}
+                if isinstance(override, dict) and override else None
+            )
 
     def _close_all(self) -> None:
         try:
@@ -387,8 +408,8 @@ class PtySession:
 
             self._maybe_reply_to_terminal_queries(chunk)
             self._update_input_modes(chunk)
+            self._append_backlog(chunk)
             with self._lock:
-                self._append_backlog(chunk)
                 clients = list(self._clients.items())
 
             for fileno, client in clients:
@@ -654,6 +675,7 @@ class PtySupervisor:
         cwd: Path,
         command: Iterable[str],
         env: Dict[str, str],
+        runtime: str = "",
         max_backlog_bytes: int = 2_000_000,
     ) -> PtySession:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
@@ -669,6 +691,7 @@ class PtySupervisor:
             cwd=cwd,
             command=command,
             env=env,
+            runtime=runtime,
             on_exit=self._on_session_exit,
             max_backlog_bytes=int(max_backlog_bytes or 0),
         )
@@ -758,6 +781,17 @@ class PtySupervisor:
             return None
         try:
             return s.idle_seconds()
+        except Exception:
+            return None
+
+    def terminal_override(self, *, group_id: str, actor_id: str) -> Optional[Dict[str, str]]:
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        with self._lock:
+            s = self._sessions.get(key)
+        if s is None or not s.is_running():
+            return None
+        try:
+            return s.terminal_override()
         except Exception:
             return None
 

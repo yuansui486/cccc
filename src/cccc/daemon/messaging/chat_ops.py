@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, DaemonResponse
+from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, DaemonResponse, SystemNotifyData
 from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
 from ...kernel.inbox import find_event_with_chat_ack, is_message_for_actor
@@ -19,9 +19,15 @@ from ...kernel.messaging import (
     get_default_send_to,
     targets_any_agent,
 )
+from ...kernel.message_sender_snapshot import build_sender_snapshot
 from ...kernel.scope import detect_scope
+from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 from ...util.time import utc_now_iso
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from .delivery import (
+    append_mcp_reply_reminder,
+    emit_system_notify,
     flush_pending_messages,
     get_headless_targets_for_message,
     queue_chat_message,
@@ -35,6 +41,13 @@ logger = logging.getLogger("cccc.daemon.server")
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
+
+
+def _is_internal_pet_sender(group: Any, by: str) -> bool:
+    actor_id = str(by or "").strip()
+    if actor_id != PET_ACTOR_ID:
+        return False
+    return isinstance(get_pet_actor(group), dict)
 
 
 def _wake_group_on_human_message(
@@ -244,9 +257,11 @@ def _notify_headless_targets(
     priority: str,
     reply_required: bool,
     event: dict[str, Any],
+    skip_actor_ids: Optional[set[str]] = None,
 ) -> None:
     try:
         headless_targets = get_headless_targets_for_message(group, event=event, by=by)
+        skip_ids = {str(item).strip() for item in (skip_actor_ids or set()) if str(item).strip()}
         if reply_required:
             notify_title = "Need reply"
             notify_priority = "urgent" if priority == "attention" else "high"
@@ -254,21 +269,20 @@ def _notify_headless_targets(
             notify_title = "Needs acknowledgement" if priority == "attention" else "New message"
             notify_priority = "urgent" if priority == "attention" else "high"
         for actor_id in headless_targets:
-            append_event(
-                group.ledger_path,
-                kind="system.notify",
-                group_id=group.group_id,
-                scope_key="",
+            if actor_id in skip_ids:
+                continue
+            emit_system_notify(
+                group,
                 by="system",
-                data={
-                    "kind": "info",
-                    "priority": notify_priority,
-                    "title": notify_title,
-                    "message": f"New message from {by}. Check your inbox.",
-                    "target_actor_id": actor_id,
-                    "requires_ack": False,
-                    "context": {"event_id": event_id, "from": by},
-                },
+                notify=SystemNotifyData(
+                    kind="info",
+                    priority=notify_priority,
+                    title=notify_title,
+                    message=f"New message from {by}. Check your inbox.",
+                    target_actor_id=actor_id,
+                    requires_ack=False,
+                    context={"event_id": event_id, "from": by},
+                ),
             )
     except Exception:
         pass
@@ -290,6 +304,7 @@ def handle_send(
     by = str(args.get("by") or "user").strip()
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"))
+    quote_text = str(args.get("quote_text") or "").strip()
     src_group_id = str(args.get("src_group_id") or "").strip()
     src_event_id = str(args.get("src_event_id") or "").strip()
     dst_group_id = str(args.get("dst_group_id") or "").strip()
@@ -328,6 +343,11 @@ def handle_send(
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
+    if _is_internal_pet_sender(group, by):
+        return _error(
+            "pet_visible_chat_forbidden",
+            "Pet cannot send or reply visible chat directly; use pet decisions instead.",
+        )
 
     group = _wake_group_on_human_message(
         group,
@@ -363,8 +383,8 @@ def handle_send(
         matched_enabled = enabled_recipient_actor_ids(group, to)
         if by and by in matched_enabled:
             matched_enabled = [actor_id for actor_id in matched_enabled if actor_id != by]
+        woken = auto_wake_recipients(group, to, by)
         if not matched_enabled:
-            woken = auto_wake_recipients(group, to, by)
             if not woken:
                 wanted = " ".join(to) if to else "@all"
                 return _error(
@@ -416,6 +436,7 @@ def handle_send(
             format="plain",
             priority=priority,
             reply_required=reply_required,
+            quote_text=quote_text or None,
             to=to,
             refs=refs,
             attachments=attachments,
@@ -423,6 +444,7 @@ def handle_send(
             source_user_name=source_user_name or None,
             source_user_id=source_user_id or None,
             mention_user_ids=mention_user_ids or None,
+            **build_sender_snapshot(group, by=by),
             src_group_id=src_group_id or None,
             src_event_id=src_event_id or None,
             dst_group_id=dst_group_id or None,
@@ -443,7 +465,9 @@ def handle_send(
         src_group_id=src_group_id,
         src_event_id=src_event_id,
     )
+    headless_delivery_text = append_mcp_reply_reminder(delivery_text)
     actors = list_actors(group)
+    skip_headless_notify_actor_ids: set[str] = set()
     logger.debug(f"[SEND] group={group_id} text={text[:30]!r} actors={[a.get('id') for a in actors]} effective_to={effective_to}")
     for actor in actors:
         if not isinstance(actor, dict):
@@ -458,8 +482,39 @@ def handle_send(
         if not is_message_for_actor(group, actor_id=actor_id, event=event_with_effective_to):
             logger.debug(f"[SEND] skip actor={actor_id} (not for actor)")
             continue
+        runtime = str(actor.get("runtime") or "codex").strip() or "codex"
         runner_kind = str(actor.get("runner") or "pty").strip()
-        if effective_runner_kind(runner_kind) == "pty":
+        if (
+            runtime == "codex"
+            and effective_runner_kind(runner_kind) == "headless"
+            and codex_app_supervisor.actor_running(group.group_id, actor_id)
+        ):
+            delivered = bool(codex_app_supervisor.submit_user_message(
+                group_id=group.group_id,
+                actor_id=actor_id,
+                text=headless_delivery_text,
+                event_id=event_id,
+                ts=event_ts,
+                attachments=attachments,
+            ))
+            if delivered:
+                skip_headless_notify_actor_ids.add(actor_id)
+        elif (
+            runtime == "claude"
+            and effective_runner_kind(runner_kind) == "headless"
+            and claude_app_supervisor.actor_running(group.group_id, actor_id)
+        ):
+            delivered = bool(claude_app_supervisor.submit_user_message(
+                group_id=group.group_id,
+                actor_id=actor_id,
+                text=headless_delivery_text,
+                event_id=event_id,
+                ts=event_ts,
+                attachments=attachments,
+            ))
+            if delivered:
+                skip_headless_notify_actor_ids.add(actor_id)
+        elif effective_runner_kind(runner_kind) == "pty":
             queue_chat_message(
                 group,
                 actor_id=actor_id,
@@ -484,6 +539,7 @@ def handle_send(
         priority=priority,
         reply_required=reply_required,
         event=event_for_headless,
+        skip_actor_ids=skip_headless_notify_actor_ids,
     )
 
     try:
@@ -546,6 +602,11 @@ def handle_reply(
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
+    if _is_internal_pet_sender(group, by):
+        return _error(
+            "pet_visible_chat_forbidden",
+            "Pet cannot send or reply visible chat directly; use pet decisions instead.",
+        )
 
     group = _wake_group_on_human_message(
         group,
@@ -582,8 +643,8 @@ def handle_reply(
         matched_enabled = enabled_recipient_actor_ids(group, to)
         if by and by in matched_enabled:
             matched_enabled = [actor_id for actor_id in matched_enabled if actor_id != by]
+        woken = auto_wake_recipients(group, to, by)
         if not matched_enabled:
-            woken = auto_wake_recipients(group, to, by)
             if not woken:
                 wanted = " ".join(to) if to else "@all"
                 return _error(
@@ -625,6 +686,7 @@ def handle_reply(
             source_user_name=original_source_user_name or None,
             source_user_id=original_source_user_id or None,
             mention_user_ids=original_mention_user_ids or None,
+            **build_sender_snapshot(group, by=by),
             client_id=client_id or None,
         ).model_dump(),
     )
@@ -664,6 +726,8 @@ def handle_reply(
         refs=refs,
         attachments=attachments,
     )
+    headless_delivery_text = append_mcp_reply_reminder(delivery_text)
+    skip_headless_notify_actor_ids: set[str] = set()
     for actor in list_actors(group):
         if not isinstance(actor, dict):
             continue
@@ -672,8 +736,41 @@ def handle_reply(
             continue
         if not is_message_for_actor(group, actor_id=actor_id, event=event_with_effective_to):
             continue
+        runtime = str(actor.get("runtime") or "codex").strip() or "codex"
         runner_kind = str(actor.get("runner") or "pty").strip()
-        if effective_runner_kind(runner_kind) == "pty":
+        if (
+            runtime == "codex"
+            and effective_runner_kind(runner_kind) == "headless"
+            and codex_app_supervisor.actor_running(group.group_id, actor_id)
+        ):
+            delivered = bool(codex_app_supervisor.submit_user_message(
+                group_id=group.group_id,
+                actor_id=actor_id,
+                text=headless_delivery_text,
+                event_id=event_id,
+                ts=event_ts,
+                reply_to=target_event_id or reply_to,
+                attachments=attachments,
+            ))
+            if delivered:
+                skip_headless_notify_actor_ids.add(actor_id)
+        elif (
+            runtime == "claude"
+            and effective_runner_kind(runner_kind) == "headless"
+            and claude_app_supervisor.actor_running(group.group_id, actor_id)
+        ):
+            delivered = bool(claude_app_supervisor.submit_user_message(
+                group_id=group.group_id,
+                actor_id=actor_id,
+                text=headless_delivery_text,
+                event_id=event_id,
+                ts=event_ts,
+                reply_to=target_event_id or reply_to,
+                attachments=attachments,
+            ))
+            if delivered:
+                skip_headless_notify_actor_ids.add(actor_id)
+        elif effective_runner_kind(runner_kind) == "pty":
             queue_chat_message(
                 group,
                 actor_id=actor_id,
@@ -694,6 +791,7 @@ def handle_reply(
         priority=priority,
         reply_required=reply_required,
         event=event_with_effective_to,
+        skip_actor_ids=skip_headless_notify_actor_ids,
     )
 
     try:

@@ -1,16 +1,27 @@
-import type { LedgerEvent } from "../../types";
-import { apiJson } from "./base";
+import type { HeadlessStreamEvent, LedgerEvent, LedgerEventStatusPayload } from "../../types";
+import { apiJson, ledgerStatusesRequestKey, reuseRecentReadRequest } from "./base";
 
-export async function fetchLedgerTail(groupId: string, lines = 120, init?: RequestInit & { noCache?: boolean }) {
-  const params = new URLSearchParams({
-    kind: "chat",
-    limit: String(lines),
-    with_read_status: "true",
-    with_ack_status: "true",
-    with_obligation_status: "true",
-  });
+const LEDGER_STATUSES_TTL_MS = 1200;
+
+type LedgerFetchInit = RequestInit & { noCache?: boolean; includeStatuses?: boolean };
+
+function buildLedgerStatusParams(includeStatuses: boolean): URLSearchParams {
+  const params = new URLSearchParams();
+  if (includeStatuses) {
+    params.set("with_read_status", "true");
+    params.set("with_ack_status", "true");
+    params.set("with_obligation_status", "true");
+  }
+  return params;
+}
+
+export async function fetchLedgerTail(groupId: string, lines = 120, init?: LedgerFetchInit) {
+  const includeStatuses = init?.includeStatuses !== false;
+  const params = buildLedgerStatusParams(includeStatuses);
+  params.set("kind", "chat");
+  params.set("limit", String(lines));
   return apiJson<{ events: LedgerEvent[]; has_more: boolean; count: number }>(
-    `/api/v1/groups/${encodeURIComponent(groupId)}/ledger/search?${params.toString()}`,
+    `/api/v1/groups/${encodeURIComponent(groupId)}/ledger/tail?${params.toString()}`,
     init,
   );
 }
@@ -58,17 +69,44 @@ export async function searchChatMessages(
   q: string,
   opts?: { limit?: number; before?: string; after?: string },
 ) {
-  const params = new URLSearchParams({
-    kind: "chat",
-    q: q || "",
-    limit: String(opts?.limit ?? 50),
-    with_read_status: "true",
-    with_ack_status: "true",
-    with_obligation_status: "true",
-  });
+  const params = buildLedgerStatusParams(true);
+  params.set("kind", "chat");
+  params.set("q", q || "");
+  params.set("limit", String(opts?.limit ?? 50));
   if (opts?.before) params.set("before", opts.before);
   if (opts?.after) params.set("after", opts.after);
   return apiJson<{ events: LedgerEvent[]; has_more: boolean; count: number }>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/ledger/search?${params.toString()}`,
+  );
+}
+
+export async function fetchLedgerStatuses(groupId: string, eventIds: string[], init?: RequestInit & { noCache?: boolean }) {
+  const normalizedIds = eventIds.map((eventId) => String(eventId || "").trim()).filter((eventId) => eventId);
+  if (normalizedIds.length === 0) {
+    return { ok: true, result: { statuses: {} } } as const;
+  }
+  const loader = () =>
+    apiJson<{ statuses: Record<string, LedgerEventStatusPayload> }>(
+      `/api/v1/groups/${encodeURIComponent(groupId)}/ledger/statuses`,
+      {
+        method: "POST",
+        body: JSON.stringify({ event_ids: normalizedIds }),
+        ...init,
+      },
+    );
+  if (init?.noCache || init?.signal) {
+    return loader();
+  }
+  return reuseRecentReadRequest(
+    ledgerStatusesRequestKey(groupId, normalizedIds),
+    LEDGER_STATUSES_TTL_MS,
+    loader,
+  );
+}
+
+export async function fetchHeadlessSnapshot(groupId: string, init?: RequestInit & { noCache?: boolean }) {
+  return apiJson<{ group_id: string; events: HeadlessStreamEvent[]; count: number }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/headless/snapshot`,
+    init,
   );
 }

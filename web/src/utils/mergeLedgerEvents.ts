@@ -1,14 +1,33 @@
 import type { LedgerEvent } from "../types";
 
+function mergeEventWithExistingStatus(incoming: LedgerEvent, existing?: LedgerEvent): LedgerEvent {
+  if (!existing) return incoming;
+  return {
+    ...incoming,
+    _read_status: incoming._read_status ?? existing._read_status,
+    _ack_status: incoming._ack_status ?? existing._ack_status,
+    _obligation_status: incoming._obligation_status ?? existing._obligation_status,
+  };
+}
+
 export function mergeLedgerEvents(existing: LedgerEvent[], incoming: LedgerEvent[], maxEvents: number): LedgerEvent[] {
   const nextIncoming = Array.isArray(incoming) ? incoming.filter(Boolean) : [];
   if (nextIncoming.length === 0) {
     const nextExisting = Array.isArray(existing) ? existing.filter(Boolean) : [];
     return nextExisting.length > maxEvents ? nextExisting.slice(nextExisting.length - maxEvents) : nextExisting;
   }
+  const existingById = new Map(
+    (Array.isArray(existing) ? existing : [])
+      .map((event) => [String(event?.id || "").trim(), event] as const)
+      .filter(([eventId]) => eventId.length > 0)
+  );
+  const hydratedIncoming = nextIncoming.map((event) => {
+    const eventId = String(event?.id || "").trim();
+    return eventId ? mergeEventWithExistingStatus(event, existingById.get(eventId)) : event;
+  });
 
   const incomingIds = new Set(
-    nextIncoming
+    hydratedIncoming
       .map((event) => String(event?.id || "").trim())
       .filter((eventId) => eventId.length > 0)
   );
@@ -19,7 +38,7 @@ export function mergeLedgerEvents(existing: LedgerEvent[], incoming: LedgerEvent
     return !eventId || !incomingIds.has(eventId);
   });
 
-  const merged = [...nextIncoming, ...localOnlyExisting]
+  const merged = [...hydratedIncoming, ...localOnlyExisting]
     .map((event, index) => ({
       event,
       index,

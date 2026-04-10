@@ -1,7 +1,7 @@
 import type { PetReminder, ReminderAction } from "./types";
 
 export interface ReminderActionButton {
-  labelKey: "draft" | "applyRule" | "restart" | "restartPeer" | "restartForeman";
+  labelKey: "fillChat" | "restart" | "restartPeer" | "restartForeman";
   fallback: string;
   action: ReminderAction;
 }
@@ -15,8 +15,8 @@ export function getReminderActionButtons(
   ) {
     return [
       {
-        labelKey: "draft",
-        fallback: "Draft in chat",
+        labelKey: "fillChat",
+        fallback: "Fill into chat",
         action: reminder.action,
       },
     ];
@@ -41,18 +41,8 @@ export function getReminderActionButtons(
   if (reminder.action.type === "task_proposal") {
     return [
       {
-        labelKey: "draft",
-        fallback: "Draft in chat",
-        action: reminder.action,
-      },
-    ];
-  }
-
-  if (reminder.action.type === "automation_proposal") {
-    return [
-      {
-        labelKey: "applyRule",
-        fallback: "Apply rule",
+        labelKey: "fillChat",
+        fallback: "Fill into chat",
         action: reminder.action,
       },
     ];

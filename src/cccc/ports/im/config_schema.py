@@ -10,7 +10,7 @@ from typing import Any, Dict, Set
 
 from ...util.conv import coerce_bool
 
-SUPPORTED_IM_PLATFORMS: Set[str] = {"telegram", "slack", "discord", "feishu", "dingtalk", "wecom"}
+SUPPORTED_IM_PLATFORMS: Set[str] = {"telegram", "slack", "discord", "feishu", "dingtalk", "wecom", "weixin"}
 
 _LEGACY_KEYS: Set[str] = {
     "token_env",

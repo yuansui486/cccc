@@ -28,9 +28,32 @@ describe("aggregateWebPetState", () => {
     expect(result.catState).toBe("napping");
   });
 
+  it("does not treat active_task_id alone as runtime activity", () => {
+    const context: GroupContext = {
+      agent_states: [makeAgentState("peer-1", "T-1", "Ship task")],
+      actors_runtime: [],
+    };
+    const result = aggregateWebPetState(makeInput({ groupContext: context, groupId: "g-1", teamName: "Team" }));
+    expect(result.catState).toBe("napping");
+    expect(result.panelData.agents).toEqual([
+      {
+        id: "peer-1",
+        state: "napping",
+        focus: "Ship task",
+        activeTaskId: "T-1",
+      },
+    ]);
+  });
+
   it("returns working when single agent is active", () => {
     const context: GroupContext = {
       agent_states: [makeAgentState("peer-impl-1", "T1", "implementing")],
+      actors_runtime: [
+        {
+          id: "peer-impl-1",
+          effective_working_state: "working",
+        },
+      ],
     };
     const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.catState).toBe("working");
@@ -50,6 +73,31 @@ describe("aggregateWebPetState", () => {
     const result = aggregateWebPetState(makeInput({ groupContext: context }));
     expect(result.catState).toBe("working");
     expect(result.panelData.agents[0].state).toBe("working");
+  });
+
+  it("uses runtime working state as the source of truth when task heuristics disagree", () => {
+    const context: GroupContext = {
+      agent_states: [makeAgentState("peer-1", "", "Review runtime")],
+      actors_runtime: [
+        {
+          id: "peer-1",
+          running: true,
+          runner: "headless",
+          runner_effective: "headless",
+          effective_working_state: "working",
+        },
+      ],
+    };
+    const result = aggregateWebPetState(makeInput({ groupContext: context, groupId: "g-1", teamName: "Team" }));
+    expect(result.catState).toBe("working");
+    expect(result.panelData.agents).toEqual([
+      {
+        id: "peer-1",
+        state: "working",
+        focus: "Review runtime",
+        activeTaskId: undefined,
+      },
+    ]);
   });
 
   it("includes runtime-only actors in panel state", () => {
@@ -72,6 +120,16 @@ describe("aggregateWebPetState", () => {
       agent_states: [
         makeAgentState("peer-impl-1", "T1"),
         makeAgentState("peer-impl-2", "T2"),
+      ],
+      actors_runtime: [
+        {
+          id: "peer-impl-1",
+          effective_working_state: "working",
+        },
+        {
+          id: "peer-impl-2",
+          effective_working_state: "working",
+        },
       ],
     };
     const result = aggregateWebPetState(makeInput({ groupContext: context }));

@@ -12,7 +12,63 @@ export interface AgentSummary {
   id: string;
   state: string;
   focus: string;
+  activeTaskId?: string;
 }
+
+export interface PetCompanionProfile {
+  name: string;
+  species: string;
+  identity: string;
+  temperament: string;
+  speechStyle: string;
+  careStyle: string;
+}
+
+export type TaskProposalStylePolicy = {
+  tone: "cautious" | "direct";
+  ownershipDriftMode: "reconfirm" | "reassign";
+  stalledActiveMode: "reconfirm" | "escalate";
+  waitingUserMode: "sync" | "close";
+};
+
+export type TaskProposalReason =
+  | {
+      kind: "move_active";
+      actorId: string;
+    }
+  | {
+      kind: "sync_waiting_user";
+      actorId: string;
+      focus: string;
+    }
+  | {
+      kind: "sync_blocked";
+      actorId: string;
+      blockers: string[];
+    }
+  | {
+      kind: "stalled_active_task";
+      actorId: string;
+      focus: string;
+      mountedMinutes: number;
+      blockers: string[];
+      suggestedOperation: "update" | "handoff";
+    }
+  | {
+      kind: "ownership_drift";
+      actorId: string;
+      currentActiveTaskId?: string;
+    }
+  | {
+      kind: "assign_active_owner";
+      actorId: string;
+    }
+  | {
+      kind: "escalated_waiting_user";
+      actorId: string;
+      focus: string;
+      mountedMinutes: number;
+    };
 
 export type ReminderKind =
   | "suggestion"
@@ -36,13 +92,8 @@ export type ReminderAction =
       status?: string;
       assignee?: string;
       text?: string;
-    }
-  | {
-      type: "automation_proposal";
-      groupId: string;
-      title?: string;
-      summary?: string;
-      actions: Array<Record<string, unknown>>;
+      reason?: TaskProposalReason;
+      style?: TaskProposalStylePolicy;
     }
   | {
       type: "restart_actor";
@@ -55,6 +106,8 @@ export interface PetReminder {
   kind: ReminderKind;
   priority: number;
   summary: string;
+  confidence?: "low" | "medium" | "high";
+  reasoningBrief?: string;
   agent: string;
   ephemeral?: boolean;
   source: {

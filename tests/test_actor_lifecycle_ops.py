@@ -267,6 +267,38 @@ class TestActorLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_actor_remove_stops_codex_session_and_publishes_global_event(self) -> None:
+        home, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "actor-remove-publish", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            with patch("cccc.daemon.actors.actor_membership_ops.codex_app_supervisor.stop_actor") as stop_actor:
+                remove, _ = self._call("actor_remove", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(remove.ok, getattr(remove, "error", None))
+            stop_actor.assert_called_once_with(group_id=group_id, actor_id="peer1")
+            self.assertIn("actor.remove", self._global_event_kinds(home))
+        finally:
+            cleanup()
+
     def test_actor_add_and_remove_schedule_summary_snapshot_rebuild(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -445,6 +477,46 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertIsInstance(group_doc, dict)
             assert isinstance(group_doc, dict)
             self.assertEqual(str(group_doc.get("state") or ""), "paused")
+            self.assertTrue(bool(group_doc.get("running")))
+        finally:
+            cleanup()
+
+    def test_actor_start_resumes_stopped_group_to_active(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "stopped-start", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            stop, _ = self._call("group_stop", {"group_id": group_id, "by": "user"})
+            self.assertTrue(stop.ok, getattr(stop, "error", None))
+
+            start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(start.ok, getattr(start, "error", None))
+
+            show, _ = self._call("group_show", {"group_id": group_id})
+            self.assertTrue(show.ok, getattr(show, "error", None))
+            group_doc = (show.result or {}).get("group") if isinstance(show.result, dict) else {}
+            self.assertIsInstance(group_doc, dict)
+            assert isinstance(group_doc, dict)
+            self.assertEqual(str(group_doc.get("state") or ""), "active")
             self.assertTrue(bool(group_doc.get("running")))
         finally:
             cleanup()

@@ -5,6 +5,7 @@ import { ActorProfile, ActorProfileUsage, RUNTIME_INFO, SUPPORTED_RUNTIMES } fro
 import * as api from "../../../services/api";
 import { parsePrivateEnvSetText, parsePrivateEnvUnsetText } from "../../../utils/privateEnvInput";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../../utils/capabilityAutoload";
+import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../../utils/headlessRuntimeSupport";
 import { useGroupStore } from "../../../stores";
 import {
   cardClass,
@@ -29,6 +30,7 @@ type EditorState = {
   revision: number;
   name: string;
   runtime: string;
+  runner: "pty" | "headless";
   command: string;
   useDefaultCommand: boolean;
   submit: "enter" | "newline" | "none";
@@ -63,8 +65,18 @@ function supportsRuntimeDefaultCommand(runtime: string): boolean {
   return String(runtime || "").trim() !== "custom";
 }
 
+function modeButtonClass(selected: boolean): string {
+  return [
+    "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
+    selected
+      ? "bg-blue-600 text-white border-blue-600"
+      : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
+  ].join(" ");
+}
+
 function buildEditor(profile?: ActorProfile | null): EditorState {
   const runtime = String(profile?.runtime || "codex");
+  const runner = supportsStandardWebHeadlessRuntime(runtime) ? normalizeActorRunner(profile?.runner) : "pty";
   const command = formatCommand(profile?.command);
   const defaultCommand = defaultCommandForRuntime(runtime);
   const useDefaultCommand =
@@ -75,6 +87,7 @@ function buildEditor(profile?: ActorProfile | null): EditorState {
     revision: Number(profile?.revision || 0),
     name: String(profile?.name || ""),
     runtime,
+    runner,
     command,
     useDefaultCommand,
     submit: (String(profile?.submit || "enter") as "enter" | "newline" | "none"),
@@ -144,6 +157,10 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
   const editorSupportsDefaultCommand = useMemo(
     () => supportsRuntimeDefaultCommand(editor.runtime),
+    [editor.runtime]
+  );
+  const editorSupportsHeadlessRunner = useMemo(
+    () => supportsStandardWebHeadlessRuntime(editor.runtime),
     [editor.runtime]
   );
   const editorDefaultCommand = useMemo(
@@ -235,6 +252,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                     return {
                       ...prev,
                       runtime: nextRuntime,
+                      runner: supportsStandardWebHeadlessRuntime(nextRuntime) ? prev.runner : "pty",
                       useDefaultCommand: supportsDefault ? prev.useDefaultCommand : false,
                       command: supportsDefault && prev.useDefaultCommand ? "" : prev.command,
                     };
@@ -246,6 +264,32 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                   <option key={rt} value={rt}>{RUNTIME_INFO[rt]?.label || rt}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className={labelClass()}>{t("actorProfiles.runner")}</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={modeButtonClass(editor.runner === "pty")}
+                  onClick={() => setEditor((prev) => ({ ...prev, runner: "pty" }))}
+                >
+                  {t("actorProfiles.pty")}
+                </button>
+                <button
+                  type="button"
+                  className={modeButtonClass(editor.runner === "headless")}
+                  onClick={() => setEditor((prev) => ({ ...prev, runner: "headless" }))}
+                  disabled={!editorSupportsHeadlessRunner}
+                >
+                  {t("actorProfiles.headless")}
+                </button>
+              </div>
+              <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                {editorSupportsHeadlessRunner
+                  ? t("actorProfiles.runnerModeHint")
+                  : t("actorProfiles.runnerModeHeadlessNote")}
+              </div>
             </div>
           </div>
 
@@ -683,7 +727,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
         scope: profileScope,
         owner_id: ownerId,
         runtime: editor.runtime,
-        runner: "pty",
+        runner: editorSupportsHeadlessRunner ? editor.runner : "pty",
         command: editorSupportsDefaultCommand && editor.useDefaultCommand ? "" : editor.command.trim(),
         submit: editor.submit,
         env: {},

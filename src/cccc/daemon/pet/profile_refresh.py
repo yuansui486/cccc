@@ -14,6 +14,7 @@ from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor, is_desktop_pet_enab
 from ...paths import ensure_home
 from ...util.fs import atomic_write_json, read_json
 from ...util.time import parse_utc_iso, utc_now_iso
+from . import assistive_jobs
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ _STATE_FILENAME = "pet_profile_state.json"
 PET_PROFILE_BOOTSTRAP_MIN_ELIGIBLE = 10
 PET_PROFILE_REFRESH_DELTA = 20
 PET_PROFILE_REFRESH_COOLDOWN_SECONDS = 6 * 60 * 60
+PET_PROFILE_REFRESH_LEASE_SECONDS = 300.0
 PET_PROFILE_SAMPLE_WINDOW = 50
 PET_PROFILE_REFRESH_PACKET_SIZE = 16
 PET_PROFILE_CLIP_CHARS = 140
@@ -301,6 +303,22 @@ def _can_refresh_now(group_id: str) -> bool:
     return True
 
 
+def _profile_refresh_unavailable_reason(group_id: str) -> str:
+    group = load_group(group_id)
+    if group is None:
+        return "group_not_found"
+    if not is_desktop_pet_enabled(group):
+        return "desktop_pet_disabled"
+    if get_group_state(group) not in {"active", "idle"}:
+        return f"group_state_{str(get_group_state(group) or '').strip().lower() or 'unavailable'}"
+    actor = get_pet_actor(group)
+    if not isinstance(actor, dict):
+        return "pet_actor_missing"
+    if not bool(actor.get("enabled", True)):
+        return "pet_actor_disabled"
+    return "profile_refresh_unavailable"
+
+
 def _emit_profile_refresh(group_id: str, *, state: Dict[str, Any], source_event_id: str, reason: str) -> bool:
     group = load_group(group_id)
     if group is None:
@@ -335,6 +353,30 @@ def _emit_profile_refresh(group_id: str, *, state: Dict[str, Any], source_event_
     return True
 
 
+def _dispatch_profile_refresh(
+    group_id: str,
+    *,
+    reasons: set[str],
+    source_event_id: str,
+    trigger_class: str,
+) -> bool:
+    del trigger_class
+    gid = str(group_id or "").strip()
+    if not gid:
+        return False
+    if not _can_refresh_now(gid):
+        return False
+    state = _load_or_bootstrap_state(gid)
+    resolved_reason = ""
+    for item in sorted({str(reason or '').strip() for reason in reasons if str(reason or '').strip()}):
+        if item:
+            resolved_reason = item
+            break
+    if not resolved_reason:
+        resolved_reason = _refresh_due_reason(state) or "scheduled_refresh"
+    return _emit_profile_refresh(gid, state=state, source_event_id=source_event_id, reason=resolved_reason)
+
+
 def maybe_request_pet_profile_refresh(
     group_id: str,
     *,
@@ -354,7 +396,17 @@ def maybe_request_pet_profile_refresh(
         _save_state(gid, state)
         return False
     resolved_reason = str(reason or "").strip() or due_reason
-    return _emit_profile_refresh(gid, state=state, source_event_id=source_event_id, reason=resolved_reason)
+    trigger_class = (
+        assistive_jobs.TRIGGER_STARTUP_RESUME if resolved_reason == "startup_recheck" else assistive_jobs.TRIGGER_EVENT
+    )
+    return assistive_jobs.request_job(
+        gid,
+        job_kind=assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH,
+        trigger_class=trigger_class,
+        reason=resolved_reason,
+        source_event_id=source_event_id,
+        immediate=False,
+    )
 
 
 def record_user_chat_message(
@@ -407,9 +459,14 @@ def mark_pet_profile_refresh_applied(
     state["last_refresh_at"] = utc_now_iso()
     state["last_applied_user_model_hash"] = hashlib.sha1(value.encode("utf-8", errors="replace")).hexdigest()
     _save_state(gid, state)
+    try:
+        assistive_jobs.mark_job_completed(gid, assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH)
+    except Exception:
+        LOGGER.exception("pet_profile_refresh_complete_mark_failed group_id=%s", gid)
 
 
 def recover_due_pet_profile_refreshes() -> None:
+    assistive_jobs.recover_jobs(job_kinds=(assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH,))
     groups_root = ensure_home() / "groups"
     try:
         for group_dir in groups_root.iterdir():

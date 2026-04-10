@@ -428,6 +428,7 @@ export async function relayMessage(
   text: string,
   to: string[],
   src: { groupId: string; eventId: string },
+  quoteText = "",
 ) {
   return apiJson(`/api/v1/groups/${encodeURIComponent(dstGroupId)}/send`, {
     method: "POST",
@@ -435,6 +436,7 @@ export async function relayMessage(
       text,
       by: "user",
       to,
+      quote_text: quoteText,
       path: "",
       priority: "normal",
       src_group_id: src.groupId,

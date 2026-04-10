@@ -1,12 +1,55 @@
 import { useEffect, useState } from "react";
 import type { PetPeerContextResponse } from "../../services/api";
 import { fetchPetPeerContext } from "../../services/api";
-import type { PetReminder } from "./types";
+import type { PetCompanionProfile, PetReminder } from "./types";
 
 export type PetPeerContextStatus = "idle" | "loading" | "loaded" | "error";
 
+const PET_CONTEXT_INITIAL_FETCH_DELAY_MS = 800;
+const petPeerContextCache = new Map<string, Partial<PetPeerContextResponse> | null>();
+
+export type PetTaskEvidence = {
+  kind: string;
+  priority: number;
+  hypothesis: string;
+  actor: {
+    id: string;
+    activeTaskId?: string;
+    focus?: string;
+    nextAction?: string;
+    blockers: string[];
+  };
+  task: {
+    id: string;
+    title: string;
+    status: string;
+    assignee?: string;
+    waitingOn?: string;
+    blockedBy: string[];
+    handoffTo?: string;
+    updatedAt?: string;
+  };
+  currentActiveTask?: {
+    id: string;
+    title: string;
+    status: string;
+    assignee?: string;
+    waitingOn?: string;
+    blockedBy: string[];
+    handoffTo?: string;
+    updatedAt?: string;
+  };
+  signals: {
+    taskStaleMinutes: number;
+    sameWorkstreamHint: boolean;
+    blockerCount: number;
+  };
+};
+
 export type PetPeerContext = {
+  companion: PetCompanionProfile;
   decisions: PetReminder[];
+  taskEvidence: PetTaskEvidence[];
   signals: {
     replyPressure: {
       severity: string;
@@ -61,6 +104,15 @@ export type PetPeerContext = {
   snapshot: string;
   source: "help" | "default";
   status: PetPeerContextStatus;
+};
+
+const DEFAULT_COMPANION: PetCompanionProfile = {
+  name: "Momo",
+  species: "cat",
+  identity: "Momo is a small desk-side companion who watches team flow quietly.",
+  temperament: "steady",
+  speechStyle: "short, plain sentences",
+  careStyle: "prefers the smallest next step that unblocks progress",
 };
 
 function mapTaskProposalOperation(value: unknown): "create" | "update" | "move" | "handoff" | "archive" {
@@ -152,16 +204,6 @@ function mapDecision(raw: NonNullable<PetPeerContextResponse["decisions"]>[numbe
             assignee: String(raw?.action?.assignee || "").trim() || undefined,
             text: String(raw?.action?.text || "").trim() || undefined,
           }
-      : actionType === "automation_proposal"
-        ? {
-            type: "automation_proposal" as const,
-            groupId: String(raw?.action?.group_id || "").trim(),
-            title: String(raw?.action?.title || "").trim() || undefined,
-            summary: String(raw?.action?.summary || "").trim() || undefined,
-            actions: Array.isArray(raw?.action?.actions)
-              ? raw.action.actions.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-              : [],
-          }
       : actionType === "draft_message"
         ? {
           type: "draft_message" as const,
@@ -179,13 +221,21 @@ function mapDecision(raw: NonNullable<PetPeerContextResponse["decisions"]>[numbe
   if (action.type === "restart_actor" && (!action.groupId || !action.actorId)) return null;
   if (action.type === "draft_message" && !action.text) return null;
   if (action.type === "task_proposal" && !action.groupId) return null;
-  if (action.type === "automation_proposal" && (!action.groupId || action.actions.length === 0)) return null;
 
   return {
     id,
     kind: kind === "actor_down" ? "actor_down" : "suggestion",
     priority: Number(raw?.priority || 0),
     summary: String(raw?.summary || "").trim(),
+    confidence:
+      String(raw?.confidence || "").trim() === "low"
+        ? "low"
+        : String(raw?.confidence || "").trim() === "high"
+          ? "high"
+          : String(raw?.confidence || "").trim() === "medium"
+            ? "medium"
+            : undefined,
+    reasoningBrief: String(raw?.reasoning_brief || "").trim() || undefined,
     agent: String(raw?.agent || "").trim(),
     ephemeral: !!raw?.ephemeral,
     source: {
@@ -206,6 +256,81 @@ function mapDecision(raw: NonNullable<PetPeerContextResponse["decisions"]>[numbe
   };
 }
 
+function mapEvidenceTask(
+  raw?: {
+    id?: string | null;
+    title?: string | null;
+    status?: string | null;
+    assignee?: string | null;
+    waiting_on?: string | null;
+    blocked_by?: string[] | null;
+    handoff_to?: string | null;
+    updated_at?: string | null;
+  } | null,
+): PetTaskEvidence["task"] | undefined {
+  const id = String(raw?.id || "").trim();
+  const title = String(raw?.title || "").trim();
+  const status = String(raw?.status || "").trim();
+  if (!id || !status) return undefined;
+  return {
+    id,
+    title,
+    status,
+    assignee: String(raw?.assignee || "").trim() || undefined,
+    waitingOn: String(raw?.waiting_on || "").trim() || undefined,
+    blockedBy: Array.isArray(raw?.blocked_by)
+      ? raw.blocked_by.map((item) => String(item || "").trim()).filter(Boolean)
+      : [],
+    handoffTo: String(raw?.handoff_to || "").trim() || undefined,
+    updatedAt: String(raw?.updated_at || "").trim() || undefined,
+  };
+}
+
+function mapTaskEvidence(raw?: NonNullable<PetPeerContextResponse["task_evidence"]>[number] | null): PetTaskEvidence | null {
+  const kind = String(raw?.kind || "").trim();
+  const actorId = String(raw?.actor?.id || "").trim();
+  const task = mapEvidenceTask(raw?.task);
+  if (!kind || !actorId || !task) return null;
+  return {
+    kind,
+    priority: Number(raw?.priority || 0),
+    hypothesis: String(raw?.hypothesis || "").trim(),
+    actor: {
+      id: actorId,
+      activeTaskId: String(raw?.actor?.active_task_id || "").trim() || undefined,
+      focus: String(raw?.actor?.focus || "").trim() || undefined,
+      nextAction: String(raw?.actor?.next_action || "").trim() || undefined,
+      blockers: Array.isArray(raw?.actor?.blockers)
+        ? raw.actor.blockers.map((item) => String(item || "").trim()).filter(Boolean)
+        : [],
+    },
+    task,
+    currentActiveTask: mapEvidenceTask(raw?.current_active_task),
+    signals: {
+      taskStaleMinutes: Number(raw?.signals?.task_stale_minutes || 0),
+      sameWorkstreamHint: !!raw?.signals?.same_workstream_hint,
+      blockerCount: Number(raw?.signals?.blocker_count || 0),
+    },
+  };
+}
+
+function mapCompanion(raw?: PetPeerContextResponse["companion"] | null): PetCompanionProfile {
+  const name = String(raw?.name || "").trim();
+  const species = String(raw?.species || "").trim();
+  const identity = String(raw?.identity || "").trim();
+  const temperament = String(raw?.temperament || "").trim();
+  const speechStyle = String(raw?.speech_style || "").trim();
+  const careStyle = String(raw?.care_style || "").trim();
+  return {
+    name: name || DEFAULT_COMPANION.name,
+    species: species || DEFAULT_COMPANION.species,
+    identity: identity || DEFAULT_COMPANION.identity,
+    temperament: temperament || DEFAULT_COMPANION.temperament,
+    speechStyle: speechStyle || DEFAULT_COMPANION.speechStyle,
+    careStyle: careStyle || DEFAULT_COMPANION.careStyle,
+  };
+}
+
 export function buildPetPeerContext(
   raw?: Partial<PetPeerContextResponse> | null,
   opts?: { status?: PetPeerContextStatus },
@@ -217,9 +342,14 @@ export function buildPetPeerContext(
   const decisions = Array.isArray(raw?.decisions)
     ? raw.decisions.map((item) => mapDecision(item)).filter((item): item is PetReminder => item !== null)
     : [];
+  const taskEvidence = Array.isArray(raw?.task_evidence)
+    ? raw.task_evidence.map((item) => mapTaskEvidence(item)).filter((item): item is PetTaskEvidence => item !== null)
+    : [];
 
   return {
+    companion: mapCompanion(raw?.companion),
     decisions,
+    taskEvidence,
     signals: mapSignals(raw?.signals),
     persona,
     help,
@@ -236,54 +366,63 @@ export function usePetPeerContext(input: {
 }): PetPeerContext {
   const groupId = String(input.groupId || "").trim();
   const refreshToken = Number(input.refreshToken || 0);
+  const cachedContext = groupId ? (petPeerContextCache.get(groupId) ?? null) : null;
   const [state, setState] = useState<{
     groupId: string;
     rawContext: Partial<PetPeerContextResponse> | null;
     status: PetPeerContextStatus;
   }>({
-    groupId: "",
-    rawContext: null,
-    status: "idle",
+    groupId,
+    rawContext: cachedContext,
+    status: groupId ? (cachedContext ? "loaded" : "loading") : "idle",
   });
 
   useEffect(() => {
     if (!groupId) return;
 
     let cancelled = false;
+    const cached = petPeerContextCache.get(groupId) ?? null;
     // 同步更新 state.groupId 以避免在 fetch 期间产生 state.groupId !== groupId 的
     // "中间态"，该中间态会导致每次重渲染创建新对象，引发 VirtualMessageList 级联刷新
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 有意为之的同步状态机转换
     setState({
       groupId,
-      rawContext: null,
-      status: "loading",
+      rawContext: cached,
+      status: cached ? "loaded" : "loading",
     });
-    void fetchPetPeerContext(groupId)
-      .then((resp) => {
-        if (cancelled) return;
-        setState({
-          groupId,
-          rawContext: resp.ok ? resp.result || null : null,
-          status: resp.ok ? "loaded" : "error",
+    const timeout = window.setTimeout(() => {
+      void fetchPetPeerContext(groupId)
+        .then((resp) => {
+          if (cancelled) return;
+          const nextRawContext = resp.ok ? resp.result || null : cached;
+          if (resp.ok) {
+            petPeerContextCache.set(groupId, nextRawContext);
+          }
+          setState({
+            groupId,
+            rawContext: nextRawContext,
+            status: resp.ok ? "loaded" : cached ? "loaded" : "error",
+          });
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          console.warn("failed to load pet peer context", error);
+          setState({
+            groupId,
+            rawContext: cached,
+            status: cached ? "loaded" : "error",
+          });
         });
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.warn("failed to load pet peer context", error);
-        setState({
-          groupId,
-          rawContext: null,
-          status: "error",
-        });
-      });
+    }, refreshToken > 0 ? 0 : PET_CONTEXT_INITIAL_FETCH_DELAY_MS);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
     };
   }, [groupId, refreshToken]);
 
   if (!groupId || state.groupId !== groupId) {
-    return buildPetPeerContext(null, { status: !groupId ? "idle" : "loading" });
+    return buildPetPeerContext(cachedContext, { status: !groupId ? "idle" : (cachedContext ? "loaded" : "loading") });
   }
 
   return buildPetPeerContext(state.rawContext, { status: state.status });

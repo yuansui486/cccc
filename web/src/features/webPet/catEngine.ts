@@ -24,6 +24,63 @@ interface SpriteSheet {
 type SpriteSheetMap = Record<CatState, SpriteSheet | null>;
 type ReactionKind = NonNullable<PetReaction>["kind"];
 
+const SPRITE_SHEET_CACHE = new Map<string, Promise<SpriteSheet | null>>();
+const SPRITE_WARNING_KEYS = new Set<string>();
+
+function warnSpriteOnce(key: string, message: string): void {
+  if (SPRITE_WARNING_KEYS.has(key)) return;
+  SPRITE_WARNING_KEYS.add(key);
+  console.warn(message);
+}
+
+function loadSpriteSheet(state: CatState, url: string): Promise<SpriteSheet | null> {
+  const cacheKey = `${state}:${url}`;
+  const cached = SPRITE_SHEET_CACHE.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = new Promise<SpriteSheet | null>((resolve) => {
+    if (!url) {
+      warnSpriteOnce(cacheKey, `Sprite URL missing: ${state}.png, using procedural fallback`);
+      resolve(null);
+      return;
+    }
+
+    let settled = false;
+    const img = new Image();
+    const finish = (sheet: SpriteSheet | null, warning?: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      img.onload = null;
+      img.onerror = null;
+      if (warning) {
+        warnSpriteOnce(cacheKey, warning);
+      }
+      resolve(sheet);
+    };
+    img.onload = () => {
+      const frameCount = Math.max(1, Math.floor(img.naturalWidth / FRAME_SIZE));
+      finish({ img, frameCount });
+    };
+    img.onerror = () => {
+      finish(null, `Sprite not found: ${state}.png, using procedural fallback`);
+    };
+    const timeout = window.setTimeout(() => {
+      finish(null, `Sprite load timed out: ${state}.png, using procedural fallback`);
+    }, SPRITE_LOAD_TIMEOUT_MS);
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) {
+      const frameCount = Math.max(1, Math.floor(img.naturalWidth / FRAME_SIZE));
+      finish({ img, frameCount });
+    }
+  });
+
+  SPRITE_SHEET_CACHE.set(cacheKey, promise);
+  return promise;
+}
+
 export function createCatEngine(options: CatEngineOptions): CatEngine {
   const { canvas, spriteUrls } = options;
   const ctxOrNull = canvas.getContext("2d");
@@ -53,36 +110,11 @@ export function createCatEngine(options: CatEngineOptions): CatEngine {
   // --- Sprite Sheet Loader ---
 
   async function loadSprites(): Promise<void> {
-    const promises = CAT_STATES.map((state) => {
-      return new Promise<void>((resolve) => {
-        let settled = false;
-        const img = new Image();
-        const finish = (sheet: SpriteSheet | null, warning?: string) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timeout);
-          img.onload = null;
-          img.onerror = null;
-          if (warning) {
-            console.warn(warning);
-          }
-          if (!destroyed) {
-            spriteSheets[state] = sheet;
-          }
-          resolve();
-        };
-        img.onload = () => {
-          const frameCount = Math.floor(img.naturalWidth / FRAME_SIZE);
-          finish({ img, frameCount });
-        };
-        img.onerror = () => {
-          finish(null, `Sprite not found: ${state}.png, using procedural fallback`);
-        };
-        const timeout = window.setTimeout(() => {
-          finish(null, `Sprite load timed out: ${state}.png, using procedural fallback`);
-        }, SPRITE_LOAD_TIMEOUT_MS);
-        img.src = spriteUrls[state];
-      });
+    const promises = CAT_STATES.map(async (state) => {
+      const sheet = await loadSpriteSheet(state, spriteUrls[state]);
+      if (!destroyed) {
+        spriteSheets[state] = sheet;
+      }
     });
     await Promise.all(promises);
   }
@@ -445,11 +477,6 @@ export function createCatEngine(options: CatEngineOptions): CatEngine {
         if (sheet?.img) {
           sheet.img.onload = null;
           sheet.img.onerror = null;
-          try {
-            sheet.img.src = "";
-          } catch {
-            // Ignore best-effort cleanup failures.
-          }
         }
         spriteSheets[state] = null;
       }

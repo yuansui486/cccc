@@ -791,8 +791,9 @@ def is_message_for_actor(
     # chat.message: check the "to" field
     targets = _message_targets(event)
 
-    # Internal actors observe normal chat routing but still require explicit
-    # targeting for system.notify to avoid picking up background noise.
+    if actor_internal:
+        return actor_id in targets
+
     # Empty targets = broadcast (everyone can see)
     if not targets:
         return True

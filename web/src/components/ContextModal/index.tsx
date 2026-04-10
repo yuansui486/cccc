@@ -113,6 +113,7 @@ export function ContextModal({
   const [taskEditorMode, setTaskEditorMode] = useState<"none" | "create" | "edit">("none");
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
+  const [pendingTaskReadback, setPendingTaskReadback] = useState<{ taskId: string; previousUpdatedAt: string } | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [viewBusy, setViewBusy] = useState(false);
@@ -308,6 +309,7 @@ export function ContextModal({
     setTaskQuery("");
     setArchivedExpanded(false);
     setDragTaskId("");
+    setPendingTaskReadback(null);
     setTaskEditorMode("none");
     setSelectedTaskId("");
     setTaskDraft(null);
@@ -445,6 +447,18 @@ export function ContextModal({
     }
   }, [selectedTaskId, selectedTask, taskDraft, taskEditorMode]);
 
+  useEffect(() => {
+    if (!pendingTaskReadback) return;
+    if (taskEditorMode !== "edit" || !selectedTaskId) {
+      setPendingTaskReadback(null);
+      return;
+    }
+    if (!selectedTask || selectedTask.id !== pendingTaskReadback.taskId) return;
+    if (String(selectedTask.updated_at || "") === pendingTaskReadback.previousUpdatedAt) return;
+    setTaskDraft(taskToDraft(selectedTask));
+    setPendingTaskReadback(null);
+  }, [pendingTaskReadback, selectedTask, selectedTaskId, taskEditorMode]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } })
@@ -475,6 +489,9 @@ export function ContextModal({
     const sameTask = selectedTaskId === task.id && taskEditorMode === "edit";
     if (!sameTask && !confirmDiscardTaskChanges()) return false;
     const nextDraft = options?.draft ?? taskToDraft(task);
+    if (!sameTask) {
+      setPendingTaskReadback(null);
+    }
     setSelectedTaskId(task.id);
     setTaskDraft(nextDraft);
     setTaskEditorMode("edit");
@@ -516,11 +533,14 @@ export function ContextModal({
       });
       const nextResp = await applyContextWriteback(resp);
       if (!nextResp.ok) {
-        setSyncError(resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
+        setSyncError(nextResp.error?.message || resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
         return;
       }
       if (selectedTaskId === task.id && taskEditorMode === "edit") {
-        setTaskDraft((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+        setPendingTaskReadback({
+          taskId: task.id,
+          previousUpdatedAt: String(task.updated_at || ""),
+        });
       }
     } finally {
       setSyncBusy(false);
@@ -555,6 +575,7 @@ export function ContextModal({
     if (selectedTaskId === task.id && taskEditorMode === "edit") return;
     if (!confirmDiscardTaskChanges()) return;
     const nextDraft = taskToDraft(task);
+    setPendingTaskReadback(null);
     setSelectedTaskId(task.id);
     setTaskDraft(nextDraft);
     setTaskEditorMode("edit");
@@ -564,6 +585,7 @@ export function ContextModal({
 
   const closeTaskEditor = useCallback(() => {
     if (!confirmDiscardTaskChanges()) return;
+    setPendingTaskReadback(null);
     setTaskEditorMode("none");
     setSelectedTaskId("");
     setTaskDraft(null);
@@ -572,6 +594,7 @@ export function ContextModal({
 
   const openSteeringTab = useCallback((tab: SteeringTab) => {
     if (!confirmDiscardTaskChanges()) return;
+    setPendingTaskReadback(null);
     setTaskEditorMode("none");
     setActiveView("coordination");
     setSteeringTab(tab);
@@ -590,6 +613,7 @@ export function ContextModal({
   const handleSwitchActiveView = useCallback((next: ContextModalView) => {
     if (next !== "coordination") {
       if (!confirmDiscardTaskChanges()) return;
+      setPendingTaskReadback(null);
       setTaskEditorMode("none");
       setSelectedTaskId("");
       setTaskDraft(null);
@@ -673,7 +697,7 @@ export function ContextModal({
       });
       const nextResp = await applyContextWriteback(resp);
       if (!nextResp.ok) {
-        setSyncError(resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
+        setSyncError(nextResp.error?.message || resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
         return;
       }
       setEditingBrief(false);
@@ -725,7 +749,7 @@ export function ContextModal({
         }]);
         const nextResp = await applyContextWriteback(resp);
         if (!nextResp.ok) {
-          setSyncError(resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
+          setSyncError(nextResp.error?.message || resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
           return;
         }
         setTaskEditorMode("none");
@@ -752,9 +776,13 @@ export function ContextModal({
       });
       const nextResp = await applyContextWriteback(resp);
       if (!nextResp.ok) {
-        setSyncError(resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
+        setSyncError(nextResp.error?.message || resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
         return;
       }
+      setPendingTaskReadback({
+        taskId: selectedTask.id,
+        previousUpdatedAt: String(selectedTask.updated_at || ""),
+      });
     } finally {
       setSyncBusy(false);
     }
@@ -785,7 +813,7 @@ export function ContextModal({
       const resp = await deleteCoordinationTask(groupId, task.id);
       const nextResp = await applyContextWriteback(resp);
       if (!nextResp.ok) {
-        setSyncError(resp.error?.message || tr("context.failedToDeleteTask", "Failed to delete task"));
+        setSyncError(nextResp.error?.message || resp.error?.message || tr("context.failedToDeleteTask", "Failed to delete task"));
         return;
       }
       if (selectedTaskId === task.id) {
@@ -812,6 +840,7 @@ export function ContextModal({
 
   const handleOpenCreate = useCallback((status: BoardStatus = "planned") => {
     if (!confirmDiscardTaskChanges()) return;
+    setPendingTaskReadback(null);
     setTaskEditorMode("create");
     setSelectedTaskId("");
     setTaskDraft(emptyTaskDraft(status));
@@ -839,7 +868,7 @@ export function ContextModal({
       });
       const nextResp = await applyContextWriteback(resp);
       if (!nextResp.ok) {
-        setProjectError(resp.error?.message || tr("context.failedToSaveProject", "Failed to save PROJECT.md"));
+        setProjectError(nextResp.error?.message || resp.error?.message || tr("context.failedToSaveProject", "Failed to save PROJECT.md"));
         return;
       }
       setProjectMd(nextResp.result);
@@ -879,7 +908,7 @@ export function ContextModal({
       const resp = await addCoordinationNote(groupId, kind, summary, String(draft.taskId || "").trim() || null);
       const nextResp = await applyContextWriteback(resp);
       if (!nextResp.ok) {
-        setActivityError(resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
+        setActivityError(nextResp.error?.message || resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
         return;
       }
       if (kind === "decision") {

@@ -18,6 +18,11 @@ def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None)
 
 def handle_attach(args: Dict[str, Any]) -> DaemonResponse:
     path = Path(str(args.get("path") or "."))
+    if not path.exists():
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return _error("scope_path_create_failed", f"cannot create directory: {exc}")
     scope = detect_scope(path)
     reg = load_registry()
     requested_group_id = str(args.get("group_id") or "").strip()

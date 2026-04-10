@@ -108,6 +108,10 @@ class TestWebActorAvatarApi(unittest.TestCase):
                 fetch_resp = client.get(avatar_url)
                 self.assertEqual(fetch_resp.status_code, 200)
                 self.assertIn("image/svg+xml", str(fetch_resp.headers.get("content-type") or ""))
+                self.assertEqual(
+                    str(fetch_resp.headers.get("cache-control") or ""),
+                    "private, max-age=31536000, immutable",
+                )
 
                 clear_resp = client.delete(f"/api/v1/groups/{group_id}/actors/peer-1/avatar?by=user")
                 self.assertEqual(clear_resp.status_code, 200)

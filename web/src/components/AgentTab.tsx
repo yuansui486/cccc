@@ -4,19 +4,23 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useTranslation } from "react-i18next";
-import { Actor, AgentState, RUNTIME_INFO } from "../types";
+import { Actor, AgentState, HeadlessPreviewSession, StreamingActivity, getRuntimeColor, RUNTIME_INFO } from "../types";
+import { useActorDisplayState } from "../hooks/useActorDisplayState";
 import { getTerminalTheme } from "../hooks/useTheme";
 import { classNames } from "../utils/classNames";
 import { formatFullTime, formatTime } from "../utils/time";
-import { useObservabilityStore, useTerminalSignalsStore } from "../stores";
+import { useGroupStore, useObservabilityStore, useTerminalSignalsStore } from "../stores";
 import { withAuthToken, fetchTerminalTail } from "../services/api";
+import { HeadlessLiveTrace } from "./headless/HeadlessLiveTrace";
 import { StopIcon, RefreshIcon, InboxIcon, TrashIcon, PlayIcon, EditIcon, RocketIcon, TerminalIcon } from "./Icons";
 import { ScrollFade } from "./ScrollFade";
-import { getActorDisplayWorkingState, getTerminalSignalFromChunk } from "../utils/terminalWorkingState";
-import { getTerminalSignalKey } from "../stores/useTerminalSignalsStore";
+import { getTerminalSignalFromChunk } from "../utils/terminalWorkingState";
 import { getRuntimeIndicatorState } from "../utils/statusIndicators";
+import { getEffectiveActorRunner, supportsStandardWebHeadlessRuntime } from "../utils/headlessRuntimeSupport";
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+const EMPTY_STREAMING_ACTIVITIES: StreamingActivity[] = [];
+const EMPTY_HEADLESS_PREVIEW_SESSIONS: HeadlessPreviewSession[] = [];
 
 // Delay before showing terminal after connection (allows backlog replay to complete without visible scrolling)
 const TERMINAL_SHOW_DELAY_MS = 150;
@@ -66,18 +70,38 @@ export function AgentTab({
 }: AgentTabProps) {
   const { t } = useTranslation('actors');
   // Derived state (must be defined before refs that use them)
-  const isRunning = actor.running ?? actor.enabled ?? false;
-  const effectiveRunner = String(actor.runner_effective || actor.runner || "pty").trim() || "pty";
+  const { isRunning, workingState } = useActorDisplayState({ groupId, actor });
+  const effectiveRunner = getEffectiveActorRunner(actor);
   const isHeadless = effectiveRunner === "headless";
   const canControl = !readOnly;
+  const latestHeadlessText = useGroupStore((state) => {
+    const bucket = state.chatByGroup[String(groupId || "").trim()];
+    if (!bucket) return "";
+    const actorId = String(actor.id || "").trim();
+    if (!actorId) return "";
+    return String(bucket.latestActorTextByActorId?.[actorId] || "");
+  });
+  const headlessPreviewSessions = useGroupStore((state) => {
+    const bucket = state.chatByGroup[String(groupId || "").trim()];
+    if (!bucket) return EMPTY_HEADLESS_PREVIEW_SESSIONS;
+    const actorId = String(actor.id || "").trim();
+    if (!actorId) return EMPTY_HEADLESS_PREVIEW_SESSIONS;
+    const sessions = bucket.previewSessionsByActorId?.[actorId];
+    return Array.isArray(sessions) ? sessions : EMPTY_HEADLESS_PREVIEW_SESSIONS;
+  });
+  const latestHeadlessActivities = useGroupStore((state) => {
+    const bucket = state.chatByGroup[String(groupId || "").trim()];
+    if (!bucket) return EMPTY_STREAMING_ACTIVITIES;
+    const actorId = String(actor.id || "").trim();
+    if (!actorId) return EMPTY_STREAMING_ACTIVITIES;
+    const activities = bucket.latestActorActivitiesByActorId?.[actorId];
+    return Array.isArray(activities) ? activities : EMPTY_STREAMING_ACTIVITIES;
+  });
   const observabilityLoaded = useObservabilityStore((s) => s.loaded);
   const loadObservability = useObservabilityStore((s) => s.load);
   const terminalScrollbackLines = useObservabilityStore((s) => s.terminalScrollbackLines);
-  const terminalSignals = useTerminalSignalsStore((s) => s.signals);
   const setTerminalSignal = useTerminalSignalsStore((s) => s.setSignal);
   const clearTerminalSignal = useTerminalSignalsStore((s) => s.clearSignal);
-  const terminalSignal = terminalSignals[getTerminalSignalKey(groupId, actor.id)];
-  const workingState = getActorDisplayWorkingState(actor, terminalSignal);
 
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -91,9 +115,6 @@ export function AgentTab({
   const [activated, setActivated] = useState(false);
   // Bumped to trigger a fresh WebSocket connection from the reconnect button
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
-  // Last terminal output captured when agent stops — shows crash/error info
-  const [stoppedTerminalTail, setStoppedTerminalTail] = useState("");
-  const [stoppedTerminalTailLoading, setStoppedTerminalTailLoading] = useState(false);
   const terminalSignalBufferRef = useRef("");
 
   const pasteStateRef = useRef<{ inFlight: boolean; lastAt: number }>({ inFlight: false, lastAt: 0 });
@@ -126,33 +147,6 @@ export function AgentTab({
     terminalSignalBufferRef.current = "";
     clearTerminalSignal(groupId, actor.id);
   }, [actor.id, clearTerminalSignal, groupId, isHeadless, isRunning]);
-
-  // When agent stops, fetch the last terminal output so crash errors are visible
-  useEffect(() => {
-    if (isRunning || isHeadless) {
-      setStoppedTerminalTail("");
-      setStoppedTerminalTailLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setStoppedTerminalTail("");
-    setStoppedTerminalTailLoading(true);
-    void fetchTerminalTail(groupId, actor.id, 4000, true, true)
-      .then((resp) => {
-        if (cancelled) return;
-        if (resp.ok && resp.result.text?.trim()) {
-          setStoppedTerminalTail(resp.result.text.trim());
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setStoppedTerminalTailLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [isRunning, isHeadless, groupId, actor.id]);
 
   // Activate the terminal only after the user has visited this actor tab at least once.
   // Once activated, keep the PTY session connected even when the tab is hidden to avoid backlog replay and scroll jumps.
@@ -217,20 +211,6 @@ export function AgentTab({
           strongPulse: runtimeIndicator.strongPulse,
           badgeClass: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
         };
-      case "waiting":
-        return {
-          dotClass: runtimeIndicator.dotClass,
-          pulse: runtimeIndicator.pulse,
-          strongPulse: runtimeIndicator.strongPulse,
-          badgeClass: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
-        };
-      case "stuck":
-        return {
-          dotClass: runtimeIndicator.dotClass,
-          pulse: runtimeIndicator.pulse,
-          strongPulse: runtimeIndicator.strongPulse,
-          badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-        };
       case "run":
       default:
         return {
@@ -245,10 +225,11 @@ export function AgentTab({
   const runtimeStatusText = (() => {
     if (!isRunning) return t("stopped");
     if (workingState === "working") return t("working");
-    if (workingState === "waiting") return t("waiting");
-    if (workingState === "stuck") return t("stuck");
     return t("running");
   })();
+  const latestHeadlessPreview = headlessPreviewSessions.length > 0
+    ? headlessPreviewSessions[headlessPreviewSessions.length - 1]
+    : null;
 
   // Send interrupt (Ctrl+C)
   const sendInterrupt = () => {
@@ -855,18 +836,39 @@ export function AgentTab({
       {/* contain: layout prevents terminal content changes from triggering parent layout recalculation */}
       <div className={classNames("flex-1 min-h-0 relative", "bg-[var(--color-bg-secondary)]")} style={{ contain: 'layout', overflow: 'hidden' }}>
         {isHeadless ? (
-          // Headless agent - show status
-          <div className={classNames("flex flex-col items-center justify-center h-full p-8", "text-[var(--color-text-tertiary)]")}>
+          <div className={classNames("flex h-full min-h-0 flex-col items-center p-8", "text-[var(--color-text-tertiary)]")}>
             <div className="mb-4"><RocketIcon size={48} /></div>
             <div className="text-lg font-medium mb-2">{t('headlessAgent')}</div>
             <div className="text-sm text-center max-w-md">
-              {t('headlessDescription')}
+              {supportsStandardWebHeadlessRuntime(String(actor.runtime || "").trim())
+                ? t('headlessStreamDescription', { defaultValue: '该智能体以无终端模式运行。过程输出会显示在 Chat 里，正式回复需要通过消息工具发送。' })
+                : t('headlessDescription')}
             </div>
             {isRunning && (
               <div className={classNames("mt-4 px-3 py-1.5 rounded text-sm", statusTone.badgeClass)}>
                 {t("statusWithValue", { value: runtimeStatusText })}
               </div>
             )}
+            <div className="mt-6 flex w-full max-w-3xl min-h-0 flex-1 flex-col">
+              <HeadlessLiveTrace
+                previewSessions={headlessPreviewSessions}
+                fallbackText={latestHeadlessText}
+                fallbackActivities={latestHeadlessActivities}
+                fallbackUpdatedAt={String(latestHeadlessPreview?.updatedAt || "").trim()}
+                fallbackPendingEventId={String(latestHeadlessPreview?.pendingEventId || `preview:${actor.id}`).trim()}
+                fallbackStreamId={String(latestHeadlessPreview?.currentStreamId || "").trim()}
+                fallbackStreamPhase={String(latestHeadlessPreview?.streamPhase || "").trim().toLowerCase()}
+                fallbackPhase={String(latestHeadlessPreview?.phase || "").trim().toLowerCase()}
+                emptyLabel={t('noStreamingOutputYet', { defaultValue: '当前还没有可显示的流式输出。' })}
+                recentLabel="Recent"
+                isDark={isDark}
+                density="expanded"
+                className={classNames(
+                  "min-h-[220px] flex-1 overflow-y-auto rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] px-3.5 py-3 text-left",
+                  "text-[var(--color-text-secondary)]"
+                )}
+              />
+            </div>
           </div>
         ) : isRunning ? (
           // PTY agent - show terminal
@@ -930,27 +932,9 @@ export function AgentTab({
                 </button>
               ) : null}
             </div>
-            {stoppedTerminalTailLoading ? (
-              <div className="mt-6 w-full max-w-xl flex-shrink-0 rounded-lg border border-dashed border-[var(--glass-border-subtle)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                {t('loadingLastTerminalOutput')}
-              </div>
-            ) : stoppedTerminalTail ? (
-              <div className="mt-6 w-full max-w-xl flex-shrink-0">
-                <div className="text-xs font-medium mb-2 text-[var(--color-text-secondary)]">
-                  {t('lastTerminalOutput')}
-                </div>
-                <pre className={classNames(
-                  "text-xs leading-relaxed whitespace-pre-wrap break-words p-3 rounded-lg max-h-64 overflow-y-auto",
-                  "bg-[var(--color-bg-primary)] text-[var(--color-text-secondary)] border border-[var(--glass-border-subtle)]"
-                )}>
-                  {stoppedTerminalTail}
-                </pre>
-              </div>
-            ) : (
-              <div className="mt-6 w-full max-w-xl flex-shrink-0 rounded-lg border border-dashed border-[var(--glass-border-subtle)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-                {t('noRecentTerminalOutput')}
-              </div>
-            )}
+            <div className="mt-6 w-full max-w-xl flex-shrink-0 rounded-lg border border-dashed border-[var(--glass-border-subtle)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
+              {t('noRecentTerminalOutput')}
+            </div>
           </div>
         )}
       </div>

@@ -1,5 +1,6 @@
 import { useComposerStore, useGroupStore, useUIStore } from "../../stores";
 import type { ChatMessageData, LedgerEvent, PresentationMessageRef, ReplyTarget } from "../../types";
+import { getReplyEventId } from "../../utils/chatReply";
 import type { PetReminder } from "./types";
 import { getPetReminderDraftText } from "./reminderText";
 import { buildTaskProposalMessage } from "./taskProposal";
@@ -30,9 +31,12 @@ function findReplyTarget(groupId: string, replyTo: string): ReplyTarget {
     };
   }
 
+  const replyEventId = getReplyEventId(match);
+  if (!replyEventId) return null;
+
   const data = (match.data && typeof match.data === "object" ? match.data : {}) as ChatMessageData;
   return {
-    eventId,
+    eventId: replyEventId,
     by: String(match.by || "unknown"),
     text: truncateReplyText(String(data.text || "")),
   };
@@ -65,6 +69,13 @@ function mergeComposerText(existingText: string, suggestionText: string): string
   return `${existing}\n\n${next}`;
 }
 
+function formatComposerTaskProposalText(reminder: PetReminder): string {
+  if (reminder.action.type !== "task_proposal") return "";
+  const body = buildTaskProposalMessage(reminder.action);
+  if (!body) return "";
+  return `Pet task proposal: please ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
+}
+
 function getReminderDraftPayload(
   reminder: PetReminder,
 ): { groupId: string; text: string; toText: string; replyTo: string } | null {
@@ -79,7 +90,7 @@ function getReminderDraftPayload(
   if (reminder.action.type === "task_proposal") {
     return {
       groupId: String(reminder.action.groupId || "").trim(),
-      text: buildTaskProposalMessage(reminder.action),
+      text: formatComposerTaskProposalText(reminder),
       toText: "@foreman",
       replyTo: "",
     };

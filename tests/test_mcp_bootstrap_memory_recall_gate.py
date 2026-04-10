@@ -144,6 +144,11 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
         hits = gate.get("hits") if isinstance(gate.get("hits"), list) else []
         self.assertGreaterEqual(len(hits), 1)
 
+        next_calls = out["next_calls"]
+        self.assertEqual(next_calls["inbox_list"], 'cccc_inbox_list(kind_filter="all")')
+        self.assertIn('signal_family="interrupt"', next_calls["interrupt_triage"])
+        self.assertIn('resume the current task', next_calls["interrupt_triage"])
+
     def test_recall_gate_query_uses_rich_warm_cues_when_hot_cues_are_missing(self) -> None:
         from cccc.ports.mcp import server as mcp_server
         from cccc.ports.mcp.handlers import cccc_core, cccc_group_actor

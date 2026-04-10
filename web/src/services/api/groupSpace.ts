@@ -73,6 +73,7 @@ export async function ingestGroupSpace(args: {
     group_id: string;
     job_id: string;
     accepted: boolean;
+    completed: boolean;
     deduped: boolean;
     job: GroupSpaceJob;
     queue_summary: { pending: number; running: number; failed: number };
@@ -212,6 +213,8 @@ export async function actionGroupSpaceArtifact(args: {
     task_id?: string;
     status?: string;
     wait?: boolean;
+    accepted?: boolean;
+    completed?: boolean;
     saved_to_space?: boolean;
     output_path?: string;
     generate_result?: Record<string, unknown>;

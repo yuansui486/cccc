@@ -52,16 +52,7 @@ class TestWebPresentationApi(unittest.TestCase):
             )
             self.assertTrue(publish.ok, getattr(publish, "error", None))
 
-            def fake_call_daemon(req: dict):
-                resp, _ = self._call(str(req.get("op") or ""), dict(req.get("args") or {}))
-                payload = {"ok": bool(resp.ok)}
-                if resp.result is not None:
-                    payload["result"] = resp.result
-                if resp.error is not None:
-                    payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
-                return payload
-
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("cccc.ports.web.app.call_daemon", side_effect=AssertionError("presentation_get should not call daemon")):
                 with self._client() as client:
                     resp = client.get(f"/api/v1/groups/{group_id}/presentation")
 

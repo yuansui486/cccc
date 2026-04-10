@@ -7,12 +7,15 @@ from typing import Any, Callable, Dict, Optional
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.actors import find_actor, list_actors, remove_actor
 from ...kernel.context import ContextStorage
+from ...kernel.events import publish_event
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
 from ...kernel.permissions import require_actor_permission
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ..context.context_ops import _schedule_summary_snapshot_rebuild
 
 
@@ -47,6 +50,8 @@ def handle_actor_remove(
         if isinstance(actor_doc, dict):
             avatar_rel_path = str(actor_doc.get("avatar_asset_path") or "").strip()
         remove_actor(group, actor_id)
+        codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+        claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
         pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
         remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
         headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
@@ -84,6 +89,7 @@ def handle_actor_remove(
         by=by,
         data={"actor_id": actor_id},
     )
+    publish_event("actor.remove", {"group_id": group.group_id, "actor_id": actor_id})
     maybe_reset_automation_on_foreman_change(group, before_foreman_id=before_foreman)
     return DaemonResponse(ok=True, result={"actor_id": actor_id, "event": event})
 

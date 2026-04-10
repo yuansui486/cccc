@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from .async_result import (
+    DEFAULT_ASYNC_COMPLETION_SIGNAL,
+    build_async_result_fields,
+)
 from .actor import Actor, ActorRole, ActorSubmit, AgentRuntime, HeadlessState, RunnerKind
 from .actor_profile import ActorProfile, ActorProfileRef
 from .automation import AutomationAction, AutomationRule, AutomationRuleSet, AutomationSnippetCatalog, AutomationTrigger
@@ -42,6 +46,7 @@ __all__ = [
     "ActorRole",
     "ActorSubmit",
     "AgentRuntime",
+    "build_async_result_fields",
     "AutomationAction",
     "AutomationRule",
     "AutomationRuleSet",
@@ -54,6 +59,7 @@ __all__ = [
     "DaemonError",
     "DaemonRequest",
     "DaemonResponse",
+    "DEFAULT_ASYNC_COMPLETION_SIGNAL",
     "Event",
     "GroupTemplate",
     "GroupTemplateActor",

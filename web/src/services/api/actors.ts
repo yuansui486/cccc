@@ -39,11 +39,21 @@ function buildProfileDeleteQuery(opts?: ProfileDeleteOptions): string {
   return params.toString();
 }
 
-export async function fetchActors(groupId: string, includeUnread = false, init?: RequestInit & { noCache?: boolean }) {
+export async function fetchActors(
+  groupId: string,
+  includeUnread = false,
+  init?: RequestInit & { noCache?: boolean },
+  options?: { includeInternal?: boolean },
+) {
   const gid = String(groupId || "").trim();
+  const includeInternal = Boolean(options?.includeInternal);
+  const params = new URLSearchParams();
+  if (includeUnread) params.set("include_unread", "true");
+  if (includeInternal) params.set("include_internal", "true");
+  const query = params.toString();
   const url = includeUnread
-    ? `/api/v1/groups/${encodeURIComponent(gid)}/actors?include_unread=true`
-    : `/api/v1/groups/${encodeURIComponent(gid)}/actors`;
+    ? `/api/v1/groups/${encodeURIComponent(gid)}/actors?${query}`
+    : `/api/v1/groups/${encodeURIComponent(gid)}/actors${query ? `?${query}` : ""}`;
   if (init?.noCache || init?.signal) {
     return apiJson<{ actors: Actor[] }>(url, init);
   }
@@ -51,7 +61,7 @@ export async function fetchActors(groupId: string, includeUnread = false, init?:
     return apiJson<{ actors: Actor[] }>(url);
   }
   return reuseSharedReadRequest(
-    actorsReadOnlyRequestKey(gid),
+    actorsReadOnlyRequestKey(gid, includeInternal),
     () => apiJson<{ actors: Actor[] }>(url),
   );
 }
@@ -61,6 +71,7 @@ export async function addActor(
   actorId: string,
   role: "peer" | "foreman",
   runtime: string,
+  runner: "pty" | "headless",
   command: string,
   envPrivate?: Record<string, string>,
   options?: {
@@ -78,7 +89,7 @@ export async function addActor(
     body: JSON.stringify({
       actor_id: actorId,
       role,
-      runner: "pty",
+      runner,
       runtime,
       command,
       env: {},
@@ -98,6 +109,7 @@ export async function updateActor(
   groupId: string,
   actorId: string,
   runtime?: string,
+  runner?: "pty" | "headless",
   command?: string,
   title?: string,
   opts?: {
@@ -113,6 +125,7 @@ export async function updateActor(
   clearGroupsReadRequest();
   const body: Record<string, unknown> = { by: "user" };
   if (runtime !== undefined && runtime !== "") body.runtime = runtime;
+  if (runner !== undefined) body.runner = runner;
   if (command !== undefined) body.command = command.trim();
   if (title !== undefined) body.title = title.trim();
   if (opts?.profileId !== undefined) body.profile_id = String(opts.profileId || "");

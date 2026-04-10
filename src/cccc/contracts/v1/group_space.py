@@ -67,8 +67,10 @@ class SpaceJob(BaseModel):
     remote_space_id: str = ""
     kind: SpaceJobKind = "context_sync"
     payload: Dict[str, Any] = Field(default_factory=dict)
+    payload_ref: str = ""
     result: Dict[str, Any] = Field(default_factory=dict)
     payload_digest: str = ""
+    payload_bytes: int = 0
     idempotency_key: str = ""
     state: SpaceJobState = "pending"
     attempt: int = 0

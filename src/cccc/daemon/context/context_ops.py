@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ...contracts.v1 import DaemonError, DaemonResponse
+from ..actor_runtime_cache import get_group_runtime
 from ...kernel.agent_state_hygiene import sync_mind_context_runtime_state
 from ...kernel.context import (
     AgentState,
@@ -43,7 +44,12 @@ from ...kernel.context import (
 from ...kernel.actors import get_effective_role, list_actors
 from ...kernel.group import load_group
 from ...kernel.query_projections import get_actor_list_projection
+from ...kernel.pet_actor import PET_ACTOR_ID
 from ...kernel.ledger import append_event
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
+from ...runners import headless as headless_runner
+from ...runners import pty as pty_runner
 from ...kernel.prompt_files import (
     HELP_FILENAME,
     delete_group_prompt_file,
@@ -51,16 +57,13 @@ from ...kernel.prompt_files import (
     read_group_prompt_file,
     write_group_prompt_file,
 )
-from ...kernel.working_state import DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES, derive_effective_working_state
+from ...kernel.working_state import derive_effective_working_state
 from ...util.conv import coerce_bool
 from ...util.fs import atomic_write_json, read_json
 from ..space.group_space_projection import sync_group_space_projection
 from ..space.group_space_store import enqueue_space_job, get_space_binding, get_space_provider_state
 from ..pet.profile_refresh import mark_pet_profile_refresh_applied
 from ..pet.review_scheduler import request_pet_review
-from ...runners import headless as headless_runner
-from ...runners import pty as pty_runner
-
 _CURATED_SPACE_SYNC_PREFIXES = (
     "coordination.",
     "task.",
@@ -75,6 +78,43 @@ _SUMMARY_REBUILD_IN_FLIGHT: Set[str] = set()
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
+
+
+_PET_FORBIDDEN_CONTEXT_OPS = {
+    "coordination.brief.update",
+    "coordination.note.add",
+    "task.create",
+    "task.update",
+    "task.move",
+    "task.restore",
+    "task.delete",
+    "meta.merge",
+    "role_notes.set",
+    "agent_state.clear",
+}
+
+
+def _check_pet_context_permission(by: str, op_name: str, *, target_actor_id: Optional[str] = None) -> Optional[str]:
+    if str(by or "").strip() != PET_ACTOR_ID:
+        return None
+    if op_name in _PET_FORBIDDEN_CONTEXT_OPS:
+        return f"Permission denied: pet cannot run {op_name}"
+    if op_name == "agent_state.update":
+        target = str(target_actor_id or "").strip()
+        if target and target != PET_ACTOR_ID:
+            return f"Permission denied: pet can only update its own agent_state ({PET_ACTOR_ID})"
+    return None
+
+
+def _validate_pet_agent_state_update(raw: Dict[str, Any], *, actor_id: str) -> Optional[str]:
+    target = str(actor_id or "").strip()
+    if target != PET_ACTOR_ID:
+        return f"Permission denied: pet can only update its own agent_state ({PET_ACTOR_ID})"
+    allowed = {"op", "actor_id", "agent_id", "user_model", "user_profile"}
+    extra = sorted(key for key in raw.keys() if key not in allowed)
+    if extra:
+        return "Permission denied: pet agent_state.update only allows user_model; disallowed keys: " + ", ".join(extra)
+    return None
 
 
 def _status_value(value: Any) -> str:
@@ -303,48 +343,73 @@ def _actor_runtime_state_to_dict(
     group_id: str,
     actor_doc: Dict[str, Any],
     agent_state_by_id: Dict[str, Dict[str, Any]],
+    runtime_snapshot_by_id: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
     actor_id = str(actor_doc.get("id") or "").strip()
     runner_kind = str(actor_doc.get("runner") or "pty").strip() or "pty"
+    runtime = str(actor_doc.get("runtime") or "").strip() or "codex"
     effective_runner = "headless" if runner_kind == "headless" else "pty"
-    running = False
-    idle_seconds = None
-    headless_state = None
-    if effective_runner == "headless":
-        state = headless_runner.SUPERVISOR.get_state(group_id=group_id, actor_id=actor_id)
-        headless_state = state.model_dump() if state is not None else None
-        running = bool(state is not None and headless_runner.SUPERVISOR.actor_running(group_id, actor_id))
-    else:
-        running = pty_runner.SUPERVISOR.actor_running(group_id, actor_id)
-        idle_seconds = pty_runner.SUPERVISOR.idle_seconds(group_id=group_id, actor_id=actor_id) if running else None
-    pty_terminal_text = ""
-    if effective_runner == "pty" and running:
-        try:
-            pty_terminal_text = pty_runner.SUPERVISOR.tail_output(
-                group_id=group_id,
-                actor_id=actor_id,
-                max_bytes=DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES,
-            ).decode("utf-8", errors="replace")
-        except Exception:
-            pty_terminal_text = ""
+    snap = runtime_snapshot_by_id.get(actor_id) if isinstance(runtime_snapshot_by_id.get(actor_id), dict) else {}
+    running = bool(snap.get("running")) if snap else False
+    idle_seconds = snap.get("idle_seconds") if snap else None
 
     result = {
         "id": actor_id,
-        "runtime": str(actor_doc.get("runtime") or "").strip() or "codex",
+        "runtime": runtime,
         "runner": runner_kind,
-        "runner_effective": effective_runner,
+        "runner_effective": str(snap.get("runner_effective") or effective_runner) if snap else effective_runner,
         "running": bool(running),
         "idle_seconds": idle_seconds,
     }
+    if snap:
+        for key in (
+            "effective_working_state",
+            "effective_working_reason",
+            "effective_working_updated_at",
+            "effective_active_task_id",
+        ):
+            if key in snap:
+                result[key] = snap.get(key)
+        return result
+
+    pty_terminal_text = ""
+    if effective_runner == "headless":
+        if runtime.lower() == "codex":
+            running = bool(codex_app_supervisor.actor_running(group_id, actor_id))
+        elif runtime.lower() == "claude":
+            running = bool(claude_app_supervisor.actor_running(group_id, actor_id))
+        else:
+            running = bool(headless_runner.SUPERVISOR.actor_running(group_id=group_id, actor_id=actor_id))
+    else:
+        running = bool(pty_runner.SUPERVISOR.actor_running(group_id=group_id, actor_id=actor_id))
+        try:
+            idle_seconds = pty_runner.SUPERVISOR.idle_seconds(group_id=group_id, actor_id=actor_id)
+        except Exception:
+            idle_seconds = None
+        try:
+            raw_tail = pty_runner.SUPERVISOR.tail_output(
+                group_id=group_id,
+                actor_id=actor_id,
+                max_bytes=12_000,
+            )
+            if isinstance(raw_tail, bytes):
+                pty_terminal_text = raw_tail.decode("utf-8", errors="replace")
+            elif isinstance(raw_tail, str):
+                pty_terminal_text = raw_tail
+        except Exception:
+            pty_terminal_text = ""
+
+    result["runner_effective"] = effective_runner
+    result["running"] = bool(running)
+    result["idle_seconds"] = idle_seconds
     result.update(
         derive_effective_working_state(
-            running=running,
+            running=bool(running),
             effective_runner=effective_runner,
-            runtime=str(actor_doc.get("runtime") or "").strip(),
+            runtime=runtime,
             idle_seconds=idle_seconds,
             pty_terminal_text=pty_terminal_text,
             agent_state=agent_state_by_id.get(actor_id),
-            headless_state=headless_state,
         )
     )
     return result
@@ -359,16 +424,18 @@ def _build_actor_runtime_states(storage: ContextStorage, ordered_agents: List[Ag
         for item in (_agent_state_to_dict(agent) for agent in ordered_agents)
         if str(item.get("id") or "").strip()
     }
+    runtime_snapshot_by_id = get_group_runtime(storage.group.group_id)
     result: List[Dict[str, Any]] = []
     for actor in actors:
         if not isinstance(actor, dict) or not str(actor.get("id") or "").strip():
             continue
         result.append(
-            _actor_runtime_state_to_dict(
-                group_id=storage.group.group_id,
-                actor_doc=actor,
-                agent_state_by_id=agent_state_by_id,
-            )
+                _actor_runtime_state_to_dict(
+                    group_id=storage.group.group_id,
+                    actor_doc=actor,
+                    agent_state_by_id=agent_state_by_id,
+                    runtime_snapshot_by_id=runtime_snapshot_by_id,
+                )
         )
     return result
 
@@ -544,6 +611,10 @@ def _check_permission(
     group = load_group(group_id)
     if group is None:
         return None
+
+    pet_err = _check_pet_context_permission(by, op_name, target_actor_id=target_actor_id)
+    if pet_err:
+        return pet_err
 
     role = "user" if by == "user" else get_effective_role(group, by)
     if role in {"user", "foreman"}:
@@ -1065,8 +1136,12 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
     tasks_changed = False
     agents_changed = False
 
-    def _mark_change(index: int, op_name: str, detail: str) -> None:
-        changes.append({"index": index, "op": op_name, "detail": detail})
+    def _mark_change(index: int, op_name: str, detail: str, *, task_id: str = "") -> None:
+        entry: Dict[str, Any] = {"index": index, "op": op_name, "detail": detail}
+        normalized_task_id = str(task_id or "").strip()
+        if normalized_task_id:
+            entry["task_id"] = normalized_task_id
+        changes.append(entry)
 
     try:
         for idx, raw in enumerate(ops):
@@ -1195,7 +1270,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 if review_reasons:
                     pet_review_reasons.update(review_reasons)
                     pet_review_immediate = pet_review_immediate or review_immediate
-                _mark_change(idx, op_name, f"Created task {task.id}: {task.title}")
+                _mark_change(idx, op_name, f"Created task {task.id}: {task.title}", task_id=task.id)
                 continue
 
             if op_name == "task.update":
@@ -1285,7 +1360,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     if review_reasons:
                         pet_review_reasons.update(review_reasons)
                         pet_review_immediate = pet_review_immediate or review_immediate
-                    _mark_change(idx, op_name, f"Updated task {task.id}")
+                    _mark_change(idx, op_name, f"Updated task {task.id}", task_id=task.id)
                 continue
 
             if op_name == "task.move":
@@ -1328,7 +1403,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 if review_reasons:
                     pet_review_reasons.update(review_reasons)
                     pet_review_immediate = pet_review_immediate or review_immediate
-                _mark_change(idx, op_name, f"Moved task {task.id} to {new_status.value}")
+                _mark_change(idx, op_name, f"Moved task {task.id} to {new_status.value}", task_id=task.id)
 
                 assignee_id = str(task.assignee or "").strip()
                 if assignee_id:
@@ -1437,7 +1512,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 if review_reasons:
                     pet_review_reasons.update(review_reasons)
                     pet_review_immediate = pet_review_immediate or review_immediate
-                _mark_change(idx, op_name, f"Restored task {task.id}")
+                _mark_change(idx, op_name, f"Restored task {task.id}", task_id=task.id)
                 continue
 
             if op_name == "task.delete":
@@ -1487,9 +1562,9 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 if delete_pet_reasons:
                     pet_review_reasons.update(delete_pet_reasons)
                 if len(delete_targets) == 1:
-                    _mark_change(idx, op_name, f"Deleted task {task_id}")
+                    _mark_change(idx, op_name, f"Deleted task {task_id}", task_id=task_id)
                 else:
-                    _mark_change(idx, op_name, f"Deleted task subtree {task_id} ({len(delete_targets)} tasks)")
+                    _mark_change(idx, op_name, f"Deleted task subtree {task_id} ({len(delete_targets)} tasks)", task_id=task_id)
                 continue
 
             if op_name == "agent_state.update":
@@ -1499,6 +1574,10 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 perm_err = _check_permission(by, op_name, group_id, target_actor_id=actor_id)
                 if perm_err:
                     raise ValueError(perm_err)
+                if by == PET_ACTOR_ID:
+                    pet_update_err = _validate_pet_agent_state_update(raw, actor_id=actor_id)
+                    if pet_update_err:
+                        raise ValueError(pet_update_err)
                 agent = _get_or_create_agent(agents_state, actor_id)
                 updated = False
                 hot = agent.hot if isinstance(agent.hot, AgentStateHot) else AgentStateHot()
@@ -1579,6 +1658,10 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                 perm_err = _check_permission(by, op_name, group_id, target_actor_id=actor_id)
                 if perm_err:
                     raise ValueError(perm_err)
+                if by == PET_ACTOR_ID:
+                    pet_update_err = _validate_pet_agent_state_update(raw, actor_id=actor_id)
+                    if pet_update_err:
+                        raise ValueError(pet_update_err)
                 agent = _get_or_create_agent(agents_state, actor_id)
                 agent.hot = AgentStateHot()
                 agent.warm = AgentStateWarm()

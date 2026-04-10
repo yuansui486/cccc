@@ -36,7 +36,14 @@ def cmd_attach(args: argparse.Namespace) -> int:
             return 0
 
     # Fallback: local execution (dev convenience)
-    scope = detect_scope(Path(args.path))
+    scope_path = Path(args.path)
+    if not scope_path.exists():
+        try:
+            scope_path.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            _print_json({"ok": False, "error": f"cannot create directory: {exc}"})
+            return 2
+    scope = detect_scope(scope_path)
     reg = load_registry()
     if args.group_id:
         group = load_group(str(args.group_id))

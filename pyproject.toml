@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cccc-pair"
-version = "0.4.8"
+version = "0.4.10"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
@@ -56,7 +56,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "cccc.ports.web" = ["dist/**"]
-"cccc.resources" = ["*.md", "*.yaml"]
+"cccc.resources" = ["*.md", "*.yaml", "im/*.mjs"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   FloatingPortal,
   autoUpdate,
@@ -15,7 +15,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GroupMeta } from "../../types";
 import { classNames } from "../../utils/classNames";
-import { getGroupStatusUnified } from "../../utils/groupStatus";
+import { getGroupStatusFromSource } from "../../utils/groupStatus";
 import { GripIcon, MoreIcon } from "../Icons";
 
 interface SortableGroupItemProps {
@@ -56,6 +56,7 @@ export function SortableGroupItem({
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -66,12 +67,12 @@ export function SortableGroupItem({
     transition,
   };
 
-  const status = getGroupStatusUnified(group.running ?? false, group.state);
+  const status = getGroupStatusFromSource(group);
   const { refs, floatingStyles, context } = useFloating({
     open: menuOpen,
     onOpenChange: setMenuOpen,
     placement: "bottom-end",
-    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    middleware: [offset(8), flip({ padding: 12 }), shift({ padding: 12 })],
     whileElementsMounted: autoUpdate,
     strategy: "fixed",
   });
@@ -81,6 +82,11 @@ export function SortableGroupItem({
   const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss, role]);
   const setReference = useCallback((node: HTMLElement | null) => refs.setReference(node), [refs]);
   const setFloating = useCallback((node: HTMLElement | null) => refs.setFloating(node), [refs]);
+  const dragListeners = useMemo(() => listeners ?? {}, [listeners]);
+  const handleDragHandlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    listeners?.onPointerDown?.(event);
+    event.stopPropagation();
+  }, [listeners]);
 
   if (isCollapsed) {
     const initial = (group.title || gid).charAt(0).toUpperCase();
@@ -138,27 +144,36 @@ export function SortableGroupItem({
             : "glass-group-item",
           isArchived && !isActive && "opacity-90"
         )}
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          onSelect();
+        }}
       >
         {/* Drag handle */}
         {!dragDisabled && (
           <div
-            {...listeners}
+            {...dragListeners}
+            {...attributes}
+            ref={setActivatorNodeRef}
             className={classNames(
               "flex-shrink-0 cursor-grab active:cursor-grabbing p-1 -ml-1 rounded transition-opacity touch-none",
               "hidden md:block md:opacity-0 md:group-hover/item:opacity-100",
               isDragging && "!block !opacity-100",
               "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
             )}
-            onClick={(e) => e.stopPropagation()}
+            onPointerDown={handleDragHandlePointerDown}
+            onClick={(event) => event.stopPropagation()}
           >
             <GripIcon size={14} />
           </div>
         )}
 
-        <button
-          type="button"
+        <div
           className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left"
-          onClick={onSelect}
           onMouseEnter={onWarm}
           onFocus={onWarm}
         >
@@ -187,7 +202,7 @@ export function SortableGroupItem({
           >
             {status.label}
           </span>
-        </button>
+        </div>
 
         {onMenuAction && menuActionLabel && menuInlineAction && (
           <button
@@ -220,6 +235,12 @@ export function SortableGroupItem({
                 ),
                 "aria-label": menuAriaLabel || menuActionLabel,
                 title: menuAriaLabel || menuActionLabel,
+                onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+                  event.stopPropagation();
+                },
+                onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+                  event.stopPropagation();
+                },
               })}
             >
               <MoreIcon size={16} />

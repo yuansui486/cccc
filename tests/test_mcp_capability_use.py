@@ -245,7 +245,8 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertIn("active_capsule_skills", runtime_visible_in)
         self.assertIn("active_capsule_skills", str(result.get("runtime_activation_evidence") or ""))
         self.assertIn("dynamic_tools", str(result.get("next_step_hint") or ""))
-        self.assertIn("$CODEX_HOME/skills", str(result.get("next_step_hint") or ""))
+        self.assertIn("Codex's skills directory", str(result.get("next_step_hint") or ""))
+        self.assertIn("CODEX_HOME", str(result.get("next_step_hint") or ""))
         enable_mock.assert_called_once()
         call_mock.assert_not_called()
 
@@ -276,7 +277,8 @@ class TestMcpCapabilityUse(unittest.TestCase):
         runtime_visible_in = result.get("runtime_visible_in") if isinstance(result.get("runtime_visible_in"), list) else []
         self.assertIn("active_capsule_skills", runtime_visible_in)
         self.assertIn("active_capsule_skills", str(result.get("runtime_activation_evidence") or ""))
-        self.assertIn("$CODEX_HOME/skills", str(result.get("next_step_hint") or ""))
+        self.assertIn("Codex's skills directory", str(result.get("next_step_hint") or ""))
+        self.assertIn("CODEX_HOME", str(result.get("next_step_hint") or ""))
 
     def test_capability_use_builtin_runtime_bootstrap_inproc_enables_skill_and_dependencies(self) -> None:
         from cccc.contracts.v1 import DaemonRequest

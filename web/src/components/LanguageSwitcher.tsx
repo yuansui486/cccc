@@ -146,7 +146,7 @@ export function LanguageSwitcher({ isDark: _isDark, showLabel = false, variant =
           isRow
             ? "w-full flex items-center justify-between gap-3 px-3.5 py-3 rounded-xl text-sm min-h-[48px]"
             : isRail
-            ? "flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px] rounded-xl text-xs shrink-0 border border-transparent bg-transparent"
+            ? "flex items-center justify-center h-9 w-9 min-w-[36px] min-h-[36px] rounded-[14px] text-[11px] shrink-0 border border-transparent bg-transparent"
             : showLabel
             ? "w-full flex items-center justify-center gap-2 px-3 py-3 text-sm rounded-2xl min-h-[52px] glass-btn"
             : "flex items-center justify-center w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl text-xs shrink-0 glass-btn",

@@ -5,11 +5,11 @@ from typing import Any, Dict
 from .context import ContextStorage
 from .group import Group
 from .pet_actor import PET_ACTOR_ID
+from .pet_profile import build_pet_profile
 from .pet_signals import build_pet_signal_summary_lines, load_pet_signals
 from .pet_task_triage import build_task_triage_payload, join_task_briefs
 from .prompt_files import HELP_FILENAME, load_builtin_help_markdown, read_group_prompt_file
-from .system_prompt import render_role_system_prompt
-from ..ports.mcp.utils.help_markdown import _select_help_markdown, parse_help_markdown
+from ..ports.mcp.utils.help_markdown import parse_help_markdown
 
 
 def load_pet_help_markdown(group: Group) -> str:
@@ -99,69 +99,77 @@ def build_pet_snapshot_text(group: Any, context_payload: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def build_pet_prompt_parts(group: Group, *, help_markdown: str, context_payload: Dict[str, Any]) -> Dict[str, str]:
+def build_pet_prompt_parts(
+    group: Group,
+    *,
+    help_markdown: str,
+    context_payload: Dict[str, Any],
+    include_snapshot: bool = True,
+) -> Dict[str, Any]:
     parsed = parse_help_markdown(help_markdown)
     persona = str(parsed.get("pet") or "").strip()
-    selected_help = _select_help_markdown(help_markdown, role="peer", actor_id=PET_ACTOR_ID, include_pet=True)
-    snapshot = build_pet_snapshot_text(group, context_payload)
-    decision_contract = "\n".join(
+    profile = build_pet_profile(group, persona=persona)
+    snapshot = build_pet_snapshot_text(group, context_payload) if include_snapshot else ""
+    title = str(group.doc.get("title") or group.group_id or "").strip() or "unknown-group"
+    persona_contract = "\n".join(
         [
-            "Pet Runtime Contract:",
-            "- You are the Web Pet actor. Reuse the normal peer workflow, tools, and context discipline.",
-            "- You have two distinct jobs: pet_review and pet_profile_refresh. Do not merge them.",
-            "- pet_review manages reminders. pet_profile_refresh maintains only your distilled user_model.",
-            "- During ordinary pet_review, your reminder output surface is cccc_pet_decisions, not visible chat.",
-            "- Every time you receive a pet_review request, you must finish by calling cccc_pet_decisions exactly once.",
-            "- The only valid end states for a pet_review are: action=replace with the full current decision list, or action=clear when there is truly nothing actionable.",
-            "- Do not end a pet_review with analysis only. Do not skip the tool call. Do not leave stale decisions untouched.",
-            "- When you have current actionable reminders, call cccc_pet_decisions with action=replace and write the full decision list.",
-            "- When there is no current actionable reminder, call cccc_pet_decisions with action=clear.",
-            "- During pet_review, do not update cccc_agent_state just because you noticed style or memory drift.",
-            "- If a pet_review needs a draft_message and style memory matters, read your current self_state via cccc_bootstrap() and use recovery.self_state.recovery.user_model when present.",
-            "- Do not emit low-signal status chatter, duplicate restarts, or reminder-like chat messages just to mirror state.",
-            "- Judge from current evidence and context. Do not rely on fixed frontend keyword matching.",
-            "- summary is your internal judgment for the decision list, not the final outbound message body.",
-            "- For draft_message, action.text must already be the final message body that can be inserted into chat as-is.",
-            "- For draft_message, use action.type=draft_message and do not emit suggestion or suggestion_preview fields.",
-            "- When sending to foreman, write a short next-step message, not an internal state dump or runtime analysis paragraph.",
-            "- Do not paste snapshot labels, field names, slash-delimited status bundles, or metric-style observations into action.text.",
-            "- Prefer one direct recommendation or one direct question that moves the next step forward immediately.",
-            "- For task_proposal, summary and action.text must both read like natural next-step guidance, not raw telemetry labels or half-translated internal jargon.",
-            "- Avoid phrases like reply_pressure, overdue reply thread, waiting_user task, blocked work, or other internal signal names in user-facing reminder text.",
-            "- chat_reply, reply_required, actor_down, blocked work, waiting_user, and handoff pressure are high-signal review inputs; do not ignore them silently.",
-            "- For task-board management, prefer proposing a structured task_proposal for the foreman instead of mutating shared tasks yourself.",
-            "- For repeatable coordination issues, you may propose a structured automation_proposal, but do not assume permission to execute it yourself.",
-            "- When task pressure is high, prefer one high-value proposal over many noisy reminders.",
-            "- For task triage, prioritize: waiting_user > handoff > blocked > planned backlog cleanup.",
-            "- Treat Proposal Ready as the current best evidence about whether a reminder should be emitted now, and what it should focus on.",
-            "- Unless there is an urgent runtime failure, emit at most one task_proposal per review.",
-            "- During pet_profile_refresh, do not touch cccc_pet_decisions.",
-            "- A pet_profile_refresh request means: inspect your unread system.notify events, find the latest unread notify whose data.context.kind=pet_profile_refresh, read its prepared sample_packet, distill the user's drafting style, and update only your own user_model.",
-            "- During pet_profile_refresh, the only allowed write is cccc_agent_state(action=update, actor_id=pet-peer, user_model=...).",
-            "- During pet_profile_refresh, do not overwrite persona_notes.",
-            "- During pet_profile_refresh, write a short stable drafting profile, not raw message dumps, transcript slices, or copied sample text.",
-            "- The distilled user_model exists only to improve future draft_message wording. It must not affect blocked/waiting_user/handoff/runtime triage.",
+            "Pet Persona Contract:",
+            f"- Stable companion identity: {profile['name']} is a {profile['species']} companion.",
+            f"- Identity: {profile['identity']}",
+            f"- Temperament: {profile['temperament']}",
+            f"- Speech style: {profile['speech_style']}",
+            f"- Care style: {profile['care_style']}",
+            "- Keep continuity stronger than novelty. Sound like the same nearby companion across sessions.",
+            "- Be warm and observant, but never so theatrical that the next step becomes blurry.",
         ]
     )
-    prompt = "\n\n".join(
+    wording_contract = "\n".join(
         [
-            render_role_system_prompt(
-                group=group,
-                actor_id=PET_ACTOR_ID,
-                role="peer",
-                runtime_name="pet-peer",
-                runner="pty",
-            ).strip(),
-            "Pet-Specific Help:\n" + str(selected_help or "").strip(),
-            "Pet Persona:\n" + (persona or "(default pet peer persona)"),
-            decision_contract,
-            "Runtime Snapshot:\n" + snapshot,
+            "Pet Wording Contract:",
+            "- Prefer one short observation plus one direct next step.",
+            "- Sound like a companion beside the user, not a dashboard reading metrics aloud.",
+            "- Avoid internal telemetry labels, raw status bundles, and board-state dumps in user-facing text.",
+            "- Default to concise, lightly human wording. Expand only when needed to make the reminder actionable.",
+            "- Do not sound like a second foreman. Nudge clearly, then get out of the way.",
         ]
-    ).strip()
+    )
+    decision_contract = "\n".join(
+        [
+            "Pet Contract:",
+            "- pet_review: surface exactly one current highest-value recommendation, or clear when nothing clearly beats interruption cost.",
+            "- During pet_review, work from current live state. Do not rely on stale startup text.",
+            "- For pet_review, first inspect the latest unread notify with data.context.kind=pet_review and use its review_packet as your initial focus. Widen only if the packet is insufficient.",
+            "- When review_packet.task_evidence or pet-context.task_evidence is present, treat each item as a hypothesis packet built from code-side evidence. Re-rank it against live state; do not mirror it mechanically.",
+            "- Finish every pet_review with exactly one cccc_pet_decisions call: action=replace with the full current decision list, or action=clear.",
+            "- Default to draft_message. Valid surfaced actions are draft_message, task_proposal, and restart_actor.",
+            "- Do not call cccc_message_send, cccc_message_reply, or visible file-send tools from Pet; surface drafts through pet decisions instead.",
+            "- When a surfaced decision is non-trivial, include confidence=low|medium|high and a short reasoning_brief grounded in current evidence.",
+            "- When drafting, action.text must already be the exact message the user would likely want to send next.",
+            "- A draft_message may be multi-sentence or a short bullet list when one control move needs structure.",
+            "- Set action.to and action.reply_to when the routing is clear.",
+            "- Do not paste internal telemetry labels, field names, slash-delimited status bundles, or board-state dumps into action.text.",
+            "- Use task_proposal when board cleanup is the right abstraction; propose, do not broadly mutate shared tasks yourself.",
+            "- user_model shapes wording only. It must not affect severity or ranking.",
+            "- pet_profile_refresh is separate: if an unread notify has data.context.kind=pet_profile_refresh, update only cccc_agent_state(action=update, actor_id=pet-peer, user_model=...) from its sample_packet and do not touch cccc_pet_decisions.",
+        ]
+    )
+    header_lines = [
+        f"[CCCC PET] You are {PET_ACTOR_ID} in group '{title}'",
+        f"group_id: {group.group_id}",
+        "role: user-side draft-first attention assistant",
+    ]
+    sections = ["\n".join(header_lines).strip()]
+    if persona:
+        sections.append("Pet Persona:\n" + persona)
+    sections.append(persona_contract)
+    sections.append(wording_contract)
+    sections.append(decision_contract)
+    prompt = "\n\n".join(sections).strip()
     return {
         "persona": persona,
-        "help": selected_help,
+        "help": "Pet Persona:\n" + persona if persona else "",
         "snapshot": snapshot,
+        "profile": profile,
         "prompt": prompt,
         "source": "help" if persona else "default",
     }
@@ -215,6 +223,11 @@ def _load_pet_runtime_context(group: Group) -> Dict[str, Any]:
 
 def render_pet_system_prompt(group: Group, *, actor: Dict[str, Any], context_payload: Dict[str, Any] | None = None) -> str:
     help_markdown = load_pet_help_markdown(group)
-    effective_context_payload = context_payload if isinstance(context_payload, dict) and context_payload else _load_pet_runtime_context(group)
-    parts = build_pet_prompt_parts(group, help_markdown=help_markdown, context_payload=effective_context_payload)
+    effective_context_payload = context_payload if isinstance(context_payload, dict) else _load_pet_runtime_context(group)
+    parts = build_pet_prompt_parts(
+        group,
+        help_markdown=help_markdown,
+        context_payload=effective_context_payload,
+        include_snapshot=False,
+    )
     return str(parts.get("prompt") or "").strip() + "\n"

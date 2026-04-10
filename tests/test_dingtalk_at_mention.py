@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cccc.ports.im.adapters.dingtalk import DingTalkAdapter
+from cccc.ports.im.adapters.dingtalk import DINGTALK_MAX_MESSAGE_LENGTH, DingTalkAdapter
 
 
 # ── fixtures ─────────────────────────────────────────────────────────
@@ -332,3 +332,41 @@ class TestSendMessageAtResolution:
         assert ok is True
         assert captured["endpoint"] == "/chat/send"
         assert captured["body"]["msg"]["at"]["atUserIds"] == ["staff_001"]
+
+    def test_long_message_is_split_instead_of_truncated(self, adapter: DingTalkAdapter) -> None:
+        """Long outbound text should be split into multiple webhook sends."""
+        chat_id = "cidGroupSplit"
+        adapter._session_webhook_cache[chat_id] = (
+            "https://webhook.example.com",
+            time.time() + 3600,
+        )
+        adapter.max_chars = DINGTALK_MAX_MESSAGE_LENGTH
+        long_text = ("A" * DINGTALK_MAX_MESSAGE_LENGTH) + ("B" * 32)
+        captured_texts: List[str] = []
+        captured_at: List[Optional[List[str]]] = []
+
+        def mock_webhook(self_adapter, url, text, at_user_ids=None):
+            _ = self_adapter
+            _ = url
+            captured_texts.append(text)
+            captured_at.append(at_user_ids)
+            return True
+
+        with patch.object(type(adapter), "_send_via_webhook", mock_webhook):
+            ok = adapter.send_message(chat_id, long_text, mention_user_ids=["staff_001"])
+
+        assert ok is True
+        assert len(captured_texts) == 2
+        assert captured_texts[0] == "A" * DINGTALK_MAX_MESSAGE_LENGTH
+        assert captured_texts[1] == "B" * 32
+        assert captured_at == [["staff_001"], None]
+
+    def test_format_outbound_keeps_full_text_for_chunking(self, adapter: DingTalkAdapter) -> None:
+        """format_outbound must not truncate before send_message can split."""
+        long_text = "x" * (DINGTALK_MAX_MESSAGE_LENGTH + 64)
+
+        formatted = adapter.format_outbound("foreman", ["user"], long_text)
+
+        assert formatted.startswith("[foreman] ")
+        assert len(formatted) > DINGTALK_MAX_MESSAGE_LENGTH
+        assert not formatted.endswith("...")

@@ -1,6 +1,9 @@
 import os
+import shutil
 import tempfile
+import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -12,11 +15,20 @@ class TestChatOps(unittest.TestCase):
         os.environ["CCCC_HOME"] = td
 
         def cleanup() -> None:
-            td_ctx.__exit__(None, None, None)
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)
             else:
                 os.environ["CCCC_HOME"] = old_home
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(td)
+                    break
+                except FileNotFoundError:
+                    break
+                except OSError:
+                    if attempt >= 4:
+                        raise
+                    time.sleep(0.05)
 
         return td, cleanup
 
@@ -205,6 +217,36 @@ class TestChatOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_send_preserves_explicit_quote_text(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "chat-send-quote", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            send, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "to": ["user"],
+                    "text": "测试activity消息抖动",
+                    "quote_text": "为什么activity 会出现再消失，当前抖动太严重了",
+                },
+            )
+            self.assertTrue(send.ok, getattr(send, "error", None))
+            sent_event = (send.result or {}).get("event") if isinstance(send.result, dict) else {}
+            self.assertIsInstance(sent_event, dict)
+            assert isinstance(sent_event, dict)
+            data = sent_event.get("data") if isinstance(sent_event.get("data"), dict) else {}
+            self.assertEqual(
+                str(data.get("quote_text") or ""),
+                "为什么activity 会出现再消失，当前抖动太严重了",
+            )
+        finally:
+            cleanup()
+
     def test_reply_preserves_im_source_identity_and_mentions(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -266,6 +308,70 @@ class TestChatOps(unittest.TestCase):
             self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
         finally:
             cleanup()
+
+    def test_send_persists_actor_sender_snapshot(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "chat-sender-snapshot", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "actor_id": "peer1",
+                    "title": "代码审查员",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "enabled": False,
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            avatar_path = Path(os.environ["CCCC_HOME"]) / "groups" / group_id / "state" / "actor_avatars" / "avatar_test.png"
+            avatar_path.parent.mkdir(parents=True, exist_ok=True)
+            avatar_path.write_bytes(
+                b"\x89PNG\r\n\x1a\n"
+                b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+                b"\x00\x00\x00\rIDATx\x9cc`\x00\x00\x00\x02\x00\x01\xe5'\xd4\xa2"
+                b"\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            update, _ = self._call(
+                "actor_update",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "by": "user",
+                    "patch": {"avatar_asset_path": f"groups/{group_id}/state/actor_avatars/avatar_test.png"},
+                },
+            )
+            self.assertTrue(update.ok, getattr(update, "error", None))
+
+            send, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "by": "peer1",
+                    "to": ["user"],
+                    "text": "审查完成",
+                },
+            )
+            self.assertTrue(send.ok, getattr(send, "error", None))
+            event = (send.result or {}).get("event") if isinstance(send.result, dict) else {}
+            self.assertIsInstance(event, dict)
+            assert isinstance(event, dict)
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            self.assertEqual(str(data.get("sender_title") or ""), "代码审查员")
+            self.assertEqual(str(data.get("sender_runtime") or ""), "codex")
+            avatar_blob_path = str(data.get("sender_avatar_path") or "")
+            self.assertTrue(avatar_blob_path.startswith("state/blobs/"))
+            self.assertTrue((Path(os.environ["CCCC_HOME"]) / "groups" / group_id / avatar_blob_path).exists())
+        finally:
+            cleanup()
+
 
     def test_send_pet_review_immediate_follows_reply_required(self) -> None:
         group_id, cleanup = self._setup_group_with_actors()

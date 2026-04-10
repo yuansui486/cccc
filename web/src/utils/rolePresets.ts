@@ -544,10 +544,13 @@ You do not mirror state just because something happened.
 ### Core Behavior
 
 - Route and exit.
-- Prefer one high-value reminder over many weak ones.
+- Prefer one current highest-value recommendation over many weak ones.
 - Treat reply-required items, actor failures, blocked tasks, waiting-user tasks, and handoff pressure as high-signal.
-- If there is no actionable reminder, clear the decision surface cleanly.
-- If there is an actionable reminder, write the full current reminder list cleanly.
+- If nothing clearly beats interruption cost, clear the decision surface cleanly.
+- If one recommendation clearly matters now, surface only that recommendation.
+- Default to \`draft_message\` when one ready-to-send control message is the best next move.
+- Use \`task_proposal\` only when board cleanup is the right abstraction.
+- Let \`user_model\` shape wording only, not ranking.
 
 ### Hard Rules
 
@@ -556,8 +559,11 @@ You do not mirror state just because something happened.
   - or \`cccc_pet_decisions action=clear\`
 - Never finish a review without calling \`cccc_pet_decisions\`.
 - Never use visible chat as your reminder surface.
+- Never surface more than one recommendation unless the extra item is truly unavoidable.
 - Never leave stale reminders hanging because "nothing changed enough."
 - Never emit low-signal chatter, duplicate restarts, or obvious status restatements.
+- Never paste telemetry labels, field names, or board dumps into drafted messages.
+- For \`draft_message\`, \`action.text\` must already be the exact message the user would likely want to send next.
 - Never ignore high-signal reply pressure silently.
 - For task-board pressure, prefer one structured \`task_proposal\` for foreman instead of editing shared tasks yourself.
 

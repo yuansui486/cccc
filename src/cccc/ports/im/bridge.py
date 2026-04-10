@@ -10,10 +10,11 @@ Handles:
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
+import shlex
 import signal
 import sys
 import time
@@ -42,6 +43,7 @@ from .commands import (
 from .config_schema import canonicalize_im_config
 from .auth import KeyManager
 from .subscribers import SubscriberManager
+from .weixin_sidecar import resolve_weixin_sidecar_script_path
 from ...util.file_lock import LockUnavailableError, acquire_lockfile
 
 
@@ -54,6 +56,58 @@ def _is_env_var_name(value: str) -> bool:
 
 
 _PRESERVED_RECIPIENT_TOKENS = frozenset({"user", "@user", "@all", "@peers", "@foreman"})
+
+
+def _sniff_attachment_content_type(raw: bytes) -> Tuple[str, str]:
+    head = raw[:64]
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ("image/png", ".png")
+    if head.startswith(b"\xff\xd8\xff"):
+        return ("image/jpeg", ".jpg")
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return ("image/gif", ".gif")
+    if head.startswith(b"BM"):
+        return ("image/bmp", ".bmp")
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ("image/webp", ".webp")
+
+    try:
+        text_head = raw[:512].decode("utf-8", errors="ignore").lstrip().lower()
+    except Exception:
+        text_head = ""
+    if text_head.startswith("<svg") or text_head.startswith("<?xml") and "<svg" in text_head:
+        return ("image/svg+xml", ".svg")
+    return ("", "")
+
+
+def _normalize_inbound_attachment_metadata(
+    *,
+    raw: bytes,
+    filename: str,
+    mime_type: str,
+    kind: str,
+) -> Tuple[str, str, str]:
+    normalized_filename = str(filename or "").strip() or "file"
+    normalized_mime_type = str(mime_type or "").strip().lower()
+    normalized_kind = str(kind or "").strip().lower() or "file"
+
+    sniffed_mime_type = ""
+    sniffed_ext = ""
+    if not normalized_mime_type or normalized_kind != "image":
+        sniffed_mime_type, sniffed_ext = _sniff_attachment_content_type(raw)
+
+    effective_mime_type = normalized_mime_type or sniffed_mime_type
+    effective_kind = normalized_kind
+    if effective_mime_type.startswith("image/"):
+        effective_kind = "image"
+    elif sniffed_mime_type.startswith("image/"):
+        effective_kind = "image"
+
+    has_suffix = bool(Path(normalized_filename).suffix)
+    if effective_kind == "image" and not has_suffix and sniffed_ext:
+        normalized_filename = f"{normalized_filename}{sniffed_ext}"
+
+    return (normalized_filename, effective_mime_type, effective_kind)
 
 
 def _acquire_singleton_lock(lock_path: Path) -> Optional[Any]:
@@ -1270,13 +1324,19 @@ class IMBridge:
                 if max_bytes and len(raw) > max_bytes:
                     self.adapter.send_message(chat_id, f"⚠️ Ignored: file too large (> {max_mb}MB).", thread_id=thread_id)
                     continue
+                normalized_filename, normalized_mime_type, normalized_kind = _normalize_inbound_attachment_metadata(
+                    raw=raw,
+                    filename=str(a.get("file_name") or a.get("filename") or "file"),
+                    mime_type=str(a.get("mime_type") or a.get("content_type") or ""),
+                    kind=str(a.get("kind") or "file"),
+                )
                 stored_attachments.append(
                     store_blob_bytes(
                         group,
                         data=raw,
-                        filename=str(a.get("file_name") or a.get("filename") or "file"),
-                        mime_type=str(a.get("mime_type") or a.get("content_type") or ""),
-                        kind=str(a.get("kind") or "file"),
+                        filename=normalized_filename,
+                        mime_type=normalized_mime_type,
+                        kind=normalized_kind,
                     )
                 )
 
@@ -1360,6 +1420,8 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
     dingtalk_app_key: str = ""
     dingtalk_app_secret: str = ""
     dingtalk_robot_code: str = ""
+    weixin_account_id: str = ""
+    weixin_command: List[str] = []
 
     def _resolve_secret(*, value_key: str, env_key: str, default_env: str) -> str:
         raw = str(im_config.get(value_key) or "").strip()
@@ -1495,6 +1557,28 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
                 "[error] WeCom requires bot_id + secret (set via group IM config or WECOM_BOT_ID/WECOM_SECRET)."
             )
             sys.exit(1)
+    elif platform.lower() == "weixin":
+        weixin_account_id = str(
+            im_config.get("weixin_account_id")
+            or os.environ.get("CCCC_IM_WEIXIN_ACCOUNT_ID")
+            or ""
+        ).strip()
+        raw_weixin_command = str(
+            im_config.get("weixin_command")
+            or os.environ.get("CCCC_IM_WEIXIN_COMMAND")
+            or ""
+        ).strip()
+        if raw_weixin_command:
+            weixin_command = [part for part in shlex.split(raw_weixin_command) if part]
+        else:
+            default_script = resolve_weixin_sidecar_script_path()
+            if not default_script.exists():
+                print(
+                    "[error] Default weixin sidecar script not found. "
+                    "Set weixin_command in group IM config or CCCC_IM_WEIXIN_COMMAND."
+                )
+                sys.exit(1)
+            weixin_command = ["node", str(default_script)]
     else:
         # Telegram/Discord: single token
         token_env_raw = str(im_config.get("token_env") or im_config.get("bot_token_env") or "").strip()
@@ -1530,6 +1614,8 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
         lock_identity = f"dingtalk|app_key={dingtalk_app_key}"
     elif platform.lower() == "wecom":
         lock_identity = f"wecom|bot_id={wecom_bot_id}"
+    elif platform.lower() == "weixin":
+        lock_identity = f"weixin|account={weixin_account_id}|cmd={' '.join(weixin_command)}"
     else:
         lock_identity = f"{platform.lower()}|token={bot_token or ''}"
     token_material = lock_identity
@@ -1592,6 +1678,13 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
             log_path=log_path,
             ws_url=str(im_config.get("wecom_ws_url") or ""),
         )
+    elif platform.lower() == "weixin":
+        from .adapters.weixin import WeixinAdapter
+        adapter = WeixinAdapter(
+            command=weixin_command,
+            account_id=weixin_account_id,
+            log_path=log_path,
+        )
     else:
         print(f"[error] Unsupported platform: {platform}")
         sys.exit(1)
@@ -1651,7 +1744,7 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m cccc.ports.im.bridge <group_id> [platform]")
-        print("  platform: telegram (default), slack, discord, feishu (Feishu/Lark), dingtalk, wecom")
+        print("  platform: telegram (default), slack, discord, feishu (Feishu/Lark), dingtalk, wecom, weixin")
         print("")
         print("Environment variables:")
         print("  Telegram: TELEGRAM_BOT_TOKEN")
@@ -1660,6 +1753,7 @@ if __name__ == "__main__":
         print("  Feishu/Lark: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_DOMAIN (optional: feishu|lark|https://...)")
         print("  DingTalk: DINGTALK_APP_KEY, DINGTALK_APP_SECRET, DINGTALK_ROBOT_CODE (optional)")
         print("  WeCom:    WECOM_BOT_ID, WECOM_SECRET")
+        print("  Weixin:   CCCC_IM_WEIXIN_ACCOUNT_ID (optional), CCCC_IM_WEIXIN_COMMAND (optional)")
         sys.exit(1)
 
     _group_id = sys.argv[1]

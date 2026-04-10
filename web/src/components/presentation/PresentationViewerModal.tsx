@@ -1,27 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MarkdownRenderer } from "../MarkdownRenderer";
-import { CopyIcon, EditIcon, RefreshIcon, TrashIcon } from "../Icons";
+import { CloseIcon, CopyIcon, EditIcon, RefreshIcon, SplitViewIcon, TrashIcon, WindowViewIcon } from "../Icons";
 import { ModalFrame } from "../modals/ModalFrame";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import type { GroupPresentation, LedgerEvent, PresentationMessageRef, PresentationSlot } from "../../types";
 import {
+  fetchPresentationBrowserSurfaceSession,
   getGroupBlobUrl,
   getPresentationAssetUrl,
   uploadPresentationReferenceSnapshot,
 } from "../../services/api";
 import { classNames } from "../../utils/classNames";
-import { findPresentationSlot } from "../../utils/presentation";
+import { findPresentationSlot, shouldPreferPresentationLiveBrowser } from "../../utils/presentation";
 import {
   canRestorePresentationRefInViewer,
   getPresentationRefViewerScrollTop,
+  shouldAutoOpenInteractivePresentation,
 } from "../../utils/presentationLocator";
 import { buildPresentationRefForSlot } from "../../utils/presentationRefs";
-import { PresentationWebPreviewPanel } from "./PresentationWebPreviewPanel";
+import { PresentationWebPreviewPanel, type PresentationWebPreviewMode } from "./PresentationWebPreviewPanel";
 import type { PresentationBrowserFrame } from "./PresentationBrowserSurfacePanel";
 
-type PresentationViewerModalProps = {
-  isOpen: boolean;
+type PresentationViewerBaseProps = {
   isDark: boolean;
   readOnly?: boolean;
   groupId: string;
@@ -39,6 +40,24 @@ type PresentationViewerModalProps = {
   onReplaceSlot?: (slotId: string) => void;
   onClearSlot?: (slotId: string) => void;
   onClose: () => void;
+};
+
+type PresentationViewerProps = PresentationViewerBaseProps & {
+  variant: "modal" | "split";
+  isOpen?: boolean;
+  supportsSplit?: boolean;
+  onOpenSplit?: () => void;
+  onOpenWindow?: () => void;
+};
+
+type PresentationViewerModalProps = PresentationViewerBaseProps & {
+  isOpen: boolean;
+  supportsSplit?: boolean;
+  onOpenSplit?: () => void;
+};
+
+type PresentationViewerSplitPanelProps = PresentationViewerBaseProps & {
+  onOpenWindow?: () => void;
 };
 
 function getReferenceHref(groupId: string, slot: PresentationSlot | null, cacheBust?: string | number): string {
@@ -137,8 +156,12 @@ function PresentationWindowExpandIcon({ expanded }: { expanded: boolean }) {
   );
 }
 
-export function PresentationViewerModal({
-  isOpen,
+function PresentationViewer({
+  variant,
+  isOpen = true,
+  supportsSplit = false,
+  onOpenSplit,
+  onOpenWindow,
   isDark,
   readOnly,
   groupId,
@@ -153,9 +176,10 @@ export function PresentationViewerModal({
   onReplaceSlot,
   onClearSlot,
   onClose,
-}: PresentationViewerModalProps) {
+}: PresentationViewerProps) {
   const { t, i18n } = useTranslation("chat");
-  const { modalRef } = useModalA11y(isOpen, onClose);
+  const isModal = variant === "modal";
+  const { modalRef } = useModalA11y(isModal && isOpen, onClose);
   const [refreshTick, setRefreshTick] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const [linkedMarkdown, setLinkedMarkdown] = useState("");
@@ -179,6 +203,10 @@ export function PresentationViewerModal({
   const cardType = String(card?.card_type || "").trim();
   const cardMode = String(card?.content.mode || "inline").trim();
   const allowLiveBrowser = !!card && card.card_type === "web_preview" && !!String(card.content.url || "").trim() && !readOnly;
+  const preferredWebPreviewMode: PresentationWebPreviewMode =
+    allowLiveBrowser && shouldPreferPresentationLiveBrowser(href) ? "interactive" : "embedded";
+  const [webPreviewMode, setWebPreviewMode] = useState<PresentationWebPreviewMode>(preferredWebPreviewMode);
+  const showWebPreviewModeToggle = !!card && card.card_type === "web_preview" && allowLiveBrowser;
   const canRefresh = !!card && (isWorkspaceLinked || card.card_type === "web_preview");
   const copyReferenceValue = String(card?.content.url || card?.content.workspace_rel_path || href || "").trim();
   const viewerPanelClassName = isExpanded
@@ -251,8 +279,17 @@ export function PresentationViewerModal({
     : t("presentationCopyReferenceAction", { defaultValue: "Copy URL/path" });
   const editActionLabel = t("presentationReplaceAction", { defaultValue: "Edit" });
   const clearActionLabel = t("presentationClearAction", { defaultValue: "Clear" });
+  const embeddedModeLabel = t("presentationEmbeddedModeLabel", { defaultValue: "Standard" });
+  const interactiveModeLabel = t("presentationInteractiveModeLabel", { defaultValue: "Enhanced" });
+  const previewModeLabel = t("presentationPreviewModeLabel", { defaultValue: "Web preview mode" });
+  const embeddedModeHelp = t("presentationEmbeddedModeHelp", {
+    defaultValue: "Standard mode is lightweight. If links jump out or the page cannot load, switch to enhanced mode.",
+  });
+  const interactiveModeHelp = t("presentationInteractiveModeHelp", {
+    defaultValue: "Enhanced mode works better for local or private pages and tries to keep navigation inside CCCC.",
+  });
 
-  const headerActions = (
+  const modalHeaderActions = (
     <>
       {sourceEventId && onOpenMessageContext ? (
         <button
@@ -306,8 +343,44 @@ export function PresentationViewerModal({
           <PresentationWindowExpandIcon expanded={isExpanded} />
         </button>
       ) : null}
+      {supportsSplit && onOpenSplit ? (
+        <button
+          type="button"
+          onClick={onOpenSplit}
+          className={classNames(
+            "inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg transition-colors glass-btn",
+            isDark ? "text-cyan-200 hover:text-cyan-100" : "text-cyan-700 hover:text-cyan-800",
+          )}
+          aria-label={t("presentationOpenSplitViewAction", { defaultValue: "Open beside chat" })}
+          title={t("presentationOpenSplitViewAction", { defaultValue: "Open beside chat" })}
+        >
+          <SplitViewIcon size={16} />
+        </button>
+      ) : null}
     </>
   );
+
+  useEffect(() => {
+    setWebPreviewMode(preferredWebPreviewMode);
+  }, [preferredWebPreviewMode, slotId, card?.published_at]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!allowLiveBrowser) return undefined;
+
+    const run = async () => {
+      const existing = await fetchPresentationBrowserSurfaceSession(groupId, slotId);
+      if (cancelled || !existing.ok) return;
+      if (shouldAutoOpenInteractivePresentation(allowLiveBrowser, existing.result.browser_surface)) {
+        setWebPreviewMode("interactive");
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [allowLiveBrowser, groupId, slotId, card?.published_at]);
 
   useEffect(() => {
     if (!isOpen || !isWorkspaceLinked) return;
@@ -360,6 +433,12 @@ export function PresentationViewerModal({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (variant !== "modal") {
+      setIsExpanded(false);
+    }
+  }, [variant]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -633,19 +712,22 @@ export function PresentationViewerModal({
       )}
     />
   ) : card.card_type === "web_preview" ? (
-    <PresentationWebPreviewPanel
-      key={`${slot?.slot_id || ""}:${card.published_at}:${href}`}
-      groupId={groupId}
-      slotId={slot?.slot_id || ""}
-      title={card.title}
-      href={href}
-      isDark={isDark}
-      useSandboxedPreview={useSandboxedPreview}
-      allowLiveBrowser={allowLiveBrowser}
-      refreshNonce={refreshTick}
-      viewportClassName={immersiveViewportClassName}
-      onInteractiveFrameUpdate={setBrowserFrameForQuote}
-    />
+    isOpen ? (
+      <PresentationWebPreviewPanel
+        key={`${slot?.slot_id || ""}:${card.published_at}:${href}`}
+        groupId={groupId}
+        slotId={slot?.slot_id || ""}
+        title={card.title}
+        href={href}
+        isDark={isDark}
+        useSandboxedPreview={useSandboxedPreview}
+        allowLiveBrowser={allowLiveBrowser}
+        mode={webPreviewMode}
+        refreshNonce={refreshTick}
+        viewportClassName={immersiveViewportClassName}
+        onInteractiveFrameUpdate={setBrowserFrameForQuote}
+      />
+    ) : null
   ) : (
     <div className={classNames("rounded-3xl border p-6", isDark ? "border-white/10 bg-slate-950/60" : "border-black/10 bg-white/90")}>
       <div className={classNames("text-base font-semibold", isDark ? "text-slate-100" : "text-gray-900")}>
@@ -657,22 +739,12 @@ export function PresentationViewerModal({
     </div>
   );
 
-  return (
-    <ModalFrame
-      isOpen={isOpen}
-      isDark={isDark}
-      onClose={onClose}
-      titleId="presentation-viewer-title"
-      title={card?.title || t("presentationTitle", { defaultValue: "Presentation" })}
-      closeAriaLabel={t("presentationCloseViewer", { defaultValue: "Close presentation viewer" })}
-      panelClassName={viewerPanelClassName}
-      headerActions={headerActions}
-      modalRef={modalRef}
-    >
+  const viewerBody = (
       <div className="flex min-h-0 flex-1 flex-col">
+        {variant === "modal" ? (
         <div
           className={classNames(
-            "flex flex-wrap items-center gap-2 border-b px-5 py-3 text-xs",
+            "flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs",
             isDark ? "border-white/10 text-slate-400" : "border-black/10 text-gray-600",
           )}
         >
@@ -689,6 +761,53 @@ export function PresentationViewerModal({
               {card.source_label ? <span>{card.source_label}</span> : null}
               {publishedAt ? <span>{publishedAt}</span> : null}
               <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+                {showWebPreviewModeToggle ? (
+                  <div
+                    className={classNames(
+                      "inline-flex items-center rounded-full border p-0.5",
+                      isDark ? "border-white/10 bg-white/[0.04]" : "border-black/10 bg-black/[0.03]",
+                    )}
+                    role="group"
+                    aria-label={previewModeLabel}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setWebPreviewMode("embedded")}
+                      className={classNames(
+                        "rounded-full px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition-colors",
+                        webPreviewMode === "embedded"
+                          ? isDark
+                            ? "bg-slate-100 text-slate-950"
+                            : "bg-slate-900 text-white"
+                          : isDark
+                            ? "text-slate-300 hover:bg-white/8"
+                            : "text-gray-600 hover:bg-black/6",
+                      )}
+                      aria-pressed={webPreviewMode === "embedded"}
+                      title={embeddedModeHelp}
+                    >
+                      {embeddedModeLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWebPreviewMode("interactive")}
+                      className={classNames(
+                        "rounded-full px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition-colors",
+                        webPreviewMode === "interactive"
+                          ? isDark
+                            ? "bg-cyan-400/18 text-cyan-50"
+                            : "bg-cyan-50 text-cyan-700"
+                          : isDark
+                            ? "text-slate-300 hover:bg-white/8"
+                            : "text-gray-600 hover:bg-black/6",
+                      )}
+                      aria-pressed={webPreviewMode === "interactive"}
+                      title={interactiveModeHelp}
+                    >
+                      {interactiveModeLabel}
+                    </button>
+                  </div>
+                ) : null}
                 {copyReferenceValue ? (
                   <button
                     type="button"
@@ -702,10 +821,10 @@ export function PresentationViewerModal({
                     <CopyIcon size={16} />
                   </button>
                 ) : null}
-                {!readOnly ? (
+                {!readOnly && onReplaceSlot ? (
                   <button
                     type="button"
-                    onClick={() => slot && onReplaceSlot?.(slot.slot_id)}
+                    onClick={() => slot && onReplaceSlot(slot.slot_id)}
                     className={iconButtonClassName}
                     aria-label={editActionLabel}
                     title={editActionLabel}
@@ -713,10 +832,10 @@ export function PresentationViewerModal({
                     <EditIcon size={16} />
                   </button>
                 ) : null}
-                {!readOnly ? (
+                {!readOnly && onClearSlot ? (
                   <button
                     type="button"
-                    onClick={() => slot && onClearSlot?.(slot.slot_id)}
+                    onClick={() => slot && onClearSlot(slot.slot_id)}
                     className={destructiveIconButtonClassName}
                     aria-label={clearActionLabel}
                     title={clearActionLabel}
@@ -730,8 +849,9 @@ export function PresentationViewerModal({
             <span>{t("presentationMissingCard", { defaultValue: "This presentation slot is empty." })}</span>
           )}
         </div>
+        ) : null}
 
-        <div className="relative min-h-0 flex-1 overflow-hidden px-5 py-5">
+        <div className={classNames("relative min-h-0 flex-1 overflow-hidden", variant === "split" ? "px-2 py-2" : "px-4 py-3")}>
           {showSnapshotCompare ? (
             <div className="mb-3 flex items-center gap-2 lg:hidden">
               <button
@@ -922,6 +1042,195 @@ export function PresentationViewerModal({
           ) : null}
         </div>
       </div>
+  );
+
+  if (variant === "split") {
+    return (
+      <section
+        className={classNames(
+          "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+          isDark ? "bg-slate-950/18" : "bg-white/62",
+        )}
+        aria-label={t("presentationTitle", { defaultValue: "Presentation" })}
+      >
+        <div
+          className={classNames(
+            "flex items-center justify-between gap-2 border-b px-3 py-1.5",
+            isDark ? "border-white/8" : "border-black/8",
+          )}
+        >
+          <div className="min-w-0 flex items-center gap-2">
+            <div className={classNames("truncate text-sm font-semibold", isDark ? "text-slate-100" : "text-gray-900")}>
+              {card?.title || t("presentationTitle", { defaultValue: "Presentation" })}
+            </div>
+            {card ? (
+              <span className={classNames("flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium", isDark ? "bg-cyan-500/10 text-cyan-200" : "bg-cyan-50 text-cyan-700")}>
+                {getCardTypeLabel(card.card_type, t)}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            {showWebPreviewModeToggle ? (
+              <div
+                className={classNames(
+                  "inline-flex items-center rounded-full border p-0.5",
+                  isDark ? "border-white/10 bg-white/[0.04]" : "border-black/10 bg-black/[0.03]",
+                )}
+                role="group"
+                aria-label={previewModeLabel}
+              >
+                <button
+                  type="button"
+                  onClick={() => setWebPreviewMode("embedded")}
+                  className={classNames(
+                    "rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap transition-colors",
+                    webPreviewMode === "embedded"
+                      ? isDark
+                        ? "bg-slate-100 text-slate-950"
+                        : "bg-slate-900 text-white"
+                      : isDark
+                        ? "text-slate-300 hover:bg-white/8"
+                        : "text-gray-600 hover:bg-black/6",
+                  )}
+                  aria-pressed={webPreviewMode === "embedded"}
+                  title={embeddedModeHelp}
+                >
+                  {embeddedModeLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWebPreviewMode("interactive")}
+                  className={classNames(
+                    "rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap transition-colors",
+                    webPreviewMode === "interactive"
+                      ? isDark
+                        ? "bg-cyan-400/18 text-cyan-50"
+                        : "bg-cyan-50 text-cyan-700"
+                      : isDark
+                        ? "text-slate-300 hover:bg-white/8"
+                        : "text-gray-600 hover:bg-black/6",
+                  )}
+                  aria-pressed={webPreviewMode === "interactive"}
+                  title={interactiveModeHelp}
+                >
+                  {interactiveModeLabel}
+                </button>
+              </div>
+            ) : null}
+            {canRefresh ? (
+              <button
+                type="button"
+                onClick={() => setRefreshTick((value) => value + 1)}
+                className={classNames(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                )}
+                aria-label={refreshActionLabel}
+                title={refreshActionLabel}
+              >
+                <RefreshIcon size={14} />
+              </button>
+            ) : null}
+            {copyReferenceValue ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCopyReference();
+                }}
+                className={classNames(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  copiedReference
+                    ? isDark ? "bg-cyan-500/20 text-cyan-100" : "bg-cyan-50 text-cyan-700"
+                    : isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                )}
+                aria-label={copyActionLabel}
+                title={copyActionLabel}
+              >
+                <CopyIcon size={14} />
+              </button>
+            ) : null}
+            {onOpenWindow ? (
+              <button
+                type="button"
+                onClick={onOpenWindow}
+                className={classNames(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  isDark ? "bg-slate-800 text-cyan-200 hover:bg-slate-700 hover:text-cyan-100" : "bg-gray-100 text-cyan-700 hover:bg-gray-200 hover:text-cyan-800",
+                )}
+                aria-label={t("presentationOpenWindowAction", { defaultValue: "Open in window" })}
+                title={t("presentationOpenWindowAction", { defaultValue: "Open in window" })}
+              >
+                <WindowViewIcon size={14} />
+              </button>
+            ) : null}
+            {!readOnly && onReplaceSlot && slot ? (
+              <button
+                type="button"
+                onClick={() => onReplaceSlot(slot.slot_id)}
+                className={classNames(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                )}
+                aria-label={editActionLabel}
+                title={editActionLabel}
+              >
+                <EditIcon size={14} />
+              </button>
+            ) : null}
+            {!readOnly && onClearSlot && slot ? (
+              <button
+                type="button"
+                onClick={() => onClearSlot(slot.slot_id)}
+                className={classNames(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  isDark ? "bg-rose-500/15 text-rose-200 hover:bg-rose-500/25" : "bg-rose-50 text-rose-700 hover:bg-rose-100",
+                )}
+                aria-label={clearActionLabel}
+                title={clearActionLabel}
+              >
+                <TrashIcon size={14} />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className={classNames(
+                "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+              )}
+              aria-label={t("presentationCloseSplitAction", { defaultValue: "Close presentation" })}
+              title={t("presentationCloseSplitAction", { defaultValue: "Close presentation" })}
+            >
+              <CloseIcon size={14} />
+            </button>
+          </div>
+        </div>
+        {viewerBody}
+      </section>
+    );
+  }
+
+  return (
+    <ModalFrame
+      isOpen={isOpen}
+      isDark={isDark}
+      onClose={onClose}
+      titleId="presentation-viewer-title"
+      title={card?.title || t("presentationTitle", { defaultValue: "Presentation" })}
+      closeAriaLabel={t("presentationCloseViewer", { defaultValue: "Close presentation viewer" })}
+      panelClassName={viewerPanelClassName}
+      headerActions={modalHeaderActions}
+      modalRef={modalRef}
+    >
+      {viewerBody}
     </ModalFrame>
   );
+}
+
+export function PresentationViewerModal(props: PresentationViewerModalProps) {
+  return <PresentationViewer variant="modal" {...props} />;
+}
+
+export function PresentationViewerSplitPanel(props: PresentationViewerSplitPanelProps) {
+  return <PresentationViewer variant="split" {...props} />;
 }

@@ -32,6 +32,31 @@ def _trim_text(value: Any, *, max_chars: int) -> str:
     return text[: max_chars - 3].rstrip() + "..."
 
 
+_BOOTSTRAP_INTERRUPT_NOTIFY_KINDS = {
+    "actor_idle",
+    "auto_idle",
+    "automation",
+    "help_nudge",
+    "keepalive",
+    "nudge",
+    "pet_review",
+    "silence_check",
+    "standup",
+}
+
+
+def _bootstrap_signal_family(*, item: Dict[str, Any], data: Dict[str, Any]) -> str:
+    kind = str(item.get("kind") or "").strip()
+    if kind == "chat.message":
+        return "work_chat"
+    if kind == "system.notify":
+        notify_kind = str(data.get("kind") or "").strip().lower()
+        if data.get("requires_ack") is True or notify_kind in _BOOTSTRAP_INTERRUPT_NOTIFY_KINDS:
+            return "interrupt"
+        return "notify"
+    return "other"
+
+
 def _strip_reserved_runtime_help_sections(markdown: str) -> str:
     raw = str(markdown or "")
     if not raw:
@@ -496,16 +521,19 @@ def _build_bootstrap_inbox_preview(*, inbox: Dict[str, Any], limit: int) -> Dict
             if isinstance(data.get("message"), str) and str(data.get("message") or "").strip()
             else data.get("title")
         )
-        preview.append(
-            {
-                "id": str(item.get("id") or ""),
-                "ts": str(item.get("ts") or ""),
-                "by": str(item.get("by") or ""),
-                "kind": str(item.get("kind") or ""),
-                "reply_required": bool(data.get("reply_required") is True or data.get("requires_ack") is True),
-                "text_preview": _trim_text(text_source, max_chars=220),
-            }
-        )
+        entry = {
+            "id": str(item.get("id") or ""),
+            "ts": str(item.get("ts") or ""),
+            "by": str(item.get("by") or ""),
+            "kind": str(item.get("kind") or ""),
+            "signal_family": _bootstrap_signal_family(item=item, data=data),
+            "reply_required": bool(data.get("reply_required") is True or data.get("requires_ack") is True),
+            "text_preview": _trim_text(text_source, max_chars=220),
+        }
+        notify_kind = str(data.get("kind") or "").strip()
+        if notify_kind:
+            entry["notify_kind"] = notify_kind
+        preview.append(entry)
     return {
         "messages": preview,
         "truncated": has_more,
@@ -617,7 +645,7 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             [
                 "- Capsule skill is runtime capsule activation, not a full local skill-package install.",
                 "- Runtime success is mainly visible via `capability_state.active_capsule_skills`; `dynamic_tools` may stay unchanged.",
-                "- If you need full local skill scripts or assets, install a normal skill package into `$CODEX_HOME/skills`.",
+                "- If you need full local skill scripts or assets, install a normal skill package into Codex's skills directory (`$CODEX_HOME/skills` if `CODEX_HOME` is explicitly set).",
             ]
         )
         sections.append("\n".join(lines).rstrip())
@@ -710,7 +738,12 @@ def bootstrap(
             "help": "cccc_help()",
             "project_info": "cccc_project_info()",
             "context_get": "cccc_context_get()",
+            "inbox_list": 'cccc_inbox_list(kind_filter="all")',
             "memory_search": 'cccc_memory(action="search", query=...)',
+            "interrupt_triage": (
+                'If inbox_preview messages have signal_family="interrupt", treat them as coordination interrupts: '
+                'refresh or reply, then resume the current task unless priority changed.'
+            ),
         },
     }
 

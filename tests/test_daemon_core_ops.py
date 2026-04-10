@@ -51,7 +51,25 @@ class TestDaemonCoreOps(unittest.TestCase):
             self.assertFalse(denied.ok)
             self.assertEqual(str(getattr(denied, "error", None).code), "permission_denied")
 
-            update, _ = self._call("observability_update", {"by": "user", "patch": {"developer_mode": True}})
+            update, _ = self._call(
+                "observability_update",
+                {
+                    "by": "user",
+                    "patch": {
+                        "developer_mode": True,
+                        "logger_levels": {
+                            "asyncio": "warning",
+                            "cccc.daemon.group_space_ops": "debug",
+                            "": "info",
+                            "httpx": "bogus",
+                        },
+                        "runtime_visibility": {
+                            "peer_runtime": "hidden",
+                            "pet_runtime": "visible",
+                        },
+                    },
+                },
+            )
             self.assertTrue(update.ok, getattr(update, "error", None))
 
             get, _ = self._call("observability_get", {})
@@ -60,6 +78,16 @@ class TestDaemonCoreOps(unittest.TestCase):
             self.assertIsInstance(obs, dict)
             assert isinstance(obs, dict)
             self.assertEqual(bool(obs.get("developer_mode")), True)
+            self.assertEqual(
+                obs.get("logger_levels"),
+                {
+                    "asyncio": "WARNING",
+                    "cccc.daemon.group_space_ops": "DEBUG",
+                },
+            )
+            runtime_visibility = obs.get("runtime_visibility") if isinstance(obs.get("runtime_visibility"), dict) else {}
+            self.assertEqual(str(runtime_visibility.get("peer_runtime") or ""), "hidden")
+            self.assertEqual(str(runtime_visibility.get("pet_runtime") or ""), "visible")
         finally:
             cleanup()
 

@@ -15,6 +15,7 @@ from .slack import SlackAdapter
 from .discord import DiscordAdapter
 from .feishu import FeishuAdapter
 from .dingtalk import DingTalkAdapter
+from .weixin import WeixinAdapter
 
 __all__ = [
     "IMAdapter",
@@ -23,4 +24,5 @@ __all__ = [
     "DiscordAdapter",
     "FeishuAdapter",
     "DingTalkAdapter",
+    "WeixinAdapter",
 ]

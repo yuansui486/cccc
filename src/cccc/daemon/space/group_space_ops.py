@@ -12,7 +12,15 @@ import re
 import threading
 from typing import Any, Callable, Deque, Dict, Optional, Tuple
 
-from ...contracts.v1 import DaemonError, DaemonResponse, SpaceBinding, SpaceLane, SystemNotifyData
+from ...contracts.v1 import (
+    DEFAULT_ASYNC_COMPLETION_SIGNAL,
+    DaemonError,
+    DaemonResponse,
+    SpaceBinding,
+    SpaceLane,
+    SystemNotifyData,
+    build_async_result_fields,
+)
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
 from ...kernel.permissions import require_group_permission
@@ -292,6 +300,16 @@ def _float_or_default(raw: Any, *, default: float, lo: float, hi: float) -> floa
 def _artifact_status_completed(raw: Any) -> bool:
     status = str(raw or "").strip().lower()
     return status in {"completed", "succeeded", "ready", "done"}
+
+
+def _artifact_status_terminal(raw: Any) -> bool:
+    status = str(raw or "").strip().lower()
+    return status in {"completed", "succeeded", "ready", "done", "failed", "canceled", "cancelled", "error"}
+
+
+def _space_job_state_completed(raw: Any) -> bool:
+    state = str(raw or "").strip().lower()
+    return state in {"succeeded", "failed", "canceled"}
 
 
 def _safe_path_fragment(raw: Any, *, fallback: str) -> str:
@@ -928,7 +946,7 @@ def _emit_artifact_async_notify(
             "task_id": str(task_id or ""),
             "status": str(status or ""),
             "output_path": str(output_path or ""),
-            "completion_signal": "system.notify",
+            "completion_signal": DEFAULT_ASYNC_COMPLETION_SIGNAL,
             "polling_discouraged": True,
             "recommended_next_action": recommended_next_action,
             "completion_guidance": completion_guidance,
@@ -1595,11 +1613,13 @@ def handle_group_space_ingest(args: Dict[str, Any]) -> DaemonResponse:
         normalized_source_ids = [str(item or "").strip() for item in source_ids if str(item or "").strip()]
         if source_id and source_id not in normalized_source_ids:
             normalized_source_ids = [source_id, *normalized_source_ids]
+        job_state = str(final_job.get("state") or "").strip().lower()
+        job_completed = _space_job_state_completed(job_state)
         response_payload = {
             "group_id": group.group_id,
             "lane": lane,
             "job_id": str(final_job.get("job_id") or ""),
-            "accepted": True,
+            **build_async_result_fields(accepted=not job_completed, completed=job_completed),
             "deduped": bool(deduped),
             "job": final_job,
             "ingest_result": ingest_result,
@@ -1999,13 +2019,16 @@ def handle_group_space_artifact(args: Dict[str, Any]) -> DaemonResponse:
                     "task_id": "",
                     "status": "queued",
                     "wait": False,
-                    "queued": True,
-                    "accepted": True,
-                    "background": True,
-                    "completion_signal": "system.notify",
-                    "recommended_next_action": "wait_for_notify",
-                    "polling_discouraged": True,
-                    "wait_guidance": _artifact_wait_guidance_text(),
+                    **build_async_result_fields(
+                        accepted=True,
+                        completed=False,
+                        queued=True,
+                        background=True,
+                        completion_signal=DEFAULT_ASYNC_COMPLETION_SIGNAL,
+                        recommended_next_action="wait_for_notify",
+                        polling_discouraged=True,
+                        wait_guidance=_artifact_wait_guidance_text(),
+                    ),
                     "saved_to_space": False,
                     "output_path": "",
                     "generate_result": {},
@@ -2031,13 +2054,16 @@ def handle_group_space_artifact(args: Dict[str, Any]) -> DaemonResponse:
                     "task_id": "",
                     "status": "pending",
                     "wait": False,
-                    "queued": False,
-                    "accepted": True,
-                    "background": True,
-                    "completion_signal": "system.notify",
-                    "recommended_next_action": "wait_for_notify",
-                    "polling_discouraged": True,
-                    "wait_guidance": _artifact_wait_guidance_text(),
+                    **build_async_result_fields(
+                        accepted=True,
+                        completed=False,
+                        queued=False,
+                        background=True,
+                        completion_signal=DEFAULT_ASYNC_COMPLETION_SIGNAL,
+                        recommended_next_action="wait_for_notify",
+                        polling_discouraged=True,
+                        wait_guidance=_artifact_wait_guidance_text(),
+                    ),
                     "saved_to_space": False,
                     "output_path": "",
                     "generate_result": {},
@@ -2116,6 +2142,7 @@ def handle_group_space_artifact(args: Dict[str, Any]) -> DaemonResponse:
         if next_req is not None:
             _start_generate_worker(next_req)
 
+        artifact_completed = _artifact_status_terminal(artifact_status)
         return DaemonResponse(
             ok=True,
             result={
@@ -2129,8 +2156,16 @@ def handle_group_space_artifact(args: Dict[str, Any]) -> DaemonResponse:
                 "task_id": task_id,
                 "status": artifact_status,
                 "wait": bool(wait_for_completion),
-                "queued": False,
-                "accepted": True,
+                **build_async_result_fields(
+                    accepted=not artifact_completed,
+                    completed=artifact_completed,
+                    queued=False,
+                    background=(True if not artifact_completed else None),
+                    completion_signal=DEFAULT_ASYNC_COMPLETION_SIGNAL,
+                    recommended_next_action="wait_for_notify",
+                    polling_discouraged=True,
+                    wait_guidance=_artifact_wait_guidance_text(),
+                ),
                 "saved_to_space": bool(save_to_space and bool(final_output_path)),
                 "output_path": final_output_path,
                 "generate_result": generate_result,

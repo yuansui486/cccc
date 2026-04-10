@@ -9,12 +9,14 @@ const GLOBAL_REFRESH_EVENT_KINDS = new Set([
   "group.updated",
   "group.deleted",
   "group.state_changed",
+  "actor.remove",
   "actor.start",
   "actor.stop",
   "actor.restart",
 ]);
 
 const ACTOR_REFRESH_EVENT_KINDS = new Set([
+  "actor.remove",
   "actor.start",
   "actor.stop",
   "actor.restart",

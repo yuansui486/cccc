@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -124,6 +125,36 @@ def _cleanup_daemon_state_files(home: Path) -> None:
         path.unlink(missing_ok=True)
 
 
+def _same_home_daemon_lock_holder_pids(home: Path) -> list[int]:
+    if os.name != "posix":
+        return []
+    if not shutil.which("lsof"):
+        return []
+    lock_path = home / "daemon" / "ccccd.lock"
+    try:
+        proc = subprocess.run(
+            ["lsof", "-t", str(lock_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return []
+    if int(proc.returncode or 0) not in {0, 1}:
+        return []
+
+    pids: list[int] = []
+    for line in str(proc.stdout or "").splitlines():
+        text = str(line or "").strip()
+        if not text.isdigit():
+            continue
+        pid = int(text)
+        if pid <= 0 or pid == os.getpid():
+            continue
+        pids.append(pid)
+    return sorted(set(pids))
+
+
 def _same_home_daemon_pids(home: Path) -> list[int]:
     if os.name != "posix":
         return []
@@ -132,7 +163,7 @@ def _same_home_daemon_pids(home: Path) -> list[int]:
     default_home = str(ensure_home().resolve())
     proc_root = Path("/proc")
     if not proc_root.is_dir():
-        return []
+        return _same_home_daemon_lock_holder_pids(home)
     pids: list[int] = []
     try:
         proc_dirs = list(proc_root.iterdir())

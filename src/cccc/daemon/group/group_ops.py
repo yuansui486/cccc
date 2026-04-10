@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ...kernel.active import load_active, set_active_group_id
 from ...kernel.group import delete_group, detach_scope_from_group, load_group, set_active_scope, update_group
 from ...kernel.ledger import append_event
@@ -122,6 +124,8 @@ def handle_group_delete(
     try:
         require_group_permission(group, by=by, action="group.delete")
         stop_im_bridges_for_group(group_id)
+        codex_app_supervisor.stop_group(group_id=group_id)
+        claude_app_supervisor.stop_group(group_id=group_id)
         pty_runner.SUPERVISOR.stop_group(group_id=group_id)
         headless_runner.SUPERVISOR.stop_group(group_id=group_id)
         delete_group_private_env(group_id)

@@ -23,7 +23,7 @@ from ... import __version__
 from ...daemon.server import call_daemon
 from ...kernel.access_tokens import list_access_tokens, lookup_access_token
 from ...paths import ensure_home
-from ...util.obslog import setup_root_json_logging
+from ...util.obslog import apply_logger_levels, setup_root_json_logging
 from ...util.process import pid_is_alive, terminate_pid
 from .runtime_control import (
     WEB_RUNTIME_RESTART_EXIT_CODE,
@@ -58,7 +58,7 @@ def _close_web_logging() -> None:
     _WEB_LOG_PATH = None
 
 
-def _apply_web_logging(*, home: Path, level: str) -> None:
+def _apply_web_logging(*, home: Path, level: str, logger_levels: Optional[Dict[str, str]] = None) -> None:
     global _WEB_LOG_FH, _WEB_LOG_PATH
     try:
         d = home / "daemon"
@@ -70,10 +70,12 @@ def _apply_web_logging(*, home: Path, level: str) -> None:
             _WEB_LOG_FH = p.open("a", encoding="utf-8")
             _WEB_LOG_PATH = p
         setup_root_json_logging(component="web", level=level, stream=_WEB_LOG_FH, force=True)
+        apply_logger_levels(logger_levels)
     except Exception:
         # Fall back to stderr if file logging isn't possible.
         try:
             setup_root_json_logging(component="web", level=level, force=True)
+            apply_logger_levels(logger_levels)
         except Exception:
             pass
 
@@ -313,14 +315,30 @@ def create_app() -> FastAPI:
         resp = call_daemon({"op": "observability_get"})
         obs = (resp.get("result") or {}).get("observability") if resp.get("ok") else None
         level = "INFO"
+        logger_levels: Dict[str, str] = {}
         if isinstance(obs, dict):
-            level = str(obs.get("log_level") or "INFO").strip().upper() or "INFO"
-            if obs.get("developer_mode") and level == "INFO":
-                level = "DEBUG"
-        _apply_web_logging(home=home, level=level)
+            requested_level = str(obs.get("log_level") or "INFO").strip().upper() or "INFO"
+            effective_level = "DEBUG" if obs.get("developer_mode") and requested_level == "INFO" else requested_level
+            level = "INFO" if effective_level == "DEBUG" else effective_level
+            if isinstance(obs.get("logger_levels"), dict):
+                logger_levels = {
+                    str(name): str(value)
+                    for name, value in obs.get("logger_levels", {}).items()
+                }
+            if effective_level == "DEBUG":
+                logger_levels.setdefault("cccc", "DEBUG")
+                for noisy_logger in (
+                    "asyncio",
+                    "httpcore",
+                    "httpx",
+                    "cccc.delivery",
+                    "cccc.providers.notebooklm._vendor.notebooklm",
+                ):
+                    logger_levels.setdefault(noisy_logger, "INFO")
+        _apply_web_logging(home=home, level=level, logger_levels=logger_levels)
     except Exception:
         try:
-            _apply_web_logging(home=home, level="INFO")
+            _apply_web_logging(home=home, level="INFO", logger_levels={})
         except Exception:
             pass
 

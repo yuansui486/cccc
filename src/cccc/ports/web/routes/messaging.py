@@ -92,6 +92,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "by": req.by,
                 "to": list(req.to),
                 "path": req.path,
+                "quote_text": req.quote_text,
                 "priority": req.priority,
                 "reply_required": _normalize_reply_required(req.reply_required),
                 "src_group_id": req.src_group_id,
@@ -328,6 +329,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if len(name) > 64 and "_" in name:
             # blob name format: <sha256>_<filename>
             download_name = name.split("_", 1)[1] or name
-        return FileResponse(path=abs_path, filename=download_name)
+        response = FileResponse(path=abs_path, filename=download_name)
+        # Blob names are content-addressed (<sha256>_<filename>), so they are safe to cache aggressively.
+        response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+        return response
 
     return [group_router]

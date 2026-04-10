@@ -1,4 +1,5 @@
 import type { MessageAttachment } from "../../types";
+import { withAuthToken } from "../../services/api/base";
 import { classNames } from "../../utils/classNames";
 import { isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
 import { FileIcon } from "../Icons";
@@ -31,9 +32,9 @@ export function MessageAttachments({
           {imageAttachments.map((attachment, index) => {
             const parts = String(attachment.path || "").split("/");
             const blobName = parts[parts.length - 1] || "";
-            const href =
-              attachment.local_preview_url ||
-              `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`;
+            const href = attachment.local_preview_url || withAuthToken(
+              `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
+            );
             const label = attachment.title || blobName || "image";
             return (
               <ImagePreview
@@ -53,9 +54,9 @@ export function MessageAttachments({
           {fileAttachments.map((attachment, index) => {
             const parts = String(attachment.path || "").split("/");
             const blobName = parts[parts.length - 1] || "";
-            const href =
-              attachment.local_preview_url ||
-              `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`;
+            const href = attachment.local_preview_url || withAuthToken(
+              `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
+            );
             const label = attachment.title || blobName || "file";
             return (
               <a

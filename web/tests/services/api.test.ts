@@ -36,6 +36,89 @@ vi.stubGlobal("window", {
 });
 vi.stubGlobal("sessionStorage", sessionStorageMock);
 
+describe("api error normalization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      location: { search: "", protocol: "http:", host: "localhost" },
+    });
+    vi.stubGlobal("sessionStorage", sessionStorageMock);
+  });
+
+  it("keeps regular API errors unchanged", async () => {
+    const { formatApiErrorMessage } = await import("../../src/services/api");
+
+    expect(
+      formatApiErrorMessage({
+        code: "permission_denied",
+        message: "permission denied",
+      })
+    ).toBe("permission denied");
+  });
+
+  it("summarizes daemon transport diagnostics into the message", async () => {
+    const { formatApiErrorMessage } = await import("../../src/services/api");
+
+    expect(
+      formatApiErrorMessage({
+        code: "daemon_unavailable",
+        message: "ccccd unavailable",
+        details: {
+          transport: "tcp",
+          endpoint: { host: "127.0.0.1", port: 9001 },
+          phase: "connect",
+          reason: "os_error",
+        },
+      })
+    ).toBe("ccccd unavailable · tcp 127.0.0.1:9001 · connect os error");
+  });
+
+  it("normalizes daemon_unavailable messages from response bodies", async () => {
+    vi.stubGlobal("window", { location: { search: "" } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error: {
+              code: "daemon_unavailable",
+              message: "ccccd unavailable",
+              details: {
+                transport: "unix",
+                endpoint: { path: "/tmp/ccccd.sock" },
+                phase: "read",
+                reason: "timeout",
+              },
+            },
+          }),
+          {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      )
+    );
+
+    const { apiJson } = await import("../../src/services/api");
+    const resp = await apiJson("/api/v1/ping");
+
+    expect(resp.ok).toBe(false);
+    if (resp.ok) {
+      throw new Error("expected error response");
+    }
+    expect(resp.error.message).toBe("ccccd unavailable · unix /tmp/ccccd.sock · read timeout");
+    expect(resp.error.details).toEqual({
+      transport: "unix",
+      endpoint: { path: "/tmp/ccccd.sock" },
+      phase: "read",
+      reason: "timeout",
+    });
+  });
+});
+
 describe("api.fetchActors", () => {
   beforeEach(() => {
     vi.resetModules();

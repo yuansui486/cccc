@@ -1,4 +1,4 @@
-import type { IMConfig, IMPlatform, IMStatus } from "../../types";
+import type { IMConfig, IMPlatform, IMStatus, WeixinLoginStatus } from "../../types";
 import { apiJson } from "./base";
 
 export interface IMAuthorizedChat {
@@ -42,6 +42,8 @@ export async function setIMConfig(
     dingtalk_robot_code?: string;
     wecom_bot_id?: string;
     wecom_secret?: string;
+    weixin_account_id?: string;
+    weixin_command?: string;
   },
 ) {
   const body: Record<string, unknown> = {
@@ -73,6 +75,11 @@ export async function setIMConfig(
     body.wecom_secret = extra.wecom_secret;
   }
 
+  if (platform === "weixin" && extra) {
+    body.weixin_account_id = extra.weixin_account_id;
+    body.weixin_command = extra.weixin_command;
+  }
+
   return apiJson("/api/im/set", {
     method: "POST",
     body: JSON.stringify(body),
@@ -95,6 +102,24 @@ export async function startIMBridge(groupId: string) {
 
 export async function stopIMBridge(groupId: string) {
   return apiJson("/api/im/stop", {
+    method: "POST",
+    body: JSON.stringify({ group_id: groupId }),
+  });
+}
+
+export async function fetchWeixinLoginStatus(groupId: string) {
+  return apiJson<WeixinLoginStatus>(`/api/im/weixin/login/status?group_id=${encodeURIComponent(groupId)}`);
+}
+
+export async function startWeixinLogin(groupId: string) {
+  return apiJson<WeixinLoginStatus>("/api/im/weixin/login/start", {
+    method: "POST",
+    body: JSON.stringify({ group_id: groupId }),
+  });
+}
+
+export async function logoutWeixin(groupId: string) {
+  return apiJson<WeixinLoginStatus>("/api/im/weixin/logout", {
     method: "POST",
     body: JSON.stringify({ group_id: groupId }),
   });

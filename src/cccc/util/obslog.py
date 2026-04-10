@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, TextIO
 
 
 _CONFIGURED: Dict[str, bool] = {}
+_LOGGER_LEVEL_OVERRIDES: Dict[str, int] = {}
 
 
 def _utc_ts_iso(ts: float) -> str:
@@ -99,7 +100,9 @@ def setup_root_json_logging(
                 pass
 
     handler = logging.StreamHandler(stream or sys.stderr)
-    handler.setLevel(_parse_level(level))
+    # Keep filtering on the logger side so per-logger DEBUG overrides still work
+    # when the process default level stays at INFO.
+    handler.setLevel(logging.NOTSET)
     handler.setFormatter(JsonlFormatter(component=component))
 
     # Avoid duplicate handlers on repeated calls (common in reload/dev).
@@ -108,9 +111,32 @@ def setup_root_json_logging(
             # If it already looks like our JSONL handler, keep it.
             fmt = getattr(h, "formatter", None)
             if isinstance(fmt, JsonlFormatter):
-                h.setLevel(_parse_level(level))
+                h.setLevel(logging.NOTSET)
                 root.setLevel(_parse_level(level))
                 return
 
     root.addHandler(handler)
 
+
+def apply_logger_levels(logger_levels: Optional[Dict[str, str]]) -> None:
+    """Apply explicit logger-level overrides and clear stale ones.
+
+    Logger names omitted from the latest call are reset to NOTSET so they
+    inherit from their nearest configured parent again.
+    """
+    desired: Dict[str, int] = {}
+    if isinstance(logger_levels, dict):
+        for name, level in logger_levels.items():
+            logger_name = str(name or "").strip()
+            if not logger_name:
+                continue
+            desired[logger_name] = _parse_level(str(level or "").strip().upper(), logging.NOTSET)
+
+    stale = set(_LOGGER_LEVEL_OVERRIDES) - set(desired)
+    for logger_name in stale:
+        logging.getLogger(logger_name).setLevel(logging.NOTSET)
+        _LOGGER_LEVEL_OVERRIDES.pop(logger_name, None)
+
+    for logger_name, level in desired.items():
+        logging.getLogger(logger_name).setLevel(level)
+        _LOGGER_LEVEL_OVERRIDES[logger_name] = level

@@ -8,14 +8,17 @@ from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
 from ...kernel.messaging import get_default_send_to
-from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor, sync_pet_actor
+from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 from ...kernel.permissions import require_group_permission
 from ...kernel.terminal_transcript import apply_terminal_transcript_patch, get_terminal_transcript_settings
+from ..actors.actor_profile_runtime import resolve_linked_actor_before_start
 from ..pet.pet_runtime_ops import (
+    capture_pet_actor_state,
     is_pet_actor_running,
     pet_runtime_changed,
-    restore_pet_actor_doc,
+    restore_pet_actor_state,
     stop_pet_actor_runtime,
+    sync_pet_actor_from_foreman,
 )
 from ..pet.review_scheduler import cancel_pet_review, request_pet_review
 from ..pet.profile_refresh import maybe_request_pet_profile_refresh
@@ -60,6 +63,11 @@ def handle_group_settings_update(
     *,
     effective_runner_kind: Callable[[str], str],
     start_actor_process: Callable[..., dict[str, Any]],
+    load_actor_private_env: Callable[[str, str], Dict[str, str]],
+    update_actor_private_env: Callable[..., Dict[str, str]],
+    delete_actor_private_env: Callable[[str, str], None],
+    get_actor_profile: Callable[[str], Optional[Dict[str, Any]]],
+    load_actor_profile_secrets: Callable[[str], Dict[str, str]],
     remove_headless_state: Callable[[str, str], None],
     remove_pty_state_if_pid: Callable[..., None],
 ) -> DaemonResponse:
@@ -151,7 +159,11 @@ def handle_group_settings_update(
         if features_patch:
             features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
             pet_actor_before = get_pet_actor(group) if "desktop_pet_enabled" in features_patch else None
-            pet_actor_before_doc = dict(pet_actor_before) if isinstance(pet_actor_before, dict) else None
+            pet_state_before = (
+                capture_pet_actor_state(group, load_actor_private_env=load_actor_private_env)
+                if "desktop_pet_enabled" in features_patch
+                else None
+            )
             pet_was_running = is_pet_actor_running(
                 group,
                 actor=pet_actor_before,
@@ -166,6 +178,15 @@ def handle_group_settings_update(
             if "desktop_pet_enabled" in features_patch:
                 try:
                     desired_enabled = coerce_bool(features_patch["desktop_pet_enabled"], default=False)
+                    resolve_before_start = lambda grp, aid, caller_id="", is_admin=False: resolve_linked_actor_before_start(
+                        grp,
+                        aid,
+                        get_actor_profile=get_actor_profile,
+                        load_actor_profile_secrets=load_actor_profile_secrets,
+                        update_actor_private_env=update_actor_private_env,
+                        caller_id=caller_id,
+                        is_admin=is_admin,
+                    )
                     if not desired_enabled and isinstance(pet_actor_before, dict):
                         stop_pet_actor_runtime(
                             group,
@@ -177,16 +198,50 @@ def handle_group_settings_update(
                             emit_event=pet_was_running,
                         )
                         cancel_pet_review(group.group_id)
-                        sync_pet_actor(group)
+                        sync_pet_actor_from_foreman(
+                            group,
+                            effective_runner_kind=effective_runner_kind,
+                            load_actor_private_env=load_actor_private_env,
+                            update_actor_private_env=update_actor_private_env,
+                            delete_actor_private_env=delete_actor_private_env,
+                            resolve_linked_actor_before_start=resolve_before_start,
+                            caller_id=str(args.get("caller_id") or "").strip(),
+                            is_admin=coerce_bool(args.get("is_admin"), default=False),
+                        )
                     else:
-                        sync_pet_actor(group)
+                        sync_pet_actor_from_foreman(
+                            group,
+                            effective_runner_kind=effective_runner_kind,
+                            load_actor_private_env=load_actor_private_env,
+                            update_actor_private_env=update_actor_private_env,
+                            delete_actor_private_env=delete_actor_private_env,
+                            resolve_linked_actor_before_start=resolve_before_start,
+                            caller_id=str(args.get("caller_id") or "").strip(),
+                            is_admin=coerce_bool(args.get("is_admin"), default=False),
+                        )
                         pet_actor_after = get_pet_actor(group)
+                        pet_private_env_after = load_actor_private_env(group.group_id, PET_ACTOR_ID)
                         if coerce_bool(group.doc.get("running"), default=False) and isinstance(pet_actor_after, dict):
-                            config_changed = pet_runtime_changed(pet_actor_before_doc, pet_actor_after)
+                            pet_private_env_before = (
+                                pet_state_before.get("private_env")
+                                if isinstance(pet_state_before, dict) and isinstance(pet_state_before.get("private_env"), dict)
+                                else {}
+                            )
+                            pet_actor_before_doc = (
+                                pet_state_before.get("actor_doc")
+                                if isinstance(pet_state_before, dict) and isinstance(pet_state_before.get("actor_doc"), dict)
+                                else None
+                            )
+                            config_changed = pet_runtime_changed(
+                                pet_actor_before_doc,
+                                pet_actor_after,
+                                before_private_env=pet_private_env_before,
+                                after_private_env=pet_private_env_after,
+                            )
                             if pet_was_running and config_changed:
                                 stop_pet_actor_runtime(
                                     group,
-                                    actor=pet_actor_before_doc,
+                                    actor=pet_actor_before,
                                     by=by,
                                     effective_runner_kind=effective_runner_kind,
                                     remove_headless_state=remove_headless_state,
@@ -213,7 +268,12 @@ def handle_group_settings_update(
                 except Exception:
                     features["desktop_pet_enabled"] = desktop_pet_enabled_before
                     group.doc["features"] = features
-                    restored_actor = restore_pet_actor_doc(group, pet_actor_before_doc)
+                    restored_actor = restore_pet_actor_state(
+                        group,
+                        pet_state_before,
+                        update_actor_private_env=update_actor_private_env,
+                        delete_actor_private_env=delete_actor_private_env,
+                    )
                     if desktop_pet_enabled_before and pet_was_running and isinstance(restored_actor, dict):
                         restart_result = start_actor_process(
                             group,
@@ -321,6 +381,11 @@ def try_handle_group_settings_op(
     *,
     effective_runner_kind: Callable[[str], str],
     start_actor_process: Callable[..., dict[str, Any]],
+    load_actor_private_env: Callable[[str, str], Dict[str, str]],
+    update_actor_private_env: Callable[..., Dict[str, str]],
+    delete_actor_private_env: Callable[[str, str], None],
+    get_actor_profile: Callable[[str], Optional[Dict[str, Any]]],
+    load_actor_profile_secrets: Callable[[str], Dict[str, str]],
     remove_headless_state: Callable[[str, str], None],
     remove_pty_state_if_pid: Callable[..., None],
 ) -> Optional[DaemonResponse]:
@@ -329,6 +394,11 @@ def try_handle_group_settings_op(
             args,
             effective_runner_kind=effective_runner_kind,
             start_actor_process=start_actor_process,
+            load_actor_private_env=load_actor_private_env,
+            update_actor_private_env=update_actor_private_env,
+            delete_actor_private_env=delete_actor_private_env,
+            get_actor_profile=get_actor_profile,
+            load_actor_profile_secrets=load_actor_profile_secrets,
             remove_headless_state=remove_headless_state,
             remove_pty_state_if_pid=remove_pty_state_if_pid,
         )

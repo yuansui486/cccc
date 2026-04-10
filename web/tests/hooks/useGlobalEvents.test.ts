@@ -31,6 +31,15 @@ describe("useGlobalEvents open refresh policy", () => {
     ).toBe(true);
   });
 
+  it("refreshes selected actors for actor removal events too", () => {
+    expect(
+      shouldRefreshActorsAfterGlobalEvent(
+        { kind: "actor.remove", group_id: "g-demo", data: { actor_id: "peer-1" } },
+        "g-demo",
+      ),
+    ).toBe(true);
+  });
+
   it("ignores lifecycle events for other groups", () => {
     expect(
       shouldRefreshActorsAfterGlobalEvent(

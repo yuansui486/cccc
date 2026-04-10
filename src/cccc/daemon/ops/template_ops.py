@@ -670,8 +670,13 @@ def group_create_from_template(args: Dict[str, Any]) -> DaemonResponse:
         return _error("missing_template", "missing template")
 
     p = Path(path).expanduser()
-    if not p.exists() or not p.is_dir():
-        return _error("invalid_path", f"path does not exist: {p}")
+    if not p.exists():
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return _error("scope_path_create_failed", f"cannot create directory: {exc}")
+    if not p.is_dir():
+        return _error("invalid_path", f"path is not a directory: {p}")
 
     try:
         tpl = parse_group_template(template_text)

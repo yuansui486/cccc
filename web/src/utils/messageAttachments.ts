@@ -37,3 +37,14 @@ export function isSvgAttachment(attachment: MessageAttachment): boolean {
   if (mime === "image/svg+xml") return true;
   return attachmentExtension(attachment) === ".svg";
 }
+
+export function isRedundantWecomImagePlaceholder(
+  text: string,
+  attachments: MessageAttachment[],
+  sourcePlatform?: string,
+): boolean {
+  if (String(sourcePlatform || "").trim().toLowerCase() !== "wecom") return false;
+  if (!attachments.length || !attachments.every((attachment) => isImageAttachment(attachment))) return false;
+  const normalized = String(text || "").trim().toLowerCase();
+  return normalized === "[image]" || /^\[file(?:: [^\]]+)?\](?:\s+\S+)?$/.test(normalized);
+}

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Theme } from "../types";
 import { classNames } from "../utils/classNames";
-import { SunIcon, MoonIcon, TerminalIcon } from "./Icons";
+import { SunIcon, MoonIcon, MonitorIcon } from "./Icons";
 
 interface ThemeToggleProps {
   theme: Theme;
@@ -16,7 +16,7 @@ export function ThemeToggle({ theme, onThemeChange, isDark: _isDark }: ThemeTogg
   const themes: { value: Theme; label: string; Icon: React.FC<{ size?: number }> }[] = [
     { value: "light", label: t('themeLight'), Icon: SunIcon },
     { value: "dark", label: t('themeDark'), Icon: MoonIcon },
-    { value: "system", label: t('themeSystem'), Icon: TerminalIcon },
+    { value: "system", label: t('themeSystem'), Icon: MonitorIcon },
   ];
 
   return (
@@ -51,7 +51,7 @@ export function ThemeToggleCompact({ theme, onThemeChange, isDark: _isDark, vari
     return "light";
   };
 
-  const Icon = theme === "light" ? SunIcon : theme === "dark" ? MoonIcon : TerminalIcon;
+  const Icon = theme === "light" ? SunIcon : theme === "dark" ? MoonIcon : MonitorIcon;
   const label = theme === "light" ? t('themeLight') : theme === "dark" ? t('themeDark') : t('themeSystem');
 
   return (
@@ -59,14 +59,14 @@ export function ThemeToggleCompact({ theme, onThemeChange, isDark: _isDark, vari
       onClick={() => onThemeChange(nextTheme())}
       className={classNames(
         variant === "rail"
-          ? "flex items-center justify-center w-10 h-10 rounded-xl transition-all min-h-[40px] min-w-[40px] shrink-0 border border-transparent bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
+          ? "flex items-center justify-center h-9 w-9 min-h-[36px] min-w-[36px] rounded-[14px] transition-all shrink-0 border border-transparent bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
           : "flex items-center justify-center w-11 h-11 rounded-xl transition-all min-h-[44px] min-w-[44px] shrink-0 glass-btn text-[var(--color-text-secondary)]",
         className
       )}
       title={t('themeClickToChange', { theme: label })}
       aria-label={t('currentTheme', { theme: label })}
     >
-      <Icon size={18} />
+      <Icon size={17} />
     </button>
   );
 }

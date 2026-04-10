@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ...kernel.group import load_group
 from ...kernel.query_projections import get_groups_projection
 from ...kernel.registry import load_registry
@@ -54,6 +56,10 @@ def handle_groups(_: Dict[str, Any]) -> DaemonResponse:
             continue
         gid = str(group_meta.get("group_id") or "").strip()
         running = (
+            (codex_app_supervisor.group_running(gid) if gid else False)
+            or
+            (claude_app_supervisor.group_running(gid) if gid else False)
+            or
             (pty_runner.SUPERVISOR.group_running(gid) if gid else False)
             or (headless_runner.SUPERVISOR.group_running(gid) if gid else False)
         )

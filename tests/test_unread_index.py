@@ -100,7 +100,7 @@ class TestUnreadIndex(unittest.TestCase):
             with patch("cccc.kernel.inbox.batch_unread_counts", side_effect=AssertionError("delta path should avoid full rebuild")):
                 actors = self._actor_list(group_id, include_unread=True)
             by_id = {str(item.get("id") or ""): item for item in actors}
-            self.assertEqual(int(by_id["peer1"].get("unread_count") or 0), peer1_before + 2)
+            self.assertEqual(int(by_id["peer1"].get("unread_count") or 0), peer1_before + 1)
             self.assertEqual(int(by_id["peer2"].get("unread_count") or 0), peer2_before)
         finally:
             cleanup()
@@ -159,7 +159,7 @@ class TestUnreadIndex(unittest.TestCase):
             self.assertTrue(sent.ok, getattr(sent, "error", None))
 
             baseline = self._actor_list(group_id, include_unread=True)
-            self.assertEqual(int(baseline[0].get("unread_count") or 0), 2)
+            self.assertEqual(int(baseline[0].get("unread_count") or 0), 1)
 
             compact, _ = self._call("ledger_compact", {"group_id": group_id, "by": "user", "reason": "snapshot-seed", "force": True})
             self.assertTrue(compact.ok, getattr(compact, "error", None))
@@ -172,7 +172,7 @@ class TestUnreadIndex(unittest.TestCase):
 
             with patch("cccc.kernel.inbox.batch_unread_counts", side_effect=AssertionError("ledger snapshot should seed unread state")):
                 restored = self._actor_list(group_id, include_unread=True)
-            self.assertEqual(int(restored[0].get("unread_count") or 0), 2)
+            self.assertEqual(int(restored[0].get("unread_count") or 0), 1)
         finally:
             cleanup()
 

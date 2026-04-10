@@ -1,7 +1,8 @@
 // IMBridgeTab configures IM bridge settings.
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation, Trans } from "react-i18next";
-import { IMStatus, IMPlatform } from "../../../types";
+import QRCode from "qrcode";
+import { IMStatus, IMPlatform, WeixinLoginStatus } from "../../../types";
 import * as api from "../../../services/api";
 import { inputClass, labelClass, primaryButtonClass, cardClass } from "./types";
 
@@ -36,12 +37,87 @@ interface IMBridgeTabProps {
   setImWecomBotId: (v: string) => void;
   imWecomSecret: string;
   setImWecomSecret: (v: string) => void;
+  // Weixin fields
+  imWeixinAccountId: string;
+  setImWeixinAccountId: (v: string) => void;
+  imWeixinCommand: string;
+  setImWeixinCommand: (v: string) => void;
+  weixinLoginStatus: WeixinLoginStatus | null;
+  onStartWeixinLogin: () => void;
+  onLogoutWeixin: () => void;
   // Actions
   imBusy: boolean;
   onSaveConfig: () => void;
   onRemoveConfig: () => void;
   onStartBridge: () => void;
   onStopBridge: () => void;
+}
+
+function WeixinQrCode({
+  value,
+  loadingLabel,
+  errorLabel,
+}: {
+  value: string;
+  loadingLabel: string;
+  errorLabel: string;
+}) {
+  const [dataUrl, setDataUrl] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const content = String(value || "").trim();
+    if (!content) return;
+
+    void QRCode.toDataURL(content, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 320,
+      color: {
+        dark: "#334155",
+        light: "#ffffff",
+      },
+    })
+      .then((nextUrl: string) => {
+        if (cancelled) return;
+        setDataUrl(nextUrl);
+        setError("");
+      })
+      .catch((nextError: unknown) => {
+        if (cancelled) return;
+        setDataUrl("");
+        setError(nextError instanceof Error ? nextError.message : String(nextError));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+
+  if (error) {
+    return (
+      <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-500">
+        {errorLabel}: {error}
+      </div>
+    );
+  }
+
+  if (!dataUrl) {
+    return (
+      <div className="mt-3 flex h-56 w-56 items-center justify-center rounded-lg border border-black/10 bg-white p-2 text-xs text-[var(--color-text-muted)]">
+        {loadingLabel}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={dataUrl}
+      alt="Weixin QR Code"
+      className="h-56 w-56 rounded-lg border border-black/10 bg-white p-2"
+    />
+  );
 }
 
 export function IMBridgeTab({
@@ -70,6 +146,13 @@ export function IMBridgeTab({
   setImWecomBotId,
   imWecomSecret,
   setImWecomSecret,
+  imWeixinAccountId,
+  setImWeixinAccountId,
+  imWeixinCommand,
+  setImWeixinCommand,
+  weixinLoginStatus,
+  onStartWeixinLogin,
+  onLogoutWeixin,
   imBusy,
   onSaveConfig,
   onRemoveConfig,
@@ -93,6 +176,12 @@ export function IMBridgeTab({
         return String(platform || "");
     }
   };
+  const [weixinQrCopyState, setWeixinQrCopyState] = useState<"idle" | "done" | "failed">("idle");
+  const weixinStatus = String(weixinLoginStatus?.status || "").trim().toLowerCase();
+  const weixinErrorText = String(weixinLoginStatus?.error || "").trim();
+  const weixinLoggedIn = !!weixinLoginStatus?.logged_in;
+  const weixinHasQr = !!String(weixinLoginStatus?.qrcode_url || "").trim();
+  const weixinHasCustomAdvanced = !!String(imWeixinAccountId || "").trim() || !!String(imWeixinCommand || "").trim();
   const getBotTokenLabel = () => {
     switch (imPlatform) {
       case "telegram": return t("imBridge.botTokenTelegram");
@@ -120,6 +209,9 @@ export function IMBridgeTab({
     }
     if (imPlatform === "wecom") {
       return !!imWecomBotId && !!imWecomSecret;
+    }
+    if (imPlatform === "weixin") {
+      return true;
     }
     if (!imBotTokenEnv) return false;
     if (imPlatform === "slack" && !imAppTokenEnv) return false;
@@ -186,6 +278,41 @@ export function IMBridgeTab({
       }
     }
   }, [groupId, t]);
+
+  const onCopyWeixinQrLink = useCallback(async () => {
+    const link = String(weixinLoginStatus?.qrcode_url || "").trim();
+    if (!link || typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setWeixinQrCopyState("failed");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      setWeixinQrCopyState("done");
+    } catch {
+      setWeixinQrCopyState("failed");
+    }
+  }, [weixinLoginStatus?.qrcode_url]);
+
+  useEffect(() => {
+    if (weixinQrCopyState === "idle") return;
+    const timer = window.setTimeout(() => setWeixinQrCopyState("idle"), 1800);
+    return () => window.clearTimeout(timer);
+  }, [weixinQrCopyState]);
+
+  const getWeixinStatusLabel = () => {
+    if (weixinLoggedIn) return t("imBridge.weixinStatusLoggedIn");
+    if (weixinStatus === "waiting_scan") return t("imBridge.weixinStatusWaitingScan");
+    if (weixinStatus === "starting_login") return t("imBridge.weixinStatusStarting");
+    if (weixinStatus === "error") return t("imBridge.weixinStatusError");
+    return t("imBridge.weixinNotLoggedIn");
+  };
+
+  const getWeixinHint = () => {
+    if (weixinHasQr || weixinStatus === "waiting_scan") return t("imBridge.weixinHintWaitingScan");
+    if (weixinLoggedIn) return t("imBridge.weixinHintLoggedIn");
+    if (weixinStatus === "error") return t("imBridge.weixinHintError");
+    return t("imBridge.weixinHintIdle");
+  };
 
   const loadIMAuthState = useCallback(async () => {
     await Promise.all([loadAuthorizedChats(), loadPendingRequests()]);
@@ -344,6 +471,7 @@ export function IMBridgeTab({
             <option value="feishu">飞书</option>
             <option value="dingtalk">钉钉</option>
             <option value="wecom">{t("imBridge.wecom")}</option>
+            <option value="weixin">{t("imBridge.weixin")}</option>
           </select>
         </div>
 
@@ -509,6 +637,136 @@ export function IMBridgeTab({
                 {t("imBridge.wecomSecretHint")}
               </p>
             </div>
+          </>
+        )}
+
+        {imPlatform === "weixin" && (
+          <>
+            <div className={cardClass()}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-[var(--color-text-secondary)]">
+                    {t("imBridge.weixinLoginTitle")}
+                  </div>
+                  <div className="mt-2 inline-flex rounded-full border border-emerald-500/15 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-[var(--color-text-secondary)]">
+                    {t("imBridge.weixinLoginStatus")}: {getWeixinStatusLabel()}
+                  </div>
+                  {weixinLoginStatus?.account_id && (
+                    <div className="text-xs mt-2 text-[var(--color-text-muted)]">
+                      {t("imBridge.weixinCurrentAccount")}: {weixinLoginStatus.account_id}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={onStartWeixinLogin}
+                    disabled={imBusy || !!weixinLoginStatus?.running}
+                    className="px-3 py-2 text-sm rounded-lg min-h-[40px] transition-colors font-medium bg-blue-500/15 hover:bg-blue-500/25 text-blue-600 dark:text-blue-400 disabled:opacity-50"
+                  >
+                    {weixinLoggedIn ? t("imBridge.weixinRefreshQr") : t("imBridge.weixinStartLogin")}
+                  </button>
+                  <button
+                    onClick={onLogoutWeixin}
+                    disabled={imBusy || !weixinLoggedIn}
+                    className="px-3 py-2 text-sm rounded-lg min-h-[40px] transition-colors font-medium border border-red-500/15 bg-red-500/5 text-red-600 hover:bg-red-500/10 disabled:opacity-50 disabled:text-[var(--color-text-muted)]"
+                  >
+                    {t("imBridge.weixinLogout")}
+                  </button>
+                </div>
+              </div>
+              {weixinErrorText && (
+                <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-600 dark:text-red-400">
+                  <div className="font-medium">{t("imBridge.weixinErrorDetails")}</div>
+                  <div className="mt-1 break-words">{weixinErrorText}</div>
+                  {weixinLoginStatus?.updated_at && (
+                    <div className="mt-2 text-[11px] text-red-500/80 dark:text-red-300/80">
+                      {t("imBridge.weixinLastUpdated")}: {weixinLoginStatus.updated_at}
+                    </div>
+                  )}
+                </div>
+              )}
+              {weixinLoginStatus?.qrcode_url && (
+                <div className="mt-3 flex flex-col items-start gap-2">
+                  <WeixinQrCode
+                    value={weixinLoginStatus.qrcode_url}
+                    loadingLabel={t("imBridge.weixinQrRendering")}
+                    errorLabel={t("imBridge.weixinQrRenderFailed")}
+                  />
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={onCopyWeixinQrLink}
+                      className="rounded-md border border-black/10 bg-black/5 px-2 py-1 text-[var(--color-text-secondary)] transition-colors hover:bg-black/10"
+                    >
+                      {t("imBridge.weixinCopyQrLink")}
+                    </button>
+                    {weixinQrCopyState === "done" && (
+                      <span className="text-emerald-600">{t("imBridge.weixinCopySuccess")}</span>
+                    )}
+                    {weixinQrCopyState === "failed" && (
+                      <span className="text-red-500">{t("imBridge.weixinCopyFailed")}</span>
+                    )}
+                  </div>
+                  <details className="w-full rounded-lg border border-black/10 bg-black/5 px-3 py-2">
+                    <summary className="cursor-pointer text-xs text-[var(--color-text-secondary)]">
+                      {t("imBridge.weixinQrLinkLabel")}
+                    </summary>
+                    <p className="mt-2 break-all text-xs text-[var(--color-text-muted)]">
+                      {weixinLoginStatus.qrcode_url}
+                    </p>
+                  </details>
+                </div>
+              )}
+              {!weixinLoginStatus?.qrcode_url && weixinLoginStatus?.qr_ascii && (
+                <pre className="mt-3 overflow-auto rounded-lg bg-black/5 p-3 text-[10px] leading-none text-[var(--color-text-secondary)]">
+                  {weixinLoginStatus.qr_ascii}
+                </pre>
+              )}
+              <p className="text-xs mt-2 text-[var(--color-text-muted)]">
+                {getWeixinHint()}
+              </p>
+            </div>
+            <details className={cardClass()} open={weixinHasCustomAdvanced}>
+              <summary className="cursor-pointer text-sm font-medium text-[var(--color-text-secondary)]">
+                {t("imBridge.weixinAdvanced")}
+              </summary>
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className={labelClass()}>{t("imBridge.weixinAccountId")}</label>
+                  <input
+                    type="text"
+                    value={imWeixinAccountId}
+                    onChange={(e) => setImWeixinAccountId(e.target.value)}
+                    placeholder="默认首个已登录微信账号"
+                    className={`${inputClass()} placeholder-[var(--color-text-muted)]`}
+                  />
+                  <p className="text-xs mt-1 text-[var(--color-text-muted)]">
+                    {t("imBridge.weixinAccountIdHint")}
+                  </p>
+                </div>
+                <div>
+                  <label className={labelClass()}>{t("imBridge.weixinCommand")}</label>
+                  <input
+                    type="text"
+                    value={imWeixinCommand}
+                    onChange={(e) => setImWeixinCommand(e.target.value)}
+                    placeholder="node scripts/im/weixin_sidecar.mjs"
+                    className={`${inputClass()} placeholder-[var(--color-text-muted)]`}
+                  />
+                  <p className="text-xs mt-1 text-[var(--color-text-muted)]">
+                    {t("imBridge.weixinCommandHint")}
+                  </p>
+                  {imWeixinCommand.trim() && (
+                    <p className="text-xs mt-1 text-amber-600 dark:text-amber-400">
+                      {t("imBridge.weixinCustomCommandWarning")}
+                    </p>
+                  )}
+                  <p className="text-xs mt-1 text-[var(--color-text-muted)]">
+                    {t("imBridge.weixinPackageHint")}
+                  </p>
+                </div>
+              </div>
+            </details>
           </>
         )}
       </div>
