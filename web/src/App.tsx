@@ -23,6 +23,7 @@ import { useAppGroupLifecycle } from "./hooks/useAppGroupLifecycle";
 import { useAppTabState } from "./hooks/useAppTabState";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
+import { buildReplyComposerState } from "./utils/chatReply";
 import {
   useGroupStore,
   useUIStore,
@@ -33,7 +34,7 @@ import {
   useDoneHubStore,
 } from "./stores";
 import { useChatOutboxStore } from "./stores/chatOutboxStore";
-import type { ChatMessageData, LedgerEvent } from "./types";
+import type { LedgerEvent } from "./types";
 
 export default function App() {
   const { theme, setTheme, isDark } = useTheme();
@@ -189,34 +190,14 @@ export default function App() {
 
   const startReply = React.useCallback(
     (ev: LedgerEvent) => {
-      if (!ev.id || ev.kind !== "chat.message") return;
-      const data = ev.data as ChatMessageData | undefined;
-      const text = data?.text ? String(data.text) : "";
+      const replyComposerState = buildReplyComposerState(ev, selectedGroupId, actors, groupSettings);
+      if (!replyComposerState) return;
 
-      if (selectedGroupId) {
-        setDestGroupId(selectedGroupId);
+      if (replyComposerState.destGroupId) {
+        setDestGroupId(replyComposerState.destGroupId);
       }
-
-      const by = String(ev.by || "").trim();
-      const authorIsActor = by && by !== "user" && actors.some((a) => String(a.id || "") === by);
-      const originalTo = Array.isArray(data?.to)
-        ? data.to.map((token) => String(token || "").trim()).filter((token) => token)
-        : [];
-      const policy = groupSettings?.default_send_to || "foreman";
-      const defaultTo = authorIsActor
-        ? [by]
-        : originalTo.length > 0
-          ? originalTo
-          : policy === "foreman"
-            ? ["@foreman"]
-            : [];
-      setToText(defaultTo.join(", "));
-
-      setReplyTarget({
-        eventId: String(ev.id),
-        by: String(ev.by || "unknown"),
-        text: text.slice(0, 100) + (text.length > 100 ? "..." : ""),
-      });
+      setToText(replyComposerState.toText);
+      setReplyTarget(replyComposerState.replyTarget);
       requestAnimationFrame(() => composerRef.current?.focus());
     },
     [selectedGroupId, actors, composerRef, groupSettings, setDestGroupId, setReplyTarget, setToText]

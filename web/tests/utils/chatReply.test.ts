@@ -50,4 +50,32 @@ describe("buildReplyComposerState", () => {
 
     expect(state?.replyTarget.text).toBe("");
   });
+
+  it("drops redundant wecom image placeholders for inbound media attachments without blob paths", () => {
+    const state = buildReplyComposerState(
+      {
+        id: "evt-wecom-media",
+        kind: "chat.message",
+        by: "user",
+        data: {
+          text: "[image]",
+          source_platform: "wecom",
+          attachments: [
+            {
+              kind: "image",
+              title: "wx-camera-shot",
+              mime_type: "image/jpeg",
+              download_url: "https://example.test/media/123",
+              decryption_key: "aes-demo",
+            },
+          ],
+        },
+      } as any,
+      "g-demo",
+      [],
+      null,
+    );
+
+    expect(state?.replyTarget.text).toBe("");
+  });
 });
