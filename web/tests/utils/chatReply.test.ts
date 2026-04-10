@@ -22,4 +22,32 @@ describe("buildReplyComposerState", () => {
 
     expect(state?.replyTarget.text).toBe("为什么activity 会出现再消失，当前抖动太严重了");
   });
+
+  it("drops redundant wecom image placeholders when building a reply target", () => {
+    const state = buildReplyComposerState(
+      {
+        id: "evt-image",
+        kind: "chat.message",
+        by: "user",
+        data: {
+          text: "[image]",
+          source_platform: "wecom",
+          attachments: [
+            {
+              kind: "image",
+              path: "state/blobs/demo-image.png",
+              title: "demo-image.png",
+              mime_type: "image/png",
+            },
+          ],
+          to: ["@foreman"],
+        },
+      } as any,
+      "g-demo",
+      [],
+      null,
+    );
+
+    expect(state?.replyTarget.text).toBe("");
+  });
 });

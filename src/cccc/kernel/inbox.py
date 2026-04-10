@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
@@ -1100,10 +1101,68 @@ def get_quote_text(group: Group, event_id: str, max_len: int = 100) -> Optional[
     data = ev.get("data")
     if not isinstance(data, dict):
         return None
+    return get_quote_text_from_message_data(data, max_len=max_len)
+
+
+_IMAGE_ATTACHMENT_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".bmp",
+    ".avif",
+}
+
+
+def _quote_attachment_extension(raw: str) -> str:
+    value = str(raw or "").strip().lower()
+    if not value:
+        return ""
+    query_index = value.find("?")
+    if query_index >= 0:
+        value = value[:query_index]
+    dot = value.rfind(".")
+    if dot < 0:
+        return ""
+    return value[dot:]
+
+
+def _quote_attachment_is_image(attachment: Any) -> bool:
+    if not isinstance(attachment, dict):
+        return False
+    kind = str(attachment.get("kind") or "").strip().lower()
+    if kind == "image":
+        return True
+    mime = str(attachment.get("mime_type") or "").strip().lower()
+    if mime.startswith("image/"):
+        return True
+    raw_name = str(attachment.get("path") or attachment.get("title") or "").strip()
+    return _quote_attachment_extension(raw_name) in _IMAGE_ATTACHMENT_EXTENSIONS
+
+
+def _is_redundant_wecom_image_placeholder(text: str, attachments: list[Any], source_platform: str) -> bool:
+    if str(source_platform or "").strip().lower() != "wecom":
+        return False
+    if not attachments or not all(_quote_attachment_is_image(item) for item in attachments):
+        return False
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized == "[image]" or bool(re.fullmatch(r"\[file(?:: [^\]]+)?\](?:\s+\S+)?", normalized))
+
+
+def get_quote_text_from_message_data(data: dict[str, Any], max_len: int = 100) -> Optional[str]:
     text = data.get("text")
     if not isinstance(text, str):
         return None
     text = text.strip()
+    attachments = data.get("attachments")
+    attachment_list = attachments if isinstance(attachments, list) else []
+    source_platform = str(data.get("source_platform") or "").strip()
+    if _is_redundant_wecom_image_placeholder(text, attachment_list, source_platform):
+        return None
     if len(text) > max_len:
         return text[:max_len] + "..."
     return text

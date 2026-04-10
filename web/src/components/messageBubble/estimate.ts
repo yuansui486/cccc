@@ -1,4 +1,5 @@
 import type { LedgerEvent, MessageAttachment } from "../../types";
+import { getAttachmentAwareMessageText } from "../../utils/messageAttachments";
 
 const DEFAULT_MESSAGE_HEIGHT = 72;
 const DEFAULT_STREAMING_HEIGHT = 108;
@@ -40,7 +41,9 @@ export function estimateMessageRowHeight(message: LedgerEvent | undefined, optio
   const text = String(data?.text || "");
   const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
   const quoteText = String(data?.quote_text || "");
+  const sourcePlatform = String((data as { source_platform?: unknown } | undefined)?.source_platform || "");
   const activities = Array.isArray(data?.activities) ? data.activities : [];
+  const displayText = getAttachmentAwareMessageText(text, attachments, sourcePlatform);
 
   const headerOffset = options?.collapseHeader ? -28 : 0;
 
@@ -59,9 +62,9 @@ export function estimateMessageRowHeight(message: LedgerEvent | undefined, optio
   }
 
   let height = DEFAULT_MESSAGE_HEIGHT;
-  height += getEstimatedTextHeight(text);
+  height += getEstimatedTextHeight(displayText);
 
-  const codeBlockCount = (text.match(/```/g) || []).length / 2;
+  const codeBlockCount = (displayText.match(/```/g) || []).length / 2;
   if (codeBlockCount > 0) {
     height += codeBlockCount * DEFAULT_CODE_BLOCK_HEIGHT;
   }

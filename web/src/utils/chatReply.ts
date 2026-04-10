@@ -1,4 +1,5 @@
 import type { Actor, ChatMessageData, GroupSettings, LedgerEvent, ReplyTarget } from "../types";
+import { getAttachmentAwareMessageText } from "./messageAttachments";
 
 type ReplyComposerState = {
   destGroupId: string;
@@ -45,7 +46,9 @@ export function buildReplyComposerState(
   const data = event.data && typeof event.data === "object" ? (event.data as ChatMessageData) : null;
   const quoteText = data && typeof data.quote_text === "string" ? String(data.quote_text) : "";
   const messageText = data && typeof data.text === "string" ? String(data.text) : "";
-  const text = quoteText || messageText;
+  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+  const sourcePlatform = data && typeof data.source_platform === "string" ? String(data.source_platform) : "";
+  const text = getAttachmentAwareMessageText(quoteText || messageText, attachments, sourcePlatform);
   const by = String(event.by || "").trim();
   const authorIsActor = by && by !== "user" && actors.some((actor) => String(actor.id || "") === by);
   const originalTo = Array.isArray(data?.to)

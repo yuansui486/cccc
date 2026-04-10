@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAttachmentAwareMessageText,
   isImageAttachment,
   isRedundantWecomImagePlaceholder,
   isSvgAttachment,
@@ -66,5 +67,16 @@ describe("messageAttachments", () => {
     expect(isRedundantWecomImagePlaceholder("[image]", [imageAttachment], "telegram")).toBe(false);
     expect(isRedundantWecomImagePlaceholder("需要人工确认", [imageAttachment], "wecom")).toBe(false);
     expect(isRedundantWecomImagePlaceholder("[image]", [fileAttachment], "wecom")).toBe(false);
+  });
+
+  it("suppresses redundant wecom image placeholder text in display rendering", () => {
+    const attachment = {
+      kind: "image",
+      path: "state/blobs/sha_demo.png",
+      title: "demo.png",
+      mime_type: "image/png",
+    };
+    expect(getAttachmentAwareMessageText("[image]", [attachment], "wecom")).toBe("");
+    expect(getAttachmentAwareMessageText("需要人工确认", [attachment], "wecom")).toBe("需要人工确认");
   });
 });
