@@ -753,6 +753,26 @@ class TestWecomAttachments(unittest.TestCase):
         self.assertEqual(raw, b"raw-bytes")
         mock_decrypt.assert_not_called()
 
+    def test_decrypt_media_bytes_uses_python_crypto_without_openssl(self):
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cccc.ports.im.adapters.wecom import WECOM_MEDIA_BLOCK_SIZE
+
+        adapter = self._make_adapter()
+        key = b"0123456789abcdef0123456789abcdef"
+        iv = key[:16]
+        plain = b"wecom-image-bytes"
+        pad = WECOM_MEDIA_BLOCK_SIZE - (len(plain) % WECOM_MEDIA_BLOCK_SIZE)
+        padded = plain + bytes([pad]) * pad
+
+        encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+        encrypted = encryptor.update(padded) + encryptor.finalize()
+
+        with patch("cccc.ports.im.adapters.wecom.subprocess.run") as mock_run:
+            raw = adapter._decrypt_media_bytes(encrypted, key.decode("utf-8"))
+
+        self.assertEqual(raw, plain)
+        mock_run.assert_not_called()
+
     def test_send_file_uploads_image_and_sends_caption(self):
         adapter = self._make_adapter()
         adapter._store_reply_ref("conv_1", "req_test")
