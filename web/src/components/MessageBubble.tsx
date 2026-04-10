@@ -7,7 +7,7 @@ import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/tim
 import { classNames } from "../utils/classNames";
 import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
-import { isRedundantWecomImagePlaceholder } from "../utils/messageAttachments";
+import { getAttachmentAwareMessageText } from "../utils/messageAttachments";
 import { selectStreamingReplySession, useGroupStore } from "../stores";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
 import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
@@ -585,11 +585,8 @@ export const MessageBubble = memo(function MessageBubble({
         }))
         .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
     const displayMessageText = useMemo(() => {
-        if (isRedundantWecomImagePlaceholder(messageText, blobAttachments, sourcePlatform)) {
-            return "";
-        }
-        return messageText;
-    }, [blobAttachments, messageText, sourcePlatform]);
+        return getAttachmentAwareMessageText(messageText, rawAttachments, sourcePlatform);
+    }, [messageText, rawAttachments, sourcePlatform]);
     const presentationRefs = useMemo(() => getPresentationMessageRefs(msgData?.refs), [msgData?.refs]);
     const shouldRenderMarkdown = useMemo(() => !isStreaming && mayContainMarkdown(displayMessageText), [displayMessageText, isStreaming]);
     const streamingActivities = useMemo(() => {

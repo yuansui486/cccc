@@ -48,3 +48,14 @@ export function isRedundantWecomImagePlaceholder(
   const normalized = String(text || "").trim().toLowerCase();
   return normalized === "[image]" || /^\[file(?:: [^\]]+)?\](?:\s+\S+)?$/.test(normalized);
 }
+
+export function getAttachmentAwareMessageText(
+  text: string,
+  attachments: MessageAttachment[],
+  sourcePlatform?: string,
+): string {
+  if (isRedundantWecomImagePlaceholder(text, attachments, sourcePlatform)) {
+    return "";
+  }
+  return String(text || "");
+}

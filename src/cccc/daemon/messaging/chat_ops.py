@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Optional
 from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, DaemonResponse, SystemNotifyData
 from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
-from ...kernel.inbox import find_event_with_chat_ack, is_message_for_actor
+from ...kernel.inbox import find_event_with_chat_ack, get_quote_text_from_message_data, is_message_for_actor
 from ...kernel.ledger import append_event
 from ...kernel.messaging import (
     default_reply_recipients,
@@ -238,15 +238,7 @@ def _normalize_refs(raw: Any) -> list[dict[str, Any]]:
 
 
 def _quote_text_from_message_data(data: dict[str, Any], *, max_len: int = 100) -> Optional[str]:
-    text = data.get("text")
-    if not isinstance(text, str):
-        return None
-    snippet = text.strip()
-    if not snippet:
-        return None
-    if len(snippet) > max_len:
-        return snippet[:max_len] + "..."
-    return snippet
+    return get_quote_text_from_message_data(data, max_len=max_len)
 
 
 def _notify_headless_targets(
