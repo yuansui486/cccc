@@ -14,6 +14,7 @@ authors = [
 license = "Apache-2.0"
 keywords = ["orchestrator","ai","rfd","pair","collaboration"]
 dependencies = [
+  "cryptography>=42,<46",
   "PyYAML>=6.0,<7.0",
   "dingtalk-stream>=0.24.3",
   "fastapi>=0.110,<1.0",

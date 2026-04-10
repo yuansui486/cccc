@@ -246,9 +246,13 @@ class WecomAdapter(IMAdapter):
             raise ValueError("invalid wecom media pkcs7 padding")
         return raw[:-pad]
 
-    def _decrypt_media_bytes(self, encrypted: bytes, aes_key: str) -> bytes:
-        key = self._decode_media_aes_key(aes_key)
-        iv = key[:16]
+    def _decrypt_media_bytes_with_cryptography(self, encrypted: bytes, *, key: bytes, iv: bytes) -> bytes:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+        decryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+        return self._strip_pkcs7_padding(decryptor.update(encrypted) + decryptor.finalize())
+
+    def _decrypt_media_bytes_with_openssl(self, encrypted: bytes, *, key: bytes, iv: bytes) -> bytes:
         cmd = [
             "openssl",
             "enc",
@@ -260,19 +264,36 @@ class WecomAdapter(IMAdapter):
             "-iv",
             iv.hex(),
         ]
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=encrypted,
-                capture_output=True,
-                check=False,
-            )
-        except Exception as e:
-            raise ValueError(f"wecom media decrypt command failed: {e}") from e
+        proc = subprocess.run(
+            cmd,
+            input=encrypted,
+            capture_output=True,
+            check=False,
+        )
         if proc.returncode != 0:
             stderr = proc.stderr.decode("utf-8", errors="replace").strip()
             raise ValueError(f"wecom media decrypt failed: {stderr or f'openssl exit {proc.returncode}'}")
         return self._strip_pkcs7_padding(proc.stdout)
+
+    def _decrypt_media_bytes(self, encrypted: bytes, aes_key: str) -> bytes:
+        key = self._decode_media_aes_key(aes_key)
+        iv = key[:16]
+
+        try:
+            return self._decrypt_media_bytes_with_cryptography(encrypted, key=key, iv=iv)
+        except ModuleNotFoundError:
+            pass
+        except Exception as e:
+            raise ValueError(f"wecom media decrypt failed: {e}") from e
+
+        try:
+            return self._decrypt_media_bytes_with_openssl(encrypted, key=key, iv=iv)
+        except FileNotFoundError as e:
+            raise ValueError(
+                "wecom media decrypt unavailable: install cryptography or ensure openssl is on PATH"
+            ) from e
+        except Exception as e:
+            raise ValueError(f"wecom media decrypt command failed: {e}") from e
 
     def _upload_media(self, raw: bytes, filename: str, media_type: str) -> str:
         boundary = "----cccc" + uuid.uuid4().hex
