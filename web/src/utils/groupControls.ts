@@ -72,3 +72,38 @@ export function getGroupControlVisual(
       "border border-transparent bg-transparent text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-[var(--color-text-primary)] dark:hover:bg-white/6 active:translate-y-0",
   };
 }
+
+export function resolveGroupControls(args: {
+  selectedGroupId: string;
+  actorCount: number;
+  statusKey: GroupStatusKey | null | undefined;
+  busy: string;
+}): {
+  isGroupBusy: boolean;
+  launchHardUnavailable: boolean;
+  pauseHardUnavailable: boolean;
+  stopHardUnavailable: boolean;
+  launchDisabled: boolean;
+  pauseDisabled: boolean;
+  stopDisabled: boolean;
+} {
+  const selectedGroupId = String(args.selectedGroupId || "").trim();
+  const actorCount = Number(args.actorCount || 0);
+  const statusKey = args.statusKey ?? null;
+  const busy = String(args.busy || "");
+
+  const isGroupBusy = busy.startsWith("group-");
+  const launchHardUnavailable = !selectedGroupId || actorCount === 0;
+  const pauseHardUnavailable = !selectedGroupId || actorCount === 0 || statusKey === "stop";
+  const stopHardUnavailable = !selectedGroupId;
+
+  return {
+    isGroupBusy,
+    launchHardUnavailable,
+    pauseHardUnavailable,
+    stopHardUnavailable,
+    launchDisabled: launchHardUnavailable || isGroupBusy,
+    pauseDisabled: pauseHardUnavailable || isGroupBusy,
+    stopDisabled: stopHardUnavailable || isGroupBusy,
+  };
+}

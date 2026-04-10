@@ -30,6 +30,9 @@ class PtySupervisor:
     def tail_output(self, *, group_id: str, actor_id: str, max_bytes: int = 2_000_000) -> bytes:
         return b""
 
+    def terminal_override(self, *, group_id: str, actor_id: str):
+        return None
+
     def clear_backlog(self, *, group_id: str, actor_id: str) -> bool:
         return False
 
@@ -41,6 +44,7 @@ class PtySupervisor:
         cwd: Path,
         command: Iterable[str],
         env: Dict[str, str],
+        runtime: str = "",
         max_backlog_bytes: int = 2_000_000,
     ) -> PtySession:
         raise RuntimeError(pty_support_error_message() or "PTY runner is not supported in this environment.")

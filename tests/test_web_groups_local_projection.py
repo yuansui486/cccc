@@ -41,3 +41,101 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
                     self.assertEqual(data["result"]["groups"][0]["group_id"], "g1")
         finally:
             cleanup()
+
+    def test_groups_route_marks_headless_codex_group_running_from_local_supervisor(self) -> None:
+        cleanup = self._with_home()
+        try:
+            from cccc.kernel.actors import add_actor
+            from cccc.kernel.group import create_group, load_group
+            from cccc.kernel.registry import load_registry
+            from cccc.daemon.runner_state_ops import headless_state_path
+            from cccc.util.fs import atomic_write_json
+
+            reg = load_registry()
+            gid = create_group(reg, title="codex-running", topic="").group_id
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="headless")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            atomic_write_json(
+                headless_state_path(gid, "peer1"),
+                {
+                    "v": 1,
+                    "kind": "headless",
+                    "runtime": "codex",
+                    "group_id": gid,
+                    "actor_id": "peer1",
+                    "pid": os.getpid(),
+                    "status": "idle",
+                },
+            )
+            with self._client() as client:
+                resp = client.get("/api/v1/groups")
+
+            self.assertEqual(resp.status_code, 200)
+            groups = resp.json()["result"]["groups"]
+            match = next(item for item in groups if str(item.get("group_id") or "") == gid)
+            self.assertTrue(bool(match.get("running")))
+            self.assertTrue(bool(((match.get("runtime_status") or {}).get("runtime_running"))))
+        finally:
+            cleanup()
+
+    def test_groups_route_prefers_group_level_supervisor_running_signal(self) -> None:
+        cleanup = self._with_home()
+        try:
+            from cccc.kernel.group import create_group
+            from cccc.kernel.registry import load_registry
+
+            reg = load_registry()
+            gid = create_group(reg, title="group-running-supervisor", topic="").group_id
+
+            with patch("cccc.ports.web.routes.groups.codex_app_supervisor.group_running", return_value=True):
+                with self._client() as client:
+                    resp = client.get("/api/v1/groups")
+
+            self.assertEqual(resp.status_code, 200)
+            groups = resp.json()["result"]["groups"]
+            match = next(item for item in groups if str(item.get("group_id") or "") == gid)
+            self.assertTrue(bool(match.get("running")))
+            self.assertTrue(bool(((match.get("runtime_status") or {}).get("runtime_running"))))
+        finally:
+            cleanup()
+
+    def test_groups_route_treats_codex_pty_actor_as_internal_headless_on_restart(self) -> None:
+        cleanup = self._with_home()
+        try:
+            from cccc.kernel.actors import add_actor
+            from cccc.kernel.group import create_group, load_group
+            from cccc.kernel.registry import load_registry
+            from cccc.daemon.runner_state_ops import headless_state_path
+            from cccc.util.fs import atomic_write_json
+
+            reg = load_registry()
+            gid = create_group(reg, title="codex-pty-restarts-running", topic="").group_id
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            atomic_write_json(
+                headless_state_path(gid, "peer1"),
+                {
+                    "v": 1,
+                    "kind": "headless",
+                    "runtime": "codex",
+                    "group_id": gid,
+                    "actor_id": "peer1",
+                    "pid": os.getpid(),
+                    "status": "idle",
+                },
+            )
+            with self._client() as client:
+                resp = client.get("/api/v1/groups")
+
+            self.assertEqual(resp.status_code, 200)
+            groups = resp.json()["result"]["groups"]
+            match = next(item for item in groups if str(item.get("group_id") or "") == gid)
+            self.assertTrue(bool(match.get("running")))
+        finally:
+            cleanup()

@@ -144,7 +144,7 @@
   --glass-bubble-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 
   /* Panel glass tokens (non-interactive) */
-  --glass-panel-bg: rgba(20, 20, 28, 0.78);
+  --glass-panel-bg: rgba(20, 20, 28, 0.92);
   --glass-panel-border: rgba(255, 255, 255, 0.08);
 
   /* Enhanced Accent System */
@@ -578,6 +578,77 @@ select {
 
 .animate-scale-in {
   animation: scale-in 0.2s ease-out;
+}
+
+@keyframes cccc-bubble-soft-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.988);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cccc-status-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.985);
+  }
+}
+
+.cccc-transient-bubble {
+  animation: cccc-bubble-soft-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.cccc-transient-bubble-commentary {
+  animation-duration: 0.16s;
+}
+
+.cccc-streaming-status-panel {
+  transform-origin: top left;
+  transition: opacity 0.16s ease-out, transform 0.18s ease-out, filter 0.18s ease-out;
+  will-change: opacity, transform, filter;
+}
+
+.cccc-streaming-status-panel-enter {
+  animation: cccc-bubble-soft-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cccc-streaming-status-panel-exit {
+  animation: cccc-status-panel-out 0.14s ease-out forwards;
+}
+
+.cccc-streaming-status-shell {
+  contain: layout paint;
+}
+
+.cccc-streaming-status-layer {
+  transition:
+    opacity 0.16s ease-out,
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.18s ease-out;
+  will-change: opacity, transform, filter;
+}
+
+.cccc-streaming-status-layer-active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+.cccc-streaming-status-layer-inactive {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
+  filter: blur(3px);
+  pointer-events: none;
+  user-select: none;
 }
 
 /* ============================================

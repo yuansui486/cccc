@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -85,6 +86,70 @@ class _FakeDingTalkAdapter(IMAdapter):
         return True
 
 
+class _FakeWecomFileImageAdapter(IMAdapter):
+    platform = "wecom"
+
+    def __init__(self) -> None:
+        self._connected = False
+        self._messages = [
+            {
+                "chat_id": "cid_wecom",
+                "chat_title": "ops",
+                "chat_type": "p2p",
+                "routed": True,
+                "thread_id": 0,
+                "text": "[file: unknown]",
+                "from_user": "Alice",
+                "from_user_id": "staff_001",
+                "attachments": [
+                    {
+                        "kind": "file",
+                        "media_id": "media_file_img",
+                        "file_name": "file",
+                        "mime_type": "",
+                    }
+                ],
+                "message_id": "msg_file_img",
+                "timestamp": time.time(),
+            }
+        ]
+
+    def connect(self) -> bool:
+        self._connected = True
+        return True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def poll(self) -> List[Dict[str, Any]]:
+        if not self._connected:
+            return []
+        out = list(self._messages)
+        self._messages = []
+        return out
+
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
+        _ = chat_id
+        _ = text
+        _ = thread_id
+        _ = mention_user_ids
+        return True
+
+    def get_chat_title(self, chat_id: str) -> str:
+        return str(chat_id)
+
+    def download_attachment(self, attachment: Dict[str, Any]) -> bytes:
+        _ = attachment
+        return b"\x89PNG\r\n\x1a\nfake-png"
+
+
 class TestImSenderIdentity(unittest.TestCase):
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
@@ -93,11 +158,20 @@ class TestImSenderIdentity(unittest.TestCase):
         os.environ["CCCC_HOME"] = td
 
         def cleanup() -> None:
-            td_ctx.__exit__(None, None, None)
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)
             else:
                 os.environ["CCCC_HOME"] = old_home
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(td)
+                    break
+                except FileNotFoundError:
+                    break
+                except OSError:
+                    if attempt >= 4:
+                        raise
+                    time.sleep(0.05)
 
         return td, cleanup
 
@@ -119,6 +193,7 @@ class TestImSenderIdentity(unittest.TestCase):
 
     def test_bridge_inbound_send_persists_source_identity(self) -> None:
         _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
         try:
             group, _group_id = self._create_group_with_peer()
             adapter = _FakeDingTalkAdapter(
@@ -166,6 +241,46 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
             self.assertEqual(str(event.get("by") or ""), "user")
         finally:
+            if bridge is not None:
+                bridge.stop()
+            cleanup()
+
+    def test_bridge_inbound_wecom_file_image_is_normalized_to_image_blob(self) -> None:
+        _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeWecomFileImageAdapter()
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+
+            captured: List[Dict[str, Any]] = []
+
+            def _daemon(req: Dict[str, Any]) -> Dict[str, Any]:
+                resp, _ = handle_request(DaemonRequest.model_validate(req))
+                payload: Dict[str, Any] = {"ok": bool(resp.ok)}
+                if resp.ok:
+                    payload["result"] = resp.result
+                else:
+                    payload["error"] = resp.error.model_dump() if resp.error else {}
+                captured.append(payload)
+                return payload
+
+            bridge._daemon = _daemon  # type: ignore[method-assign]
+            bridge._process_inbound()
+
+            self.assertEqual(len(captured), 1)
+            event = ((captured[0].get("result") or {}).get("event") or {})
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            attachments = data.get("attachments") if isinstance(data.get("attachments"), list) else []
+            self.assertEqual(len(attachments), 1)
+            self.assertEqual(str(attachments[0].get("kind") or ""), "image")
+            self.assertEqual(str(attachments[0].get("mime_type") or ""), "image/png")
+            self.assertTrue(str(attachments[0].get("title") or "").endswith(".png"))
+        finally:
+            if bridge is not None:
+                bridge.stop()
             cleanup()
 
     def test_render_single_message_includes_source_identity(self) -> None:
@@ -223,6 +338,7 @@ class TestImSenderIdentity(unittest.TestCase):
 
     def test_bridge_forward_passes_explicit_mention_targets(self) -> None:
         _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
         try:
             group, _group_id = self._create_group_with_peer()
             adapter = _FakeDingTalkAdapter([])
@@ -247,10 +363,13 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(len(adapter.sent_messages), 1)
             self.assertEqual(adapter.sent_messages[0]["mention_user_ids"], ["staff_001"])
         finally:
+            if bridge is not None:
+                bridge.stop()
             cleanup()
 
     def test_bridge_forward_does_not_promote_source_user_id_to_mention_target(self) -> None:
         _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
         try:
             group, _group_id = self._create_group_with_peer()
             adapter = _FakeDingTalkAdapter([])
@@ -276,10 +395,13 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(len(adapter.sent_messages), 1)
             self.assertIsNone(adapter.sent_messages[0]["mention_user_ids"])
         finally:
+            if bridge is not None:
+                bridge.stop()
             cleanup()
 
     def test_bridge_forward_passes_explicit_mention_targets_to_file_caption(self) -> None:
         _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
         try:
             group, _group_id = self._create_group_with_peer()
             adapter = _FakeDingTalkAdapter([])
@@ -310,6 +432,8 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(len(adapter.sent_files), 1)
             self.assertEqual(adapter.sent_files[0]["mention_user_ids"], ["staff_001"])
         finally:
+            if bridge is not None:
+                bridge.stop()
             cleanup()
 
 

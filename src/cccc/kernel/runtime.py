@@ -89,8 +89,6 @@ KNOWN_RUNTIMES: Dict[str, Dict[str, Any]] = {
 
 # First-class supported runtimes (CCCC manages startup defaults + MCP wiring)
 PRIMARY_RUNTIMES = ["claude", "codex", "droid", "amp", "auggie", "neovate", "gemini", "kimi"]
-
-
 def detect_runtime(name: str) -> RuntimeInfo:
     """Detect if a specific runtime is available on the system."""
     config = KNOWN_RUNTIMES.get(name)

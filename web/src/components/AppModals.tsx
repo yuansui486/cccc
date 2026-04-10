@@ -31,6 +31,7 @@ import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayT
 import { findPresentationSlot } from "../utils/presentation";
 import { buildPresentationRefForSlot } from "../utils/presentationRefs";
 import { formatGroupSettingsUpdateError } from "../utils/groupSettingsErrors";
+import { getEffectiveActorRunner, normalizeActorRunner } from "../utils/headlessRuntimeSupport";
 import {
   useGroupStore,
   useUIStore,
@@ -41,8 +42,9 @@ import {
   useDoneHubStore,
 } from "../stores";
 import { getAckRecipientIdsForEvent, getRecipientActorIdsForEvent } from "../hooks/useSSE";
+import { getChatSession } from "../stores/useUIStore";
 import * as api from "../services/api";
-import { Actor, ActorProfile, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime } from "../types";
+import { Actor, ActorProfile, RUNTIME_INFO, LedgerEvent, GroupSettings, ChatMessageData, PresentationMessageRef, SupportedRuntime, TextScale, Theme } from "../types";
 
 const ContextModal = lazy(() => import("./ContextModal/index").then((module) => ({ default: module.ContextModal })));
 const SettingsModal = lazy(() => import("./SettingsModal").then((module) => ({ default: module.SettingsModal })));
@@ -52,11 +54,14 @@ const PresentationViewerModal = lazy(() =>
 
 interface AppModalsProps {
   isDark: boolean;
+  theme: Theme;
+  textScale: TextScale;
   readOnly?: boolean;
   ccccHome: string;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
   onStartReply: (ev: LedgerEvent) => void;
-  onThemeToggle: () => void;
+  onThemeChange: (theme: Theme) => void;
+  onTextScaleChange: (scale: TextScale) => void;
   onStartGroup: () => Promise<void>;
   onStopGroup: () => Promise<void>;
   onSetGroupState: (state: "active" | "idle" | "paused") => Promise<void>;
@@ -96,11 +101,14 @@ function LazyModalFallback({ isDark }: { isDark: boolean }) {
 
 export function AppModals({
   isDark,
+  theme,
+  textScale,
   readOnly,
   ccccHome,
   composerRef,
   onStartReply,
-  onThemeToggle,
+  onThemeChange,
+  onTextScaleChange,
   onStartGroup,
   onStopGroup,
   onSetGroupState,
@@ -135,11 +143,14 @@ export function AppModals({
   const {
     busy,
     isSmallScreen,
+    chatSessions,
     setBusy,
     showError,
     showNotice,
     setActiveTab,
     setChatMobileSurface,
+    setChatPresentationDockOpen,
+    setChatPresentationDisplayMode,
   } = useUIStore();
   const doneHubStatus = useDoneHubStore((state) => state.status);
   const doneHubSession = useDoneHubStore((state) => state.session);
@@ -167,17 +178,23 @@ export function AppModals({
   const setQuotedPresentationRef = useComposerStore((state) => state.setQuotedPresentationRef);
   const setComposerDestGroupId = useComposerStore((state) => state.setDestGroupId);
 
+  const preferredPresentationSurface = selectedGroupId
+    ? (!isSmallScreen && getChatSession(selectedGroupId, chatSessions).presentationDisplayMode === "split" ? "split" : "modal")
+    : "modal";
+
   const {
     editGroupTitle,
     editGroupTopic,
     setEditGroupTitle,
     setEditGroupTopic,
     editActorRuntime,
+    editActorRunner,
     editActorCommand,
     editActorTitle,
     editActorRoleNotes,
     editActorCapabilityAutoloadText,
     setEditActorRuntime,
+    setEditActorRunner,
     setEditActorCommand,
     setEditActorTitle,
     setEditActorRoleNotes,
@@ -185,6 +202,7 @@ export function AppModals({
     newActorId,
     newActorRole,
     newActorRuntime,
+    newActorRunner,
     newActorCommand,
     newActorUseDefaultCommand,
     newActorSecretsSetText,
@@ -197,6 +215,7 @@ export function AppModals({
     setNewActorId,
     setNewActorRole,
     setNewActorRuntime,
+    setNewActorRunner,
     setNewActorCommand,
     setNewActorUseDefaultCommand,
     setNewActorSecretsSetText,
@@ -612,6 +631,7 @@ export function AppModals({
     const willChangeSecrets = canEditSecrets && (clear || setKeys.length > 0 || unsetKeys.length > 0);
 
     const currentRuntime = String(editingActor.runtime || "codex").trim();
+    const currentRunner = getEffectiveActorRunner(editingActor);
     const currentCommand = Array.isArray(editingActor.command)
       ? editingActor.command.filter((item) => typeof item === "string" && item.trim()).join(" ").trim()
       : "";
@@ -622,6 +642,7 @@ export function AppModals({
     const currentRoleNotes = String(editActorRoleNotesBaselineRef.current || "").trim();
     const nextRoleNotes = String(editActorRoleNotes || "").trim();
     const nextRuntime = String(editActorRuntime || "codex").trim();
+    const nextRunner = normalizeActorRunner(editActorRunner);
     const nextCommand = String(editActorCommand || "").trim();
     const nextTitle = String(editActorTitle || "").trim();
     const nextCapabilityAutoload = Array.isArray(payload.capabilityAutoload)
@@ -629,6 +650,7 @@ export function AppModals({
       : [];
 
     const runtimeChanged = mode === "custom" && (!linkedBefore || convertToCustom) && nextRuntime !== currentRuntime;
+    const runnerChanged = mode === "custom" && (!linkedBefore || convertToCustom) && nextRunner !== currentRunner;
     const commandChanged = mode === "custom" && (!linkedBefore || convertToCustom) && nextCommand !== currentCommand;
     const titleChanged = nextTitle !== currentTitle;
     const autoloadChanged =
@@ -640,7 +662,7 @@ export function AppModals({
     });
     const roleNotesChanged = nextRoleNotes !== currentRoleNotes;
     const hasActorMutation =
-      convertToCustom || runtimeChanged || commandChanged || titleChanged || autoloadChanged || profileChanged;
+      convertToCustom || runtimeChanged || runnerChanged || commandChanged || titleChanged || autoloadChanged || profileChanged;
 
     if (!options.restart && !hasActorMutation && !willChangeSecrets && !roleNotesChanged) {
       throw new Error(NO_CHANGES_SENTINEL);
@@ -661,6 +683,7 @@ export function AppModals({
         const convertResp = await api.updateActor(
           selectedGroupId,
           actorId,
+          undefined,
           undefined,
           undefined,
           nextTitle,
@@ -688,6 +711,7 @@ export function AppModals({
             actorId,
             undefined,
             undefined,
+            undefined,
             nextTitle,
             {
               profileId,
@@ -711,9 +735,11 @@ export function AppModals({
         const snapshotCommand = Array.isArray(actorSnapshot.command)
           ? actorSnapshot.command.filter((item) => typeof item === "string" && item.trim()).join(" ").trim()
           : currentCommand;
+        const snapshotRunner = getEffectiveActorRunner(actorSnapshot as { runner?: unknown; runner_effective?: unknown });
         const snapshotTitle = String(actorSnapshot.title || "").trim();
         const needCustomPatch =
           nextRuntime !== snapshotRuntime ||
+          nextRunner !== snapshotRunner ||
           nextCommand !== snapshotCommand ||
           nextTitle !== snapshotTitle ||
           autoloadChanged;
@@ -722,6 +748,7 @@ export function AppModals({
             selectedGroupId,
             actorId,
             editActorRuntime,
+            nextRunner,
             editActorCommand,
             nextTitle,
             { capabilityAutoload: nextCapabilityAutoload }
@@ -794,6 +821,7 @@ export function AppModals({
   const applyEditingActor = useCallback((actor: Record<string, unknown>) => {
     const runtime = String(actor.runtime || "").trim();
     setEditActorRuntime((runtime || "codex") as SupportedRuntime);
+    setEditActorRunner(getEffectiveActorRunner(actor));
     setEditActorCommand(Array.isArray(actor.command) ? actor.command.join(" ") : "");
     setEditActorTitle(String(actor.title || ""));
     setEditActorRoleNotes("");
@@ -802,7 +830,7 @@ export function AppModals({
       formatCapabilityIdInput((actor as { capability_autoload?: unknown[] }).capability_autoload)
     );
     setEditingActor(actor as Actor);
-  }, [setEditActorRuntime, setEditActorCommand, setEditActorTitle, setEditActorRoleNotes, setEditActorCapabilityAutoloadText, setEditingActor]);
+  }, [setEditActorRuntime, setEditActorRunner, setEditActorCommand, setEditActorTitle, setEditActorRoleNotes, setEditActorCapabilityAutoloadText, setEditingActor]);
 
   useEffect(() => {
     if (!editingActor || !selectedGroupId) return;
@@ -821,6 +849,7 @@ export function AppModals({
       String(editingActor.profile_id || "").trim() !== String(latest.profile_id || "").trim() ||
       Number(editingActor.profile_revision_applied || 0) !== Number(latest.profile_revision_applied || 0) ||
       String(editingActor.runtime || "").trim() !== String(latest.runtime || "").trim() ||
+      String(editingActor.runner || "").trim() !== String(latest.runner || "").trim() ||
       String(editingActor.title || "") !== String(latest.title || "") ||
       String(Array.isArray(editingActor.command) ? editingActor.command.join("\u0000") : "") !==
         String(Array.isArray(latest.command) ? latest.command.join("\u0000") : "") ||
@@ -856,7 +885,7 @@ export function AppModals({
       const resp = await api.upsertActorProfile({
         name: name.trim(),
         runtime: editActorRuntime,
-        runner: "pty",
+        runner: editActorRunner,
         command: editActorCommand.trim(),
         submit: String(editingActor.submit || "enter"),
         env: editingActor.env && typeof editingActor.env === "object" ? editingActor.env : {},
@@ -1015,6 +1044,9 @@ export function AppModals({
         actorId,
         newActorRole,
         newActorUseProfile ? String(selectedProfile?.runtime || "codex") : newActorRuntime,
+        newActorUseProfile
+          ? normalizeActorRunner(selectedProfile?.runner)
+          : newActorRunner,
         commandToUse,
         newActorUseProfile ? undefined : (Object.keys(secretsSetVars).length ? secretsSetVars : undefined),
         newActorUseProfile
@@ -1088,7 +1120,7 @@ export function AppModals({
       const resp = await api.upsertActorProfile({
         name: name.trim(),
         runtime: newActorRuntime,
-        runner: "pty",
+        runner: newActorRunner,
         command: commandToUse,
         submit: "enter",
         env: {},
@@ -1234,6 +1266,7 @@ export function AppModals({
 
     const d = src.data as ChatMessageData | undefined;
     const srcText = typeof d?.text === "string" ? d.text : "";
+    const srcQuoteText = typeof d?.quote_text === "string" ? d.quote_text.trim() : "";
     const noteText = String(note || "").trim();
     const relayText = (noteText ? noteText + "\n\n" : "") + String(srcText || "");
     if (!relayText.trim()) {
@@ -1245,7 +1278,13 @@ export function AppModals({
 
     setBusy("relay");
     try {
-      const resp = await api.relayMessage(dstGroup, relayText, to, { groupId: srcGroupId, eventId: srcEventId });
+      const resp = await api.relayMessage(
+        dstGroup,
+        relayText,
+        to,
+        { groupId: srcGroupId, eventId: srcEventId },
+        srcQuoteText,
+      );
       if (!resp.ok) {
         showError(`${resp.error.code}: ${resp.error.message}`);
         return;
@@ -1270,12 +1309,15 @@ export function AppModals({
         }
         setGroupPresentation(resp.result.presentation);
         setPresentationPin(null);
-        setPresentationViewer({ groupId: gid, slotId: resp.result.slot_id || payload.slotId });
+        if (preferredPresentationSurface === "split") {
+          setChatPresentationDockOpen(gid, true);
+        }
+        setPresentationViewer({ groupId: gid, slotId: resp.result.slot_id || payload.slotId, surface: preferredPresentationSurface });
       } finally {
         setBusy("");
       }
     },
-    [selectedGroupId, setBusy, setGroupPresentation, setPresentationPin, setPresentationViewer, showError],
+    [preferredPresentationSurface, selectedGroupId, setBusy, setChatPresentationDockOpen, setGroupPresentation, setPresentationPin, setPresentationViewer, showError],
   );
 
   const handlePresentationPublishFile = useCallback(
@@ -1291,12 +1333,15 @@ export function AppModals({
         }
         setGroupPresentation(resp.result.presentation);
         setPresentationPin(null);
-        setPresentationViewer({ groupId: gid, slotId: resp.result.slot_id || payload.slotId });
+        if (preferredPresentationSurface === "split") {
+          setChatPresentationDockOpen(gid, true);
+        }
+        setPresentationViewer({ groupId: gid, slotId: resp.result.slot_id || payload.slotId, surface: preferredPresentationSurface });
       } finally {
         setBusy("");
       }
     },
-    [selectedGroupId, setBusy, setGroupPresentation, setPresentationPin, setPresentationViewer, showError],
+    [preferredPresentationSurface, selectedGroupId, setBusy, setChatPresentationDockOpen, setGroupPresentation, setPresentationPin, setPresentationViewer, showError],
   );
 
   const handlePresentationPublishWorkspace = useCallback(
@@ -1312,12 +1357,15 @@ export function AppModals({
         }
         setGroupPresentation(resp.result.presentation);
         setPresentationPin(null);
-        setPresentationViewer({ groupId: gid, slotId: resp.result.slot_id || payload.slotId });
+        if (preferredPresentationSurface === "split") {
+          setChatPresentationDockOpen(gid, true);
+        }
+        setPresentationViewer({ groupId: gid, slotId: resp.result.slot_id || payload.slotId, surface: preferredPresentationSurface });
       } finally {
         setBusy("");
       }
     },
-    [selectedGroupId, setBusy, setGroupPresentation, setPresentationPin, setPresentationViewer, showError],
+    [preferredPresentationSurface, selectedGroupId, setBusy, setChatPresentationDockOpen, setGroupPresentation, setPresentationPin, setPresentationViewer, showError],
   );
 
   const handlePresentationClear = useCallback(
@@ -1405,6 +1453,8 @@ export function AppModals({
       <MobileMenuSheet
         isOpen={modals.mobileMenu}
         isDark={isDark}
+        theme={theme}
+        textScale={textScale}
         selectedGroupId={selectedGroupId}
         groupDoc={groupDoc}
         selectedGroupRunning={selectedGroupRunning}
@@ -1412,7 +1462,8 @@ export function AppModals({
         busy={busy}
         doneHub={doneHub}
         onClose={() => closeModal("mobileMenu")}
-        onToggleTheme={onThemeToggle}
+        onThemeChange={onThemeChange}
+        onTextScaleChange={onTextScaleChange}
         onOpenSearch={() => openModal("search")}
         onOpenContext={() => {
           openModal("context");
@@ -1504,7 +1555,7 @@ export function AppModals({
             return (
               <PresentationViewerModal
                 key={`${selectedGroupId}:${slotId}:${version}`}
-                isOpen={!!presentationViewer && presentationViewer.groupId === selectedGroupId && presentationViewer.slotId === slotId}
+                isOpen={!!presentationViewer && presentationViewer.surface !== "split" && presentationViewer.groupId === selectedGroupId && presentationViewer.slotId === slotId}
                 isDark={isDark}
                 readOnly={readOnly}
                 groupId={selectedGroupId}
@@ -1523,6 +1574,14 @@ export function AppModals({
                   setPresentationPin({ groupId: gid, slotId: nextSlotId });
                 }}
                 onClearSlot={(nextSlotId) => void handlePresentationClear(nextSlotId)}
+                supportsSplit={!isSmallScreen}
+                onOpenSplit={() => {
+                  const gid = String(selectedGroupId || "").trim();
+                  if (!gid || !presentationViewer) return;
+                  setChatPresentationDisplayMode(gid, "split");
+                  setChatPresentationDockOpen(gid, true);
+                  setPresentationViewer({ ...presentationViewer, surface: "split" });
+                }}
                 onClose={() => setPresentationViewer(null)}
               />
             );
@@ -1616,6 +1675,8 @@ export function AppModals({
         runtimes={runtimes}
         runtime={editActorRuntime}
         onChangeRuntime={setEditActorRuntime}
+        runner={editActorRunner}
+        onChangeRunner={setEditActorRunner}
         command={editActorCommand}
         onChangeCommand={setEditActorCommand}
         title={editActorTitle}
@@ -1687,6 +1748,8 @@ export function AppModals({
         actorProfilesBusy={actorProfilesBusy}
         newActorRuntime={newActorRuntime}
         setNewActorRuntime={setNewActorRuntime}
+        newActorRunner={newActorRunner}
+        setNewActorRunner={setNewActorRunner}
         newActorCommand={newActorCommand}
         setNewActorCommand={setNewActorCommand}
         newActorUseDefaultCommand={newActorUseDefaultCommand}

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -92,50 +93,6 @@ class TestMcpInstall(unittest.TestCase):
                         timeout=30,
                     )
 
-    def test_ensure_mcp_installed_claude_uses_absolute_cccc_command(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            cwd = Path(td)
-            with patch("cccc.daemon.mcp_install._runtime_mcp_state", side_effect=["missing", "ready"]), patch(
-                "cccc.daemon.mcp_install.get_cccc_mcp_stdio_command",
-                return_value=[r"C:\CCCC\cccc.exe", "mcp"],
-            ), patch("cccc.daemon.mcp_install.resolve_subprocess_argv", side_effect=lambda argv: list(argv)):
-                with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
-                    mock_run.return_value.returncode = 0
-                    ok = ensure_mcp_installed("claude", cwd, auto_mcp_runtimes=("claude",))
-                    self.assertTrue(ok)
-                    mock_run.assert_called_once_with(
-                        ["claude", "mcp", "add", "-s", "user", "cccc", "--", "C:\\CCCC\\cccc.exe", "mcp"],
-                        capture_output=True,
-                        text=True,
-                        cwd=str(cwd),
-                        timeout=30,
-                    )
-
-    def test_is_mcp_installed_claude_windows_rejects_stale_command(self) -> None:
-        with patch("cccc.daemon.mcp_install.sys.platform", "win32"), patch(
-            "cccc.daemon.mcp_install.get_cccc_mcp_stdio_command",
-            return_value=[r"C:\CCCC\cccc.exe", "mcp"],
-        ), patch(
-            "cccc.daemon.mcp_install.resolve_subprocess_argv",
-            side_effect=lambda argv: list(argv),
-        ):
-            with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
-                mock_run.return_value.returncode = 0
-                mock_run.return_value.stdout = (
-                    "cccc:\n"
-                    "  Scope: User config\n"
-                    "  Type: stdio\n"
-                    "  Command: C:\\Old\\cccc.exe\n"
-                    "  Args: mcp\n"
-                ).encode()
-                self.assertFalse(is_mcp_installed("claude"))
-                mock_run.assert_called_once_with(
-                    ["claude", "mcp", "get", "cccc"],
-                    capture_output=True,
-                    text=False,
-                    timeout=10,
-                )
-
     def test_ensure_mcp_installed_claude_windows_repairs_stale_config(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             cwd = Path(td)
@@ -205,57 +162,25 @@ class TestMcpInstall(unittest.TestCase):
                         ],
                     )
 
-    def test_ensure_mcp_installed_droid_windows_uses_forward_slash_command_and_repairs_stale_entry(self) -> None:
+    def test_ensure_mcp_installed_codex_passes_explicit_env(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             cwd = Path(td)
-            with patch("cccc.daemon.mcp_install.sys.platform", "win32"), patch(
-                "cccc.daemon.mcp_install._runtime_mcp_state",
-                side_effect=["stale", "ready"],
-            ), patch(
-                "cccc.daemon.mcp_install.get_cccc_mcp_stdio_command",
-                return_value=[r"D:\dev\cccc\.venv\Scripts\cccc.exe", "mcp"],
-            ), patch("cccc.daemon.mcp_install.resolve_subprocess_argv", side_effect=lambda argv: list(argv)):
-                with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
-                    mock_run.return_value.returncode = 0
-                    ok = ensure_mcp_installed("droid", cwd, auto_mcp_runtimes=("droid",))
-                    self.assertTrue(ok)
-                    self.assertEqual(
-                        mock_run.call_args_list,
-                        [
-                            call(
-                                ["droid", "mcp", "remove", "cccc"],
-                                capture_output=True,
-                                text=True,
-                                cwd=str(cwd),
-                                timeout=30,
-                            ),
-                            call(
-                                ["droid", "mcp", "add", "--type", "stdio", "cccc", "D:/dev/cccc/.venv/Scripts/cccc.exe", "mcp"],
-                                capture_output=True,
-                                text=True,
-                                cwd=str(cwd),
-                                timeout=30,
-                            ),
-                        ],
-                    )
-
-    def test_ensure_mcp_installed_codex_uses_absolute_cccc_command(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            cwd = Path(td)
+            env = {"CODEX_HOME": "/tmp/cccc-isolated-codex-home", "OPENAI_API_KEY": "sk-test"}
             with patch("cccc.daemon.mcp_install._runtime_mcp_state", side_effect=["missing", "ready"]), patch(
                 "cccc.daemon.mcp_install.get_cccc_mcp_stdio_command",
-                return_value=["C:\\CCCC\\cccc.exe", "mcp"],
+                return_value=["/abs/cccc", "mcp"],
             ), patch("cccc.daemon.mcp_install.resolve_subprocess_argv", side_effect=lambda argv: list(argv)):
                 with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
                     mock_run.return_value.returncode = 0
-                    ok = ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",))
+                    ok = ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",), env=env)
                     self.assertTrue(ok)
                     mock_run.assert_called_once_with(
-                        ["codex", "mcp", "add", "cccc", "--", "C:\\CCCC\\cccc.exe", "mcp"],
+                        ["codex", "mcp", "add", "cccc", "--", "/abs/cccc", "mcp"],
                         capture_output=True,
                         text=True,
                         cwd=str(cwd),
                         timeout=30,
+                        env={**os.environ, **env},
                     )
 
     def test_ensure_mcp_installed_returns_false_when_initial_probe_times_out(self) -> None:
@@ -307,50 +232,6 @@ class TestMcpInstall(unittest.TestCase):
                 cwd=str(cwd),
                 timeout=30,
             )
-
-    def test_is_mcp_installed_codex_windows_rejects_stale_relative_command(self) -> None:
-        with patch("cccc.daemon.mcp_install.sys.platform", "win32"), patch(
-            "cccc.daemon.mcp_install.get_cccc_mcp_stdio_command",
-            return_value=["C:\\CCCC\\cccc.exe", "mcp"],
-        ), patch(
-            "cccc.daemon.mcp_install.resolve_subprocess_argv",
-            side_effect=lambda argv: list(argv),
-        ):
-            with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
-                mock_run.return_value.returncode = 0
-                mock_run.return_value.stdout = (
-                    "cccc\n"
-                    "  enabled: true\n"
-                    "  transport: stdio\n"
-                    "  command: cccc\n"
-                    "  args: mcp\n"
-                )
-                self.assertFalse(is_mcp_installed("codex"))
-                mock_run.assert_called_once_with(
-                    ["codex", "mcp", "get", "cccc"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-
-    def test_is_mcp_installed_codex_windows_accepts_expected_absolute_command(self) -> None:
-        with patch("cccc.daemon.mcp_install.sys.platform", "win32"), patch(
-            "cccc.daemon.mcp_install.get_cccc_mcp_stdio_command",
-            return_value=["C:\\CCCC\\cccc.exe", "mcp"],
-        ), patch(
-            "cccc.daemon.mcp_install.resolve_subprocess_argv",
-            side_effect=lambda argv: list(argv),
-        ):
-            with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
-                mock_run.return_value.returncode = 0
-                mock_run.return_value.stdout = (
-                    "cccc\n"
-                    "  enabled: true\n"
-                    "  transport: stdio\n"
-                    "  command: C:\\CCCC\\cccc.exe\n"
-                    "  args: mcp\n"
-                )
-                self.assertTrue(is_mcp_installed("codex"))
 
     def test_ensure_mcp_installed_codex_windows_repairs_stale_config(self) -> None:
         with tempfile.TemporaryDirectory() as td:

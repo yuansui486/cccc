@@ -13,6 +13,8 @@ export type IMConfigDraft = {
   dingtalkRobotCode: string;
   wecomBotId: string;
   wecomSecret: string;
+  weixinAccountId: string;
+  weixinCommand: string;
 };
 
 export type IMConfigSaveRequest = IMConfigDraft & {
@@ -30,6 +32,8 @@ function toIMConfigExtra(config: IMConfigDraft) {
     dingtalk_robot_code: config.dingtalkRobotCode,
     wecom_bot_id: config.wecomBotId,
     wecom_secret: config.wecomSecret,
+    weixin_account_id: config.weixinAccountId,
+    weixin_command: config.weixinCommand,
   };
 }
 

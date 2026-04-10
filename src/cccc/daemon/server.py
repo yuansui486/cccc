@@ -28,17 +28,19 @@ from ..kernel.settings import (
     update_web_branding_settings,
 )
 from ..kernel.terminal_transcript import get_terminal_transcript_settings
-from ..kernel.messaging import disabled_recipient_actor_ids
+from ..kernel.messaging import disabled_recipient_actor_ids, enabled_recipient_actor_ids
 from ..paths import ensure_home
 from ..runners import pty as pty_runner
 from ..runners import headless as headless_runner
 from ..util.conv import coerce_bool
-from ..util.obslog import setup_root_json_logging
+from ..util.obslog import apply_logger_levels, setup_root_json_logging
 from ..util.process import best_effort_signal_pid, pid_is_alive
 from ..util.fs import atomic_write_json, atomic_write_text, read_json
 from ..util.file_lock import acquire_lockfile, release_lockfile, LockUnavailableError
 from ..util.time import utc_now_iso
 from .automation import AutomationManager
+from .claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from .codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from .im.bootstrap_im_ops import autostart_enabled_im_bridges
 from .group.bootstrap_actor_ops import autostart_running_groups
 from .pet.review_scheduler import recover_pending_pet_reviews
@@ -139,6 +141,17 @@ _DAEMON_CLIENT_WARN_LOCK = threading.Lock()
 _DAEMON_CLIENT_WARN_SEEN: Dict[tuple[str, str, str], float] = {}
 _SPACE_SYNC_RUN_QUEUE: Optional[GroupSpaceSyncRunQueue] = None
 _REQUEST_FAST_QUEUE_OPS = {"send", "reply", "chat_ack"}
+_REQUEST_READ_QUEUE_OPS = {
+    "branding_get",
+    "context_get",
+    "groups",
+    "group_space_status",
+    "im_list_authorized",
+    "im_list_pending",
+    "actor_list",
+    "observability_get",
+    "ping",
+}
 
 
 def _should_log_daemon_client_warning(*, op: str, phase: str, reason: str) -> bool:
@@ -183,13 +196,28 @@ def _apply_observability_settings(home: Path, obs: Dict[str, Any]) -> None:
         _OBSERVABILITY.update(copy.deepcopy(obs))
         _OBSERVABILITY_HOME = home
 
-    # Logging: keep simple; configure root JSONL logger to stderr.
-    level = str(obs.get("log_level") or "INFO").strip().upper() or "INFO"
-    if coerce_bool(obs.get("developer_mode"), default=False):
-        # Developer mode typically wants more detail.
-        if level == "INFO":
-            level = "DEBUG"
-    setup_root_json_logging(component="daemon", level=level, force=True)
+    # Keep root conservative and express targeted DEBUG via logger overrides.
+    requested_level = str(obs.get("log_level") or "INFO").strip().upper() or "INFO"
+    effective_level = requested_level
+    if coerce_bool(obs.get("developer_mode"), default=False) and requested_level == "INFO":
+        effective_level = "DEBUG"
+    root_level = "INFO" if effective_level == "DEBUG" else effective_level
+    logger_levels = {
+        str(name): str(level)
+        for name, level in (obs.get("logger_levels") or {}).items()
+    } if isinstance(obs.get("logger_levels"), dict) else {}
+    if effective_level == "DEBUG":
+        logger_levels.setdefault("cccc", "DEBUG")
+        for noisy_logger in (
+            "asyncio",
+            "httpcore",
+            "httpx",
+            "cccc.delivery",
+            "cccc.providers.notebooklm._vendor.notebooklm",
+        ):
+            logger_levels.setdefault(noisy_logger, "INFO")
+    setup_root_json_logging(component="daemon", level=root_level, force=True)
+    apply_logger_levels(logger_levels)
 
 
 def _apply_space_provider_runtime_flags_from_state() -> None:
@@ -233,12 +261,19 @@ def _effective_runner_kind(runner_kind: str) -> str:
 def _request_queue_for(
     req: Any,
     *,
+    read_queue: DaemonRequestExecutionQueue,
     fast_queue: DaemonRequestExecutionQueue,
     slow_queue: DaemonRequestExecutionQueue,
 ) -> DaemonRequestExecutionQueue:
     op = str(getattr(req, "op", "") or "").strip()
+    args = getattr(req, "args", None)
+    if op in _REQUEST_READ_QUEUE_OPS:
+        return read_queue
+    if op == "group_space_provider_auth":
+        action = str(args.get("action") or "").strip().lower() if isinstance(args, dict) else ""
+        if action == "status":
+            return read_queue
     if op in _REQUEST_FAST_QUEUE_OPS:
-        args = getattr(req, "args", None)
         group_id = str(args.get("group_id") or "").strip() if isinstance(args, dict) else ""
         if group_id:
             group = load_group(group_id)
@@ -317,8 +352,8 @@ def _is_mcp_installed(runtime: str) -> bool:
     return runtime_is_mcp_installed(runtime)
 
 
-def _ensure_mcp_installed(runtime: str, cwd: Path) -> bool:
-    return runtime_ensure_mcp_installed(runtime, cwd, auto_mcp_runtimes=AUTO_MCP_RUNTIMES)
+def _ensure_mcp_installed(runtime: str, cwd: Path, *, env: Dict[str, str] | None = None) -> bool:
+    return runtime_ensure_mcp_installed(runtime, cwd, auto_mcp_runtimes=AUTO_MCP_RUNTIMES, env=env)
 
 
 def _prepare_pty_env(env: Dict[str, Any]) -> Dict[str, str]:
@@ -588,6 +623,9 @@ def _maybe_autostart_running_groups() -> None:
         throttle_reset_actor=lambda gid, aid: THROTTLE.reset_actor(gid, aid, keep_pending=True),
         automation_on_resume=AUTOMATION.on_resume,
         get_group_state=get_group_state,
+        load_actor_private_env=_load_actor_private_env,
+        update_actor_private_env=_update_actor_private_env,
+        delete_actor_private_env=_delete_actor_private_env,
         resolve_linked_actor_before_start=lambda grp, aid, caller_id="", is_admin=False: _resolve_linked_actor_before_start(
             grp,
             aid,
@@ -684,6 +722,7 @@ def _start_actor_process(
         clear_preamble_sent=clear_preamble_sent,
         throttle_reset_actor=lambda gid, aid: THROTTLE.reset_actor(gid, aid, keep_pending=True),
         supported_runtimes=SUPPORTED_RUNTIMES,
+        load_actor_private_env=_load_actor_private_env,
         resolve_linked_actor_before_start=lambda grp, aid, caller_id="", is_admin=False: _resolve_linked_actor_before_start(
             grp,
             aid,
@@ -777,8 +816,29 @@ def _request_dispatch_deps() -> RequestDispatchDeps:
             to,
             by=by,
             disabled_recipient_actor_ids=disabled_recipient_actor_ids,
+            enabled_recipient_actor_ids=enabled_recipient_actor_ids,
             find_actor=find_actor,
             coerce_bool=coerce_bool,
+            is_actor_running=lambda wake_group, actor_id: (
+                (
+                    str((find_actor(wake_group, actor_id) or {}).get("runtime") or "").strip().lower() == "codex"
+                    and _effective_runner_kind(str((find_actor(wake_group, actor_id) or {}).get("runner") or "pty")) == "headless"
+                    and codex_app_supervisor.actor_running(wake_group.group_id, actor_id)
+                )
+                or (
+                    str((find_actor(wake_group, actor_id) or {}).get("runtime") or "").strip().lower() == "claude"
+                    and _effective_runner_kind(str((find_actor(wake_group, actor_id) or {}).get("runner") or "pty")) == "headless"
+                    and claude_app_supervisor.actor_running(wake_group.group_id, actor_id)
+                )
+                or (
+                    _effective_runner_kind(str((find_actor(wake_group, actor_id) or {}).get("runner") or "pty")) == "headless"
+                    and headless_runner.SUPERVISOR.actor_running(wake_group.group_id, actor_id)
+                )
+                or (
+                    _effective_runner_kind(str((find_actor(wake_group, actor_id) or {}).get("runner") or "pty")) == "pty"
+                    and pty_runner.SUPERVISOR.actor_running(wake_group.group_id, actor_id)
+                )
+            ),
             start_actor_process=_start_actor_process,
             update_actor=update_actor,
             runner_stop_actor=runner_stop_actor,
@@ -928,11 +988,17 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         automation_tick=AUTOMATION.tick,
         load_group=load_group,
         group_running=lambda gid: (
+            codex_app_supervisor.group_running(gid)
+            or
+            claude_app_supervisor.group_running(gid)
+            or
             pty_runner.SUPERVISOR.group_running(gid)
             or headless_runner.SUPERVISOR.group_running(gid)
         ),
         tick_delivery=tick_delivery,
         compact_ledgers=_maybe_compact_ledgers,
+        automation_interval_seconds=5.0,
+        initial_automation_delay_seconds=5.0,
     )
 
     def _tick_space_jobs() -> None:
@@ -991,9 +1057,11 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             home=p.home,
             pty_supervisor=pty_runner.SUPERVISOR,
             headless_supervisor=headless_runner.SUPERVISOR,
+            codex_supervisor=codex_app_supervisor,
+            claude_supervisor=claude_app_supervisor,
             event_broadcaster=_activity_broadcaster,
             load_group=load_group,
-            interval_seconds=10.0,
+            interval_seconds=1.0,
         )
     except Exception:
         logger.warning("Failed to start actor activity thread")
@@ -1047,8 +1115,18 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             logger=logger,
             on_should_exit=stop_event.set,
         )
+        read_request_queue = DaemonRequestExecutionQueue(
+            stop_event=stop_event,
+            handle_request=handle_request,
+            send_json=_send_json,
+            dump_response=_dump_response,
+            logger=logger,
+            on_should_exit=stop_event.set,
+        )
         start_request_execution_thread(request_queue=request_queue, name="cccc-request-worker-slow")
         start_request_execution_thread(request_queue=fast_request_queue, name="cccc-request-worker-fast")
+        start_request_execution_thread(request_queue=read_request_queue, name="cccc-request-worker-read-1")
+        start_request_execution_thread(request_queue=read_request_queue, name="cccc-request-worker-read-2")
 
         should_exit = False
         while not should_exit and not stop_event.is_set():
@@ -1099,6 +1177,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
                 handle_request=handle_request,
                 schedule_request=lambda req, conn: _request_queue_for(
                     req,
+                    read_queue=read_request_queue,
                     fast_queue=fast_request_queue,
                     slow_queue=request_queue,
                 ).submit(conn=conn, req=req),
@@ -1122,6 +1201,8 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         home=p.home,
         best_effort_killpg=_best_effort_killpg,
         im_stop_all=im_stop_all,
+        codex_stop_all=codex_app_supervisor.stop_all,
+        claude_stop_all=claude_app_supervisor.stop_all,
         pty_stop_all=pty_runner.SUPERVISOR.stop_all,
         headless_stop_all=headless_runner.SUPERVISOR.stop_all,
         sock_path=p.sock_path,

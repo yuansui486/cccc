@@ -840,8 +840,9 @@ class DingTalkAdapter(IMAdapter):
         if not self._connected:
             return False
 
-        # Ensure message fits limit
-        safe_text = self._compose_safe(text)
+        chunks = self._split_message_chunks(text)
+        if not chunks:
+            return True
 
         # Resolve @mention targets for group conversations
         at_user_ids: Optional[List[str]]
@@ -855,59 +856,68 @@ class DingTalkAdapter(IMAdapter):
                 if staff_id:
                     at_user_ids = [staff_id]
 
-        # Rate limit
-        self._rate_limiter.wait_and_acquire(chat_id)
+        for idx, chunk in enumerate(chunks):
+            chunk_at_user_ids = at_user_ids if idx == 0 else None
 
-        # Try sessionWebhook first (most reliable for group messages)
-        if chat_id in self._session_webhook_cache:
-            webhook_url, expires_at = self._session_webhook_cache[chat_id]
-            current_time = time.time()
-            if current_time < expires_at:
-                if self._send_via_webhook(webhook_url, safe_text, at_user_ids=at_user_ids):
-                    return True
-                self._log("[send] Webhook failed, falling back to API...")
+            # Rate limit
+            self._rate_limiter.wait_and_acquire(chat_id)
+
+            # Try sessionWebhook first (most reliable for group messages)
+            if chat_id in self._session_webhook_cache:
+                webhook_url, expires_at = self._session_webhook_cache[chat_id]
+                current_time = time.time()
+                if current_time < expires_at:
+                    if self._send_via_webhook(webhook_url, chunk, at_user_ids=chunk_at_user_ids):
+                        continue
+                    self._log("[send] Webhook failed, falling back to API...")
+                else:
+                    # Webhook expired, remove from cache
+                    del self._session_webhook_cache[chat_id]
             else:
-                # Webhook expired, remove from cache
-                del self._session_webhook_cache[chat_id]
-        else:
-            self._log("[send] No cached sessionWebhook; falling back to API.")
+                self._log("[send] No cached sessionWebhook; falling back to API.")
 
-        if not self.robot_code:
+            if not self.robot_code:
+                if chat_id.startswith("cid"):
+                    self._log("[send] Missing robot_code; cannot use new API fallback. Trying legacy API.")
+                    if self._send_message_legacy(chat_id, chunk, at_user_ids=chunk_at_user_ids):
+                        continue
+                    return False
+                self._log("[send] Missing robot_code; cannot send via API fallback. Configure DINGTALK_ROBOT_CODE.")
+                return False
+
+            # Use robot message API
+            markdown_payload = self._build_markdown_payload(chunk, chunk_at_user_ids)
+            body: Dict[str, Any] = {
+                "robotCode": self.robot_code,
+                "msgKey": "sampleMarkdown",
+                "msgParam": json.dumps(markdown_payload, ensure_ascii=False),
+            }
+
+            # Determine if group or 1:1
             if chat_id.startswith("cid"):
-                self._log("[send] Missing robot_code; cannot use new API fallback. Trying legacy API.")
-                return self._send_message_legacy(chat_id, safe_text, at_user_ids=at_user_ids)
-            self._log("[send] Missing robot_code; cannot send via API fallback. Configure DINGTALK_ROBOT_CODE.")
+                # Group conversation
+                body["openConversationId"] = chat_id
+                endpoint = "/v1.0/robot/groupMessages/send"
+            else:
+                # 1:1 conversation - need user ID
+                body["userIds"] = [chat_id]
+                endpoint = "/v1.0/robot/oToMessages/batchSend"
+
+            resp = self._api_new("POST", endpoint, body)
+
+            if resp.get("processQueryKey") or resp.get("sendResults"):
+                continue
+
+            # Try alternative API for older bots
+            if "code" in resp or "errcode" in resp:
+                if self._send_message_legacy(chat_id, chunk, at_user_ids=chunk_at_user_ids):
+                    continue
+                return False
+
+            self._log(f"[send] Failed to chat {chat_id}: {resp}")
             return False
 
-        # Use robot message API
-        markdown_payload = self._build_markdown_payload(safe_text, at_user_ids=at_user_ids)
-        body: Dict[str, Any] = {
-            "robotCode": self.robot_code,
-            "msgKey": "sampleMarkdown",
-            "msgParam": json.dumps(markdown_payload, ensure_ascii=False),
-        }
-
-        # Determine if group or 1:1
-        if chat_id.startswith("cid"):
-            # Group conversation
-            body["openConversationId"] = chat_id
-            endpoint = "/v1.0/robot/groupMessages/send"
-        else:
-            # 1:1 conversation - need user ID
-            body["userIds"] = [chat_id]
-            endpoint = "/v1.0/robot/oToMessages/batchSend"
-
-        resp = self._api_new("POST", endpoint, body)
-
-        if resp.get("processQueryKey") or resp.get("sendResults"):
-            return True
-
-        # Try alternative API for older bots
-        if "code" in resp or "errcode" in resp:
-            return self._send_message_legacy(chat_id, safe_text, at_user_ids=at_user_ids)
-
-        self._log(f"[send] Failed to chat {chat_id}: {resp}")
-        return False
+        return True
 
     def _send_message_legacy(
         self,
@@ -943,6 +953,88 @@ class DingTalkAdapter(IMAdapter):
             summarized = summarized[: DINGTALK_MAX_MESSAGE_LENGTH - 1] + "..."
 
         return summarized
+
+    def _normalize_text(self, text: str) -> str:
+        """Normalize outbound text without truncating content."""
+        if not text:
+            return ""
+
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "  ")
+        lines = [ln.rstrip() for ln in normalized.split("\n")]
+
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+        kept: List[str] = []
+        empty_count = 0
+        for ln in lines:
+            if not ln.strip():
+                empty_count += 1
+                if empty_count <= 1:
+                    kept.append("")
+            else:
+                empty_count = 0
+                kept.append(ln)
+
+        return "\n".join(kept).strip()
+
+    def _split_message_chunks(self, text: str) -> List[str]:
+        """Split a long outbound message into DingTalk-sized chunks."""
+        normalized = self._normalize_text(text)
+        if not normalized:
+            return []
+
+        max_chars = max(1, min(int(self.max_chars or DINGTALK_MAX_MESSAGE_LENGTH), DINGTALK_MAX_MESSAGE_LENGTH))
+        max_lines = max(1, int(self.max_lines or DEFAULT_MAX_LINES))
+        chunks: List[str] = []
+        current_lines: List[str] = []
+        current_chars = 0
+
+        def flush() -> None:
+            nonlocal current_lines, current_chars
+            if not current_lines:
+                return
+            chunk = "\n".join(current_lines).strip()
+            if chunk:
+                chunks.append(chunk)
+            current_lines = []
+            current_chars = 0
+
+        def push_line(line: str) -> None:
+            nonlocal current_chars
+            sep = 1 if current_lines else 0
+            current_lines.append(line)
+            current_chars += len(line) + sep
+
+        for raw_line in normalized.split("\n"):
+            remaining = raw_line
+            while True:
+                if not current_lines and len(remaining) > max_chars:
+                    chunks.append(remaining[:max_chars])
+                    remaining = remaining[max_chars:]
+                    if not remaining:
+                        break
+                    continue
+
+                needs_new_chunk = False
+                if current_lines and len(current_lines) >= max_lines:
+                    needs_new_chunk = True
+                else:
+                    sep = 1 if current_lines else 0
+                    if current_chars + len(remaining) + sep > max_chars:
+                        needs_new_chunk = True
+
+                if needs_new_chunk:
+                    flush()
+                    continue
+
+                push_line(remaining)
+                break
+
+        flush()
+        return chunks
 
     def get_chat_title(self, chat_id: str) -> str:
         """Get conversation title via API."""
@@ -1250,8 +1342,7 @@ class DingTalkAdapter(IMAdapter):
 
     def format_outbound(self, by: str, to: List[str], text: str, is_system: bool = False) -> str:
         """Format message for DingTalk display."""
-        formatted = super().format_outbound(by, to, text, is_system)
-        return self._compose_safe(formatted)
+        return super().format_outbound(by, to, text, is_system)
 
     # ===== Webhook Event Handling =====
 

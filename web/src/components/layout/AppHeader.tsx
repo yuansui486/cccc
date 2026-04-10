@@ -1,8 +1,9 @@
-import { useTranslation } from 'react-i18next';
-import { Actor, DoneHubStatus, GroupDoc, Theme } from "../../types";
-import { getGroupStatusUnified } from "../../utils/groupStatus";
-import { getGroupControlVisual, getLaunchControlMode } from "../../utils/groupControls";
+import { useTranslation } from "react-i18next";
+import { Actor, DoneHubStatus, GroupDoc, GroupRuntimeStatus, TextScale, Theme } from "../../types";
+import { getGroupStatusFromSource } from "../../utils/groupStatus";
+import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
 import { classNames } from "../../utils/classNames";
+import { TextScaleSwitcher } from "../TextScaleSwitcher";
 import { ThemeToggleCompact } from "../ThemeToggle";
 import { LanguageSwitcher } from "../LanguageSwitcher";
 import { formatDoneHubQuota } from "../../services/doneHub";
@@ -21,11 +22,14 @@ import {
 export interface AppHeaderProps {
   isDark: boolean;
   theme: Theme;
+  textScale: TextScale;
   onThemeChange: (theme: Theme) => void;
+  onTextScaleChange: (scale: TextScale) => void;
   webReadOnly?: boolean;
   selectedGroupId: string;
   groupDoc: GroupDoc | null;
   selectedGroupRunning: boolean;
+  selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
   actors: Actor[];
   sseStatus: "connected" | "connecting" | "disconnected";
   busy: string;
@@ -51,11 +55,14 @@ export interface AppHeaderProps {
 export function AppHeader({
   isDark,
   theme,
+  textScale,
   onThemeChange,
+  onTextScaleChange,
   webReadOnly,
   selectedGroupId,
   groupDoc,
   selectedGroupRunning,
+  selectedGroupRuntimeStatus,
   actors,
   busy,
   doneHub,
@@ -71,26 +78,36 @@ export function AppHeader({
   onOpenMobileMenu,
   sseStatus,
 }: AppHeaderProps) {
-  const { t } = useTranslation('layout');
+  const { t } = useTranslation("layout");
   const headerIconButtonBaseClass =
     "flex items-center justify-center w-11 h-11 rounded-xl transition-all shrink-0";
   const headerRailClass =
     "flex items-center gap-1 rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-1 shadow-sm backdrop-blur-xl";
   const headerRailButtonClass =
     "flex items-center justify-center w-10 h-10 rounded-xl transition-all shrink-0 border border-transparent bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-45 disabled:text-[var(--color-text-tertiary)] disabled:hover:bg-transparent disabled:hover:text-[var(--color-text-tertiary)]";
-  const selectedStatus = selectedGroupId ? getGroupStatusUnified(selectedGroupRunning, groupDoc?.state) : null;
+  const selectedStatus = selectedGroupId ? getGroupStatusFromSource({
+    running: selectedGroupRunning,
+    state: (selectedGroupRuntimeStatus?.lifecycle_state as GroupDoc["state"] | undefined) || groupDoc?.state,
+    runtime_status: selectedGroupRuntimeStatus || undefined,
+  }) : null;
   const selectedStatusKey = selectedStatus?.key ?? null;
   const launchMode = getLaunchControlMode(selectedStatusKey);
   const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
   const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
   const stopControl = getGroupControlVisual(selectedStatusKey, "stop", busy);
-  const isGroupBusy = busy.startsWith("group-");
-  const launchHardUnavailable = !selectedGroupId || actors.length === 0;
-  const pauseHardUnavailable = !selectedGroupId || !selectedGroupRunning;
-  const stopHardUnavailable = !selectedGroupId;
-  const launchDisabled = launchHardUnavailable || isGroupBusy;
-  const pauseDisabled = pauseHardUnavailable || isGroupBusy;
-  const stopDisabled = stopHardUnavailable || isGroupBusy;
+  const {
+    launchHardUnavailable,
+    pauseHardUnavailable,
+    stopHardUnavailable,
+    launchDisabled,
+    pauseDisabled,
+    stopDisabled,
+  } = resolveGroupControls({
+    selectedGroupId,
+    actorCount: actors.length,
+    statusKey: selectedStatusKey,
+    busy,
+  });
 
   const doneHubStatus = doneHub?.status || "idle";
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
@@ -127,7 +144,7 @@ export function AppHeader({
             "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
           )}
           onClick={onOpenSidebar}
-          aria-label={t('openSidebar')}
+          aria-label={t("openSidebar")}
         >
           <MenuIcon size={18} />
         </button>
@@ -135,7 +152,7 @@ export function AppHeader({
         <div className="min-w-0 flex flex-col">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold truncate text-[var(--color-text-primary)]">
-              {groupDoc?.title || (selectedGroupId ? selectedGroupId : t('selectGroup'))}
+              {groupDoc?.title || (selectedGroupId ? selectedGroupId : t("selectGroup"))}
             </h1>
             {selectedStatus && (
               <span
@@ -154,7 +171,7 @@ export function AppHeader({
                   "flex-shrink-0 w-2 h-2 rounded-full",
                   sseStatus === "connecting" ? "bg-amber-400 animate-pulse" : "bg-rose-500"
                 )}
-                title={sseStatus === "connecting" ? t('reconnecting') : t('disconnected')}
+                title={sseStatus === "connecting" ? t("reconnecting") : t("disconnected")}
               />
             )}
           </div>
@@ -167,8 +184,8 @@ export function AppHeader({
               "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
             )}
             onClick={onOpenGroupEdit}
-            title={t('editGroup')}
-            aria-label={t('editGroup')}
+            title={t("editGroup")}
+            aria-label={t("editGroup")}
           >
             <EditIcon size={14} />
           </button>
@@ -184,9 +201,9 @@ export function AppHeader({
                   onClick={onOpenSearch}
                   disabled={!selectedGroupId}
                   className={headerRailButtonClass}
-                  title={t('searchMessages')}
+                  title={t("searchMessages")}
                 >
-                  <span className="sr-only">{t('searchMessages')}</span>
+                  <span className="sr-only">{t("searchMessages")}</span>
                   <SearchIcon size={18} />
                 </button>
 
@@ -194,9 +211,9 @@ export function AppHeader({
                   onClick={onOpenContext}
                   disabled={!selectedGroupId}
                   className={headerRailButtonClass}
-                  title={t('context')}
+                  title={t("context")}
                 >
-                  <span className="sr-only">{t('context')}</span>
+                  <span className="sr-only">{t("context")}</span>
                   <ClipboardIcon size={18} />
                 </button>
               </div>
@@ -210,10 +227,10 @@ export function AppHeader({
                     launchControl.className,
                     launchHardUnavailable && "opacity-45"
                   )}
-                  title={launchMode === "activate" ? t('resumeDelivery') : t('launchAllAgents')}
+                  title={launchMode === "activate" ? t("resumeDelivery") : t("launchAllAgents")}
                   aria-pressed={launchControl.active}
                 >
-                  <span className="sr-only">{launchMode === "activate" ? t('resumeDelivery') : t('launchAllAgents')}</span>
+                  <span className="sr-only">{launchMode === "activate" ? t("resumeDelivery") : t("launchAllAgents")}</span>
                   <RocketIcon size={18} />
                 </button>
 
@@ -225,10 +242,10 @@ export function AppHeader({
                     pauseControl.className,
                     pauseHardUnavailable && "opacity-45"
                   )}
-                  title={t('pauseDelivery')}
+                  title={t("pauseDelivery")}
                   aria-pressed={pauseControl.active}
                 >
-                  <span className="sr-only">{t('pauseDelivery')}</span>
+                  <span className="sr-only">{t("pauseDelivery")}</span>
                   <PauseIcon size={18} />
                 </button>
 
@@ -240,10 +257,10 @@ export function AppHeader({
                     stopControl.className,
                     stopHardUnavailable && "opacity-45"
                   )}
-                  title={t('stopAllAgents')}
+                  title={t("stopAllAgents")}
                   aria-pressed={stopControl.active}
                 >
-                  <span className="sr-only">{t('stopAllAgents')}</span>
+                  <span className="sr-only">{t("stopAllAgents")}</span>
                   <StopIcon size={18} />
                 </button>
               </div>
@@ -278,14 +295,15 @@ export function AppHeader({
 
               <div className={headerRailClass}>
                 <ThemeToggleCompact theme={theme} onThemeChange={onThemeChange} isDark={isDark} variant="rail" />
+                <TextScaleSwitcher textScale={textScale} onTextScaleChange={onTextScaleChange} variant="rail" />
                 <LanguageSwitcher isDark={isDark} variant="rail" />
                 <button
                   onClick={onOpenSettings}
                   disabled={!selectedGroupId}
                   className={headerRailButtonClass}
-                  title={t('settings')}
+                  title={t("settings")}
                 >
-                  <span className="sr-only">{t('settings')}</span>
+                  <span className="sr-only">{t("settings")}</span>
                   <SettingsIcon size={18} />
                 </button>
               </div>
@@ -299,7 +317,7 @@ export function AppHeader({
                 "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
               )}
               onClick={onOpenMobileMenu}
-              title={t('menu')}
+              title={t("menu")}
             >
               <MoreIcon size={18} />
             </button>

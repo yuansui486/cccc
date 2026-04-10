@@ -7,6 +7,9 @@ import type {
   ActorRuntimeState,
   LedgerEvent,
 } from "../../types";
+import type { TerminalSignal } from "../../stores/useTerminalSignalsStore";
+import { getTerminalSignalKey } from "../../stores/useTerminalSignalsStore";
+import { getActorDisplayWorkingState } from "../../utils/terminalWorkingState";
 import type {
   CatState,
   PanelData,
@@ -20,6 +23,7 @@ export interface AggregateInput {
   groupState?: string;
   teamName?: string;
   groupId?: string;
+  terminalSignals?: Record<string, TerminalSignal>;
 }
 
 export interface AggregateOutput {
@@ -40,12 +44,26 @@ export function getChatMessageText(event: LedgerEvent): string {
   return String(data?.text ?? "").trim();
 }
 
-function hasActivity(agent: AgentState, runtimeState?: ActorRuntimeState): boolean {
-  const effectiveState = String(runtimeState?.effective_working_state || "").trim().toLowerCase();
-  if (effectiveState) {
-    return effectiveState === "working";
-  }
-  return !!(agent.hot?.active_task_id ?? "").trim();
+function getWebPetWorkingState(
+  groupId: string,
+  _agent: AgentState,
+  runtimeState: ActorRuntimeState | undefined,
+  terminalSignals: Record<string, TerminalSignal>,
+): string {
+  if (!runtimeState) return "idle";
+  const actorLike: ActorRuntimeState = runtimeState ?? {
+    id: _agent.id,
+    running: false,
+    runner: "pty",
+    runner_effective: "pty",
+    effective_working_state: "",
+  };
+  const signal = terminalSignals[getTerminalSignalKey(groupId, actorLike.id)];
+  return getActorDisplayWorkingState(actorLike, signal);
+}
+
+function hasActivity(workingState: string): boolean {
+  return String(workingState || "").trim().toLowerCase() === "working";
 }
 
 export function aggregateWebPetState(input: AggregateInput): AggregateOutput {
@@ -54,9 +72,10 @@ export function aggregateWebPetState(input: AggregateInput): AggregateOutput {
     sseStatus,
     groupState = "",
     teamName = "Team",
+    groupId = "",
+    terminalSignals = {},
   } = input;
   void input.events;
-  void input.groupId;
 
   const context = groupContext ?? {};
   const agentStates: AgentState[] = context.agent_states ?? [];
@@ -65,13 +84,20 @@ export function aggregateWebPetState(input: AggregateInput): AggregateOutput {
   const agentStateById = new Map(agentStates.map((item) => [item.id, item]));
   const actorIds = Array.from(new Set([...agentStateById.keys(), ...runtimeStateById.keys()]));
 
+  const workingStateById = new Map(
+    actorIds.map((id) => [
+      id,
+      getWebPetWorkingState(groupId, agentStateById.get(id) ?? { id }, runtimeStateById.get(id), terminalSignals),
+    ]),
+  );
+
   // When group is inactive, treat all agents as idle
   const groupInactive = groupState === "paused" || groupState === "idle" || groupState === "stopped";
 
   // Count active agents (none when group is inactive)
   const activeAgents = groupInactive
     ? []
-    : actorIds.filter((id) => hasActivity(agentStateById.get(id) ?? { id }, runtimeStateById.get(id)));
+    : actorIds.filter((id) => hasActivity(workingStateById.get(id) || ""));
 
   // Determine cat state (priority: inactive > busy > working > napping)
   let catState: CatState;
@@ -88,17 +114,19 @@ export function aggregateWebPetState(input: AggregateInput): AggregateOutput {
   // Build agent summaries
   const agents: AgentSummary[] = actorIds.map((id) => {
     const agent = agentStateById.get(id);
+    const workingState = workingStateById.get(id) || "";
     return {
-    id,
-    state: groupInactive
-      ? "napping"
-      : hasActivity(agent ?? { id }, runtimeStateById.get(id))
-        ? activeAgents.length >= 2
-          ? "busy"
-          : "working"
-        : "napping",
-    focus: agent?.hot?.focus ?? "",
-  };
+      id,
+      state: groupInactive
+        ? "napping"
+        : hasActivity(workingState)
+          ? activeAgents.length >= 2
+            ? "busy"
+            : "working"
+          : "napping",
+      focus: agent?.hot?.focus ?? "",
+      activeTaskId: String(agent?.hot?.active_task_id ?? "").trim() || undefined,
+    };
   });
 
   // Connection status from SSE

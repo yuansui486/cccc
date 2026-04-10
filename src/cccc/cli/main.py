@@ -276,11 +276,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_daemon.set_defaults(func=cmd_daemon)
 
     # IM Bridge commands
-    p_im = sub.add_parser("im", help="Manage IM bridge (Telegram/Slack/Discord/Feishu/Lark/DingTalk)")
+    p_im = sub.add_parser("im", help="Manage IM bridge (Telegram/Slack/Discord/Feishu/Lark/DingTalk/WeCom/Weixin)")
     im_sub = p_im.add_subparsers(dest="action", required=True)
 
     p_im_set = im_sub.add_parser("set", help="Set IM bridge configuration")
-    p_im_set.add_argument("platform", choices=["telegram", "slack", "discord", "feishu", "dingtalk"], help="IM platform")
+    p_im_set.add_argument("platform", choices=["telegram", "slack", "discord", "feishu", "dingtalk", "wecom", "weixin"], help="IM platform")
     p_im_set.add_argument("--token-env", default="", help="Environment variable name for token (telegram/discord)")
     p_im_set.add_argument("--bot-token-env", default="", help="Bot token env var (Slack: xoxb- for outbound)")
     p_im_set.add_argument("--app-token-env", default="", help="App token env var (Slack: xapp- for inbound Socket Mode)")
@@ -289,6 +289,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_im_set.add_argument("--domain", default="", help="Feishu domain override: feishu (CN) or lark (Global)")
     p_im_set.add_argument("--robot-code-env", default="", help="Robot code env var (DingTalk; optional but recommended)")
     p_im_set.add_argument("--robot-code", default="", help="Robot code value directly (DingTalk; not recommended, prefer env var)")
+    p_im_set.add_argument("--wecom-bot-id", default="", help="WeCom Bot ID (or env var name)")
+    p_im_set.add_argument("--wecom-secret", default="", help="WeCom Secret (or env var name)")
+    p_im_set.add_argument("--weixin-account-id", default="", help="Weixin account id (optional)")
+    p_im_set.add_argument("--weixin-command", default="", help="Weixin sidecar command line (optional)")
     p_im_set.add_argument("--token", default="", help="Token value directly (not recommended, use env vars)")
     p_im_set.add_argument("--group", default="", help="Target group_id (default: active group)")
     p_im_set.set_defaults(func=cmd_im_set)

@@ -1,31 +1,62 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from "@floating-ui/react";
 import { useTranslation } from "react-i18next";
-import { LedgerEvent, Actor, AgentState, getActorAccentColor, ChatMessageData, MessageAttachment, PresentationMessageRef } from "../types";
+import { LedgerEvent, Actor, AgentState, getActorAccentColor, ChatMessageData, MessageAttachment, PresentationMessageRef, StreamingActivity } from "../types";
 import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
-import { getRecipientDisplayName } from "../hooks/useActorDisplayName";
-import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayText";
+import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
+import { getAttachmentAwareMessageText } from "../utils/messageAttachments";
+import { selectStreamingReplySession, useGroupStore } from "../stores";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
+import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
+import { withAuthToken } from "../services/api/base";
+import {
+    buildToLabel,
+    buildVisibleReadStatusEntries,
+    computeAckSummary,
+    computeObligationSummary,
+    getSenderDisplayName,
+} from "./messageBubble/model";
 import { ActorAvatar } from "./ActorAvatar";
+import {
+    StreamingMessageBody,
+} from "./messageBubble/StreamingMessageBody";
+import {
+    formatEventLine,
+    getMessageBubbleMotionClass,
+    isQueuedOnlyStreamingPlaceholder,
+    mayContainMarkdown,
+    normalizeStreamingActivities,
+} from "./messageBubble/helpers";
 
 const LazyMarkdownRenderer = lazy(() =>
     import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
 );
 
-function formatEventLine(ev: LedgerEvent): string {
-    if (ev.kind === "chat.message" && ev.data && typeof ev.data === "object") {
-        const msg = ev.data as ChatMessageData;
-        return String(msg.text || "");
-    }
-    return "";
+const TYPING_DOT_STYLE_ID = "cccc-message-bubble-typing-dot-style";
+function ensureTypingDotStyle(): void {
+    if (typeof document === "undefined") return;
+    if (document.getElementById(TYPING_DOT_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = TYPING_DOT_STYLE_ID;
+    style.textContent = `
+      @keyframes ccccMessageTypingDot {
+        0%, 70%, 100% { transform: translateY(0) scale(0.92); opacity: 0.28; }
+        35% { transform: translateY(-3px) scale(1); opacity: 0.95; }
+      }
+    `;
+    document.head.appendChild(style);
 }
 
-function mayContainMarkdown(text: string): boolean {
-    const value = String(text || "");
-    if (!value.trim()) return false;
-    return /(```|`[^`\n]+`|\[[^\]]+\]\([^)]+\)|^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>\s)/m.test(value);
+function buildSenderAvatarUrl(groupId: string, senderAvatarPath?: string): string {
+    const gid = String(groupId || "").trim();
+    const relPath = String(senderAvatarPath || "").trim();
+    if (!gid || !relPath.startsWith("state/blobs/")) return "";
+    const blobName = relPath.split("/").pop() || "";
+    if (!blobName) return "";
+    return withAuthToken(`/api/v1/groups/${encodeURIComponent(gid)}/blobs/${encodeURIComponent(blobName)}`);
 }
 
 function PlainMessageText({
@@ -106,6 +137,332 @@ function buildMessageCopyText({
     return sections.join("\n\n").trim();
 }
 
+
+function MessageBubbleBody({
+    event,
+    isUserMessage,
+    isDark,
+    groupId,
+    groupLabelById,
+    hasSource,
+    srcGroupId,
+    srcEventId,
+    hasDestination,
+    dstGroupId,
+    dstTo,
+    relayChipClass,
+    quoteText,
+    presentationRefs,
+    isStreaming,
+    streamingActivities,
+    streamId,
+    actorId,
+    pendingEventId,
+    messageText,
+    isQueuedOnlyPlaceholder,
+    streamingPlaceholderLabel,
+    shouldRenderMarkdown,
+    blobAttachments,
+    blobGroupId,
+    stableMessageAttachmentKey,
+    onOpenSource,
+    onOpenPresentationRef,
+}: {
+    event: LedgerEvent;
+    isUserMessage: boolean;
+    isDark: boolean;
+    groupId: string;
+    groupLabelById: Record<string, string>;
+    hasSource: boolean;
+    srcGroupId: string;
+    srcEventId: string;
+    hasDestination: boolean;
+    dstGroupId: string;
+    dstTo: string[];
+    relayChipClass: string;
+    quoteText?: string;
+    presentationRefs: PresentationMessageRef[];
+    isStreaming: boolean;
+    streamingActivities: StreamingActivity[];
+    streamId: string;
+    actorId: string;
+    pendingEventId: string;
+    messageText: string;
+    isQueuedOnlyPlaceholder: boolean;
+    streamingPlaceholderLabel: string;
+    shouldRenderMarkdown: boolean;
+    blobAttachments: Array<{
+        kind: string;
+        path: string;
+        title: string;
+        bytes: number;
+        mime_type: string;
+        local_preview_url: string;
+    }>;
+    blobGroupId: string;
+    stableMessageAttachmentKey: string;
+    onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
+    onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
+}) {
+    const { t } = useTranslation("chat");
+
+    return (
+        <>
+            {hasSource ? (
+                <button
+                    type="button"
+                    className={classNames(
+                        "mb-2 inline-flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 border",
+                        relayChipClass,
+                        onOpenSource ? "cursor-pointer" : "cursor-default"
+                    )}
+                    onClick={() => onOpenSource?.(srcGroupId, srcEventId)}
+                    disabled={!onOpenSource}
+                    title={t("openOriginalMessage")}
+                >
+                    <span className="opacity-70">↗</span>
+                    <span className="truncate">
+                        {t("relayedFrom", { groupId: srcGroupId, eventId: srcEventId.slice(0, 8) })}
+                    </span>
+                </button>
+            ) : null}
+
+            {hasDestination ? (() => {
+                const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
+                const dstToLabel = dstTo.length > 0 ? dstTo.join(", ") : "@all";
+                return (
+                    <div
+                        className={classNames(
+                            "mb-2 inline-flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 border",
+                            relayChipClass
+                        )}
+                        title={t("sentTo", { label: dstGroupId, to: dstToLabel })}
+                    >
+                        <span className="opacity-70">↗</span>
+                        <span className="truncate">
+                            {t("sentTo", { label: dstLabel, to: dstToLabel })}
+                        </span>
+                    </div>
+                );
+            })() : null}
+
+            {quoteText ? (
+                <div
+                    className={`mb-2 text-xs border-l-2 pl-2 italic truncate opacity-80 ${isUserMessage ? "border-blue-400" : "border-[var(--glass-border-subtle)]"}`}
+                >
+                    "{quoteText}"
+                </div>
+            ) : null}
+
+            {presentationRefs.length > 0 ? (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                    {presentationRefs.map((ref, index) => (
+                        <button
+                            key={`${String(event.id || "message")}:presentation-ref:${index}:${String(ref.slot_id || "")}`}
+                            type="button"
+                            onClick={() => onOpenPresentationRef?.(ref, event)}
+                            className={classNames(
+                                "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                                isUserMessage
+                                    ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
+                                    : "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                            )}
+                            title={getPresentationRefChipLabel(ref)}
+                        >
+                            <span className="truncate">{getPresentationRefChipLabel(ref)}</span>
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+
+            <MessageContent
+                isStreaming={isStreaming}
+                groupId={groupId}
+                streamId={streamId}
+                actorId={actorId}
+                pendingEventId={pendingEventId}
+                fallbackText={messageText}
+                streamingActivities={streamingActivities}
+                isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
+                streamingPlaceholderLabel={streamingPlaceholderLabel}
+                shouldRenderMarkdown={shouldRenderMarkdown}
+                isDark={isDark}
+                isUserMessage={isUserMessage}
+            />
+
+            <MessageAttachments
+                attachments={blobAttachments}
+                blobGroupId={blobGroupId}
+                isUserMessage={isUserMessage}
+                isDark={isDark}
+                attachmentKeyPrefix={stableMessageAttachmentKey}
+                downloadTitle={(name) => t("download", { name })}
+            />
+        </>
+    );
+}
+
+function MessageContent({
+    isStreaming,
+    groupId,
+    streamId,
+    actorId,
+    pendingEventId,
+    fallbackText,
+    streamingActivities,
+    isQueuedOnlyPlaceholder,
+    streamingPlaceholderLabel,
+    shouldRenderMarkdown,
+    isDark,
+    isUserMessage,
+}: {
+    isStreaming: boolean;
+    groupId: string;
+    streamId: string;
+    actorId: string;
+    pendingEventId: string;
+    fallbackText: string;
+    streamingActivities: StreamingActivity[];
+    isQueuedOnlyPlaceholder: boolean;
+    streamingPlaceholderLabel: string;
+    shouldRenderMarkdown: boolean;
+    isDark: boolean;
+    isUserMessage: boolean;
+}) {
+    if (isStreaming) {
+        return (
+            <StreamingMessageBody
+                groupId={groupId}
+                streamId={streamId}
+                actorId={actorId}
+                pendingEventId={pendingEventId}
+                fallbackText={fallbackText}
+                streamingActivities={streamingActivities}
+                isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
+                streamingPlaceholderLabel={streamingPlaceholderLabel}
+            />
+        );
+    }
+
+    if (shouldRenderMarkdown) {
+        return (
+            <Suspense
+                fallback={
+                    <PlainMessageText
+                        text={fallbackText}
+                        className="max-w-full"
+                    />
+                }
+            >
+                <LazyMarkdownRenderer
+                    content={fallbackText}
+                    isDark={isDark}
+                    invertText={isUserMessage}
+                    className="break-words [overflow-wrap:anywhere] max-w-full"
+                />
+            </Suspense>
+        );
+    }
+
+    return (
+        <PlainMessageText
+            text={fallbackText}
+            className="max-w-full"
+        />
+    );
+}
+
+function AgentStateTooltip({
+    isOpen,
+    canShow,
+    isPositioned,
+    setFloating,
+    floatingStyles,
+    senderDisplayName,
+    updatedAt,
+    agentStateDisplay,
+    stateTask,
+    blockerCount,
+    stateNext,
+    stateChanged,
+}: {
+    isOpen: boolean;
+    canShow: boolean;
+    isPositioned: boolean;
+    setFloating: (node: HTMLElement | null) => void;
+    floatingStyles: CSSProperties;
+    senderDisplayName: string;
+    updatedAt?: string;
+    agentStateDisplay: string;
+    stateTask: string;
+    blockerCount: number;
+    stateNext: string;
+    stateChanged: string;
+}) {
+    const { t } = useTranslation("chat");
+
+    if (!isOpen || !canShow) return null;
+
+    return (
+        <div
+            ref={setFloating}
+            style={floatingStyles}
+            className={classNames(
+                "pointer-events-none z-[80] w-[min(360px,calc(100vw-32px))] rounded-2xl px-3 py-2 shadow-2xl transition-opacity duration-150",
+                "glass-modal text-[var(--color-text-primary)]",
+                isPositioned ? "opacity-100" : "opacity-0"
+            )}
+            role="status"
+        >
+            <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold text-[var(--color-text-primary)]">
+                    {senderDisplayName}
+                </div>
+                {updatedAt ? (
+                    <div
+                        className={classNames(
+                            "ml-auto text-xs tabular-nums",
+                            "text-[var(--color-text-tertiary)]"
+                        )}
+                        title={formatFullTime(updatedAt)}
+                    >
+                        {t("updated", { time: formatTime(updatedAt) })}
+                    </div>
+                ) : null}
+            </div>
+            <div className="mt-1 text-xs whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                {agentStateDisplay}
+            </div>
+            {(stateTask || blockerCount > 0 || stateNext || stateChanged) ? (
+                <div className="mt-2 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        {stateTask ? (
+                            <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                                {t("taskShort", { id: stateTask })}
+                            </span>
+                        ) : null}
+                        {blockerCount > 0 ? (
+                            <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300">
+                                {t("blockersShort", { count: blockerCount })}
+                            </span>
+                        ) : null}
+                    </div>
+                    {stateNext ? (
+                        <div className="text-[11px] text-[var(--color-text-tertiary)]">
+                            {t("nextShort", { value: stateNext })}
+                        </div>
+                    ) : null}
+                    {stateChanged ? (
+                        <div className={classNames("text-[11px]", "text-[var(--color-text-tertiary)]")}>
+                            {t("changedShort", { value: stateChanged })}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
 export interface MessageBubbleProps {
     event: LedgerEvent;
     actorById: Map<string, Actor>;
@@ -117,6 +474,7 @@ export interface MessageBubbleProps {
     groupId: string;
     groupLabelById: Record<string, string>;
     isHighlighted?: boolean;
+    collapseHeader?: boolean;
     onReply: () => void;
     onShowRecipients: () => void;
     onCopyLink?: (eventId: string) => void;
@@ -137,6 +495,7 @@ export const MessageBubble = memo(function MessageBubble({
     groupId,
     groupLabelById,
     isHighlighted,
+    collapseHeader,
     onReply,
     onShowRecipients,
     onCopyLink,
@@ -148,15 +507,21 @@ export const MessageBubble = memo(function MessageBubble({
     const isUserMessage = ev.by === "user";
     const isOptimistic = !!(ev.data as Record<string, unknown> | undefined)?._optimistic;
     const senderAccent = !isUserMessage ? getActorAccentColor(String(ev.by || ""), isDark) : null;
+    const isStreaming = !!ev._streaming;
+    const streamId = ev.data && typeof ev.data === "object"
+        ? String((ev.data as { stream_id?: unknown }).stream_id || "").trim()
+        : "";
+    const canReply = !!getReplyEventId(ev);
     const messageText = useMemo(() => formatEventLine(ev), [ev]);
 
     const [isAgentStateOpen, setIsAgentStateOpen] = useState(false);
     const [copiedMessageText, setCopiedMessageText] = useState(false);
+    const floatingMiddleware = useMemo(() => [offset(8), flip(), shift({ padding: 8 })], []);
     const { refs, floatingStyles, context } = useFloating({
         open: isAgentStateOpen,
         onOpenChange: setIsAgentStateOpen,
         placement: "bottom-start",
-        middleware: [offset(8), flip(), shift({ padding: 8 })],
+        middleware: floatingMiddleware,
         whileElementsMounted: autoUpdate,
         strategy: "fixed",
     });
@@ -176,6 +541,10 @@ export const MessageBubble = memo(function MessageBubble({
     }, [ev.by, isUserMessage]);
 
     const { t } = useTranslation('chat');
+
+    useEffect(() => {
+        ensureTypingDotStyle();
+    }, []);
     const agentStateText = String(agentState?.hot?.focus || "").trim();
     const agentStateDisplay = agentStateText || t('noAgentStateYet');
     const stateTask = String(agentState?.hot?.active_task_id || "").trim();
@@ -187,6 +556,9 @@ export const MessageBubble = memo(function MessageBubble({
     // Treat data as ChatMessageData.
     const msgData = ev.data as ChatMessageData | undefined;
     const quoteText = msgData?.quote_text;
+    const senderSnapshotTitle = typeof msgData?.sender_title === "string" ? String(msgData.sender_title || "").trim() : "";
+    const senderSnapshotRuntime = typeof msgData?.sender_runtime === "string" ? String(msgData.sender_runtime || "").trim() : "";
+    const senderSnapshotAvatarPath = typeof msgData?.sender_avatar_path === "string" ? String(msgData.sender_avatar_path || "").trim() : "";
     const isAttention = String(msgData?.priority || "normal") === "attention";
     const replyRequired = !!msgData?.reply_required;
     const srcGroupId = typeof msgData?.src_group_id === "string" ? String(msgData.src_group_id || "").trim() : "";
@@ -200,6 +572,7 @@ export const MessageBubble = memo(function MessageBubble({
     }, [msgData?.dst_to]);
     const hasDestination = !!dstGroupId;
     const rawAttachments: MessageAttachment[] = Array.isArray(msgData?.attachments) ? msgData.attachments : [];
+    const sourcePlatform = typeof msgData?.source_platform === "string" ? String(msgData.source_platform || "").trim() : "";
     const blobAttachments = rawAttachments
         .filter((a): a is MessageAttachment => a != null && typeof a === "object")
         .map((a) => ({
@@ -211,8 +584,56 @@ export const MessageBubble = memo(function MessageBubble({
             local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
         }))
         .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
+    const displayMessageText = useMemo(() => {
+        return getAttachmentAwareMessageText(messageText, rawAttachments, sourcePlatform);
+    }, [messageText, rawAttachments, sourcePlatform]);
     const presentationRefs = useMemo(() => getPresentationMessageRefs(msgData?.refs), [msgData?.refs]);
-    const shouldRenderMarkdown = useMemo(() => mayContainMarkdown(messageText), [messageText]);
+    const shouldRenderMarkdown = useMemo(() => !isStreaming && mayContainMarkdown(displayMessageText), [displayMessageText, isStreaming]);
+    const streamingActivities = useMemo(() => {
+        return normalizeStreamingActivities((msgData as { activities?: unknown } | undefined)?.activities);
+    }, [msgData]);
+    const pendingEventId = String(
+        (msgData as { pending_event_id?: unknown; reply_to?: unknown } | undefined)?.pending_event_id
+        || (msgData as { pending_event_id?: unknown; reply_to?: unknown } | undefined)?.reply_to
+        || ""
+    ).trim();
+    const actorId = String(ev.by || "").trim();
+    const hasLiveReplySession = useGroupStore(useCallback((state) => {
+        if (isUserMessage || !actorId || !pendingEventId) return false;
+        const session = selectStreamingReplySession(state, groupId, {
+            pendingEventId,
+            streamId,
+            actorId,
+        });
+        return !!session && (session.phase === "pending" || session.phase === "streaming");
+    }, [actorId, groupId, isUserMessage, pendingEventId, streamId]));
+    const shouldRenderStreamingBody = isStreaming || hasLiveReplySession;
+    const isQueuedOnlyPlaceholder = useMemo(() => {
+        return isQueuedOnlyStreamingPlaceholder({
+            isStreaming: shouldRenderStreamingBody,
+            messageText: displayMessageText,
+            liveStreamingText: "",
+            blobAttachmentCount: blobAttachments.length,
+            presentationRefCount: presentationRefs.length,
+            activities: streamingActivities,
+        });
+    }, [blobAttachments.length, displayMessageText, presentationRefs.length, shouldRenderStreamingBody, streamingActivities]);
+    const streamPhase = String((msgData as { stream_phase?: unknown } | undefined)?.stream_phase || "").trim().toLowerCase();
+    const bubbleMotionClass = useMemo(() => getMessageBubbleMotionClass({
+        isStreaming,
+        isOptimistic,
+        streamPhase,
+    }), [isOptimistic, isStreaming, streamPhase]);
+    const streamingPlaceholderLabel = useMemo(() => {
+        if (!isStreaming) return "";
+        if (streamPhase === "commentary") {
+            return t("streamCommentaryPending");
+        }
+        if (streamPhase === "final_answer") {
+            return t("streamFinalAnswerPending");
+        }
+        return t("streamWorkingPending");
+    }, [isStreaming, streamPhase, t]);
     const stableMessageAttachmentKey = useMemo(() => {
         const clientId = typeof msgData?.client_id === "string" ? String(msgData.client_id || "").trim() : "";
         if (clientId) return `client:${clientId}`;
@@ -223,14 +644,14 @@ export const MessageBubble = memo(function MessageBubble({
         () =>
             buildMessageCopyText({
                 quoteText,
-                messageText,
+                messageText: displayMessageText,
                 presentationRefs,
                 attachments: blobAttachments.map((attachment) => ({
                     title: attachment.title,
                     path: attachment.path || attachment.local_preview_url,
                 })),
             }),
-        [blobAttachments, messageText, presentationRefs, quoteText]
+        [blobAttachments, displayMessageText, presentationRefs, quoteText]
     );
     const messageTimestamp = formatMessageTimestamp(ev.ts);
     const fullMessageTimestamp = formatFullTime(ev.ts);
@@ -243,11 +664,7 @@ export const MessageBubble = memo(function MessageBubble({
     const recipients = msgData?.to;
 
     const visibleReadStatusEntries = useMemo(() => {
-        if (!readStatus) return [];
-        return actors
-            .map((a) => String(a.id || ""))
-            .filter((id) => id && Object.prototype.hasOwnProperty.call(readStatus, id))
-            .map((id) => [id, !!readStatus[id]] as const);
+        return buildVisibleReadStatusEntries(actors, readStatus);
     }, [actors, readStatus]);
 
     const isDirectUserMessage = useMemo(() => {
@@ -272,39 +689,31 @@ export const MessageBubble = memo(function MessageBubble({
     }, [ackStatus, ev._obligation_status, isDirectUserMessage, isUserMessage]);
 
     const ackSummary = useMemo(() => {
-        if (hideDirectUserObligationSummary) return null;
-        if ((!isAttention && !replyRequired) || !ackStatus || typeof ackStatus !== "object") return null;
-        const ids = Object.keys(ackStatus);
-        if (ids.length === 0) return null;
-        const done = ids.reduce((n, id) => n + (ackStatus[id] ? 1 : 0), 0);
-        const needsUserAck =
-            Object.prototype.hasOwnProperty.call(ackStatus, "user") && !ackStatus["user"] && !isUserMessage;
-        return { done, total: ids.length, needsUserAck };
+        return computeAckSummary({
+            hideDirectUserObligationSummary,
+            isAttention,
+            replyRequired,
+            ackStatus,
+            isUserMessage,
+        });
     }, [ackStatus, hideDirectUserObligationSummary, isAttention, isUserMessage, replyRequired]);
 
     const obligationSummary = useMemo(() => {
-        if (hideDirectUserObligationSummary) return null;
-        const os = ev._obligation_status;
-        if (!os || typeof os !== "object") return null;
-        const ids = Object.keys(os);
-        if (ids.length === 0) return null;
-
-        const requiresReply = ids.some((id) => !!os[id]?.reply_required);
-        if (requiresReply) {
-            const done = ids.reduce((n, id) => n + (os[id]?.replied ? 1 : 0), 0);
-            return { kind: "reply" as const, done, total: ids.length };
-        }
-        const done = ids.reduce((n, id) => n + (os[id]?.acked ? 1 : 0), 0);
-        return { kind: "ack" as const, done, total: ids.length };
+        return computeObligationSummary({
+            hideDirectUserObligationSummary,
+            obligationStatus: ev._obligation_status,
+        });
     }, [ev._obligation_status, hideDirectUserObligationSummary]);
 
     const toLabel = useMemo(() => {
-        if (hasDestination) {
-            const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
-            const dstToLabel = formatRecipientList(dstTo, displayNameMap);
-            return `${dstLabel} · ${dstToLabel}`;
-        }
-        return formatRecipientList(recipients || [], displayNameMap);
+        return buildToLabel({
+            hasDestination,
+            dstGroupId,
+            dstTo,
+            groupLabelById,
+            recipients,
+            displayNameMap,
+        });
     }, [displayNameMap, dstGroupId, dstTo, groupLabelById, hasDestination, recipients]);
 
     // Sender display name (use title if available)
@@ -316,11 +725,17 @@ export const MessageBubble = memo(function MessageBubble({
     }, [actorById, ev.by, isUserMessage]);
 
     const senderDisplayName = useMemo(() => {
-        const by = String(ev.by || "");
-        if (!by) return by;
-        if (by === "user") return getRecipientDisplayLabel(by, displayNameMap);
-        return String(senderActor?.title || "").trim() || displayNameMap.get(by) || by;
-    }, [displayNameMap, ev.by, senderActor]);
+        return getSenderDisplayName({
+            senderId: String(ev.by || ""),
+            senderActor,
+            senderTitle: senderSnapshotTitle,
+            displayNameMap,
+        });
+    }, [displayNameMap, ev.by, senderActor, senderSnapshotTitle]);
+    const senderAvatarUrl = useMemo(() => {
+        return buildSenderAvatarUrl(blobGroupId, senderSnapshotAvatarPath) || String(senderActor?.avatar_url || "").trim();
+    }, [blobGroupId, senderActor?.avatar_url, senderSnapshotAvatarPath]);
+    const senderRuntime = senderSnapshotRuntime || String(senderActor?.runtime || "").trim();
 
     const readPreviewEntries = visibleReadStatusEntries.slice(0, 3);
     const readPreviewOverflow = Math.max(0, visibleReadStatusEntries.length - readPreviewEntries.length);
@@ -358,19 +773,20 @@ export const MessageBubble = memo(function MessageBubble({
                 <div
                     className={classNames(
                         "mt-1 h-8 w-8 flex-shrink-0",
-                        canShowAgentState ? "cursor-help" : ""
+                        collapseHeader ? "opacity-0 pointer-events-none" : "",
+                        canShowAgentState && !collapseHeader ? "cursor-help" : ""
                     )}
-                    ref={canShowAgentState ? setAgentStateReference : undefined}
-                    onMouseEnter={canShowAgentState ? () => setIsAgentStateOpen(true) : undefined}
-                    onMouseLeave={canShowAgentState ? () => setIsAgentStateOpen(false) : undefined}
-                    onFocus={canShowAgentState ? () => setIsAgentStateOpen(true) : undefined}
-                    onBlur={canShowAgentState ? () => setIsAgentStateOpen(false) : undefined}
-                    tabIndex={canShowAgentState ? 0 : undefined}
-                    aria-label={canShowAgentState ? t('agentStateTooltipLabel', { defaultValue: 'View agent state' }) : undefined}
+                    ref={canShowAgentState && !collapseHeader ? setAgentStateReference : undefined}
+                    onMouseEnter={canShowAgentState && !collapseHeader ? () => setIsAgentStateOpen(true) : undefined}
+                    onMouseLeave={canShowAgentState && !collapseHeader ? () => setIsAgentStateOpen(false) : undefined}
+                    onFocus={canShowAgentState && !collapseHeader ? () => setIsAgentStateOpen(true) : undefined}
+                    onBlur={canShowAgentState && !collapseHeader ? () => setIsAgentStateOpen(false) : undefined}
+                    tabIndex={canShowAgentState && !collapseHeader ? 0 : undefined}
+                    aria-label={canShowAgentState && !collapseHeader ? t('agentStateTooltipLabel', { defaultValue: 'View agent state' }) : undefined}
                 >
                     <ActorAvatar
-                        avatarUrl={senderActor?.avatar_url}
-                        runtime={senderActor?.runtime}
+                        avatarUrl={senderAvatarUrl || undefined}
+                        runtime={senderRuntime || undefined}
                         title={senderDisplayName}
                         isUser={isUserMessage}
                         isDark={isDark}
@@ -379,64 +795,20 @@ export const MessageBubble = memo(function MessageBubble({
                 </div>
             </div>
             <FloatingPortal>
-                {isAgentStateOpen && canShowAgentState ? (
-                    <div
-                        ref={setAgentStateFloating}
-                        style={floatingStyles}
-                        className={classNames(
-                            "pointer-events-none z-[80] w-[min(360px,calc(100vw-32px))] rounded-2xl px-3 py-2 shadow-2xl transition-opacity duration-150",
-                            "glass-modal text-[var(--color-text-primary)]",
-                            isAgentStatePositioned ? "opacity-100" : "opacity-0"
-                        )}
-                        role="status"
-                    >
-                        <div className="flex items-center gap-2">
-                            <div className="text-xs font-semibold text-[var(--color-text-primary)]">
-                                {senderDisplayName}
-                            </div>
-                            {agentState?.updated_at ? (
-                                <div
-                                    className={classNames(
-                                        "ml-auto text-xs tabular-nums",
-                                        "text-[var(--color-text-tertiary)]"
-                                    )}
-                                    title={formatFullTime(agentState.updated_at)}
-                                >
-                                    {t('updated', { time: formatTime(agentState.updated_at) })}
-                                </div>
-                            ) : null}
-                        </div>
-                        <div className="mt-1 text-xs whitespace-pre-wrap text-[var(--color-text-secondary)]">
-                            {agentStateDisplay}
-                        </div>
-                        {(stateTask || blockerCount > 0 || stateNext || stateChanged) ? (
-                            <div className="mt-2 space-y-1">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                    {stateTask ? (
-                                        <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                                            {t("taskShort", { id: stateTask })}
-                                        </span>
-                                    ) : null}
-                                    {blockerCount > 0 ? (
-                                        <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300">
-                                            {t("blockersShort", { count: blockerCount })}
-                                        </span>
-                                    ) : null}
-                                </div>
-                                {stateNext ? (
-                                    <div className="text-[11px] text-[var(--color-text-tertiary)]">
-                                        {t("nextShort", { value: stateNext })}
-                                    </div>
-                                ) : null}
-                                {stateChanged ? (
-                                    <div className={classNames("text-[11px]", "text-[var(--color-text-tertiary)]")}>
-                                        {t("changedShort", { value: stateChanged })}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ) : null}
-                    </div>
-                ) : null}
+                <AgentStateTooltip
+                    isOpen={isAgentStateOpen && !collapseHeader}
+                    canShow={canShowAgentState && !collapseHeader}
+                    isPositioned={isAgentStatePositioned}
+                    setFloating={setAgentStateFloating}
+                    floatingStyles={floatingStyles}
+                    senderDisplayName={senderDisplayName}
+                    updatedAt={agentState?.updated_at ? String(agentState.updated_at) : undefined}
+                    agentStateDisplay={agentStateDisplay}
+                    stateTask={stateTask}
+                    blockerCount={blockerCount}
+                    stateNext={stateNext}
+                    stateChanged={stateChanged}
+                />
             </FloatingPortal>
 
             {/* Message Content */}
@@ -446,85 +818,40 @@ export const MessageBubble = memo(function MessageBubble({
                     isUserMessage ? "items-end" : "items-start"
                 )}
             >
-                {/* Mobile Header Row (Visible only on mobile) */}
-                <div
-                    className={classNames(
-                        "flex items-center gap-2 mb-1 sm:hidden min-w-0",
-                        isUserMessage ? "justify-end" : "justify-start"
-                    )}
-                >
-                    <ActorAvatar
-                        avatarUrl={senderActor?.avatar_url}
-                        runtime={senderActor?.runtime}
-                        title={senderDisplayName}
-                        isUser={isUserMessage}
-                        isDark={isDark}
-                        accentRingClassName={senderAccent?.ring}
-                        sizeClassName="h-6 w-6"
-                        textClassName="text-[10px]"
-                    />
-                    <span
-                        className={classNames(
-                            "text-xs font-medium flex-shrink-0",
-                            isUserMessage
-                                ? isDark
-                                    ? "text-slate-300"
-                                    : "text-gray-700"
-                                : senderAccent
-                                    ? senderAccent.text
-                                    : isDark
-                                        ? "text-slate-300"
-                                        : "text-gray-700"
-                        )}
-                    >
-                        {senderDisplayName}
-                    </span>
-                    <span className={`text-[10px] flex-shrink-0 text-[var(--color-text-tertiary)]`}>
-                        <span title={fullMessageTimestamp}>{messageTimestamp}</span>
-                    </span>
-                    <span
-                        className={classNames(
-                            "text-[10px] min-w-0 truncate",
-                            "text-[var(--color-text-tertiary)]"
-                        )}
-                        title={t("toRecipient", { label: toLabel })}
-                    >
-                        {t("toRecipient", { label: toLabel })}
-                    </span>
-                </div>
+                {!collapseHeader ? (
+                    <>
+                        <MessageMetadataHeader
+                            mobile={true}
+                            isUserMessage={isUserMessage}
+                            isDark={isDark}
+                            senderAccentTextClass={senderAccent?.text}
+                            senderDisplayName={senderDisplayName}
+                            messageTimestamp={messageTimestamp}
+                            fullMessageTimestamp={fullMessageTimestamp}
+                            toLabel={toLabel}
+                            senderAvatarUrl={senderAvatarUrl || undefined}
+                            senderRuntime={senderRuntime || undefined}
+                            avatarRingClassName={senderAccent?.ring}
+                        />
 
-                {/* Desktop Metadata Header (Hidden on mobile) */}
-                <div className="hidden sm:flex items-center gap-2 mb-1 px-1 min-w-0">
-                    <span
-                        className={classNames(
-                            "text-[11px] font-medium flex-shrink-0",
-                            isUserMessage
-                                ? isDark
-                                    ? "text-[var(--color-text-secondary)]"
-                                    : "text-gray-500"
-                                : senderAccent
-                                    ? senderAccent.text
-                                    : isDark
-                                        ? "text-[var(--color-text-secondary)]"
-                                        : "text-gray-500"
-                        )}
-                    >
-                        {senderDisplayName}
-                    </span>
-                    <span className={`text-[10px] flex-shrink-0 text-[var(--color-text-tertiary)]`}>
-                        <span title={fullMessageTimestamp}>{messageTimestamp}</span>
-                    </span>
-                    <span
-                        className={classNames("text-[10px] min-w-0 truncate", "text-[var(--color-text-tertiary)]")}
-                        title={t("toRecipient", { label: toLabel })}
-                    >
-                        {t("toRecipient", { label: toLabel })}
-                    </span>
-                </div>
+                        <MessageMetadataHeader
+                            isUserMessage={isUserMessage}
+                            isDark={isDark}
+                            senderAccentTextClass={senderAccent?.text}
+                            senderDisplayName={senderDisplayName}
+                            messageTimestamp={messageTimestamp}
+                            fullMessageTimestamp={fullMessageTimestamp}
+                            toLabel={toLabel}
+                        />
+                    </>
+                ) : null}
 
                 {/* Bubble wrapper (allows badge to overflow) */}
                 <div
-                    className="relative w-full max-w-full min-w-0 md:w-auto"
+                    className={classNames(
+                        "relative max-w-full min-w-0 md:w-auto",
+                        isUserMessage ? "w-auto self-end" : "w-full"
+                    )}
                     style={isAttention ? { minWidth: "min(8.5rem, 85vw)" } : undefined}
                 >
                     {isAttention && (
@@ -540,7 +867,10 @@ export const MessageBubble = memo(function MessageBubble({
                     )}
                 <div
                     className={classNames(
-                        "inline-flex max-w-full flex-col px-4 py-2.5 text-sm leading-relaxed",
+                        "inline-flex max-w-full flex-col px-4 py-2.5 text-sm leading-relaxed transition-[opacity,transform,box-shadow,background-color] duration-200 ease-out",
+                        isQueuedOnlyPlaceholder ? "min-h-0 px-3 py-2" : "",
+                        isStreaming ? "opacity-95 translate-y-0" : "opacity-100 translate-y-0",
+                        bubbleMotionClass,
                         isUserMessage
                             ? "bg-blue-600 text-white rounded-2xl rounded-tr-none shadow-sm"
                             : "glass-bubble rounded-2xl rounded-tl-none text-[var(--color-text-primary)]"
@@ -551,328 +881,60 @@ export const MessageBubble = memo(function MessageBubble({
                     )}
                 >
 
-                    {/* Cross-group relay provenance */}
-                    {hasSource ? (
-                        <button
-                            type="button"
-                            className={classNames(
-                                "mb-2 inline-flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 border",
-                                relayChipClass,
-                                onOpenSource ? "cursor-pointer" : "cursor-default"
-                            )}
-                            onClick={() => onOpenSource?.(srcGroupId, srcEventId)}
-                            disabled={!onOpenSource}
-                            title={t('openOriginalMessage')}
-                        >
-                            <span className="opacity-70">↗</span>
-                            <span className="truncate">
-                                {t('relayedFrom', { groupId: srcGroupId, eventId: srcEventId.slice(0, 8) })}
-                            </span>
-                        </button>
-                    ) : null}
-                    {/* Outbound cross-group send record */}
-                    {hasDestination ? (() => {
-                        const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
-                        const dstToLabel = formatRecipientList(dstTo, displayNameMap);
-                        return (
-                            <div
-                                className={classNames(
-                                    "mb-2 inline-flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 border",
-                                    relayChipClass
-                                )}
-                                title={t('sentTo', { label: dstGroupId, to: dstToLabel })}
-                            >
-                                <span className="opacity-70">↗</span>
-                                <span className="truncate">
-                                    {t('sentTo', { label: dstLabel, to: dstToLabel })}
-                                </span>
-                            </div>
-                        );
-                    })() : null}
-                    {/* Reply Context */}
-                    {quoteText && (
-                        <div
-                            className={`mb-2 text-xs border-l-2 pl-2 italic truncate opacity-80 ${isUserMessage ? "border-blue-400" : "border-[var(--glass-border-subtle)]"
-                                }`}
-                        >
-                            "{quoteText}"
-                        </div>
-                    )}
-
-                    {presentationRefs.length > 0 ? (
-                        <div className="mb-2 flex flex-wrap gap-1.5">
-                            {presentationRefs.map((ref, index) => (
-                                <button
-                                    key={`${String(ev.id || "message")}:presentation-ref:${index}:${String(ref.slot_id || "")}`}
-                                    type="button"
-                                    onClick={() => onOpenPresentationRef?.(ref, ev)}
-                                    className={classNames(
-                                        "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                                        isUserMessage
-                                            ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
-                                            : "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                                    )}
-                                    title={getPresentationRefChipLabel(ref)}
-                                >
-                                    <span className="truncate">{getPresentationRefChipLabel(ref)}</span>
-                                </button>
-                            ))}
-                        </div>
-                    ) : null}
-
-                    {/* Text Content */}
-                    {shouldRenderMarkdown ? (
-                        <Suspense
-                            fallback={
-                                <PlainMessageText
-                                    text={messageText}
-                                    className="max-w-full"
-                                />
-                            }
-                        >
-                            <LazyMarkdownRenderer
-                                content={messageText}
-                                isDark={isDark}
-                                invertText={isUserMessage}
-                                className="break-words [overflow-wrap:anywhere] max-w-full"
-                            />
-                        </Suspense>
-                    ) : (
-                        <PlainMessageText
-                            text={messageText}
-                            className="max-w-full"
-                        />
-                    )}
-
-                    {/* Attachments */}
-                    <MessageAttachments
-                        attachments={blobAttachments}
-                        blobGroupId={blobGroupId}
+                    <MessageBubbleBody
+                        event={ev}
                         isUserMessage={isUserMessage}
                         isDark={isDark}
-                        attachmentKeyPrefix={stableMessageAttachmentKey}
-                        downloadTitle={(name) => t('download', { name })}
+                        groupId={groupId}
+                        groupLabelById={groupLabelById}
+                        hasSource={hasSource}
+                        srcGroupId={srcGroupId}
+                        srcEventId={srcEventId}
+                        hasDestination={hasDestination}
+                        dstGroupId={dstGroupId}
+                        dstTo={dstTo}
+                        relayChipClass={relayChipClass}
+                        quoteText={quoteText}
+                        presentationRefs={presentationRefs}
+                        isStreaming={shouldRenderStreamingBody}
+                        streamingActivities={streamingActivities}
+                        streamId={streamId}
+                        actorId={actorId}
+                        pendingEventId={pendingEventId}
+                        messageText={displayMessageText}
+                        isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
+                        streamingPlaceholderLabel={streamingPlaceholderLabel}
+                        shouldRenderMarkdown={shouldRenderMarkdown}
+                        blobAttachments={blobAttachments}
+                        blobGroupId={blobGroupId}
+                        stableMessageAttachmentKey={stableMessageAttachmentKey}
+                        onOpenSource={onOpenSource}
+                        onOpenPresentationRef={onOpenPresentationRef}
                     />
                 </div>
                 </div>
 
-                <div
-                    className={classNames(
-                        "flex items-center gap-3 mt-1 px-1 text-[10px] transition-opacity",
-                        (obligationSummary || ackSummary || visibleReadStatusEntries.length > 0 || replyRequired) ? "justify-between" : "justify-end",
-                        "opacity-85 group-hover:opacity-100",
-                        "text-[var(--color-text-tertiary)]"
-                    )}
-                >
-                    {obligationSummary ? (
-                        readOnly ? (
-                            <div className="flex items-center gap-2 min-w-0 rounded-lg px-2 py-1">
-                                <span
-                                    className={classNames(
-                                        "text-[10px] font-semibold tracking-tight",
-                                        obligationSummary.done >= obligationSummary.total
-                                            ? "text-emerald-600 dark:text-emerald-400"
-                                            : "text-amber-600 dark:text-amber-400"
-                                    )}
-                                >
-                                    {obligationSummary.kind === "reply" ? t('reply') : t('ack')} {obligationSummary.done}/{obligationSummary.total}
-                                </span>
-                            </div>
-                        ) : (
-                            <button
-                                type="button"
-                                className={classNames(
-                                    "touch-target-sm flex items-center gap-2 min-w-0 rounded-lg px-2 py-1",
-                                    "hover:bg-[var(--glass-tab-bg-hover)]"
-                                )}
-                                onClick={onShowRecipients}
-                                aria-label={t('showObligationStatus')}
-                            >
-                                <span
-                                    className={classNames(
-                                        "text-[10px] font-semibold tracking-tight",
-                                        obligationSummary.done >= obligationSummary.total
-                                            ? "text-emerald-600 dark:text-emerald-400"
-                                            : "text-amber-600 dark:text-amber-400"
-                                    )}
-                                >
-                                    {obligationSummary.kind === "reply" ? t('reply') : t('ack')} {obligationSummary.done}/{obligationSummary.total}
-                                </span>
-                            </button>
-                        )
-                    ) : ackSummary ? (
-                        readOnly ? (
-                            <div className="flex items-center gap-2 min-w-0 rounded-lg px-2 py-1">
-                                <span
-                                    className={classNames(
-                                        "text-[10px] font-semibold tracking-tight",
-                                        ackSummary.done >= ackSummary.total
-                                            ? "text-emerald-600 dark:text-emerald-400"
-                                            : "text-amber-600 dark:text-amber-400"
-                                    )}
-                                >
-                                    {t('ack')} {ackSummary.done}/{ackSummary.total}
-                                </span>
-                            </div>
-                        ) : (
-                            <button
-                                type="button"
-                                className={classNames(
-                                    "touch-target-sm flex items-center gap-2 min-w-0 rounded-lg px-2 py-1",
-                                    "hover:bg-[var(--glass-tab-bg-hover)]"
-                                )}
-                                onClick={onShowRecipients}
-                                aria-label={t('showAckStatus')}
-                            >
-                                <span
-                                    className={classNames(
-                                        "text-[10px] font-semibold tracking-tight",
-                                        ackSummary.done >= ackSummary.total
-                                            ? "text-emerald-600 dark:text-emerald-400"
-                                            : "text-amber-600 dark:text-amber-400"
-                                    )}
-                                >
-                                    {t('ack')} {ackSummary.done}/{ackSummary.total}
-                                </span>
-                            </button>
-                        )
-                    ) : visibleReadStatusEntries.length > 0 ? (
-                        readOnly ? (
-                            <div className="flex items-center gap-2 min-w-0 rounded-lg px-2 py-1">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    {readPreviewEntries.map(([id, cleared]) => (
-                                        <span key={id} className="inline-flex items-center gap-1 min-w-0">
-                                            <span className="truncate max-w-[10ch]">{displayNameMap.get(id) || id}</span>
-                                            <span
-                                                className={classNames(
-                                                    "text-[10px] font-semibold tracking-tight",
-                                                    cleared
-                                                        ? isDark
-                                                            ? "text-emerald-400"
-                                                            : "text-emerald-600"
-                                                        : isDark
-                                                            ? "text-slate-500"
-                                                            : "text-gray-500"
-                                                )}
-                                                aria-label={cleared ? t('read') : t('pending')}
-                                            >
-                                                {cleared ? "✓✓" : "✓"}
-                                            </span>
-                                        </span>
-                                    ))}
-                                    {readPreviewOverflow > 0 && (
-                                        <span className={classNames("text-[10px]", "text-[var(--color-text-tertiary)]")}>
-                                            +{readPreviewOverflow}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <button
-                                type="button"
-                                className={classNames(
-                                    "touch-target-sm flex items-center gap-2 min-w-0 rounded-lg px-2 py-1",
-                                    "hover:bg-[var(--glass-tab-bg-hover)]"
-                                )}
-                                onClick={onShowRecipients}
-                                aria-label={t('showRecipientStatus')}
-                            >
-                                <div className="flex items-center gap-2 min-w-0">
-                                    {readPreviewEntries.map(([id, cleared]) => (
-                                        <span key={id} className="inline-flex items-center gap-1 min-w-0">
-                                            <span className="truncate max-w-[10ch]">{displayNameMap.get(id) || id}</span>
-                                            <span
-                                                className={classNames(
-                                                    "text-[10px] font-semibold tracking-tight",
-                                                    cleared
-                                                        ? isDark
-                                                            ? "text-emerald-400"
-                                                            : "text-emerald-600"
-                                                        : isDark
-                                                            ? "text-slate-500"
-                                                            : "text-gray-500"
-                                                )}
-                                                aria-label={cleared ? t('read') : t('pending')}
-                                            >
-                                                {cleared ? "✓✓" : "✓"}
-                                            </span>
-                                        </span>
-                                    ))}
-                                    {readPreviewOverflow > 0 && (
-                                        <span className={classNames("text-[10px]", "text-[var(--color-text-tertiary)]")}>
-                                            +{readPreviewOverflow}
-                                        </span>
-                                    )}
-                                </div>
-                            </button>
-                        )
-                    ) : null}
-
-                    {!obligationSummary && !ackSummary && replyRequired && (
-                        <span
-                            className={classNames(
-                                "text-[10px] font-semibold tracking-tight",
-                                "text-violet-700 dark:text-violet-300"
-                            )}
-                        >
-                            {t('needReply')}
-                        </span>
-                    )}
-
-                    {!readOnly && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {copyableMessageText ? (
-                            <button
-                                type="button"
-                                className={classNames(
-                                    "touch-target-sm px-2 py-1 rounded-lg text-[11px] font-medium transition-colors",
-                                    "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                                )}
-                                onClick={() => void handleCopyMessageText()}
-                                title={copiedMessageText ? t("common:copied") : t("copyText")}
-                            >
-                                {copiedMessageText ? t("common:copied") : t("copyText")}
-                            </button>
-                        ) : null}
-                        {ev.id && onCopyLink ? (
-                            <button
-                                type="button"
-                                className={classNames(
-                                    "touch-target-sm px-2 py-1 rounded-lg text-[11px] font-medium transition-colors",
-                                    "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                                )}
-                                onClick={() => onCopyLink(String(ev.id))}
-                                title={t('copyLink')}
-                            >
-                                {t('copyLink')}
-                            </button>
-                        ) : null}
-                        {ev.id && onRelay ? (
-                            <button
-                                type="button"
-                                className={classNames(
-                                    "touch-target-sm px-2 py-1 rounded-lg text-[11px] font-medium transition-colors",
-                                    "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                                )}
-                                onClick={() => onRelay(ev)}
-                                title={t('relayToGroup')}
-                            >
-                                {t('relay')}
-                            </button>
-                        ) : null}
-                        <button
-                            type="button"
-                            className={classNames(
-                                "touch-target-sm px-2 py-1 rounded-lg text-[11px] font-medium transition-colors",
-                                "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                            )}
-                            onClick={onReply}
-                        >
-                            {t('reply')}
-                        </button>
-                      </div>
-                    )}
-                </div>
+                <MessageFooter
+                    readOnly={readOnly}
+                    obligationSummary={obligationSummary}
+                    ackSummary={ackSummary}
+                    visibleReadStatusEntries={visibleReadStatusEntries}
+                    readPreviewEntries={readPreviewEntries}
+                    readPreviewOverflow={readPreviewOverflow}
+                    displayNameMap={displayNameMap}
+                    isDark={isDark}
+                    replyRequired={replyRequired}
+                    copiedMessageText={copiedMessageText}
+                    copyableMessageText={copyableMessageText}
+                    onCopyMessageText={() => void handleCopyMessageText()}
+                    onShowRecipients={onShowRecipients}
+                    onCopyLink={onCopyLink}
+                    onRelay={onRelay}
+                    onReply={onReply}
+                    canReply={canReply}
+                    eventId={typeof ev.id === "string" ? String(ev.id) : undefined}
+                    event={ev}
+                />
             </div>
         </div>
     );
@@ -886,6 +948,7 @@ export const MessageBubble = memo(function MessageBubble({
         prevProps.groupId === nextProps.groupId &&
         prevProps.groupLabelById === nextProps.groupLabelById &&
         prevProps.isHighlighted === nextProps.isHighlighted &&
+        prevProps.collapseHeader === nextProps.collapseHeader &&
         prevProps.onRelay === nextProps.onRelay &&
         prevProps.onOpenSource === nextProps.onOpenSource &&
         prevProps.onOpenPresentationRef === nextProps.onOpenPresentationRef

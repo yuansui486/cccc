@@ -5,15 +5,18 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import find_actor
+from ..actor_runtime_cache import get_group_runtime
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
+from ...kernel.actors import find_actor, get_effective_role, list_actors
 from ...kernel.context import ContextStorage
 from ...kernel.group import load_group
 from ...kernel.query_projections import get_actor_list_projection
 from ...kernel.working_state import DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES, derive_effective_working_state
-from ..context.context_ops import _agent_state_to_dict
-from .private_env_ops import mask_private_env_value
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
+from ..context.context_ops import _agent_state_to_dict
+from .private_env_ops import mask_private_env_value
 from ...util.conv import coerce_bool
 
 
@@ -28,12 +31,26 @@ def handle_actor_list(
 ) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     include_unread = coerce_bool(args.get("include_unread"), default=False)
+    include_internal = coerce_bool(args.get("include_internal"), default=False)
     if not group_id:
         return _error("missing_group_id", "missing group_id")
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    actors = get_actor_list_projection(group)
+    if include_internal:
+        actors = []
+        for actor in list_actors(group):
+            if not isinstance(actor, dict):
+                continue
+            aid = str(actor.get("id") or "").strip()
+            if not aid:
+                continue
+            item = dict(actor)
+            item["role"] = get_effective_role(group, aid)
+            actors.append(item)
+    else:
+        actors = get_actor_list_projection(group)
+    runtime_snapshot = get_group_runtime(group_id)
     storage = ContextStorage(group)
     agent_rows = [_agent_state_to_dict(agent) for agent in storage.load_agents().agents]
     agent_state_by_id = {
@@ -46,39 +63,65 @@ def handle_actor_list(
         if not aid:
             continue
         runner_kind = str(actor.get("runner") or "pty").strip()
+        snap = runtime_snapshot.get(aid) if isinstance(runtime_snapshot.get(aid), dict) else {}
+        if snap:
+            actor["running"] = bool(snap.get("running"))
+            actor["idle_seconds"] = snap.get("idle_seconds")
+            snap_runner_effective = str(snap.get("runner_effective") or runner_kind or "pty")
+            if snap_runner_effective == "headless" or snap_runner_effective != runner_kind:
+                actor["runner_effective"] = snap_runner_effective
+            else:
+                actor.pop("runner_effective", None)
+            for key in (
+                "effective_working_state",
+                "effective_working_reason",
+                "effective_working_updated_at",
+                "effective_active_task_id",
+            ):
+                if key in snap:
+                    actor[key] = snap.get(key)
+            continue
         effective_runner = effective_runner_kind(runner_kind)
-        idle_seconds = None
+        runtime = str(actor.get("runtime") or "").strip()
         headless_state = None
-        if effective_runner == "headless":
-            actor["running"] = headless_runner.SUPERVISOR.actor_running(group_id, aid)
-            state = headless_runner.SUPERVISOR.get_state(group_id=group_id, actor_id=aid)
-            headless_state = state.model_dump() if state is not None else None
-            actor["idle_seconds"] = None
-        else:
-            actor["running"] = pty_runner.SUPERVISOR.actor_running(group_id, aid)
-            idle_seconds = (
-                pty_runner.SUPERVISOR.idle_seconds(group_id=group_id, actor_id=aid)
-                if actor["running"]
-                else None
-            )
-            actor["idle_seconds"] = idle_seconds
+        running = False
+        idle_seconds = None
         pty_terminal_text = ""
-        if effective_runner == "pty" and actor["running"]:
-            try:
-                pty_terminal_text = pty_runner.SUPERVISOR.tail_output(
-                    group_id=group_id,
-                    actor_id=aid,
-                    max_bytes=DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES,
-                ).decode("utf-8", errors="replace")
-            except Exception:
-                pty_terminal_text = ""
-        if effective_runner != runner_kind:
+        if runtime.lower() == "codex" and effective_runner == "headless":
+            state = codex_app_supervisor.get_state(group_id=group_id, actor_id=aid)
+            headless_state = state.model_dump() if hasattr(state, "model_dump") else (dict(state) if isinstance(state, dict) else None)
+            running = bool(state is not None and codex_app_supervisor.actor_running(group_id, aid))
+        elif runtime.lower() == "claude" and effective_runner == "headless":
+            state = claude_app_supervisor.get_state(group_id=group_id, actor_id=aid)
+            headless_state = dict(state) if isinstance(state, dict) else None
+            running = bool(state is not None and claude_app_supervisor.actor_running(group_id, aid))
+        elif effective_runner == "headless":
+            state = headless_runner.SUPERVISOR.get_state(group_id=group_id, actor_id=aid)
+            headless_state = state.model_dump() if hasattr(state, "model_dump") else (dict(state) if isinstance(state, dict) else None)
+            running = bool(state is not None and headless_runner.SUPERVISOR.actor_running(group_id, aid))
+        else:
+            running = bool(pty_runner.SUPERVISOR.actor_running(group_id, aid))
+            idle_seconds = pty_runner.SUPERVISOR.idle_seconds(group_id=group_id, actor_id=aid) if running else None
+            if running:
+                try:
+                    pty_terminal_text = pty_runner.SUPERVISOR.tail_output(
+                        group_id=group_id,
+                        actor_id=aid,
+                        max_bytes=DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES,
+                    ).decode("utf-8", errors="replace")
+                except Exception:
+                    pty_terminal_text = ""
+        actor["running"] = running
+        actor["idle_seconds"] = idle_seconds
+        if effective_runner == "headless" or effective_runner != runner_kind:
             actor["runner_effective"] = effective_runner
+        else:
+            actor.pop("runner_effective", None)
         actor.update(
             derive_effective_working_state(
-                running=bool(actor.get("running")),
+                running=running,
                 effective_runner=effective_runner,
-                runtime=str(actor.get("runtime") or ""),
+                runtime=runtime,
                 idle_seconds=idle_seconds,
                 pty_terminal_text=pty_terminal_text,
                 agent_state=agent_state_by_id.get(aid),

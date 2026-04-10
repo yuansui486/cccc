@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import signal
+import subprocess
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -12,6 +15,7 @@ from ....daemon.im.im_bridge_ops import stop_im_bridges_for_group
 from ....kernel.group import load_group
 from ....paths import ensure_home
 from ....ports.im.config_schema import canonicalize_im_config
+from ....ports.im.weixin_sidecar import resolve_weixin_sidecar_script_path
 from ....util.conv import coerce_bool
 from ....util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive, resolve_background_python_argv, supervised_process_popen_kwargs
 from ..schemas import (
@@ -26,6 +30,78 @@ from ..schemas import (
     require_group,
 )
 from .actors import invalidate_readonly_actor_list
+
+
+def _weixin_state_paths(group: Any) -> Dict[str, Any]:
+    state_dir = group.path / "state"
+    return {
+        "state_dir": state_dir,
+        "status_path": state_dir / "im_weixin_login.json",
+        "pid_path": state_dir / "im_weixin_login.pid",
+        "log_path": state_dir / "im_weixin_login.log",
+    }
+
+
+def _resolve_weixin_command(im_cfg: Dict[str, Any]) -> list[str]:
+    raw = str(
+        im_cfg.get("weixin_command")
+        or os.environ.get("CCCC_IM_WEIXIN_COMMAND")
+        or ""
+    ).strip()
+    if raw:
+        return [part for part in shlex.split(raw) if part]
+
+    script_path = resolve_weixin_sidecar_script_path()
+    return ["node", str(script_path)]
+
+
+def _read_weixin_status(group: Any) -> Dict[str, Any]:
+    paths = _weixin_state_paths(group)
+    status_path = paths["status_path"]
+    pid_path = paths["pid_path"]
+    data: Dict[str, Any] = {
+        "status": "not_logged_in",
+        "logged_in": False,
+        "account_id": "",
+        "qr_ascii": "",
+        "error": "",
+        "running": False,
+        "pid": None,
+    }
+    if status_path.exists():
+        try:
+            loaded = json.loads(status_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data.update(loaded)
+        except Exception:
+            pass
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+            if pid_is_alive(pid):
+                data["running"] = True
+                data["pid"] = pid
+            else:
+                pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return data
+
+
+def _stop_weixin_login_runner(group: Any) -> None:
+    pid_path = _weixin_state_paths(group)["pid_path"]
+    if not pid_path.exists():
+        return
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+        if pid > 0:
+            best_effort_signal_pid(pid, SOFT_TERMINATE_SIGNAL, include_group=True)
+    except Exception:
+        pass
+    try:
+        pid_path.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -61,18 +137,24 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/start")
     async def group_start(request: Request, group_id: str, by: str = "user") -> Dict[str, Any]:
         await invalidate_readonly_actor_list(group_id)
-        return await ctx.daemon({"op": "group_start", "args": {"group_id": group_id, "by": by, **_profile_auth_args(request)}})
+        result = await ctx.daemon({"op": "group_start", "args": {"group_id": group_id, "by": by, **_profile_auth_args(request)}})
+        await invalidate_readonly_actor_list(group_id)
+        return result
 
     @group_router.post("/stop")
     async def group_stop(group_id: str, by: str = "user") -> Dict[str, Any]:
         await invalidate_readonly_actor_list(group_id)
-        return await ctx.daemon({"op": "group_stop", "args": {"group_id": group_id, "by": by}})
+        result = await ctx.daemon({"op": "group_stop", "args": {"group_id": group_id, "by": by}})
+        await invalidate_readonly_actor_list(group_id)
+        return result
 
     @group_router.post("/state")
     async def group_set_state(group_id: str, state: str, by: str = "user") -> Dict[str, Any]:
         """Set group state (active/idle/paused) to control automation behavior."""
         await invalidate_readonly_actor_list(group_id)
-        return await ctx.daemon({"op": "group_set_state", "args": {"group_id": group_id, "state": state, "by": by}})
+        result = await ctx.daemon({"op": "group_set_state", "args": {"group_id": group_id, "state": state, "by": by}})
+        await invalidate_readonly_actor_list(group_id)
+        return result
 
     # =========================================================================
     # IM Bridge API (manual check_group — group_id from query/body)
@@ -144,6 +226,140 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         im_cfg = canonicalize_im_config(group.doc.get("im"))
         return {"ok": True, "result": {"group_id": group_id, "im": im_cfg}}
 
+    @im_router.get("/api/im/weixin/login/status")
+    async def im_weixin_login_status(request: Request, group_id: str) -> Dict[str, Any]:
+        """Return current Weixin login/runtime status for a group."""
+        check_group(request, group_id)
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        return {"ok": True, "result": _read_weixin_status(group)}
+
+    @im_router.post("/api/im/weixin/login/start")
+    async def im_weixin_login_start(request: Request, req: IMActionRequest) -> Dict[str, Any]:
+        """Start a Weixin QR login flow in a supervised sidecar process."""
+        check_group(request, req.group_id)
+        group = load_group(req.group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {req.group_id}"})
+
+        im_cfg = canonicalize_im_config(group.doc.get("im", {}))
+        platform = str(im_cfg.get("platform") or "").strip().lower()
+        if platform and platform != "weixin":
+            return {"ok": False, "error": {"code": "wrong_platform", "message": f"group IM platform is {platform}, not weixin"}}
+
+        paths = _weixin_state_paths(group)
+        status = _read_weixin_status(group)
+        if status.get("running"):
+            return {"ok": True, "result": status}
+
+        _stop_weixin_login_runner(group)
+        command = _resolve_weixin_command(im_cfg)
+        if not command:
+            return {"ok": False, "error": {"code": "missing_command", "message": "missing weixin sidecar command"}}
+        if len(command) >= 2 and command[0] == "node":
+            script_path = Path(command[1]).expanduser()
+            if not script_path.exists():
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "missing_sidecar_script",
+                        "message": f"weixin sidecar script not found: {script_path}",
+                    },
+                }
+
+        env = os.environ.copy()
+        account_id = str(im_cfg.get("weixin_account_id") or "").strip()
+        if account_id:
+            env["CCCC_IM_WEIXIN_ACCOUNT_ID"] = account_id
+
+        paths["state_dir"].mkdir(parents=True, exist_ok=True)
+        status_path = paths["status_path"]
+        status_path.write_text(
+            json.dumps(
+                {
+                    "status": "starting_login",
+                    "logged_in": False,
+                    "account_id": account_id,
+                    "qr_ascii": "",
+                    "error": "",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        popen_kwargs: Dict[str, Any] = {
+            "env": env,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+            "cwd": str(ensure_home()),
+        }
+        if os.name == "nt":
+            popen_kwargs.update(supervised_process_popen_kwargs())
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        try:
+            with paths["log_path"].open("a", encoding="utf-8") as log_file:
+                proc = subprocess.Popen(
+                    [*command, "--login", "--state-file", str(status_path)],
+                    stdout=log_file,
+                    stderr=log_file,
+                    **popen_kwargs,
+                )
+            paths["pid_path"].write_text(str(proc.pid), encoding="utf-8")
+        except Exception as e:
+            return {"ok": False, "error": {"code": "start_failed", "message": str(e)}}
+
+        await asyncio.sleep(0.15)
+        return {"ok": True, "result": _read_weixin_status(group)}
+
+    @im_router.post("/api/im/weixin/logout")
+    async def im_weixin_logout(request: Request, req: IMActionRequest) -> Dict[str, Any]:
+        """Clear Weixin login state on the host."""
+        check_group(request, req.group_id)
+        group = load_group(req.group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {req.group_id}"})
+
+        im_cfg = canonicalize_im_config(group.doc.get("im", {}))
+        command = _resolve_weixin_command(im_cfg)
+        paths = _weixin_state_paths(group)
+        _stop_weixin_login_runner(group)
+
+        def _killpg(pid: int, sig: signal.Signals) -> None:
+            best_effort_signal_pid(pid, sig, include_group=True)
+
+        stop_im_bridges_for_group(
+            ensure_home(),
+            group_id=req.group_id,
+            best_effort_killpg=_killpg,
+        )
+
+        try:
+            completed = subprocess.run(
+                [*command, "--logout", "--state-file", str(paths["status_path"])],
+                cwd=str(ensure_home()),
+                env=os.environ.copy(),
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            if int(completed.returncode or 0) != 0:
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "logout_failed",
+                        "message": (completed.stderr or completed.stdout or "weixin logout failed").strip(),
+                    },
+                }
+        except Exception as e:
+            return {"ok": False, "error": {"code": "logout_failed", "message": str(e)}}
+
+        return {"ok": True, "result": _read_weixin_status(group)}
+
     @im_router.post("/api/im/set")
     async def im_set(request: Request, req: IMSetRequest) -> Dict[str, Any]:
         """Set IM bridge configuration for a group."""
@@ -206,6 +422,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 im_cfg["wecom_bot_id"] = bot_id
             if secret:
                 im_cfg["wecom_secret"] = secret
+        elif platform == "weixin":
+            account_id = str(req.weixin_account_id or "").strip()
+            command = str(req.weixin_command or "").strip()
+            if account_id:
+                im_cfg["weixin_account_id"] = account_id
+            if command:
+                im_cfg["weixin_command"] = command
 
         im_cfg = canonicalize_im_config(im_cfg)
 

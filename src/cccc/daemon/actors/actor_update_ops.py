@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from ...contracts.v1 import DaemonError, DaemonResponse
+from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ...kernel.actors import find_actor, list_actors, update_actor
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
@@ -15,6 +17,7 @@ from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...runners.platform_support import pty_support_error_message
 from ...util.conv import coerce_bool
+from .actor_runtime_ops import resolve_actor_launch_spec
 from .actor_profile_runtime import (
     PROFILE_CONTROLLED_FIELDS,
     actor_profile_id,
@@ -38,7 +41,7 @@ def handle_actor_update(
     maybe_reset_automation_on_foreman_change: Callable[..., None],
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
-    ensure_mcp_installed: Callable[[str, Path], Any],
+    ensure_mcp_installed: Callable[..., Any],
     merge_actor_env_with_private: Callable[[str, str, Dict[str, Any]], Dict[str, Any]],
     inject_actor_context_env: Callable[..., Dict[str, Any]],
     normalize_runtime_command: Callable[[str, list[str]], list[str]],
@@ -199,103 +202,138 @@ def handle_actor_update(
                     )
                 except Exception as e:
                     return _error("profile_not_found", str(e))
+                try:
+                    launch_spec = resolve_actor_launch_spec(
+                        group,
+                        actor_id,
+                        command=list(actor.get("command") or []) if isinstance(actor.get("command"), list) else [],
+                        env=dict(actor.get("env") or {}) if isinstance(actor.get("env"), dict) else {},
+                        runner=str(actor.get("runner") or "pty"),
+                        runtime=str(actor.get("runtime") or "codex"),
+                        find_scope_url=find_scope_url,
+                        effective_runner_kind=effective_runner_kind,
+                        normalize_runtime_command=normalize_runtime_command,
+                        supported_runtimes=list(supported_runtimes),
+                        caller_id=str(args.get("caller_id") or "").strip(),
+                        is_admin=coerce_bool(args.get("is_admin"), default=False),
+                        merge_actor_env_with_private=merge_actor_env_with_private,
+                    )
+                except ValueError as e:
+                    msg = str(e)
+                    if msg == "no active scope for group":
+                        return _error(
+                            "missing_project_root",
+                            "missing project root for group (no active scope)",
+                            details={"hint": "Attach a project root first (e.g. cccc attach <path> --group <id>)"},
+                        )
+                    if msg.startswith("scope not attached:"):
+                        scope_key = msg.partition(":")[2].strip()
+                        return _error(
+                            "scope_not_attached",
+                            msg,
+                            details={
+                                "group_id": group.group_id,
+                                "actor_id": actor_id,
+                                "scope_key": scope_key,
+                                "hint": "Attach this scope to the group (cccc attach <path> --group <id>)",
+                            },
+                        )
+                    if msg.startswith("project root path does not exist:"):
+                        return _error(
+                            "invalid_project_root",
+                            "project root path does not exist",
+                            details={
+                                "group_id": group.group_id,
+                                "actor_id": actor_id,
+                                "scope_key": str(actor.get("default_scope_key") or group.doc.get("active_scope_key") or "").strip(),
+                                "path": msg.partition(":")[2].strip(),
+                                "hint": "Re-attach a valid project root (cccc attach <path> --group <id>)",
+                            },
+                        )
+                    if msg.startswith("unsupported runtime:"):
+                        runtime = msg.partition(":")[2].strip()
+                        return _error(
+                            "unsupported_runtime",
+                            msg,
+                            details={
+                                "group_id": group.group_id,
+                                "actor_id": actor_id,
+                                "runtime": runtime,
+                                "supported": list(supported_runtimes),
+                                "hint": "Change the actor runtime to a supported one.",
+                            },
+                        )
+                    if msg == "custom runtime requires a command (PTY runner)":
+                        return _error(
+                            "missing_command",
+                            msg,
+                            details={
+                                "group_id": group.group_id,
+                                "actor_id": actor_id,
+                                "runtime": str(actor.get("runtime") or "codex").strip() or "codex",
+                                "hint": "Set actor.command (or switch runner to headless).",
+                            },
+                        )
+                    return _error("actor_update_failed", msg)
 
-                group_scope_key = str(group.doc.get("active_scope_key") or "").strip()
-                if not group_scope_key:
-                    return _error(
-                        "missing_project_root",
-                        "missing project root for group (no active scope)",
-                        details={"hint": "Attach a project root first (e.g. cccc attach <path> --group <id>)"},
-                    )
-                scope_key = str(actor.get("default_scope_key") or group_scope_key).strip()
-                url = find_scope_url(group, scope_key)
-                if not url:
-                    return _error(
-                        "scope_not_attached",
-                        f"scope not attached: {scope_key}",
-                        details={
-                            "group_id": group.group_id,
-                            "actor_id": actor_id,
-                            "scope_key": scope_key,
-                            "hint": "Attach this scope to the group (cccc attach <path> --group <id>)",
-                        },
-                    )
-                cwd = Path(url).expanduser().resolve()
-                if not cwd.exists():
-                    return _error(
-                        "invalid_project_root",
-                        "project root path does not exist",
-                        details={
-                            "group_id": group.group_id,
-                            "actor_id": actor_id,
-                            "scope_key": scope_key,
-                            "path": str(cwd),
-                            "hint": "Re-attach a valid project root (cccc attach <path> --group <id>)",
-                        },
-                    )
-                cmd = actor.get("command") if isinstance(actor.get("command"), list) else []
-                env = actor.get("env") if isinstance(actor.get("env"), dict) else {}
-                runner_kind = str(actor.get("runner") or "pty").strip() or "pty"
-                runner_effective = effective_runner_kind(runner_kind)
-                runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-                if runtime not in supported_runtimes:
-                    return _error(
-                        "unsupported_runtime",
-                        f"unsupported runtime: {runtime}",
-                        details={
-                            "group_id": group.group_id,
-                            "actor_id": actor_id,
-                            "runtime": runtime,
-                            "supported": list(supported_runtimes),
-                            "hint": "Change the actor runtime to a supported one.",
-                        },
-                    )
-                if runtime == "custom" and runner_effective != "headless" and not cmd:
-                    return _error(
-                        "missing_command",
-                        "custom runtime requires a command (PTY runner)",
-                        details={
-                            "group_id": group.group_id,
-                            "actor_id": actor_id,
-                            "runtime": runtime,
-                            "hint": "Set actor.command (or switch runner to headless).",
-                        },
-                    )
+                cwd = launch_spec["cwd"]
+                runner_kind = str(launch_spec["runner"])
+                runner_effective = str(launch_spec["effective_runner"])
+                runtime = str(launch_spec["runtime"])
+                effective_env = dict(launch_spec["merged_env"])
                 if runner_effective != "headless":
                     if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):
                         return _error("actor_update_failed", pty_support_error_message() or "PTY runner is not supported in this environment.")
                     try:
-                        mcp_ready = bool(ensure_mcp_installed(runtime, cwd))
+                        mcp_ready = bool(
+                            ensure_mcp_installed(
+                                runtime,
+                                cwd,
+                                env={str(k): str(v) for k, v in effective_env.items() if isinstance(k, str)},
+                            )
+                        )
                     except Exception as e:
                         return _error("actor_update_failed", f"failed to install MCP: {e}")
                     if not mcp_ready:
                         return _error("actor_update_failed", f"failed to install MCP for runtime: {runtime}")
-                    effective_cmd = normalize_runtime_command(runtime, list(cmd or []))
-                    runtime_error = runtime_start_preflight_error(runtime, effective_cmd, runner=runner_effective)
+                    runtime_error = runtime_start_preflight_error(runtime, launch_spec["effective_command"], runner=runner_effective)
                     if runtime_error:
                         return _error("runtime_unavailable", runtime_error)
 
                 if runner_effective == "headless":
-                    effective_env = merge_actor_env_with_private(group.group_id, actor_id, env)
-                    headless_runner.SUPERVISOR.start_actor(
-                        group_id=group.group_id,
-                        actor_id=actor_id,
-                        cwd=cwd,
-                        env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
-                    )
-                    try:
-                        write_headless_state(group.group_id, actor_id)
-                    except Exception:
-                        pass
+                    if runtime == "codex":
+                        codex_app_supervisor.start_actor(
+                            group_id=group.group_id,
+                            actor_id=actor_id,
+                            cwd=cwd,
+                            env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                        )
+                    elif runtime == "claude":
+                        claude_app_supervisor.start_actor(
+                            group_id=group.group_id,
+                            actor_id=actor_id,
+                            cwd=cwd,
+                            env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                        )
+                    else:
+                        headless_runner.SUPERVISOR.start_actor(
+                            group_id=group.group_id,
+                            actor_id=actor_id,
+                            cwd=cwd,
+                            env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                        )
+                        try:
+                            write_headless_state(group.group_id, actor_id)
+                        except Exception:
+                            pass
                 else:
-                    effective_env = merge_actor_env_with_private(group.group_id, actor_id, env)
-                    effective_cmd = normalize_runtime_command(runtime, list(cmd or []))
                     session = pty_runner.SUPERVISOR.start_actor(
                         group_id=group.group_id,
                         actor_id=actor_id,
                         cwd=cwd,
-                        command=effective_cmd,
+                        command=launch_spec["effective_command"],
                         env=prepare_pty_env(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                        runtime=runtime,
                         max_backlog_bytes=pty_backlog_bytes(),
                     )
                     try:
@@ -308,7 +346,16 @@ def handle_actor_update(
         else:
             runner_kind = str(actor.get("runner") or "pty").strip() or "pty"
             runner_effective = effective_runner_kind(runner_kind)
-            if runner_effective == "headless":
+            runtime = str(actor.get("runtime") or "codex").strip() or "codex"
+            if runtime == "codex" and runner_effective == "headless":
+                codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_headless_state(group.group_id, actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            elif runtime == "claude" and runner_effective == "headless":
+                claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_headless_state(group.group_id, actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            elif runner_effective == "headless":
                 headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
                 remove_headless_state(group.group_id, actor_id)
                 remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
@@ -362,7 +409,7 @@ def try_handle_actor_update_op(
     maybe_reset_automation_on_foreman_change: Callable[..., None],
     find_scope_url: Callable[[Any, str], str],
     effective_runner_kind: Callable[[str], str],
-    ensure_mcp_installed: Callable[[str, Path], Any],
+    ensure_mcp_installed: Callable[..., Any],
     merge_actor_env_with_private: Callable[[str, str, Dict[str, Any]], Dict[str, Any]],
     inject_actor_context_env: Callable[..., Dict[str, Any]],
     normalize_runtime_command: Callable[[str, list[str]], list[str]],

@@ -16,9 +16,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        entryFileNames: "assets/index.js",
-        chunkFileNames: "assets/chunk-[name].js",
-        assetFileNames: "assets/[name][extname]",
+        entryFileNames: "assets/[name]-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
         // Split large deps into dedicated chunks to avoid oversized bundles.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
@@ -31,8 +31,10 @@ export default defineConfig({
           if (/[\\/]node_modules[\\/](markdown-it|mdurl|uc\.micro|entities|linkify-it)[\\/]/.test(id)) return "markdown";
           // i18n
           if (/[\\/]node_modules[\\/](i18next|react-i18next)[\\/]/.test(id)) return "i18n";
-          // Drag-and-drop + floating UI
-          if (/[\\/]node_modules[\\/](@dnd-kit|@floating-ui)[\\/]/.test(id)) return "ui-utils";
+          // Drag-and-drop
+          if (/[\\/]node_modules[\\/]@dnd-kit[\\/]/.test(id)) return "dnd";
+          // Floating UI
+          if (/[\\/]node_modules[\\/]@floating-ui[\\/]/.test(id)) return "floating-ui";
           // Remaining third-party deps
           return "vendor";
         },

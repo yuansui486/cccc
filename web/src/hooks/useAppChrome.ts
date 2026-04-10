@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../services/api";
-import { useGroupStore } from "../stores";
+import { useGroupStore, useObservabilityStore } from "../stores";
 import type { DirSuggestion } from "../types";
 
 type UseAppChromeOptions = {
@@ -41,6 +41,7 @@ export function useAppChrome({
       const session = resp.ok ? resp.result?.web_access_session ?? null : null;
       const allowed = Boolean(session?.can_access_global_settings ?? !(session?.login_active ?? false));
       setCanAccessGlobalSettings(allowed);
+      useObservabilityStore.getState().setRuntimeVisibilityFromSession(session);
     } catch {
       setCanAccessGlobalSettings(null);
     }

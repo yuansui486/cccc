@@ -21,6 +21,10 @@ export interface Observability {
   terminal_ui?: {
     scrollback_lines?: number;
   };
+  runtime_visibility?: {
+    peer_runtime?: "hidden" | "visible" | string;
+    pet_runtime?: "hidden" | "visible" | string;
+  };
 }
 
 export interface AccessTokenEntry {
@@ -42,7 +46,10 @@ export async function updateObservability(args: {
   logLevel: "INFO" | "DEBUG";
   terminalTranscriptPerActorBytes?: number;
   terminalUiScrollbackLines?: number;
+  peerRuntimeVisibility?: "hidden" | "visible";
+  petRuntimeVisibility?: "hidden" | "visible";
 }) {
+  clearWebAccessSessionReadRequest();
   return apiJson<{ observability: Observability }>("/api/v1/observability", {
     method: "PUT",
     body: JSON.stringify({
@@ -51,6 +58,8 @@ export async function updateObservability(args: {
       log_level: args.logLevel,
       terminal_transcript_per_actor_bytes: args.terminalTranscriptPerActorBytes,
       terminal_ui_scrollback_lines: args.terminalUiScrollbackLines,
+      peer_runtime_visibility: args.peerRuntimeVisibility,
+      pet_runtime_visibility: args.petRuntimeVisibility,
     }),
   });
 }

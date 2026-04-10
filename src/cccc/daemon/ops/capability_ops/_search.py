@@ -8,13 +8,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from ....contracts.v1 import DaemonError, DaemonResponse
-from ....kernel.actors import get_effective_role
+from ....kernel.actors import find_actor, get_effective_role, is_pet_actor
 from ....kernel.capabilities import (
     BUILTIN_CAPABILITY_PACKS,
     BUILTIN_CAPSULE_SKILLS,
     CORE_TOOL_NAMES,
     all_builtin_pack_ids,
     all_builtin_skill_ids,
+    resolve_core_tool_names,
     resolve_visible_tool_names,
 )
 from ....kernel.context import ContextStorage
@@ -438,19 +439,22 @@ def _context_search_tokens(*, group_id: str, actor_id: str) -> List[str]:
         ]
         task_focus_text: List[str] = []
         for st in actor_states:
-            active_task_id = str(getattr(st, "active_task_id", "") or "").strip()
+            hot = getattr(st, "hot", None)
+            active_task_id = str(
+                getattr(hot, "active_task_id", "") or getattr(st, "active_task_id", "") or ""
+            ).strip()
             if active_task_id:
                 task = task_by_id.get(active_task_id)
                 if task is not None:
-                    task_focus_text.append(str(getattr(task, "name", "") or ""))
-                    task_focus_text.append(str(getattr(task, "goal", "") or ""))
-            task_focus_text.append(str(getattr(st, "focus", "") or ""))
+                    task_focus_text.append(str(getattr(task, "title", "") or getattr(task, "name", "") or ""))
+                    task_focus_text.append(str(getattr(task, "outcome", "") or getattr(task, "goal", "") or ""))
+            task_focus_text.append(str(getattr(hot, "focus", "") or getattr(st, "focus", "") or ""))
 
         if not task_focus_text:
             for t in tasks:
                 if str(getattr(t, "assignee", "") or "").strip() in {aid, actor_norm}:
-                    task_focus_text.append(str(getattr(t, "name", "") or ""))
-                    task_focus_text.append(str(getattr(t, "goal", "") or ""))
+                    task_focus_text.append(str(getattr(t, "title", "") or getattr(t, "name", "") or ""))
+                    task_focus_text.append(str(getattr(t, "outcome", "") or getattr(t, "goal", "") or ""))
 
         out: List[str] = []
         seen: set[str] = set()
@@ -1011,9 +1015,9 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
             preferred_bias = 0 if cap_id in preferred_packs else 1
             return (
                 is_builtin,
-                enabled_bias,
                 -context_score,
                 preferred_bias,
+                enabled_bias,
                 qualification_penalty,
                 name_key,
             )
@@ -1142,6 +1146,8 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
         if not actor_id:
             actor_id = "user"
         actor_role = _resolve_actor_role(group, actor_id)
+        actor = find_actor(group, actor_id) if actor_id and actor_id != "user" else None
+        actor_is_pet = isinstance(actor, dict) and is_pet_actor(actor)
         policy = _allowlist_policy()
         max_dynamic_tools_visible = _quota_limit(
             "CCCC_CAPABILITY_MAX_DYNAMIC_TOOLS_VISIBLE",
@@ -1243,7 +1249,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
             dynamic_tools = dynamic_tools[:max_dynamic_tools_visible]
 
         visible_tools = sorted(
-            set(resolve_visible_tool_names(builtin_enabled, actor_role=actor_role))
+            set(resolve_visible_tool_names(builtin_enabled, actor_role=actor_role, is_pet=actor_is_pet))
             | {str(x.get("name") or "").strip() for x in dynamic_tools if isinstance(x, dict)}
         )
 
@@ -1572,7 +1578,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                 "group_id": group_id,
                 "actor_id": actor_id,
                 "default_profile": "core",
-                "core_tool_count": len(CORE_TOOL_NAMES),
+                "core_tool_count": len(resolve_core_tool_names(actor_role=actor_role, is_pet=actor_is_pet)),
                 "visible_tool_count": len(visible_tools),
                 "visible_tools": visible_tools,
                 "dynamic_tools": dynamic_tools,

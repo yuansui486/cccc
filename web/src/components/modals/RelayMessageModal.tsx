@@ -50,6 +50,11 @@ export function RelayMessageModal({
     const t = d?.text;
     return typeof t === "string" ? t : "";
   }, [srcEvent]);
+  const srcQuoteText = useMemo(() => {
+    const d = srcEvent?.data as ChatMessageData | undefined;
+    const t = d?.quote_text;
+    return typeof t === "string" ? t : "";
+  }, [srcEvent]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -144,6 +149,11 @@ export function RelayMessageModal({
               {srcGroupId} · {srcEventId ? srcEventId : "—"} · {srcBy || "—"}
             </div>
             <div className="mt-2 max-h-[min(40vh,20rem)] overflow-x-hidden overflow-y-auto overscroll-contain whitespace-pre-wrap break-words pr-1 text-sm text-[var(--color-text-primary)]">
+              {srcQuoteText ? (
+                <div className="mb-3 border-l-2 border-[var(--glass-border-subtle)] pl-3 text-[var(--color-text-secondary)]">
+                  "{srcQuoteText}"
+                </div>
+              ) : null}
               {srcText || t("relay.emptyMessage")}
             </div>
           </div>

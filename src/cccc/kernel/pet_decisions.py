@@ -40,10 +40,17 @@ _FOREMAN_ACTION_KEYWORDS = (
 _ACTION_PREFIX_RE = re.compile(r"^(please|prioritize|follow up|check|review|ask|decide|restart|apply)\b", re.IGNORECASE)
 _STRUCTURED_TOKEN_RE = re.compile(r"\b[a-z0-9]+(?:[_/-][a-z0-9]+)+\b", re.IGNORECASE)
 _LONG_ASCII_TOKEN_RE = re.compile(r"\b[a-z]{5,}\b", re.IGNORECASE)
+_BULLET_PREFIX_RE = re.compile(r"^((?:[-*])|(?:\d+\.))\s+")
+_CONFIDENCE_LEVELS = {"low", "medium", "high"}
 
 
 def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _normalize_confidence(value: Any) -> str:
+    normalized = _normalize_text(value).lower()
+    return normalized if normalized in _CONFIDENCE_LEVELS else ""
 
 
 def _is_foreman_target(raw: Any) -> bool:
@@ -127,12 +134,60 @@ def _compact_foreman_message(text: str) -> str:
     return _normalize_text("，".join(picked) or raw)
 
 
+def _normalize_message_block(value: Any) -> str:
+    raw = str(value or "")
+    if not raw.strip():
+        return ""
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+    lines: list[str] = []
+    blank_open = False
+    for raw_line in raw.split("\n"):
+        stripped = str(raw_line or "").strip()
+        if not stripped:
+            if lines and not blank_open:
+                lines.append("")
+                blank_open = True
+            continue
+        normalized = re.sub(r"\s+", " ", stripped)
+        bullet_match = _BULLET_PREFIX_RE.match(normalized)
+        if bullet_match:
+            prefix = str(bullet_match.group(1) or "").strip()
+            body = normalized[bullet_match.end():].strip()
+            normalized = f"{prefix} {body}".strip()
+        lines.append(normalized)
+        blank_open = False
+    while lines and lines[0] == "":
+        lines.pop(0)
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def _should_compact_foreman_message(raw: str, compact: str) -> bool:
+    normalized_raw = _normalize_text(raw)
+    normalized_compact = _normalize_text(compact)
+    if not normalized_raw or not normalized_compact or normalized_raw == normalized_compact:
+        return False
+    if "\n" in raw:
+        return False
+    if len(normalized_raw) < 96:
+        return False
+    structured_noise = _structured_noise_count(normalized_raw)
+    if structured_noise >= 3:
+        return True
+    if len(normalized_compact) <= max(48, int(len(normalized_raw) * 0.55)):
+        return True
+    return False
+
+
 def _normalize_draft_message_text(raw_text: Any, *, raw_to: Any) -> str:
-    text = _normalize_text(raw_text)
+    text = _normalize_message_block(raw_text)
     if not text:
         return ""
     if _is_foreman_target(raw_to):
-        return _compact_foreman_message(text)
+        compact = _compact_foreman_message(text)
+        if _should_compact_foreman_message(text, compact):
+            return compact
     return text
 
 
@@ -197,36 +252,6 @@ def _normalize_action(raw: Any, *, fingerprint: str = "", source: Dict[str, Any]
         if text:
             out["text"] = text
         return out
-    if action_type == "automation_proposal":
-        out["group_id"] = str(raw.get("group_id") or "").strip()
-        title = str(raw.get("title") or "").strip()
-        if title:
-            out["title"] = title
-        summary = str(raw.get("summary") or "").strip()
-        if summary:
-            out["summary"] = summary
-        actions_raw = raw.get("actions")
-        if isinstance(actions_raw, list):
-            normalized_actions: list[dict[str, Any]] = []
-            for item in actions_raw:
-                if not isinstance(item, dict):
-                    continue
-                action_item: Dict[str, Any] = {}
-                action_kind = str(item.get("type") or "").strip()
-                if not action_kind:
-                    continue
-                action_item["type"] = action_kind
-                for key in ("rule_id", "enabled"):
-                    if key in item:
-                        action_item[key] = item.get(key)
-                if isinstance(item.get("rule"), dict):
-                    action_item["rule"] = dict(item.get("rule") or {})
-                if isinstance(item.get("ruleset"), dict):
-                    action_item["ruleset"] = dict(item.get("ruleset") or {})
-                normalized_actions.append(action_item)
-            if normalized_actions:
-                out["actions"] = normalized_actions
-        return out
     return {}
 
 
@@ -262,9 +287,6 @@ def _normalize_decision(raw: Any) -> Dict[str, Any] | None:
     elif action_type == "task_proposal":
         if not str(action.get("group_id") or "").strip():
             return None
-    elif action_type == "automation_proposal":
-        if not str(action.get("group_id") or "").strip() or not isinstance(action.get("actions"), list) or len(action.get("actions") or []) == 0:
-            return None
     if action_type == "task_proposal":
         summary = _normalize_task_proposal_summary(summary, fingerprint=fingerprint, source=source)
     out: Dict[str, Any] = {
@@ -278,6 +300,12 @@ def _normalize_decision(raw: Any) -> Dict[str, Any] | None:
         "source": source,
         "updated_at": str(raw.get("updated_at") or "").strip(),
     }
+    confidence = _normalize_confidence(raw.get("confidence"))
+    if confidence:
+        out["confidence"] = confidence
+    reasoning_brief = _normalize_text(raw.get("reasoning_brief"))
+    if reasoning_brief:
+        out["reasoning_brief"] = reasoning_brief
     if bool(raw.get("ephemeral")):
         out["ephemeral"] = True
     return out

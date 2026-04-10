@@ -9,6 +9,7 @@ EffectiveWorkingState = Literal["stopped", "idle", "working", "waiting", "stuck"
 DEFAULT_PTY_STUCK_IDLE_SECONDS = 300.0
 DEFAULT_PTY_WORKING_IDLE_SECONDS = 5.0
 DEFAULT_PTY_TERMINAL_SIGNAL_TAIL_BYTES = 12_000
+DEFAULT_PTY_ACTIVITY_SIGNAL_TAIL_BYTES = 4_000
 DEFAULT_CODEX_TERMINAL_SIGNAL_WINDOW_CHARS = 1_600
 
 
@@ -102,7 +103,7 @@ def _has_visible_terminal_output(text: str) -> bool:
     return False
 
 
-def _derive_pty_terminal_override(*, runtime: str, terminal_text: str) -> Optional[Dict[str, Any]]:
+def derive_pty_terminal_override(*, runtime: str, terminal_text: str) -> Optional[Dict[str, Any]]:
     runtime_id = _clean_text(runtime).lower()
     cleaned = _strip_ansi(terminal_text)
     if runtime_id != "codex":
@@ -131,6 +132,7 @@ def derive_effective_working_state(
     runtime: str = "",
     idle_seconds: Optional[float] = None,
     pty_terminal_text: str = "",
+    pty_terminal_override: Optional[Dict[str, Any]] = None,
     agent_state: Optional[Dict[str, Any]] = None,
     headless_state: Optional[Dict[str, Any]] = None,
     pty_stuck_idle_seconds: float = DEFAULT_PTY_STUCK_IDLE_SECONDS,
@@ -158,7 +160,11 @@ def derive_effective_working_state(
             "effective_active_task_id": active_task_id or None,
         }
 
-    terminal_override = _derive_pty_terminal_override(runtime=runtime, terminal_text=pty_terminal_text)
+    terminal_override = (
+        dict(pty_terminal_override)
+        if isinstance(pty_terminal_override, dict) and pty_terminal_override
+        else derive_pty_terminal_override(runtime=runtime, terminal_text=pty_terminal_text)
+    )
     if terminal_override is not None:
         return {
             **terminal_override,
@@ -167,12 +173,18 @@ def derive_effective_working_state(
         }
 
     idle = _safe_float(idle_seconds)
-    has_visible_output = _has_visible_terminal_output(pty_terminal_text)
     if idle is not None:
-        if has_visible_output and idle < DEFAULT_PTY_WORKING_IDLE_SECONDS:
+        if idle < DEFAULT_PTY_WORKING_IDLE_SECONDS:
+            if _has_visible_terminal_output(pty_terminal_text):
+                return {
+                    "effective_working_state": "working",
+                    "effective_working_reason": "pty_no_prompt_recent_output",
+                    "effective_working_updated_at": updated_at or None,
+                    "effective_active_task_id": active_task_id or None,
+                }
             return {
-                "effective_working_state": "working",
-                "effective_working_reason": "pty_no_prompt_recent_output",
+                "effective_working_state": "waiting",
+                "effective_working_reason": "pty_no_prompt_waiting",
                 "effective_working_updated_at": updated_at or None,
                 "effective_active_task_id": active_task_id or None,
             }

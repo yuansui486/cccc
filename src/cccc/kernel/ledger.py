@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 import hashlib
 import json
 import logging
@@ -107,6 +108,12 @@ def append_event(
         append_event_to_index(ledger_path, out, next_offset_bytes=next_offset)
     except Exception:
         pass
+    try:
+        from .ledger_status_cache import update_message_status_cache_on_append
+
+        update_message_status_cache_on_append(out)
+    except Exception:
+        pass
     _notify_append(out)
     return out
 
@@ -114,17 +121,24 @@ def append_event(
 def read_last_lines(path: Path, n: int) -> list[str]:
     if n <= 0:
         return []
+    if path.name == "ledger.jsonl" and (path.parent / "group.yaml").exists():
+        try:
+            return read_last_lines_across_sources(path.parent, n)
+        except Exception as e:
+            LOGGER.warning("failed to read ledger tail across sources: path=%s err=%s", path, e)
     try:
-        return read_last_lines_across_sources(path.parent, n)
-    except Exception as e:
-        LOGGER.warning("failed to read ledger tail across sources: path=%s err=%s", path, e)
         if not path.exists():
             return []
-        try:
-            return path.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
-        except Exception as e2:
-            LOGGER.error("failed to read ledger tail fallback: path=%s err=%s", path, e2)
-            return []
+        keep = deque(maxlen=n)
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for raw_line in handle:
+                line = raw_line.rstrip("\n")
+                if line:
+                    keep.append(line)
+        return list(keep)
+    except Exception as e:
+        LOGGER.error("failed to read text tail: path=%s err=%s", path, e)
+        return []
 
 
 def follow(path: Path, *, sleep_seconds: float = 0.2) -> Iterable[str]:

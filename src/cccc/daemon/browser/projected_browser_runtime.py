@@ -740,6 +740,8 @@ class ProjectedBrowserSession:
             name=f"cccc-browser-{self.session_key[:48]}",
         )
         self._controller_attached = False
+        self._controller_socket: Optional[socket.socket] = None
+        self._controller_generation = 0
         self._state = "starting"
         self._message = "Preparing browser runtime..."
         self._error: dict[str, Any] = {}
@@ -768,6 +770,7 @@ class ProjectedBrowserSession:
         self._thread.join(timeout=5.0)
         with self._lock:
             self._controller_attached = False
+            self._controller_socket = None
             if self._state not in {"failed", "closed"}:
                 self._state = "closed"
                 self._message = "Browser surface closed."
@@ -806,23 +809,27 @@ class ProjectedBrowserSession:
             if self._state not in {"starting", "ready"}:
                 message = str(self._error.get("message") or self._message or "browser surface is not active")
                 return False, {"code": "browser_surface_not_active", "message": message, "details": dict(self._error)}
-            if self._controller_attached:
-                return False, {
-                    "code": "browser_surface_busy",
-                    "message": "browser surface already has an active controller",
-                    "details": {},
-                }
             return True, {}
 
     def attach_socket(self, sock: socket.socket) -> bool:
         with self._lock:
-            if self._controller_attached:
+            if self._state not in {"starting", "ready"}:
                 return False
+            old_sock = self._controller_socket
+            self._controller_generation += 1
+            generation = self._controller_generation
             self._controller_attached = True
+            self._controller_socket = sock
             self._updated_at = utc_now_iso()
+        # Evict old controller outside the lock to avoid deadlocks.
+        if old_sock is not None:
+            try:
+                old_sock.close()
+            except Exception:
+                pass
         threading.Thread(
             target=self._serve_socket,
-            args=(sock,),
+            args=(sock, generation),
             daemon=True,
             name=f"cccc-browser-stream-{self.session_key[:48]}",
         ).start()
@@ -940,6 +947,7 @@ class ProjectedBrowserSession:
                 self._updated_at = utc_now_iso()
             self._set_state("ready", message=f"Browser surface ready ({self._strategy or 'chromium'}).")
             next_frame_at = 0.0
+            consecutive_capture_failures = 0
             while not self._stop_event.is_set():
                 timeout = max(0.05, min(0.20, next_frame_at - time.time())) if next_frame_at else 0.05
                 try:
@@ -965,7 +973,15 @@ class ProjectedBrowserSession:
                     continue
                 with self._lock:
                     self._url = str(runtime.current_url() or self._url)
-                frame = runtime.capture_frame()
+                try:
+                    frame = runtime.capture_frame()
+                except Exception:
+                    consecutive_capture_failures += 1
+                    if consecutive_capture_failures >= 5:
+                        raise
+                    frame = None
+                else:
+                    consecutive_capture_failures = 0
                 if frame:
                     self._record_frame(frame)
                 next_frame_at = time.time() + _FRAME_INTERVAL_SECONDS
@@ -988,7 +1004,7 @@ class ProjectedBrowserSession:
                     self._updated_at = utc_now_iso()
                 self._frame_cond.notify_all()
 
-    def _serve_socket(self, sock: socket.socket) -> None:
+    def _serve_socket(self, sock: socket.socket, generation: int = 0) -> None:
         buffer = b""
         last_seq = 0
         sent_state_marker = ""
@@ -1061,8 +1077,11 @@ class ProjectedBrowserSession:
                             break
         finally:
             with self._lock:
-                self._controller_attached = False
-                self._updated_at = utc_now_iso()
+                # Only reset if we are still the current controller (not evicted).
+                if self._controller_generation == generation:
+                    self._controller_attached = False
+                    self._controller_socket = None
+                    self._updated_at = utc_now_iso()
                 self._frame_cond.notify_all()
             try:
                 sock.close()

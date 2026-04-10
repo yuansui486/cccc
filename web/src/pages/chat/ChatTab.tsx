@@ -1,25 +1,38 @@
 // ChatTab is the main chat page component.
 // Refactored to use useChatTab hook for business logic, reducing prop drilling.
 
-import { lazy, Suspense, useCallback, type MutableRefObject, type RefObject } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { BookmarkIcon, CompassIcon } from "../../components/Icons";
-import { Actor, GroupMeta, LedgerEvent, PresentationMessageRef } from "../../types";
+import { Actor, GroupMeta, HeadlessPreviewSession, LedgerEvent, PresentationMessageRef, StreamingActivity } from "../../types";
 import { VirtualMessageList } from "../../components/VirtualMessageList";
 import { classNames } from "../../utils/classNames";
 import { ChatComposer } from "./ChatComposer";
 import { useChatTab } from "../../hooks/useChatTab";
 import { useTranslation } from 'react-i18next';
-import { useGroupStore, useModalStore, useUIStore } from "../../stores";
+import { useComposerStore, useGroupStore, useModalStore, useUIStore } from "../../stores";
 import { getChatSession } from "../../stores/useUIStore";
+import { findPresentationSlot } from "../../utils/presentation";
+import { buildPresentationRefForSlot } from "../../utils/presentationRefs";
+import { clearPresentationSlot } from "../../services/api";
+import { clampPresentationSplitWidth } from "../../utils/presentationSplitLayout";
+import type { StreamingReplySession } from "../../stores/chatStreamingSessions";
 
 const PresentationRail = lazy(() =>
   import("../../components/presentation/PresentationRail").then((module) => ({ default: module.PresentationRail }))
+);
+const PresentationViewerSplitPanel = lazy(() =>
+  import("../../components/presentation/PresentationViewerModal").then((module) => ({ default: module.PresentationViewerSplitPanel }))
 );
 const SetupChecklist = lazy(() =>
   import("./SetupChecklist").then((module) => ({ default: module.SetupChecklist }))
 );
 
 const EMPTY_PRESENTATION_ATTENTION: Record<string, boolean> = {};
+const EMPTY_LIVE_WORK_TEXT: Record<string, string> = {};
+const EMPTY_LIVE_WORK_ACTIVITIES: Record<string, StreamingActivity[]> = {};
+const EMPTY_LIVE_WORK_SESSIONS: Record<string, StreamingReplySession> = {};
+const EMPTY_LIVE_WORK_PREVIEW_SESSIONS: Record<string, HeadlessPreviewSession[]> = {};
+const EMPTY_LATEST_LIVE_WORK_PREVIEW: Record<string, HeadlessPreviewSession> = {};
 
 function ChatLazyFallback({ className }: { className?: string }) {
   return <div className={classNames("min-h-0", className)} />;
@@ -33,6 +46,8 @@ export interface ChatTabProps {
 
   // Core data (must be passed from App)
   selectedGroupId: string;
+  selectedGroupRunning: boolean;
+  selectedGroupActorsHydrating: boolean;
   groupLabelById: Record<string, string>;
   actors: Actor[];
   groups: GroupMeta[];
@@ -55,7 +70,6 @@ export interface ChatTabProps {
 
   // Group actions (from useGroupActions)
   onStartGroup: () => void;
-
   // Mention menu state (local state in App)
   showMentionMenu: boolean;
   setShowMentionMenu: React.Dispatch<React.SetStateAction<boolean>>;
@@ -69,6 +83,8 @@ export function ChatTab({
   isSmallScreen,
   readOnly,
   selectedGroupId,
+  selectedGroupRunning,
+  selectedGroupActorsHydrating,
   groupLabelById,
   actors,
   groups,
@@ -91,6 +107,7 @@ export function ChatTab({
   const {
     // Chat state
     chatMessages,
+    liveWorkEvents,
     hasAnyChatMessages,
     chatFilter,
     setChatFilter,
@@ -109,6 +126,7 @@ export function ChatTab({
     busy,
     showScrollButton,
     chatUnreadCount,
+    forceStickToBottomToken,
 
     // Setup checklist
     showSetupCard,
@@ -156,6 +174,7 @@ export function ChatTab({
     addAgent,
   } = useChatTab({
     selectedGroupId,
+    selectedGroupRunning,
     actors,
     recipientActors,
     composerRef,
@@ -166,42 +185,131 @@ export function ChatTab({
 
   const { t } = useTranslation('chat');
   const groupPresentation = useGroupStore((state) => state.groupPresentation);
+  const setGroupPresentation = useGroupStore((state) => state.setGroupPresentation);
+  const presentationViewer = useModalStore((state) => state.presentationViewer);
   const setPresentationViewer = useModalStore((state) => state.setPresentationViewer);
   const setPresentationPin = useModalStore((state) => state.setPresentationPin);
+  const clearPresentationSlotAttention = useModalStore((state) => state.clearPresentationSlotAttention);
   const mobileSurface = useUIStore((state) =>
     selectedGroupId ? getChatSession(selectedGroupId, state.chatSessions).mobileSurface : "messages"
   );
   const presentationDockOpen = useUIStore((state) =>
     selectedGroupId ? getChatSession(selectedGroupId, state.chatSessions).presentationDockOpen : false
   );
+  const presentationDisplayMode = useUIStore((state) =>
+    selectedGroupId ? getChatSession(selectedGroupId, state.chatSessions).presentationDisplayMode : "modal"
+  );
   const setChatMobileSurface = useUIStore((state) => state.setChatMobileSurface);
   const setChatPresentationDockOpen = useUIStore((state) => state.setChatPresentationDockOpen);
+  const setChatPresentationDisplayMode = useUIStore((state) => state.setChatPresentationDisplayMode);
+  const presentationSplitWidth = useUIStore((state) => state.presentationSplitWidth);
+  const setPresentationSplitWidth = useUIStore((state) => state.setPresentationSplitWidth);
+  const showError = useUIStore((state) => state.showError);
+  const setQuotedPresentationRef = useComposerStore((state) => state.setQuotedPresentationRef);
+  const setComposerDestGroupId = useComposerStore((state) => state.setDestGroupId);
+  const liveWorkBucket = useGroupStore((state) => state.chatByGroup[String(selectedGroupId || "").trim()]);
   const presentationAttention = useModalStore((state) =>
     selectedGroupId ? (state.presentationAttention[selectedGroupId] || EMPTY_PRESENTATION_ATTENTION) : EMPTY_PRESENTATION_ATTENTION
   );
+  const previewSessionsByActorId = liveWorkBucket?.previewSessionsByActorId ?? EMPTY_LIVE_WORK_PREVIEW_SESSIONS;
+  const latestActorPreviewByActorId = liveWorkBucket?.latestActorPreviewByActorId ?? EMPTY_LATEST_LIVE_WORK_PREVIEW;
+  const latestActorTextByActorId = liveWorkBucket?.latestActorTextByActorId || EMPTY_LIVE_WORK_TEXT;
+  const latestActorActivitiesByActorId = liveWorkBucket?.latestActorActivitiesByActorId || EMPTY_LIVE_WORK_ACTIVITIES;
+  const replySessionsByPendingEventId = liveWorkBucket?.replySessionsByPendingEventId || EMPTY_LIVE_WORK_SESSIONS;
 
   const isHydratingEmptyState = chatMessages.length === 0 && chatEmptyState === "hydrating";
   const isBusinessEmptyState = chatMessages.length === 0 && chatEmptyState === "business_empty";
   const listIsLoadingHistory = isLoadingHistory || isHydratingEmptyState;
   const listHasMoreHistory = hasMoreHistory || isHydratingEmptyState;
   const hasPresentationAttention = Object.keys(presentationAttention).length > 0;
+  const preferredPresentationSurface = !isSmallScreen && presentationDisplayMode === "split" ? "split" : "modal";
+  const splitPresentationViewer =
+    !isSmallScreen &&
+    presentationViewer?.groupId === selectedGroupId &&
+    presentationViewer.surface === "split"
+      ? presentationViewer
+      : null;
+  const showDesktopSplitPresentation = !!splitPresentationViewer;
+  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
+  const splitResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [isSplitResizing, setIsSplitResizing] = useState(false);
+  const [splitLayoutWidth, setSplitLayoutWidth] = useState(0);
+  const effectivePresentationSplitWidth = clampPresentationSplitWidth(
+    presentationSplitWidth,
+    splitLayoutWidth || undefined
+  );
+
+  useEffect(() => {
+    const node = splitLayoutRef.current;
+    if (!node) return undefined;
+
+    const updateWidth = () => {
+      setSplitLayoutWidth(node.clientWidth || 0);
+    };
+
+    updateWidth();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
+
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [showDesktopSplitPresentation]);
+
+  useEffect(() => {
+    if (!isSplitResizing) return undefined;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = splitResizeRef.current;
+      if (!drag) return;
+      const nextWidth = drag.startWidth - (event.clientX - drag.startX);
+      const containerWidth = splitLayoutRef.current?.clientWidth || splitLayoutWidth || undefined;
+      setPresentationSplitWidth(clampPresentationSplitWidth(nextWidth, containerWidth));
+    };
+
+    const finishResize = () => {
+      splitResizeRef.current = null;
+      setIsSplitResizing(false);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishResize);
+      window.removeEventListener("pointercancel", finishResize);
+      finishResize();
+    };
+  }, [isSplitResizing, setPresentationSplitWidth, splitLayoutWidth]);
 
   const openPresentationSlot = useCallback((slotId: string) => {
     if (!selectedGroupId || !slotId) return;
-    setPresentationViewer({ groupId: selectedGroupId, slotId });
-  }, [selectedGroupId, setPresentationViewer]);
+    if (preferredPresentationSurface === "split") {
+      setChatPresentationDockOpen(selectedGroupId, true);
+    }
+    setPresentationViewer({ groupId: selectedGroupId, slotId, surface: preferredPresentationSurface });
+  }, [preferredPresentationSurface, selectedGroupId, setChatPresentationDockOpen, setPresentationViewer]);
 
   const openPresentationRef = useCallback((ref: PresentationMessageRef, event: LedgerEvent) => {
     if (!selectedGroupId) return;
     const slotId = String(ref.slot_id || "").trim();
     if (!slotId) return;
+    if (preferredPresentationSurface === "split") {
+      setChatPresentationDockOpen(selectedGroupId, true);
+    }
     setPresentationViewer({
       groupId: selectedGroupId,
       slotId,
+      surface: preferredPresentationSurface,
       focusRef: ref,
       focusEventId: String(event.id || "").trim() || null,
     });
-  }, [selectedGroupId, setPresentationViewer]);
+  }, [preferredPresentationSurface, selectedGroupId, setChatPresentationDockOpen, setPresentationViewer]);
 
   const pinPresentationSlot = useCallback((slotId: string) => {
     if (!selectedGroupId || !slotId || readOnly) return;
@@ -212,6 +320,72 @@ export function ChatTab({
     if (!selectedGroupId) return;
     setChatPresentationDockOpen(selectedGroupId, next);
   }, [selectedGroupId, setChatPresentationDockOpen]);
+
+  const handleQuotePresentationReference = useCallback((payload: { slotId: string; ref?: PresentationMessageRef | null }) => {
+    const gid = String(selectedGroupId || "").trim();
+    const normalizedSlotId = String(payload.slotId || "").trim();
+    if (!gid || !normalizedSlotId) return;
+    const slot = findPresentationSlot(groupPresentation, normalizedSlotId);
+    const ref = payload.ref || buildPresentationRefForSlot(slot);
+    if (!ref) {
+      showError(t("presentationMissingCard", { defaultValue: "This presentation slot is empty." }));
+      return;
+    }
+    setQuotedPresentationRef(ref);
+    setComposerDestGroupId(gid);
+    setChatMobileSurface(gid, "messages");
+    setPresentationViewer(null);
+    window.setTimeout(() => composerRef.current?.focus(), 0);
+  }, [composerRef, groupPresentation, selectedGroupId, setChatMobileSurface, setComposerDestGroupId, setPresentationViewer, setQuotedPresentationRef, showError, t]);
+
+  const handleOpenPresentationWindow = useCallback(() => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid || !splitPresentationViewer) return;
+    setChatPresentationDisplayMode(gid, "modal");
+    setPresentationViewer({ ...splitPresentationViewer, surface: "modal" });
+  }, [selectedGroupId, setChatPresentationDisplayMode, setPresentationViewer, splitPresentationViewer]);
+
+  const handleSplitReplaceSlot = useCallback((slotId: string) => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid || !slotId) return;
+    setPresentationViewer(null);
+    setPresentationPin({ groupId: gid, slotId });
+  }, [selectedGroupId, setPresentationPin, setPresentationViewer]);
+
+  const handleSplitClearSlot = useCallback(async (slotId: string) => {
+    const gid = String(selectedGroupId || "").trim();
+    const normalized = String(slotId || "").trim();
+    if (!gid || !normalized) return;
+    const confirmed = window.confirm(
+      t("presentationClearConfirm", {
+        index: Number(normalized.replace("slot-", "") || 0) || normalized,
+        defaultValue: `Clear ${normalized}?`,
+      }),
+    );
+    if (!confirmed) return;
+    const resp = await clearPresentationSlot(gid, normalized);
+    if (!resp.ok) {
+      showError(`${resp.error.code}: ${resp.error.message}`);
+      return;
+    }
+    setGroupPresentation(resp.result.presentation);
+    setPresentationViewer(null);
+    setPresentationPin(null);
+    clearPresentationSlotAttention(gid, normalized);
+  }, [clearPresentationSlotAttention, selectedGroupId, setGroupPresentation, setPresentationPin, setPresentationViewer, showError, t]);
+
+  const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!showDesktopSplitPresentation) return;
+    event.preventDefault();
+    event.stopPropagation();
+    splitResizeRef.current = {
+      startX: event.clientX,
+      startWidth: effectivePresentationSplitWidth,
+    };
+    setIsSplitResizing(true);
+    document.body.style.setProperty("cursor", "col-resize");
+    document.body.style.setProperty("user-select", "none");
+  }, [effectivePresentationSplitWidth, showDesktopSplitPresentation]);
 
   const filterOptions: Array<["all" | "user" | "attention" | "task", string]> = [
     ["all", t('filterAll')],
@@ -300,7 +474,7 @@ export function ChatTab({
 
       {/* 2. Body Area: messages stay primary; presentation is a secondary surface */}
       <main className="flex flex-1 min-h-0 flex-col">
-        <div className="relative flex min-h-0 flex-1">
+        <div ref={splitLayoutRef} className="relative flex min-h-0 flex-1">
           {(!isSmallScreen || mobileSurface === "messages") ? (
             <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               {isSmallScreen && (
@@ -483,7 +657,6 @@ export function ChatTab({
                   initialScrollAnchorOffsetPx={chatInitialScrollAnchorOffsetPx}
                   highlightEventId={chatHighlightEventId}
                   scrollRef={scrollRef}
-                  followBottomRef={chatAtBottomRef}
                   onReply={startReply}
                   onShowRecipients={showRecipients}
                   onCopyLink={copyMessageLink}
@@ -494,6 +667,7 @@ export function ChatTab({
                   showScrollButton={showScrollButton}
                   onScrollButtonClick={handleScrollButtonClick}
                   chatUnreadCount={chatUnreadCount}
+                  forceStickToBottomToken={forceStickToBottomToken}
                   onScrollChange={handleScrollChange}
                   onScrollSnapshot={handleScrollSnapshot}
                   isLoadingHistory={listIsLoadingHistory}
@@ -504,7 +678,69 @@ export function ChatTab({
             </section>
           ) : null}
 
-          {!isSmallScreen ? (
+          {showDesktopSplitPresentation ? (
+            <>
+              <div
+                className="relative hidden w-2 flex-shrink-0 cursor-col-resize md:block"
+                onPointerDown={handleSplitResizeStart}
+                aria-hidden="true"
+              >
+                <div
+                  className={classNames(
+                    "absolute inset-y-0 left-1/2 w-px -translate-x-1/2",
+                    isDark ? "bg-white/8" : "bg-black/8"
+                  )}
+                />
+                <div
+                  className={classNames(
+                    "absolute inset-y-0 -left-1 w-4 rounded-full transition-colors",
+                    isSplitResizing
+                      ? isDark
+                        ? "bg-cyan-300/18"
+                        : "bg-cyan-500/16"
+                      : isDark
+                        ? "hover:bg-white/8"
+                        : "hover:bg-black/6"
+                  )}
+                />
+              </div>
+              <div
+                className={classNames(
+                  "hidden min-h-0 flex-shrink-0 overflow-hidden border-l md:flex",
+                  isDark ? "border-white/8 bg-slate-950/20" : "border-black/8 bg-white/40"
+                )}
+                style={{ width: `${effectivePresentationSplitWidth}px` }}
+              >
+                <Suspense fallback={<ChatLazyFallback className="w-[52px]" />}>
+                  <PresentationRail
+                    mode="split"
+                    presentation={groupPresentation}
+                    isDark={isDark}
+                    readOnly={readOnly}
+                    attentionSlots={presentationAttention}
+                    onOpenSlot={openPresentationSlot}
+                    onPinSlot={pinPresentationSlot}
+                  />
+                </Suspense>
+                <Suspense fallback={<ChatLazyFallback className="flex-1" />}>
+                  <PresentationViewerSplitPanel
+                    isDark={isDark}
+                    readOnly={readOnly}
+                    groupId={selectedGroupId}
+                    slotId={splitPresentationViewer.slotId}
+                    presentation={groupPresentation}
+                    focusRef={splitPresentationViewer.focusRef || null}
+                    focusEventId={splitPresentationViewer.focusEventId || null}
+                    onQuoteInChat={handleQuotePresentationReference}
+                    onReplaceSlot={handleSplitReplaceSlot}
+                    onClearSlot={(slotId) => { void handleSplitClearSlot(slotId); }}
+                    onOpenWindow={handleOpenPresentationWindow}
+                    onClose={() => setPresentationViewer(null)}
+                  />
+                </Suspense>
+              </div>
+            </>
+          ) : !isSmallScreen ? (
             <Suspense fallback={<ChatLazyFallback className="w-0" />}>
               <PresentationRail
                 mode="dock"

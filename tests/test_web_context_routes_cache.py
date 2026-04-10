@@ -43,7 +43,30 @@ class TestWebContextRoutesCache(unittest.TestCase):
         reg = load_registry()
         return create_group(reg, title="context-cache-test", topic="").group_id
 
-    def test_normal_mode_context_get_uses_inflight_without_ttl(self) -> None:
+    def test_summary_context_get_reads_local_snapshot_without_daemon(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            os.environ.pop("CCCC_WEB_MODE", None)
+            group_id = self._create_group()
+            summary_payload = {"coordination": {"tasks": []}, "meta": {"summary_snapshot": {"state": "hit"}}}
+
+            with patch(
+                "cccc.ports.web.routes.groups._read_context_summary_local",
+                return_value={"ok": True, "result": summary_payload},
+            ) as mock_local, patch(
+                "cccc.ports.web.app.call_daemon",
+                side_effect=AssertionError("summary context should not call daemon"),
+            ):
+                with self._client() as client:
+                    resp = client.get(f"/api/v1/groups/{group_id}/context")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["result"]["meta"]["summary_snapshot"]["state"], "hit")
+            mock_local.assert_called_once_with(group_id)
+        finally:
+            cleanup()
+
+    def test_normal_mode_full_context_get_uses_inflight_without_ttl(self) -> None:
         _, cleanup = self._with_home()
         try:
             os.environ.pop("CCCC_WEB_MODE", None)
@@ -63,7 +86,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
 
             with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
-                    path = f"/api/v1/groups/{group_id}/context"
+                    path = f"/api/v1/groups/{group_id}/context?detail=full"
 
                     def do_get() -> int:
                         barrier.wait(timeout=2)
@@ -111,7 +134,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
 
             with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
-                    path = f"/api/v1/groups/{group_id}/context"
+                    path = f"/api/v1/groups/{group_id}/context?detail=full"
 
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         stale_future = executor.submit(client.get, path)
@@ -169,7 +192,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
 
                 with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                     with self._client() as client:
-                        path = f"/api/v1/groups/{group_id}/context"
+                        path = f"/api/v1/groups/{group_id}/context?detail=full"
 
                         with ThreadPoolExecutor(max_workers=1) as executor:
                             stale_future = executor.submit(client.get, path)
@@ -219,13 +242,13 @@ class TestWebContextRoutesCache(unittest.TestCase):
 
             with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
-                    path = f"/api/v1/groups/{group_id}/context"
+                    path = f"/api/v1/groups/{group_id}/context?detail=full"
 
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         stale_future = executor.submit(client.get, path)
                         time.sleep(0.05)
 
-                        fresh_resp = client.get(f"{path}?fresh=1")
+                        fresh_resp = client.get(f"{path}&fresh=1")
                         self.assertEqual(fresh_resp.status_code, 200)
                         self.assertEqual(fresh_resp.json()["result"]["meta"]["version"], "fresh")
 
@@ -264,7 +287,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
 
             with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
-                    path = f"/api/v1/groups/{group_id}/context"
+                    path = f"/api/v1/groups/{group_id}/context?detail=full"
 
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         stale_future = executor.submit(client.get, path)
@@ -312,7 +335,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
 
             with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
-                    path = f"/api/v1/groups/{group_id}/context"
+                    path = f"/api/v1/groups/{group_id}/context?detail=full"
 
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         stale_future = executor.submit(client.get, path)

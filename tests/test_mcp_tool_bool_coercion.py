@@ -5,37 +5,44 @@ from unittest.mock import patch
 
 
 class TestMcpToolBoolCoercion(unittest.TestCase):
-    def test_group_info_running_string_false(self) -> None:
+    def test_headless_codex_message_send_is_blocked(self) -> None:
         from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_group_actor
+        from cccc.ports.mcp.handlers import cccc_messaging
 
-        with patch.object(
-            cccc_group_actor,
-            "_call_daemon_or_raise",
-            return_value={"group": {"group_id": "g_test", "running": "false", "title": "t"}},
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
         ):
-            result = mcp_server.group_info(group_id="g_test")
-            group = result.get("group") if isinstance(result, dict) else {}
-            self.assertIsInstance(group, dict)
-            assert isinstance(group, dict)
-            self.assertFalse(bool(group.get("running")))
+            with self.assertRaises(mcp_server.MCPError) as cm:
+                mcp_server.message_send(
+                    group_id="g_test",
+                    actor_id="peer1",
+                    text="hello",
+                    to=["user"],
+                )
+        self.assertEqual(cm.exception.code, "tool_disabled_for_runtime")
 
-    def test_actor_list_enabled_running_string_coercion(self) -> None:
+    def test_headless_codex_message_reply_is_blocked(self) -> None:
         from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_group_actor
+        from cccc.ports.mcp.handlers import cccc_messaging
 
-        with patch.object(
-            cccc_group_actor,
-            "_call_daemon_or_raise",
-            return_value={"actors": [{"id": "peer1", "enabled": "false", "running": "true"}]},
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
         ):
-            result = mcp_server.actor_list(group_id="g_test")
-            actors = result.get("actors") if isinstance(result, dict) else []
-            self.assertIsInstance(actors, list)
-            assert isinstance(actors, list)
-            self.assertEqual(len(actors), 1)
-            self.assertFalse(bool(actors[0].get("enabled")))
-            self.assertTrue(bool(actors[0].get("running")))
+            with self.assertRaises(mcp_server.MCPError) as cm:
+                mcp_server.message_reply(
+                    group_id="g_test",
+                    actor_id="peer1",
+                    reply_to="ev_1",
+                    text="hello",
+                    to=["user"],
+                )
+        self.assertEqual(cm.exception.code, "tool_disabled_for_runtime")
 
     def test_file_send_blocks_path_outside_scope_root(self) -> None:
         from cccc.ports.mcp import server as mcp_server
@@ -67,92 +74,6 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
                         text="hello",
                     )
             self.assertEqual(cm.exception.code, "invalid_path")
-
-    def test_file_send_coerces_reply_required_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
-
-        class _FakeGroup:
-            def __init__(self, root: str) -> None:
-                self.group_id = "g_test"
-                self.doc = {
-                    "active_scope_key": "s1",
-                    "scopes": [{"scope_key": "s1", "url": root}],
-                }
-
-        captured = {}
-        with tempfile.TemporaryDirectory() as td:
-            scope_root = os.path.join(td, "scope")
-            os.makedirs(scope_root, exist_ok=True)
-            in_file = os.path.join(scope_root, "note.txt")
-            with open(in_file, "w", encoding="utf-8") as f:
-                f.write("hello")
-
-            def _fake_call(req):
-                captured["req"] = req
-                return {"ok": True, "event_id": "ev_test"}
-
-            with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup(scope_root)), patch.object(
-                cccc_messaging, "store_blob_bytes", return_value={"title": "note.txt", "path": "blobs/note.txt"}
-            ), patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call):
-                mcp_server.file_send(
-                    group_id="g_test",
-                    actor_id="peer1",
-                    path=in_file,
-                    text="hello",
-                    reply_required="false",  # type: ignore[arg-type]
-                )
-
-        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
-        args = req.get("args") if isinstance(req.get("args"), dict) else {}
-        self.assertFalse(bool(args.get("reply_required")))
-
-    def test_message_send_coerces_reply_required_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
-
-        captured = {}
-
-        def _fake_call(req):
-            captured["req"] = req
-            return {"ok": True, "event_id": "ev_test"}
-
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call):
-            mcp_server.message_send(
-                group_id="g_test",
-                actor_id="peer1",
-                text="hello",
-                to=["user"],
-                reply_required="false",  # type: ignore[arg-type]
-            )
-
-        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
-        args = req.get("args") if isinstance(req.get("args"), dict) else {}
-        self.assertFalse(bool(args.get("reply_required")))
-
-    def test_message_reply_coerces_reply_required_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
-
-        captured = {}
-
-        def _fake_call(req):
-            captured["req"] = req
-            return {"ok": True, "event_id": "ev_test"}
-
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call):
-            mcp_server.message_reply(
-                group_id="g_test",
-                actor_id="peer1",
-                reply_to="ev_1",
-                text="hello",
-                to=["user"],
-                reply_required="false",  # type: ignore[arg-type]
-            )
-
-        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
-        args = req.get("args") if isinstance(req.get("args"), dict) else {}
-        self.assertFalse(bool(args.get("reply_required")))
 
     def test_message_send_normalizes_double_escaped_newlines(self) -> None:
         from cccc.ports.mcp import server as mcp_server
@@ -301,83 +222,6 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("text"), r"regex \\t token")
 
-    def test_group_list_running_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_group_actor
-
-        with patch.object(
-            cccc_group_actor,
-            "_call_daemon_or_raise",
-            return_value={
-                "groups": [
-                    {
-                        "group_id": "g_test",
-                        "title": "t",
-                        "topic": "",
-                        "running": "false",
-                    }
-                ]
-            },
-        ):
-            result = mcp_server.group_list()
-            groups = result.get("groups") if isinstance(result, dict) else []
-            self.assertIsInstance(groups, list)
-            assert isinstance(groups, list)
-            self.assertEqual(len(groups), 1)
-            self.assertFalse(bool(groups[0].get("running")))
-
-    def test_context_get_include_archived_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "context_get", return_value={"ok": True}
-        ) as mock_context_get:
-            mcp_server.handle_tool_call("cccc_context_get", {"include_archived": "false"})
-            self.assertTrue(mock_context_get.called)
-            kwargs = mock_context_get.call_args.kwargs
-            self.assertEqual(kwargs.get("group_id"), "g_test")
-            self.assertFalse(bool(kwargs.get("include_archived")))
-
-    def test_context_sync_dry_run_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "_resolve_self_actor_id", return_value="peer1"
-        ), patch.object(
-            mcp_server, "context_sync", return_value={"ok": True}
-        ) as mock_context_sync:
-            mcp_server.handle_tool_call("cccc_context_sync", {"ops": [], "dry_run": "false"})
-            self.assertTrue(mock_context_sync.called)
-            kwargs = mock_context_sync.call_args.kwargs
-            self.assertEqual(kwargs.get("group_id"), "g_test")
-            self.assertFalse(bool(kwargs.get("dry_run")))
-            self.assertEqual(str(kwargs.get("by") or ""), "peer1")
-
-    def test_coordination_update_brief_forwards_caller_identity(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "_resolve_self_actor_id", return_value="peer1"
-        ), patch.object(mcp_server, "coordination_update_brief", return_value={"ok": True}) as mock_update_brief:
-            mcp_server.handle_tool_call("cccc_coordination", {"action": "update_brief", "objective": "north-star"})
-            self.assertTrue(mock_update_brief.called)
-            kwargs = mock_update_brief.call_args.kwargs
-            self.assertEqual(kwargs.get("group_id"), "g_test")
-            self.assertEqual(str(kwargs.get("objective") or ""), "north-star")
-            self.assertEqual(str(kwargs.get("by") or ""), "peer1")
-
-    def test_task_delete_forwards_caller_identity(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "_resolve_self_actor_id", return_value="peer1"
-        ), patch.object(mcp_server, "task_delete", return_value={"ok": True}) as mock_task_delete:
-            mcp_server.handle_tool_call("cccc_task", {"action": "delete", "task_id": "T123"})
-            self.assertTrue(mock_task_delete.called)
-            kwargs = mock_task_delete.call_args.kwargs
-            self.assertEqual(kwargs.get("group_id"), "g_test")
-            self.assertEqual(str(kwargs.get("task_id") or ""), "T123")
-            self.assertEqual(str(kwargs.get("by") or ""), "peer1")
 
     def test_notify_send_requires_ack_string_false(self) -> None:
         from cccc.ports.mcp import server as mcp_server

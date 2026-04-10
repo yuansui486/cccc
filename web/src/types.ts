@@ -2,6 +2,14 @@
 
 // Theme types
 export type Theme = "light" | "dark" | "system";
+export type TextScale = 90 | 100 | 125;
+
+export type GroupRuntimeStatus = {
+  lifecycle_state: "active" | "idle" | "paused" | "stopped" | string;
+  runtime_running: boolean;
+  running_actor_count: number;
+  has_running_foreman: boolean;
+};
 
 export type GroupMeta = {
   group_id: string;
@@ -10,7 +18,8 @@ export type GroupMeta = {
   updated_at?: string;
   created_at?: string;
   running?: boolean;
-  state?: "active" | "idle" | "paused";
+  state?: "active" | "idle" | "paused" | "stopped";
+  runtime_status?: GroupRuntimeStatus;
 };
 
 export type GroupDoc = {
@@ -19,7 +28,9 @@ export type GroupDoc = {
   topic?: string;
   active_scope_key?: string;
   scopes?: Array<{ scope_key?: string; url?: string; label?: string }>;
-  state?: "active" | "idle" | "paused";
+  running?: boolean;
+  state?: "active" | "idle" | "paused" | "stopped";
+  runtime_status?: GroupRuntimeStatus;
 };
 
 // Server-backed attachment metadata carried by canonical ledger events.
@@ -77,18 +88,66 @@ export type PresentationMessageRef = MessageRef & {
   snapshot?: PresentationRefSnapshot;
 };
 
+export type StreamingActivity = {
+  id: string;
+  kind: "queued" | "thinking" | "plan" | "search" | "command" | "patch" | "tool" | "reply" | string;
+  status: "started" | "updated" | "completed" | string;
+  summary: string;
+  detail?: string;
+  ts?: string;
+  raw_item_type?: string;
+  tool_name?: string;
+  server_name?: string;
+  command?: string;
+  cwd?: string;
+  file_paths?: string[];
+  query?: string;
+};
+
+export type HeadlessPreviewBlock = {
+  id: string;
+  streamId: string;
+  streamPhase: string;
+  text: string;
+  updatedAt: string;
+  completed: boolean;
+  transient: boolean;
+};
+
+export type HeadlessPreviewSession = {
+  actorId: string;
+  pendingEventId: string;
+  currentStreamId: string;
+  phase: string;
+  streamPhase: string;
+  updatedAt: string;
+  latestText: string;
+  transcriptBlocks: HeadlessPreviewBlock[];
+  activities: StreamingActivity[];
+};
+
 // Chat message payload
 export type ChatMessageData = {
   text?: string;
   to?: string[];
   priority?: "normal" | "attention";
   reply_required?: boolean;
+  sender_title?: string;
+  sender_runtime?: string;
+  sender_avatar_path?: string;
+  source_platform?: string;
+  reply_to?: string;
+  stream_id?: string;
+  stream_phase?: string;
+  pending_event_id?: string;
+  pending_placeholder?: boolean;
   client_id?: string;
   quote_text?: string;
   src_group_id?: string;
   src_event_id?: string;
   dst_group_id?: string;
   dst_to?: string[];
+  activities?: StreamingActivity[];
   refs?: MessageRef[];
   attachments?: MessageAttachment[];
 };
@@ -116,14 +175,31 @@ export type LedgerEvent = {
   group_id?: string;
   by?: string;
   data?: LedgerEventData;
+  _streaming?: boolean;
   _read_status?: Record<string, boolean>;
   _ack_status?: Record<string, boolean>;
   _obligation_status?: Record<string, ObligationStatus>;
 };
 
+export type HeadlessStreamEvent = {
+  id?: string;
+  ts?: string;
+  group_id?: string;
+  actor_id?: string;
+  type?: string;
+  data?: Record<string, unknown>;
+};
+
+export type LedgerEventStatusPayload = {
+  read_status?: Record<string, boolean>;
+  ack_status?: Record<string, boolean>;
+  obligation_status?: Record<string, ObligationStatus>;
+};
+
 export type Actor = {
   id: string;
   role?: string;
+  internal_kind?: string | null;
   title?: string;
   avatar_url?: string | null;
   has_custom_avatar?: boolean;
@@ -602,6 +678,10 @@ export type WebAccessSession = {
   allowed_groups?: string[];
   access_token_count?: number;
   can_access_global_settings?: boolean;
+  runtime_visibility?: {
+    peer_runtime?: "hidden" | "visible" | string;
+    pet_runtime?: "hidden" | "visible" | string;
+  };
 };
 
 export type DoneHubStatus =
@@ -887,7 +967,7 @@ export type GroupAutomation = {
   server_now?: string;
 };
 
-export type IMPlatform = "telegram" | "slack" | "discord" | "feishu" | "dingtalk" | "wecom";
+export type IMPlatform = "telegram" | "slack" | "discord" | "feishu" | "dingtalk" | "wecom" | "weixin";
 
 export type IMConfig = {
   platform?: IMPlatform;
@@ -916,6 +996,9 @@ export type IMConfig = {
   // WeCom fields
   wecom_bot_id?: string;
   wecom_secret?: string;
+  // Weixin fields
+  weixin_account_id?: string;
+  weixin_command?: string;
 };
 
 export type IMStatus = {
@@ -925,6 +1008,18 @@ export type IMStatus = {
   running: boolean;
   pid?: number;
   subscribers: number;
+};
+
+export type WeixinLoginStatus = {
+  status: string;
+  logged_in: boolean;
+  account_id?: string;
+  qrcode_url?: string;
+  qr_ascii?: string;
+  error?: string;
+  running: boolean;
+  pid?: number | null;
+  updated_at?: string;
 };
 
 export type DirItem = { name: string; path: string; is_dir: boolean };

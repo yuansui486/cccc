@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -175,6 +176,41 @@ class TestWebImStart(unittest.TestCase):
             self.assertGreaterEqual(len(lock_paths), 2)
             token_fingerprint = hashlib.sha256("wecom|bot_id=corp123".encode("utf-8")).hexdigest()[:12]
             self.assertTrue(lock_paths[0].endswith(f"im_bridge_wecom_{token_fingerprint}.lock"))
+        finally:
+            cleanup()
+
+    def test_im_weixin_login_start_uses_resolved_sidecar_path(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        home, cleanup = self._with_home()
+        try:
+            gid = self._create_group("im-weixin-login-start")
+            sidecar_path = Path(home) / "cache" / "sidecars" / "weixin_sidecar.mjs"
+            sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+            sidecar_path.write_text("// test sidecar\n", encoding="utf-8")
+
+            with TestClient(create_app()) as client:
+                set_resp = client.post(
+                    "/api/im/set",
+                    json={
+                        "group_id": gid,
+                        "platform": "weixin",
+                    },
+                )
+                self.assertEqual(set_resp.status_code, 200)
+                self.assertTrue(bool(set_resp.json().get("ok")))
+
+                with patch("cccc.ports.web.routes.im.resolve_weixin_sidecar_script_path", return_value=sidecar_path):
+                    with patch("subprocess.Popen", return_value=_AliveProc()) as popen:
+                        start_resp = client.post("/api/im/weixin/login/start", json={"group_id": gid})
+
+                self.assertEqual(start_resp.status_code, 200)
+                self.assertTrue(bool(start_resp.json().get("ok")))
+
+            self.assertIsNotNone(popen.call_args)
+            argv = list(popen.call_args.args[0])
+            self.assertEqual(argv[:2], ["node", str(sidecar_path)])
+            self.assertIn("--login", argv)
         finally:
             cleanup()
 

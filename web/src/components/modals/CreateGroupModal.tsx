@@ -126,6 +126,9 @@ export function CreateGroupModal({
                 {t("createGroup.browse")}
               </button>
             </div>
+            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              {t("createGroup.pathAutoCreateHint")}
+            </div>
           </div>
           {showDirBrowser && (
             <div className={`rounded-xl max-h-48 overflow-auto ${dirBrowseError ? "border border-rose-500/30 bg-rose-500/10" : "glass-panel"}`}>

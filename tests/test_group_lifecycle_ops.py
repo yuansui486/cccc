@@ -1,6 +1,9 @@
 import os
 import tempfile
 import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from unittest.mock import patch
 
 
 class TestGroupLifecycleOps(unittest.TestCase):
@@ -11,6 +14,18 @@ class TestGroupLifecycleOps(unittest.TestCase):
         os.environ["CCCC_HOME"] = td
 
         def cleanup() -> None:
+            try:
+                from cccc.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from cccc.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from cccc.runners import headless as headless_runner
+                from cccc.runners import pty as pty_runner
+
+                codex_app_supervisor.stop_all()
+                claude_app_supervisor.stop_all()
+                headless_runner.SUPERVISOR.stop_all()
+                pty_runner.SUPERVISOR.stop_all()
+            except Exception:
+                pass
             td_ctx.__exit__(None, None, None)
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)
@@ -24,6 +39,25 @@ class TestGroupLifecycleOps(unittest.TestCase):
         from cccc.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
+
+    @contextmanager
+    def _fake_codex_headless_start(self):
+        def _fake_start_actor(*, group_id: str, actor_id: str, cwd: Path, env: dict[str, str], model: str = "gpt-5.4"):
+            class _Session:
+                def __init__(self) -> None:
+                    self.group_id = group_id
+                    self.actor_id = actor_id
+                    self.cwd = cwd
+                    self.env = dict(env)
+                    self.model = model
+
+            return _Session()
+
+        with patch(
+            "cccc.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor",
+            side_effect=_fake_start_actor,
+        ):
+            yield
 
     def _add_actor(self, group_id: str, *, actor_id: str = "peer1", enabled: bool | None = None):
         add, _ = self._call(
@@ -80,7 +114,8 @@ class TestGroupLifecycleOps(unittest.TestCase):
             set_state, _ = self._call("group_set_state", {"group_id": group_id, "state": "paused", "by": "user"})
             self.assertTrue(set_state.ok, getattr(set_state, "error", None))
 
-            start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
+            with self._fake_codex_headless_start():
+                start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
             show, _ = self._call("group_show", {"group_id": group_id})
@@ -94,6 +129,8 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_after_stop_clears_stale_paused_state(self) -> None:
+        from cccc.kernel.group import load_group
+
         _, cleanup = self._with_home()
         try:
             create, _ = self._call("group_create", {"title": "group-stop-start", "topic": "", "by": "user"})
@@ -120,7 +157,8 @@ class TestGroupLifecycleOps(unittest.TestCase):
             self.assertEqual(str(stopped_doc.get("state") or ""), "stopped")
             self.assertFalse(bool(stopped_doc.get("running")))
 
-            start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
+            with self._fake_codex_headless_start():
+                start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
             show, _ = self._call("group_show", {"group_id": group_id})
@@ -166,7 +204,8 @@ class TestGroupLifecycleOps(unittest.TestCase):
             )
             group.save()
 
-            start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
+            with self._fake_codex_headless_start():
+                start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
             self.assertTrue(start.ok, getattr(start, "error", None))
 
             reloaded = load_group(group_id)
@@ -178,6 +217,140 @@ class TestGroupLifecycleOps(unittest.TestCase):
             ]
             self.assertIn("lead", actor_ids)
             self.assertNotIn("pet-peer", actor_ids)
+        finally:
+            cleanup()
+
+    def test_group_start_pet_uses_foreman_profile_private_env(self) -> None:
+        from cccc.contracts.v1 import DaemonRequest
+        from cccc.daemon.server import handle_request
+        from cccc.kernel.group import load_group
+        from cccc.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "group-start-pet-profile", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            profile_upsert, _ = handle_request(
+                DaemonRequest.model_validate(
+                    {
+                        "op": "actor_profile_upsert",
+                        "args": {
+                            "by": "user",
+                            "caller_id": "user-a",
+                            "is_admin": False,
+                            "profile": {
+                                "id": "pet-profile",
+                                "name": "Pet Profile",
+                                "scope": "user",
+                                "owner_id": "user-a",
+                                "runtime": "custom",
+                                "runner": "headless",
+                                "command": [],
+                                "submit": "newline",
+                            },
+                        },
+                    }
+                )
+            )
+            self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
+
+            secret_update, _ = handle_request(
+                DaemonRequest.model_validate(
+                    {
+                        "op": "actor_profile_secret_update",
+                        "args": {
+                            "by": "user",
+                            "profile_id": "pet-profile",
+                            "profile_scope": "user",
+                            "profile_owner": "user-a",
+                            "caller_id": "user-a",
+                            "is_admin": False,
+                            "set": {"API_KEY": "pet-secret"},
+                        },
+                    }
+                )
+            )
+            self.assertTrue(secret_update.ok, getattr(secret_update, "error", None))
+
+            add_foreman, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "lead",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "profile_id": "pet-profile",
+                    "profile_scope": "user",
+                    "profile_owner": "user-a",
+                    "caller_id": "user-a",
+                    "is_admin": False,
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add_foreman.ok, getattr(add_foreman, "error", None))
+
+            group = load_group(group_id)
+            assert group is not None
+            group.doc["running"] = False
+            group.save()
+
+            enable_pet, _ = self._call(
+                "group_settings_update",
+                {"group_id": group_id, "by": "user", "patch": {"desktop_pet_enabled": True}},
+            )
+            self.assertTrue(enable_pet.ok, getattr(enable_pet, "error", None))
+
+            captured: list[dict[str, object]] = []
+
+            def _fake_headless_start_actor(*, group_id: str, actor_id: str, cwd: Path, env: dict[str, str]):
+                captured.append(
+                    {
+                        "group_id": group_id,
+                        "actor_id": actor_id,
+                        "cwd": cwd,
+                        "env": dict(env),
+                    }
+                )
+
+                class _Session:
+                    pass
+
+                return _Session()
+
+            with patch("cccc.daemon.group.group_lifecycle_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
+                start, _ = self._call(
+                    "group_start",
+                    {"group_id": group_id, "by": "user", "caller_id": "user-a", "is_admin": False},
+                )
+
+            self.assertTrue(start.ok, getattr(start, "error", None))
+            pet_launches = [item for item in captured if item.get("actor_id") == PET_ACTOR_ID]
+            self.assertEqual(len(pet_launches), 1)
+            pet_env = pet_launches[0].get("env")
+            self.assertIsInstance(pet_env, dict)
+            assert isinstance(pet_env, dict)
+            self.assertEqual(pet_env.get("API_KEY"), "pet-secret")
+
+            private_keys, _ = self._call(
+                "actor_env_private_keys",
+                {"group_id": group_id, "actor_id": PET_ACTOR_ID, "by": "user"},
+            )
+            self.assertTrue(private_keys.ok, getattr(private_keys, "error", None))
+            self.assertEqual(set(private_keys.result.get("keys") or []), {"API_KEY"})
+
+            group = load_group(group_id)
+            assert group is not None
+            pet_actor = get_pet_actor(group)
+            self.assertIsNotNone(pet_actor)
+            assert pet_actor is not None
+            self.assertEqual(str(pet_actor.get("runtime") or ""), "custom")
+            self.assertEqual(str(pet_actor.get("submit") or ""), "newline")
         finally:
             cleanup()
 

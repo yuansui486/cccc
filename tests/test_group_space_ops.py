@@ -482,6 +482,8 @@ class TestGroupSpaceOps(unittest.TestCase):
             self.assertTrue(ingest_1.ok, getattr(ingest_1, "error", None))
             r1 = ingest_1.result if isinstance(ingest_1.result, dict) else {}
             self.assertEqual(bool(r1.get("deduped")), False)
+            self.assertEqual(bool(r1.get("accepted")), False)
+            self.assertEqual(bool(r1.get("completed")), True)
             job_1 = r1.get("job") if isinstance(r1.get("job"), dict) else {}
             self.assertEqual(str(job_1.get("state") or ""), "succeeded")
             self.assertIsInstance(job_1.get("result"), dict)
@@ -504,6 +506,8 @@ class TestGroupSpaceOps(unittest.TestCase):
             self.assertTrue(ingest_2.ok, getattr(ingest_2, "error", None))
             r2 = ingest_2.result if isinstance(ingest_2.result, dict) else {}
             self.assertEqual(bool(r2.get("deduped")), True)
+            self.assertEqual(bool(r2.get("accepted")), False)
+            self.assertEqual(bool(r2.get("completed")), True)
             self.assertEqual(str(r2.get("job_id") or ""), job_id)
 
             query, _ = self._call(
@@ -576,6 +580,8 @@ class TestGroupSpaceOps(unittest.TestCase):
                 )
             self.assertTrue(ingest.ok, getattr(ingest, "error", None))
             result = ingest.result if isinstance(ingest.result, dict) else {}
+            self.assertEqual(bool(result.get("accepted")), False)
+            self.assertEqual(bool(result.get("completed")), True)
             self.assertEqual(str(result.get("source_id") or ""), "src_intel_1")
             self.assertEqual(result.get("source_ids"), ["src_intel_1"])
             ingest_result = result.get("ingest_result") if isinstance(result.get("ingest_result"), dict) else {}
@@ -977,6 +983,8 @@ class TestGroupSpaceOps(unittest.TestCase):
             result = generated.result if isinstance(generated.result, dict) else {}
             self.assertEqual(str(result.get("action") or ""), "generate")
             self.assertEqual(str(result.get("kind") or ""), "report")
+            self.assertEqual(bool(result.get("accepted")), False)
+            self.assertEqual(bool(result.get("completed")), True)
             self.assertEqual(bool(result.get("saved_to_space")), True)
             output_path = str(result.get("output_path") or "")
             self.assertTrue(output_path)
@@ -1532,6 +1540,55 @@ class TestGroupSpaceOps(unittest.TestCase):
             cleanup_stub()
             cleanup()
 
+    def test_space_artifact_wait_true_returns_not_completed_when_provider_stays_pending(self) -> None:
+        _, cleanup = self._with_home()
+        cleanup_stub = self._with_env("CCCC_NOTEBOOKLM_STUB", "1")
+        try:
+            gid = self._create_group("space-generate-wait-pending")
+            bind, _ = self._call(
+                "group_space_bind",
+                {
+                    "group_id": gid,
+                    "provider": "notebooklm",
+                    "lane": "work",
+                    "action": "bind",
+                    "remote_space_id": "nb_gen_wait_pending",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(bind.ok, getattr(bind, "error", None))
+
+            with patch(
+                "cccc.daemon.space.group_space_ops.provider_generate_artifact",
+                return_value={"task_id": "task_wait_pending", "status": "pending"},
+            ), patch(
+                "cccc.daemon.space.group_space_ops.provider_wait_artifact",
+                return_value={"task_id": "task_wait_pending", "status": "pending"},
+            ):
+                generated, _ = self._call(
+                    "group_space_artifact",
+                    {
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "lane": "work",
+                        "action": "generate",
+                        "kind": "report",
+                        "wait": True,
+                        "save_to_space": False,
+                        "by": "user",
+                    },
+                )
+
+            self.assertTrue(generated.ok, getattr(generated, "error", None))
+            result = generated.result if isinstance(generated.result, dict) else {}
+            self.assertEqual(str(result.get("status") or ""), "pending")
+            self.assertEqual(bool(result.get("accepted")), True)
+            self.assertEqual(bool(result.get("completed")), False)
+            self.assertEqual(str(result.get("task_id") or ""), "task_wait_pending")
+        finally:
+            cleanup_stub()
+            cleanup()
+
     def test_space_artifact_async_generate_returns_quickly_when_provider_generate_is_slow(self) -> None:
         _, cleanup = self._with_home()
         cleanup_stub = self._with_env("CCCC_NOTEBOOKLM_STUB", "1")
@@ -1581,6 +1638,8 @@ class TestGroupSpaceOps(unittest.TestCase):
                 result = generated.result if isinstance(generated.result, dict) else {}
                 self.assertEqual(str(result.get("status") or ""), "pending")
                 self.assertFalse(bool(result.get("queued")))
+                self.assertEqual(bool(result.get("accepted")), True)
+                self.assertEqual(bool(result.get("completed")), False)
                 self.assertEqual(bool(result.get("background")), True)
                 self.assertEqual(str(result.get("completion_signal") or ""), "system.notify")
                 self.assertEqual(str(result.get("recommended_next_action") or ""), "wait_for_notify")
@@ -1736,7 +1795,10 @@ class TestGroupSpaceOps(unittest.TestCase):
                     },
                 )
             self.assertTrue(pending_ingest.ok, getattr(pending_ingest, "error", None))
-            pending_job = (pending_ingest.result or {}).get("job") if isinstance(pending_ingest.result, dict) else {}
+            pending_result = pending_ingest.result if isinstance(pending_ingest.result, dict) else {}
+            self.assertEqual(bool(pending_result.get("accepted")), True)
+            self.assertEqual(bool(pending_result.get("completed")), False)
+            pending_job = pending_result.get("job") if isinstance(pending_result.get("job"), dict) else {}
             self.assertEqual(str(pending_job.get("state") or ""), "pending")
             pending_job_id = str(pending_ingest.result.get("job_id") or "") if isinstance(pending_ingest.result, dict) else ""
             self.assertTrue(pending_job_id)

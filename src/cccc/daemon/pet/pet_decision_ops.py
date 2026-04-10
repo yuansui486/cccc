@@ -9,6 +9,7 @@ from ...kernel.ledger import append_event
 from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 from ...kernel.pet_decisions import clear_pet_decisions, load_pet_decisions, pet_decisions_path, replace_pet_decisions
 from ...kernel.pet_outcomes import append_expired_pet_decision_outcomes
+from .assistive_jobs import JOB_KIND_PET_REVIEW, mark_job_completed
 from ...util.file_lock import acquire_lockfile, release_lockfile
 from ...util.fs import atomic_write_json, read_json
 
@@ -43,6 +44,13 @@ def _restore_pet_decisions_document(group: Any, *, existed: bool, payload: Dict[
             return
         return
     atomic_write_json(path, payload, indent=2)
+
+
+def _try_mark_pet_review_completed(group_id: str) -> None:
+    try:
+        mark_job_completed(group_id, JOB_KIND_PET_REVIEW)
+    except Exception:
+        pass
 
 
 def handle_pet_decisions_get(args: Dict[str, Any]) -> DaemonResponse:
@@ -91,6 +99,7 @@ def handle_pet_decisions_replace(args: Dict[str, Any]) -> DaemonResponse:
             previous_decisions=previous_decisions,
             current_decisions=normalized,
         )
+        _try_mark_pet_review_completed(group.group_id)
         return DaemonResponse(ok=True, result={"decisions": normalized, "event": event})
     except Exception as e:
         if "previous_exists" in locals():
@@ -131,6 +140,7 @@ def handle_pet_decisions_clear(args: Dict[str, Any]) -> DaemonResponse:
             previous_decisions=previous_decisions,
             current_decisions=[],
         )
+        _try_mark_pet_review_completed(group.group_id)
         return DaemonResponse(ok=True, result={"cleared": True, "event": event})
     except Exception as e:
         if "previous_exists" in locals():

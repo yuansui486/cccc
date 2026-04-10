@@ -52,6 +52,9 @@ class TestWebAccessAuth(unittest.TestCase):
             self.assertEqual(bool(session.get("current_browser_signed_in")), False)
             self.assertEqual(int(session.get("access_token_count") or 0), 0)
             self.assertTrue(bool(session.get("can_access_global_settings")))
+            runtime_visibility = session.get("runtime_visibility") if isinstance(session.get("runtime_visibility"), dict) else {}
+            self.assertEqual(str(runtime_visibility.get("peer_runtime") or ""), "visible")
+            self.assertEqual(str(runtime_visibility.get("pet_runtime") or ""), "hidden")
         finally:
             cleanup()
 
@@ -79,9 +82,18 @@ class TestWebAccessAuth(unittest.TestCase):
 
     def test_web_access_session_reports_locked_management_for_non_admin_browser_when_tokens_exist(self) -> None:
         from cccc.kernel.access_tokens import create_access_token
+        from cccc.kernel.settings import update_observability_settings
 
         _, cleanup = self._with_home()
         try:
+            update_observability_settings(
+                {
+                    "runtime_visibility": {
+                        "peer_runtime": "hidden",
+                        "pet_runtime": "visible",
+                    }
+                }
+            )
             create_access_token("admin-user", is_admin=True)
             member = create_access_token("member-user", is_admin=False)
             member_token = str(member.get("token") or "")
@@ -95,6 +107,9 @@ class TestWebAccessAuth(unittest.TestCase):
             self.assertEqual(bool(session.get("is_admin")), False)
             self.assertEqual(int(session.get("access_token_count") or 0), 2)
             self.assertFalse(bool(session.get("can_access_global_settings")))
+            runtime_visibility = session.get("runtime_visibility") if isinstance(session.get("runtime_visibility"), dict) else {}
+            self.assertEqual(str(runtime_visibility.get("peer_runtime") or ""), "hidden")
+            self.assertEqual(str(runtime_visibility.get("pet_runtime") or ""), "visible")
         finally:
             cleanup()
 

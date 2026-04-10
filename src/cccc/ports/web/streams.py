@@ -10,7 +10,13 @@ from typing import AsyncIterator, Dict, Optional, Set, TextIO, Tuple
 from starlette.responses import StreamingResponse
 
 
-async def sse_jsonl_tail(path: Path, *, event_name: str, heartbeat_s: float = 30.0) -> AsyncIterator[bytes]:
+async def sse_jsonl_tail(
+    path: Path,
+    *,
+    event_name: str,
+    heartbeat_s: float = 30.0,
+    poll_interval_s: float = 0.2,
+) -> AsyncIterator[bytes]:
     """Tail a JSONL file and yield SSE events for each appended line."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(exist_ok=True)
@@ -54,7 +60,7 @@ async def sse_jsonl_tail(path: Path, *, event_name: str, heartbeat_s: float = 30
             yield b": heartbeat\n\n"
             last_send = now
 
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(max(0.01, float(poll_interval_s or 0.2)))
         try:
             st = path.stat()
             cur_inode = int(getattr(st, "st_ino", -1) or -1)
@@ -104,10 +110,11 @@ def create_sse_response(generator: AsyncIterator[bytes]) -> StreamingResponse:
 
 
 class _SharedJSONLTailer:
-    def __init__(self, path: Path, *, event_name: str, heartbeat_s: float) -> None:
+    def __init__(self, path: Path, *, event_name: str, heartbeat_s: float, poll_interval_s: float = 0.2) -> None:
         self._path = path
         self._event_name = event_name
         self._heartbeat_s = float(heartbeat_s)
+        self._poll_interval_s = max(0.01, float(poll_interval_s or 0.2))
         self._inode: int = -1
         self._f: TextIO | None = None
         self._last_send = time.monotonic()
@@ -201,7 +208,7 @@ class _SharedJSONLTailer:
                 self._broadcast(b": heartbeat\n\n")
                 self._last_send = now
 
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(self._poll_interval_s)
 
             # Detect file rotation / truncation.
             try:
@@ -241,9 +248,9 @@ class _SharedJSONLTailer:
         # Remove stale tailer entry from the global registry so long-running web
         # processes do not accumulate dead per-path tailers.
         try:
-            key = (str(self._event_name), str(self._path))
             async with _TAILERS_LOCK:
-                if _TAILERS.get(key) is self:
+                stale_keys = [key for key, tailer in _TAILERS.items() if tailer is self]
+                for key in stale_keys:
                     _TAILERS.pop(key, None)
         except Exception:
             pass
@@ -263,28 +270,51 @@ class _SharedJSONLTailer:
             self._has_subscribers.clear()
 
 
-_TAILERS: Dict[Tuple[str, str], _SharedJSONLTailer] = {}
+_TAILERS: Dict[Tuple[str, str, str], _SharedJSONLTailer] = {}
 _TAILERS_LOCK = asyncio.Lock()
 
 
-async def _get_tailer(path: Path, *, event_name: str, heartbeat_s: float) -> _SharedJSONLTailer:
-    key = (str(event_name), str(path))
+async def _get_tailer(path: Path, *, event_name: str, heartbeat_s: float, poll_interval_s: float) -> _SharedJSONLTailer:
+    key = (str(event_name), str(path), f"{max(0.01, float(poll_interval_s or 0.2)):.3f}")
     async with _TAILERS_LOCK:
         t = _TAILERS.get(key)
         if t is None:
-            t = _SharedJSONLTailer(path, event_name=event_name, heartbeat_s=heartbeat_s)
+            t = _SharedJSONLTailer(
+                path,
+                event_name=event_name,
+                heartbeat_s=heartbeat_s,
+                poll_interval_s=poll_interval_s,
+            )
             _TAILERS[key] = t
         t.ensure_started()
         return t
 
 
-async def sse_jsonl_tail_shared(path: Path, *, event_name: str, heartbeat_s: float = 30.0) -> AsyncIterator[bytes]:
+async def sse_jsonl_tail_shared(
+    path: Path,
+    *,
+    event_name: str,
+    heartbeat_s: float = 30.0,
+    poll_interval_s: float = 0.2,
+    initial_lines: list[str] | None = None,
+) -> AsyncIterator[bytes]:
     """Tail a JSONL file with a single shared reader and fan-out to many SSE clients."""
-    tailer = await _get_tailer(path, event_name=event_name, heartbeat_s=heartbeat_s)
+    tailer = await _get_tailer(
+        path,
+        event_name=event_name,
+        heartbeat_s=heartbeat_s,
+        poll_interval_s=poll_interval_s,
+    )
     q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=256)
     tailer.subscribe(q)
     try:
         yield b": connected\n\n"
+        for raw in list(initial_lines or []):
+            line = str(raw or "").strip()
+            if not line:
+                continue
+            yield f"event: {event_name}\n".encode("utf-8")
+            yield b"data: " + line.encode("utf-8", errors="replace") + b"\n\n"
         while True:
             item = await q.get()
             if item is None:

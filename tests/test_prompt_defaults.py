@@ -19,6 +19,7 @@ class TestPromptDefaults(unittest.TestCase):
         self.assertIn("Prefer silence over low-signal chatter", body)
         self.assertIn("routine `@all` updates", body)
         self.assertIn("finish it end-to-end", body)
+        self.assertIn("intent is not progress", body)
         self.assertLessEqual(len(body.split()), 90)
 
     def test_default_preamble_avoids_long_rule_duplication(self) -> None:
@@ -35,7 +36,7 @@ class TestPromptDefaults(unittest.TestCase):
         from cccc.kernel.prompt_files import load_builtin_help_markdown
 
         body = str(load_builtin_help_markdown() or "")
-        self.assertLessEqual(len(body.split()), 1500)
+        self.assertLessEqual(len(body.split()), 1700)
         self.assertIn("This is your working playbook for this group.", body)
         self.assertIn("## Working Stance", body)
         self.assertIn("## Communication Patterns", body)
@@ -47,9 +48,12 @@ class TestPromptDefaults(unittest.TestCase):
         self.assertIn("## Appendix", body)
         self.assertIn("present the post-review version, not the first draft", body)
         self.assertIn("Prefer silence over low-signal chatter.", body)
+        self.assertIn("This user is not generic. Learn their bar and dislikes; let that shape your defaults.", body)
         self.assertIn('"standing by"', body)
+        self.assertIn('"received"', body)
         self.assertIn("routine status, acknowledgements", body)
         self.assertIn("Do not drip-feed obvious in-scope next steps", body)
+        self.assertIn('if nothing changed, stay silent, not "received" or "standing by"', body)
         self.assertNotIn("## Quick Card", body)
         self.assertNotIn("## Where Things Live", body)
         self.assertNotIn("### NotebookLM Work vs Memory Lane", body)

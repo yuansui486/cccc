@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 from pathlib import Path
 import time
@@ -13,13 +14,18 @@ from fastapi.responses import FileResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from ....contracts.v1.automation import AutomationRuleSet
+from ....daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ....daemon.server import get_daemon_endpoint
 from ....daemon.group.presentation_ops import load_presentation_snapshot, resolve_workspace_asset_path
+from ....daemon.context.context_ops import _get_summary_context_fast, _rebuild_summary_snapshot
 from ....runners import headless as headless_runner
+from ....runners import pty as pty_runner
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
+from ....kernel.headless_events import headless_events_path
 from ....kernel.group import get_group_state, load_group
+from ....kernel.context import ContextStorage
 from ....kernel.query_projections import get_groups_projection
-from ....daemon.runner_state_ops import pty_state_path
+from ....daemon.runner_state_ops import headless_state_path, pty_state_path
 from ....kernel.group_template import parse_group_template
 from ....kernel.ledger import read_last_lines
 from ....kernel.prompt_files import (
@@ -36,6 +42,7 @@ from ....kernel.pet_prompt import build_pet_prompt_parts, build_pet_snapshot_tex
 from ....kernel.pet_outcomes import append_pet_decision_outcome
 from ....kernel.pet_actor import get_pet_actor, is_desktop_pet_enabled
 from ....kernel.pet_signals import load_pet_signals
+from ....kernel.pet_task_evidence import build_pet_task_evidence
 from ....daemon.pet.review_scheduler import request_manual_pet_review
 from ...mcp.utils.help_markdown import parse_help_markdown
 from ....kernel.access_tokens import list_access_tokens
@@ -76,22 +83,44 @@ _PRESENTATION_BROWSER_STREAM_LIMIT_BYTES = 16 * 1024 * 1024
 _CONTEXT_INFLIGHT: Dict[str, asyncio.Future[Dict[str, Any]]] = {}
 _CONTEXT_GENERATION: Dict[str, int] = {}
 _CONTEXT_LOCK = asyncio.Lock()
+logger = logging.getLogger("cccc.web.groups")
 
 
-def _group_running_local(group_id: str) -> bool:
+def _actor_running_local(group_id: str, actor: Any) -> bool:
     gid = str(group_id or "").strip()
-    if not gid:
+    if not gid or not isinstance(actor, dict):
         return False
-    group = load_group(gid)
-    if group is None:
+    aid = str(actor.get("id") or "").strip()
+    if not aid:
         return False
-    actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
-    for actor in actors:
-        if not isinstance(actor, dict):
-            continue
-        aid = str(actor.get("id") or "").strip()
-        if not aid:
-            continue
+    runtime = str(actor.get("runtime") or "").strip().lower()
+    runner_kind = str(actor.get("runner") or "pty").strip().lower() or "pty"
+    effective_runner = "headless" if runner_kind == "headless" else "pty"
+    if runtime == "codex":
+        if codex_app_supervisor.actor_running(gid, aid):
+            return True
+        try:
+            raw = json.loads(headless_state_path(gid, aid).read_text(encoding="utf-8"))
+            pid = int(raw.get("pid") or 0)
+            status = str(raw.get("status") or "").strip().lower()
+            state_runtime = str(raw.get("runtime") or "").strip().lower()
+        except Exception:
+            pid = 0
+            status = ""
+            state_runtime = ""
+        return bool(pid > 0 and pid_is_alive(pid) and status != "stopped" and (not state_runtime or state_runtime == "codex"))
+    if runtime == "claude" and effective_runner == "headless":
+        try:
+            raw = json.loads(headless_state_path(gid, aid).read_text(encoding="utf-8"))
+            pid = int(raw.get("pid") or 0)
+            status = str(raw.get("status") or "").strip().lower()
+            state_runtime = str(raw.get("runtime") or "").strip().lower()
+        except Exception:
+            pid = 0
+            status = ""
+            state_runtime = ""
+        return bool(pid > 0 and pid_is_alive(pid) and status != "stopped" and (not state_runtime or state_runtime == "claude"))
+    if effective_runner == "pty":
         pty_state = pty_state_path(gid, aid)
         if pty_state.exists():
             try:
@@ -101,9 +130,51 @@ def _group_running_local(group_id: str) -> bool:
                 pid = 0
             if pid > 0 and pid_is_alive(pid):
                 return True
-        if headless_runner.SUPERVISOR.actor_running(gid, aid):
-            return True
-    return False
+        return bool(pty_runner.SUPERVISOR.actor_running(gid, aid))
+    return bool(headless_runner.SUPERVISOR.actor_running(gid, aid))
+
+
+def _group_runtime_status_local(group: Any) -> Dict[str, Any]:
+    gid = str(getattr(group, "group_id", "") or "").strip()
+    lifecycle_state = get_group_state(group) if group is not None else "active"
+    if not gid or group is None:
+        return {
+            "lifecycle_state": lifecycle_state,
+            "runtime_running": False,
+            "running_actor_count": 0,
+            "has_running_foreman": False,
+        }
+    actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+    running_actor_count = 0
+    has_running_foreman = False
+    for index, actor in enumerate(actors):
+        if not _actor_running_local(gid, actor):
+            continue
+        running_actor_count += 1
+        role = str(actor.get("role") or "").strip().lower() if isinstance(actor, dict) else ""
+        enabled = coerce_bool(actor.get("enabled"), default=True) if isinstance(actor, dict) else False
+        if role == "foreman" or (not role and index == 0 and enabled):
+            has_running_foreman = True
+    runtime_running = bool(
+        running_actor_count > 0
+        or codex_app_supervisor.group_running(gid)
+        or pty_runner.SUPERVISOR.group_running(gid)
+        or headless_runner.SUPERVISOR.group_running(gid)
+    )
+    # If the group doc says running=True but no processes are alive yet,
+    # the daemon is still autostarting actors after a restart.  Report
+    # runtime_running=True so the UI doesn't flash "stopped" during boot.
+    doc_running = coerce_bool(group.doc.get("running"), default=False) if group is not None else False
+    booting = bool(doc_running and not runtime_running and lifecycle_state not in ("stopped",))
+    if booting:
+        runtime_running = True
+    return {
+        "lifecycle_state": lifecycle_state,
+        "runtime_running": runtime_running,
+        "running_actor_count": running_actor_count,
+        "has_running_foreman": has_running_foreman,
+        "booting": booting,
+    }
 
 
 def _read_groups_local() -> Dict[str, Any]:
@@ -115,7 +186,11 @@ def _read_groups_local() -> Dict[str, Any]:
             continue
         gid = str(item.get("group_id") or "").strip()
         row = dict(item)
-        row["running"] = _group_running_local(gid)
+        group = load_group(gid)
+        runtime_status = _group_runtime_status_local(group)
+        row["state"] = str(runtime_status.get("lifecycle_state") or row.get("state") or "active")
+        row["running"] = bool(runtime_status.get("runtime_running"))
+        row["runtime_status"] = runtime_status
         out.append(row)
     return {
         "ok": True,
@@ -124,6 +199,109 @@ def _read_groups_local() -> Dict[str, Any]:
             "registry_health": dict(projection.get("registry_health") or {}),
         },
     }
+
+
+def _read_group_local(group_id: str) -> Dict[str, Any]:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return {"ok": False, "error": {"code": "missing_group_id", "message": "missing group_id"}}
+    group = load_group(gid)
+    if group is None:
+        return {"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {gid}"}}
+    doc = json.loads(json.dumps(group.doc))
+    runtime_status = _group_runtime_status_local(group)
+    doc["state"] = str(runtime_status.get("lifecycle_state") or doc.get("state") or "active")
+    doc["running"] = bool(runtime_status.get("runtime_running"))
+    doc["runtime_status"] = runtime_status
+    im = doc.get("im")
+    if isinstance(im, dict):
+        im.pop("token", None)
+        im.pop("bot_token", None)
+        im.pop("app_token", None)
+    return {"ok": True, "result": {"group": doc}}
+
+
+def _read_active_headless_replay_lines(group: Any, *, limit: int = 400) -> list[str]:
+    path = headless_events_path(group.path)
+    try:
+      raw_lines = read_last_lines(path, max(50, int(limit or 400)))
+    except Exception:
+      return []
+    indexed: list[tuple[int, str, str, str]] = []
+    for idx, raw in enumerate(raw_lines):
+      try:
+        payload = json.loads(raw)
+      except Exception:
+        continue
+      if not isinstance(payload, dict):
+        continue
+      actor_id = str(payload.get("actor_id") or "").strip()
+      event_type = str(payload.get("type") or "").strip()
+      if not actor_id or not event_type:
+        continue
+      indexed.append((idx, raw, actor_id, event_type))
+
+    active_start_by_actor: dict[str, int] = {}
+    for idx, _raw, actor_id, event_type in indexed:
+      if event_type == "headless.turn.started":
+        active_start_by_actor[actor_id] = idx
+      elif event_type in {"headless.turn.completed", "headless.turn.failed"}:
+        active_start_by_actor.pop(actor_id, None)
+
+    if not active_start_by_actor:
+      return []
+
+    replay_lines: list[str] = []
+    for idx, raw, actor_id, _event_type in indexed:
+      start_idx = active_start_by_actor.get(actor_id)
+      if start_idx is None or idx < start_idx:
+        continue
+      replay_lines.append(raw)
+    return replay_lines
+
+
+def _read_active_headless_snapshot(group: Any, *, limit: int = 400) -> Dict[str, Any]:
+    events: list[Dict[str, Any]] = []
+    for raw in _read_active_headless_replay_lines(group, limit=limit):
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return {
+        "group_id": str(getattr(group, "group_id", "") or "").strip(),
+        "events": events,
+        "count": len(events),
+    }
+
+
+def _read_presentation_local(group_id: str) -> Dict[str, Any]:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return {"ok": False, "error": {"code": "missing_group_id", "message": "missing group_id"}}
+    group = load_group(gid)
+    if group is None:
+        return {"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {gid}"}}
+    snapshot = load_presentation_snapshot(group.group_id)
+    return {
+        "ok": True,
+        "result": {
+            "group_id": group.group_id,
+            "presentation": snapshot.model_dump(mode="json", exclude_none=True),
+        },
+    }
+
+
+def _read_context_summary_local(group_id: str) -> Dict[str, Any]:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return {"ok": False, "error": {"code": "missing_group_id", "message": "missing group_id"}}
+    group = load_group(gid)
+    if group is None:
+        return {"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {gid}"}}
+    storage = ContextStorage(group)
+    return {"ok": True, "result": _get_summary_context_fast(storage, group_id=gid)}
 
 
 def _context_cache_key(group_id: str, detail: str) -> str:
@@ -163,27 +341,150 @@ def _build_pet_context_payload(
     help_content = str(help_prompt.get("content") or "")
     persona = str(help_prompt.get("persona") or "").strip()
     source = str(help_prompt.get("pet_source") or "default").strip() or "default"
-    decisions = load_pet_decisions(group)
     signals = load_pet_signals(group, context_payload=context_payload)
+    enriched_context_payload = dict(context_payload)
+    enriched_context_payload["pet_signals"] = signals
+    parts = build_pet_prompt_parts(group, help_markdown=help_content, context_payload=enriched_context_payload)
+    decisions = load_pet_decisions(group)
+    task_evidence: list[dict[str, Any]] = []
+    try:
+        storage = ContextStorage(group)
+        task_evidence = build_pet_task_evidence(
+            storage.list_tasks(),
+            getattr(storage.load_agents(), "agents", []) or [],
+            limit=4,
+        )
+    except Exception:
+        task_evidence = []
+    snapshot = str(parts.get("snapshot") or "").strip() or build_pet_snapshot_text(group, enriched_context_payload)
     payload = {
         "persona": persona,
-        "snapshot": build_pet_snapshot_text(group, context_payload),
+        "snapshot": snapshot,
         "decisions": decisions,
+        "task_evidence": task_evidence,
         "signals": signals,
-        "source": source,
+        "source": str(parts.get("source") or source),
+        "companion": parts.get("profile") or {},
     }
     if not verbose:
         return payload
-    parts = build_pet_prompt_parts(group, help_markdown=help_content, context_payload=context_payload)
     payload.update(
         {
             "help": str(parts.get("help") or ""),
             "prompt": str(parts.get("prompt") or ""),
             "help_prompt": help_prompt,
-            "source": str(parts.get("source") or payload["source"]),
         }
     )
     return payload
+
+
+def _collect_ledger_event_statuses(
+    group: Any,
+    events: list[dict[str, Any]],
+    *,
+    with_read_status: bool = True,
+    with_ack_status: bool = True,
+    with_obligation_status: bool = True,
+) -> dict[str, dict[str, Any]]:
+    started_at = time.perf_counter()
+    status_by_event_id: dict[str, dict[str, Any]] = {}
+    if not events:
+        return status_by_event_id
+    chat_events = [event for event in events if str(event.get("kind") or "") == "chat.message"]
+    cached_statuses: dict[str, dict[str, Any]] = {}
+    cached_ids: set[str] = set()
+    if chat_events:
+        from ....kernel.ledger_status_cache import get_cached_message_status_batch
+
+        cached_statuses = get_cached_message_status_batch(
+            group,
+            [str(event.get("id") or "").strip() for event in chat_events],
+        )
+        cached_ids = set(cached_statuses.keys())
+        for event_id, payload in cached_statuses.items():
+            event_payload = status_by_event_id.setdefault(str(event_id), {})
+            if with_read_status and "read_status" in payload:
+                event_payload["read_status"] = payload["read_status"]
+            if with_ack_status and "ack_status" in payload:
+                event_payload["ack_status"] = payload["ack_status"]
+            if with_obligation_status and "obligation_status" in payload:
+                event_payload["obligation_status"] = payload["obligation_status"]
+
+    missing_events = [
+        event for event in chat_events
+        if str(event.get("id") or "").strip() and str(event.get("id") or "").strip() not in cached_ids
+    ]
+    cache_hit_count = len(cached_ids)
+    cache_miss_count = len(missing_events)
+    if missing_events:
+        read_status_by_event: dict[str, dict[str, bool]] = {}
+        ack_status_by_event: dict[str, dict[str, bool]] = {}
+        obligation_status_by_event: dict[str, dict[str, dict[str, bool]]] = {}
+
+        if with_read_status:
+            from ....kernel.inbox import get_read_status_batch
+
+            read_status_by_event = get_read_status_batch(group, missing_events)
+            for event_id, read_status in read_status_by_event.items():
+                status_by_event_id.setdefault(str(event_id), {})["read_status"] = read_status
+
+        if with_ack_status:
+            from ....kernel.inbox import get_ack_status_batch
+
+            ack_status_by_event = get_ack_status_batch(group, missing_events)
+            for event_id, ack_status in ack_status_by_event.items():
+                status_by_event_id.setdefault(str(event_id), {})["ack_status"] = ack_status
+
+        if with_obligation_status:
+            from ....kernel.inbox import get_obligation_status_batch
+
+            obligation_status_by_event = get_obligation_status_batch(group, missing_events)
+            for event_id, obligation_status in obligation_status_by_event.items():
+                status_by_event_id.setdefault(str(event_id), {})["obligation_status"] = obligation_status
+
+        if with_read_status and with_ack_status and with_obligation_status:
+            try:
+                from ....kernel.ledger_status_cache import store_message_status_batch
+
+                store_message_status_batch(
+                    group,
+                    missing_events,
+                    read_status_by_event=read_status_by_event,
+                    ack_status_by_event=ack_status_by_event,
+                    obligation_status_by_event=obligation_status_by_event,
+                )
+            except Exception:
+                logger.debug("ledger_status_cache_store_failed group_id=%s", str(getattr(group, "group_id", "") or ""), exc_info=True)
+
+    logger.debug(
+        "ledger_statuses group_id=%s total=%d chat=%d cache_hit=%d cache_miss=%d elapsed_ms=%.1f",
+        str(getattr(group, "group_id", "") or ""),
+        len(events),
+        len(chat_events),
+        cache_hit_count,
+        cache_miss_count,
+        (time.perf_counter() - started_at) * 1000.0,
+    )
+
+    return status_by_event_id
+
+
+def _apply_ledger_event_statuses(events: list[dict[str, Any]], status_by_event_id: dict[str, dict[str, Any]]) -> None:
+    if not events or not status_by_event_id:
+        return
+    for ev in events:
+        event_id = str(ev.get("id") or "").strip()
+        if not event_id:
+            continue
+        payload = status_by_event_id.get(event_id)
+        if not isinstance(payload, dict):
+            continue
+        if "read_status" in payload:
+            ev["_read_status"] = payload["read_status"]
+        if "ack_status" in payload:
+            ev["_ack_status"] = payload["ack_status"]
+        if "obligation_status" in payload:
+            ev["_obligation_status"] = payload["obligation_status"]
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -326,7 +627,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @global_router.get("/groups")
     async def groups(request: Request) -> Dict[str, Any]:
         async def _fetch() -> Dict[str, Any]:
-            return _read_groups_local()
+            return await run_in_threadpool(_read_groups_local)
 
         ttl = max(0.0, min(5.0, ctx.exhibit_cache_ttl_s))
         resp = await ctx.cached_json("groups", ttl, _fetch)
@@ -435,7 +736,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         gid = str(group_id or "").strip()
 
         async def _fetch() -> Dict[str, Any]:
-            return await ctx.daemon({"op": "group_show", "args": {"group_id": gid}})
+            return await run_in_threadpool(_read_group_local, gid)
 
         ttl = max(0.0, min(5.0, ctx.exhibit_cache_ttl_s))
         return await ctx.cached_json(f"group:{gid}", ttl, _fetch)
@@ -484,6 +785,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if fresh:
             await invalidate_context_read(gid, detail=detail_mode)
             return await _fetch()
+        if detail_mode == "summary":
+            return await run_in_threadpool(_read_context_summary_local, gid)
         return await _deduped_context_get(gid, detail_mode, _fetch)
 
     @group_router.get("/template/export")
@@ -535,7 +838,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.get("/presentation")
     async def group_presentation_get(group_id: str) -> Dict[str, Any]:
-        return await ctx.daemon({"op": "presentation_get", "args": {"group_id": group_id}})
+        return await run_in_threadpool(_read_presentation_local, group_id)
 
     @group_router.post("/presentation/publish")
     async def group_presentation_publish(group_id: str, req: GroupPresentationPublishRequest) -> Dict[str, Any]:
@@ -1160,9 +1463,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         if fresh:
             await invalidate_context_read(group_id, detail="summary")
-        context_resp = await _deduped_context_get(group_id, "summary", lambda: ctx.daemon({"op": "context_get", "args": {"group_id": group_id, "detail": "summary"}}))
-        if not isinstance(context_resp, dict) or not context_resp.get("ok"):
-            return context_resp
+        def _load_pet_context_payload() -> Dict[str, Any]:
+            storage = ContextStorage(group)
+            if fresh:
+                _rebuild_summary_snapshot(group_id)
+                snapshot = storage.load_summary_snapshot()
+                context_payload = snapshot.get("result") if isinstance(snapshot.get("result"), dict) else {}
+                if context_payload:
+                    return context_payload
+            return _get_summary_context_fast(storage, group_id=group_id)
+
+        context_payload = await run_in_threadpool(_load_pet_context_payload)
 
         help_prompt = _help_prompt()
         return {
@@ -1171,7 +1482,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 **_build_pet_context_payload(
                     group,
                     help_prompt,
-                    context_resp.get("result") if isinstance(context_resp.get("result"), dict) else {},
+                    context_payload,
                     verbose=verbose,
                 ),
             },
@@ -1490,48 +1801,75 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def ledger_tail(
         group_id: str,
         lines: int = 50,
+        limit: Optional[int] = None,
+        kind: str = "all",
         with_read_status: bool = False,
         with_ack_status: bool = False,
         with_obligation_status: bool = False,
     ) -> Dict[str, Any]:
-        group = load_group(group_id)
-        if group is None:
-            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
-        raw_lines = read_last_lines(group.ledger_path, int(lines))
-        events = []
-        for ln in raw_lines:
-            try:
-                events.append(json.loads(ln))
-            except Exception:
-                continue
+        def _load() -> Dict[str, Any]:
+            group = load_group(group_id)
+            if group is None:
+                raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+            effective_limit = int(limit) if limit is not None else int(lines)
+            if effective_limit <= 0:
+                return {"ok": True, "result": {"events": [], "has_more": False, "count": 0}}
+            kind_filter = str(kind or "all").strip().lower()
+            if kind_filter in {"chat", "notify"}:
+                from ....kernel.inbox import search_messages
 
-        # Optionally include read status for chat.message events (batch optimized)
-        if with_read_status:
-            from ....kernel.inbox import get_read_status_batch
-            status_map = get_read_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in status_map:
-                    ev["_read_status"] = status_map[event_id]
+                events, has_more = search_messages(
+                    group,
+                    query="",
+                    kind_filter=kind_filter,  # type: ignore[arg-type]
+                    by_filter="",
+                    before_id="",
+                    after_id="",
+                    limit=effective_limit,
+                )
+                events = list(reversed(events))
+            else:
+                raw_lines = read_last_lines(group.ledger_path, effective_limit)
+                events = []
+                for ln in raw_lines:
+                    try:
+                        events.append(json.loads(ln))
+                    except Exception:
+                        continue
 
-        # Optionally include ack status for attention chat.message events (batch optimized)
-        if with_ack_status:
-            from ....kernel.inbox import get_ack_status_batch
-            ack_map = get_ack_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in ack_map:
-                    ev["_ack_status"] = ack_map[event_id]
+                events = events[-effective_limit:] if effective_limit > 0 else events
+                has_more = False
+                if effective_limit > 0 and events:
+                    first_event_id = str(events[0].get("id") or "").strip()
+                    if first_event_id:
+                        from ....kernel.inbox import search_messages
 
-        if with_obligation_status:
-            from ....kernel.inbox import get_obligation_status_batch
-            obligation_map = get_obligation_status_batch(group, events)
-            for ev in events:
-                event_id = str(ev.get("id") or "")
-                if event_id in obligation_map:
-                    ev["_obligation_status"] = obligation_map[event_id]
+                        older_events, older_has_more = search_messages(
+                            group,
+                            query="",
+                            kind_filter="all",
+                            by_filter="",
+                            before_id=first_event_id,
+                            after_id="",
+                            limit=1,
+                        )
+                        has_more = bool(older_has_more or older_events)
 
-        return {"ok": True, "result": {"events": events}}
+            if with_read_status or with_ack_status or with_obligation_status:
+                _apply_ledger_event_statuses(
+                    events,
+                    _collect_ledger_event_statuses(
+                        group,
+                        events,
+                        with_read_status=with_read_status,
+                        with_ack_status=with_ack_status,
+                        with_obligation_status=with_obligation_status,
+                    ),
+                )
+
+            return {"ok": True, "result": {"events": events, "has_more": has_more, "count": len(events)}}
+
+        return await run_in_threadpool(_load)
 
     @group_router.get("/ledger/search")
     async def ledger_search(
@@ -1567,28 +1905,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 limit=clamped_limit,
             )
 
-            if with_read_status:
-                status_map = get_read_status_batch(group, events)
-                for ev in events:
-                    event_id = str(ev.get("id") or "")
-                    if event_id in status_map:
-                        ev["_read_status"] = status_map[event_id]
-
-            if with_ack_status:
-                from ....kernel.inbox import get_ack_status_batch
-                ack_map = get_ack_status_batch(group, events)
-                for ev in events:
-                    event_id = str(ev.get("id") or "")
-                    if event_id in ack_map:
-                        ev["_ack_status"] = ack_map[event_id]
-
-            if with_obligation_status:
-                from ....kernel.inbox import get_obligation_status_batch
-                obligation_map = get_obligation_status_batch(group, events)
-                for ev in events:
-                    event_id = str(ev.get("id") or "")
-                    if event_id in obligation_map:
-                        ev["_obligation_status"] = obligation_map[event_id]
+            if with_read_status or with_ack_status or with_obligation_status:
+                _apply_ledger_event_statuses(
+                    events,
+                    _collect_ledger_event_statuses(
+                        group,
+                        events,
+                        with_read_status=with_read_status,
+                        with_ack_status=with_ack_status,
+                        with_obligation_status=with_obligation_status,
+                    ),
+                )
 
             return {
                 "ok": True,
@@ -1652,28 +1979,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
             events = [*before_events, center_event, *after_events]
 
-            if with_read_status:
-                status_map = get_read_status_batch(group, events)
-                for ev in events:
-                    event_id = str(ev.get("id") or "")
-                    if event_id in status_map:
-                        ev["_read_status"] = status_map[event_id]
-
-            if with_ack_status:
-                from ....kernel.inbox import get_ack_status_batch
-                ack_map = get_ack_status_batch(group, events)
-                for ev in events:
-                    event_id = str(ev.get("id") or "")
-                    if event_id in ack_map:
-                        ev["_ack_status"] = ack_map[event_id]
-
-            if with_obligation_status:
-                from ....kernel.inbox import get_obligation_status_batch
-                obligation_map = get_obligation_status_batch(group, events)
-                for ev in events:
-                    event_id = str(ev.get("id") or "")
-                    if event_id in obligation_map:
-                        ev["_obligation_status"] = obligation_map[event_id]
+            if with_read_status or with_ack_status or with_obligation_status:
+                _apply_ledger_event_statuses(
+                    events,
+                    _collect_ledger_event_statuses(
+                        group,
+                        events,
+                        with_read_status=with_read_status,
+                        with_ack_status=with_ack_status,
+                        with_obligation_status=with_obligation_status,
+                    ),
+                )
 
             return {
                 "ok": True,
@@ -1703,6 +2019,47 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             return {"ok": True, "result": {"event_id": event_id, "read_status": status}}
 
         return await run_in_threadpool(_load)
+
+    @group_router.post("/ledger/statuses")
+    async def ledger_statuses(group_id: str, request: Request) -> Dict[str, Any]:
+        """Batch load read/ack/obligation status for specific event ids."""
+
+        def _load(event_ids: list[str]) -> Dict[str, Any]:
+            group = load_group(group_id)
+            if group is None:
+                raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+
+            from ....kernel.ledger_index import lookup_events_by_ids
+
+            normalized_ids: list[str] = []
+            seen_ids: set[str] = set()
+            for item in event_ids:
+                event_id = str(item or "").strip()
+                if not event_id or event_id in seen_ids:
+                    continue
+                seen_ids.add(event_id)
+                normalized_ids.append(event_id)
+            if not normalized_ids:
+                return {"ok": True, "result": {"statuses": {}}}
+
+            events = [
+                ev
+                for ev in lookup_events_by_ids(group.ledger_path, normalized_ids)
+                if isinstance(ev, dict) and str(ev.get("kind") or "") == "chat.message"
+            ]
+            statuses = _collect_ledger_event_statuses(group, events)
+            return {"ok": True, "result": {"statuses": statuses}}
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        event_ids = payload.get("event_ids") if isinstance(payload, dict) else []
+        if not isinstance(event_ids, list):
+            raise HTTPException(status_code=400, detail={"code": "invalid_event_ids", "message": "event_ids must be a list"})
+        if len(event_ids) > 500:
+            raise HTTPException(status_code=400, detail={"code": "too_many_event_ids", "message": "event_ids must not exceed 500 items"})
+        return await run_in_threadpool(_load, [str(item or "") for item in event_ids])
 
     @global_router.websocket("/groups/{group_id}/presentation/browser_surface/ws")
     async def group_presentation_browser_surface_ws(websocket: WebSocket, group_id: str) -> None:
@@ -1843,6 +2200,45 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
         return create_sse_response(sse_ledger_tail(group.ledger_path))
+
+    async def _serve_headless_snapshot(group_id: str) -> Dict[str, Any]:
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        return {"ok": True, "result": _read_active_headless_snapshot(group)}
+
+    async def _serve_headless_stream(group_id: str, replay: bool = True) -> StreamingResponse:
+        from ..streams import create_sse_response, sse_jsonl_tail_shared
+
+        group = load_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
+        replay_lines = _read_active_headless_replay_lines(group) if replay else []
+        return create_sse_response(
+            sse_jsonl_tail_shared(
+                headless_events_path(group.path),
+                event_name="headless",
+                heartbeat_s=30.0,
+                poll_interval_s=0.05,
+                initial_lines=replay_lines,
+            )
+        )
+
+    @group_router.get("/headless/snapshot")
+    async def headless_snapshot(group_id: str) -> Dict[str, Any]:
+        return await _serve_headless_snapshot(group_id)
+
+    @group_router.get("/codex/snapshot")
+    async def codex_snapshot_legacy(group_id: str) -> Dict[str, Any]:
+        return await _serve_headless_snapshot(group_id)
+
+    @group_router.get("/headless/stream")
+    async def headless_stream(group_id: str, replay: bool = True) -> StreamingResponse:
+        return await _serve_headless_stream(group_id, replay=replay)
+
+    @group_router.get("/codex/stream")
+    async def codex_stream_legacy(group_id: str, replay: bool = True) -> StreamingResponse:
+        return await _serve_headless_stream(group_id, replay=replay)
 
     return [global_router, group_router]
 

@@ -224,6 +224,95 @@ class TestActorPrivateEnv(unittest.TestCase):
             else:
                 os.environ["CCCC_HOME"] = old_home
 
+    def test_foreman_strict_clone_copies_private_env(self) -> None:
+        from cccc.contracts.v1 import DaemonRequest
+        from cccc.daemon.server import handle_request
+        from cccc.kernel.group import load_group
+
+        old_home = os.environ.get("CCCC_HOME")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                os.environ["CCCC_HOME"] = td
+
+                create, _ = handle_request(
+                    DaemonRequest.model_validate({"op": "group_create", "args": {"title": "t", "topic": "", "by": "user"}})
+                )
+                self.assertTrue(create.ok, getattr(create, "error", None))
+                group_id = str((create.result or {}).get("group_id") or "").strip()
+                self.assertTrue(group_id)
+
+                add_foreman, _ = handle_request(
+                    DaemonRequest.model_validate(
+                        {
+                            "op": "actor_add",
+                            "args": {
+                                "group_id": group_id,
+                                "actor_id": "lead",
+                                "runner": "headless",
+                                "runtime": "codex",
+                                "env": {"PUBLIC_KEY": "public"},
+                                "by": "user",
+                            },
+                        }
+                    )
+                )
+                self.assertTrue(add_foreman.ok, getattr(add_foreman, "error", None))
+
+                private_update, _ = handle_request(
+                    DaemonRequest.model_validate(
+                        {
+                            "op": "actor_env_private_update",
+                            "args": {
+                                "group_id": group_id,
+                                "actor_id": "lead",
+                                "by": "user",
+                                "set": {"OPENAI_API_KEY": "secret-token"},
+                            },
+                        }
+                    )
+                )
+                self.assertTrue(private_update.ok, getattr(private_update, "error", None))
+
+                add_peer, _ = handle_request(
+                    DaemonRequest.model_validate(
+                        {
+                            "op": "actor_add",
+                            "args": {
+                                "group_id": group_id,
+                                "actor_id": "peer1",
+                                "runner": "headless",
+                                "runtime": "codex",
+                                "by": "lead",
+                            },
+                        }
+                    )
+                )
+                self.assertTrue(add_peer.ok, getattr(add_peer, "error", None))
+
+                listed, _ = handle_request(
+                    DaemonRequest.model_validate(
+                        {"op": "actor_env_private_keys", "args": {"group_id": group_id, "actor_id": "peer1", "by": "user"}}
+                    )
+                )
+                self.assertTrue(listed.ok, getattr(listed, "error", None))
+                self.assertEqual(set(listed.result.get("keys") or []), {"OPENAI_API_KEY"})
+
+                group = load_group(group_id)
+                self.assertIsNotNone(group)
+                assert group is not None
+                actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+                peer = next(
+                    actor
+                    for actor in actors
+                    if isinstance(actor, dict) and str(actor.get("id") or "").strip() == "peer1"
+                )
+                self.assertEqual(dict(peer.get("env") or {}), {"PUBLIC_KEY": "public"})
+        finally:
+            if old_home is None:
+                os.environ.pop("CCCC_HOME", None)
+            else:
+                os.environ["CCCC_HOME"] = old_home
+
     def test_actor_add_rejects_env_private_for_non_user(self) -> None:
         from cccc.contracts.v1 import DaemonRequest
         from cccc.daemon.server import handle_request

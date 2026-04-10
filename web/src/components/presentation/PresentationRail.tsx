@@ -6,7 +6,7 @@ import { classNames } from "../../utils/classNames";
 import { ensurePresentation } from "../../utils/presentation";
 
 type PresentationRailProps = {
-  mode: "dock" | "panel";
+  mode: "dock" | "panel" | "split";
   presentation: GroupPresentation | null;
   isDark: boolean;
   readOnly?: boolean;
@@ -186,7 +186,7 @@ export function PresentationRail({
       >
         <div
           className={classNames(
-            "flex items-center justify-between gap-3 px-4 py-3 border-b",
+            "flex items-center justify-between gap-3 px-4 py-2 border-b",
             isDark ? "border-white/5" : "border-black/5"
           )}
         >
@@ -311,6 +311,97 @@ export function PresentationRail({
       </section>
     );
   }
+  if (mode === "split") {
+    return (
+      <aside
+        className={classNames(
+          "flex h-full w-[52px] flex-shrink-0 flex-col items-center border-r px-1 py-2",
+          isDark ? "border-white/8 bg-slate-950/24" : "border-black/8 bg-white/56"
+        )}
+        aria-label={t("presentationDockAriaLabel", { defaultValue: "Presentation slots" })}
+      >
+        <div
+          className={classNames(
+            "inline-flex min-h-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-medium",
+            isDark ? "bg-white/[0.06] text-slate-300" : "bg-black/[0.05] text-gray-600"
+          )}
+        >
+          {filledSlots.length}/{normalizedPresentation.slots.length}
+        </div>
+
+        <div className="mt-2 flex flex-1 flex-col items-center gap-1.5">
+          {normalizedPresentation.slots.map((slot) => {
+            const card = slot.card;
+            const isHighlighted = slot.slot_id === highlightSlotId;
+            const hasSlotAttention = !!attentionSlots?.[slot.slot_id];
+            const tone = card ? getSlotTone(card.card_type, isDark) : null;
+            const title = card ? card.title : t("presentationSlotEmptyTitle", { defaultValue: "Empty slot" });
+            return (
+              <button
+                key={slot.slot_id}
+                type="button"
+                onClick={() => {
+                  if (card) {
+                    onOpenSlot(slot.slot_id);
+                    return;
+                  }
+                  if (!readOnly) {
+                    onPinSlot?.(slot.slot_id);
+                  }
+                }}
+                className={classNames(
+                  "group relative flex h-10 w-10 items-center justify-center rounded-[14px] border text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50",
+                  card || !readOnly ? "cursor-pointer" : "cursor-default",
+                  card
+                    ? tone?.buttonClassName
+                    : isDark
+                      ? "border-dashed border-white/10 bg-white/[0.03] text-slate-100 hover:border-white/16 hover:bg-white/[0.05]"
+                      : "border-dashed border-black/10 bg-white/78 text-gray-900 hover:border-black/16 hover:bg-white",
+                  !card && !readOnly && (isDark ? "hover:border-cyan-300/30" : "hover:border-cyan-500/25"),
+                  isHighlighted && (isDark ? "ring-1 ring-cyan-300/45" : "ring-1 ring-cyan-500/35"),
+                  hasSlotAttention &&
+                    (isDark
+                      ? "ring-2 ring-cyan-300/70 presentation-slot-attention presentation-slot-attention-dark"
+                      : "ring-2 ring-cyan-500/60 presentation-slot-attention presentation-slot-attention-light")
+                )}
+                aria-label={
+                  card
+                    ? t("presentationOpenSlot", {
+                        index: slot.index,
+                        title: card.title,
+                        defaultValue: `Open presentation slot ${slot.index}: ${card.title}`,
+                      })
+                    : t("presentationEmptySlot", {
+                        index: slot.index,
+                        defaultValue: `Presentation slot ${slot.index} is empty`,
+                      })
+                }
+                title={title}
+              >
+                {card ? (
+                  <span
+                    className={classNames(
+                      "pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full ring-1",
+                      tone?.indicatorClassName
+                    )}
+                  />
+                ) : null}
+                <span
+                  className={classNames(
+                    "text-[13px] font-semibold tracking-[0.01em]",
+                    card ? "text-current" : isDark ? "text-slate-200" : "text-gray-800"
+                  )}
+                >
+                  {slot.index}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+    );
+  }
+
 
   return (
     <div

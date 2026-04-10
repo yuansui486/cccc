@@ -60,7 +60,12 @@ class TestExecutionQueues(unittest.TestCase):
         )
 
         self.assertEqual(bool(first.get("queued")), True)
+        self.assertEqual(bool(first.get("completed")), False)
+        self.assertNotIn("completion_signal", first)
+        self.assertNotIn("recommended_next_action", first)
         self.assertEqual(str(second.get("reason") or ""), "already_pending")
+        self.assertEqual(bool(second.get("completed")), False)
+        self.assertNotIn("completion_signal", second)
         self.assertEqual(processed, 1)
         self.assertEqual(ran, [("g1", True, "peer1")])
 
@@ -107,6 +112,8 @@ class TestExecutionQueues(unittest.TestCase):
 
         self.assertEqual(str(observed[0].get("reason") or ""), "queued_after_running")
         self.assertEqual(bool(observed[0].get("queued")), True)
+        self.assertEqual(bool(observed[0].get("completed")), False)
+        self.assertNotIn("completion_signal", observed[0])
         self.assertEqual(str(observed[1].get("reason") or ""), "already_pending")
         self.assertEqual(bool(observed[1].get("force")), True)
 

@@ -1,6 +1,7 @@
 // DeveloperTab configures developer mode.
 import { useTranslation } from "react-i18next";
 import { inputClass, labelClass, primaryButtonClass, cardClass, preClass } from "./types";
+import type { RuntimeVisibilityMode } from "../../../utils/runtimeVisibility";
 
 interface DeveloperTabProps {
   isDark: boolean;
@@ -16,6 +17,10 @@ interface DeveloperTabProps {
   setTerminalBacklogMiB: (v: number) => void;
   terminalScrollbackLines: number;
   setTerminalScrollbackLines: (v: number) => void;
+  peerRuntimeVisibility: RuntimeVisibilityMode;
+  setPeerRuntimeVisibility: (v: RuntimeVisibilityMode) => void;
+  petRuntimeVisibility: RuntimeVisibilityMode;
+  setPetRuntimeVisibility: (v: RuntimeVisibilityMode) => void;
   obsBusy: boolean;
   onSaveObservability: () => void;
   // Debug snapshot
@@ -63,6 +68,10 @@ export function DeveloperTab({
   setTerminalBacklogMiB,
   terminalScrollbackLines,
   setTerminalScrollbackLines,
+  peerRuntimeVisibility,
+  setPeerRuntimeVisibility,
+  petRuntimeVisibility,
+  setPetRuntimeVisibility,
   obsBusy,
   onSaveObservability,
   debugSnapshot,
@@ -189,6 +198,46 @@ export function DeveloperTab({
             <option value="INFO">INFO</option>
             <option value="DEBUG">DEBUG</option>
           </select>
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-[var(--glass-border-subtle)]">
+          <div className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {t("developer.runtimeVisibilityTitle")}
+          </div>
+          <div className="text-xs mt-0.5 text-[var(--color-text-muted)]">
+            {t("developer.runtimeVisibilityHint")}
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass()}>{t("developer.peerRuntime")}</label>
+              <select
+                value={peerRuntimeVisibility}
+                onChange={(e) => setPeerRuntimeVisibility(e.target.value === "hidden" ? "hidden" : "visible")}
+                className={inputClass()}
+              >
+                <option value="visible">{t("developer.visible")}</option>
+                <option value="hidden">{t("developer.hidden")}</option>
+              </select>
+              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                {t("developer.peerRuntimeHint")}
+              </div>
+            </div>
+            <div>
+              <label className={labelClass()}>{t("developer.petRuntime")}</label>
+              <select
+                value={petRuntimeVisibility}
+                onChange={(e) => setPetRuntimeVisibility(e.target.value === "visible" ? "visible" : "hidden")}
+                className={inputClass()}
+              >
+                <option value="hidden">{t("developer.hidden")}</option>
+                <option value="visible">{t("developer.visible")}</option>
+              </select>
+              <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                {t("developer.petRuntimeHint")}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="mt-4 pt-3 border-t border-[var(--glass-border-subtle)]">

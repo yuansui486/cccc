@@ -10,6 +10,7 @@ interface RelaySource {
 interface PresentationViewerState {
   groupId: string;
   slotId: string;
+  surface?: "modal" | "split";
   focusRef?: PresentationMessageRef | null;
   focusEventId?: string | null;
 }
@@ -115,6 +116,7 @@ export const useModalStore = create<ModalState>((set) => ({
         presentationViewer: {
           groupId,
           slotId,
+          surface: viewer.surface === "split" ? "split" : "modal",
           focusRef: viewer.focusRef || null,
           focusEventId: viewer.focusEventId ? String(viewer.focusEventId).trim() : null,
         },

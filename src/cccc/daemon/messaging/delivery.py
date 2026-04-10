@@ -32,7 +32,7 @@ logger = logging.getLogger("cccc.delivery")
 
 from ...contracts.v1 import SystemNotifyData
 from ...kernel.actors import find_actor, list_actors
-from ...kernel.group import Group, get_group_state, set_group_state
+from ...kernel.group import Group, get_group_state, load_group, set_group_state
 from ...kernel.inbox import get_cursor, is_message_for_actor, set_cursor
 from ...kernel.ledger import append_event
 from ...kernel.system_prompt import render_system_prompt
@@ -87,6 +87,11 @@ def _get_auto_mark_on_delivery(group: Group) -> bool:
     if not isinstance(delivery, dict):
         return False
     return coerce_bool(delivery.get("auto_mark_on_delivery"), default=False)
+
+
+def should_auto_mark_on_delivery(group: Group) -> bool:
+    """Public helper for delivery-callers that need the current auto-mark policy."""
+    return _get_auto_mark_on_delivery(group)
 
 
 # ============================================================================
@@ -533,6 +538,18 @@ MCP_REMINDER_LINE = (
 )
 
 
+def append_mcp_reply_reminder(text: str) -> str:
+    reminder = str(MCP_REMINDER_LINE or "").strip()
+    out = str(text or "").rstrip("\n")
+    if not reminder:
+        return out
+    if reminder in out:
+        return out
+    if not out:
+        return reminder
+    return f"{out}\n\n{reminder}"
+
+
 def render_single_message(msg: PendingMessage) -> str:
     """Render a single message for PTY delivery."""
     if msg.kind == "system.notify":
@@ -568,6 +585,46 @@ def render_single_message(msg: PendingMessage) -> str:
     return f"{head}:\n{body}" if "\n" in body else f"{head}: {body}"
 
 
+def render_headless_control_text(*, control_kind: str, body: str) -> str:
+    kind = str(control_kind or "control").strip().lower() or "control"
+    content = str(body or "").strip()
+    if not content:
+        return ""
+    if kind == "bootstrap":
+        intro = (
+            "[CCCC] INTERNAL CONTROL: session bootstrap\n"
+            "Apply the following session operating instructions as authoritative for this session. "
+            "Do not surface a reply, draft, or visible message for this bootstrap step. Wait for the next real work turn."
+        )
+    elif kind == "system_notify":
+        intro = (
+            "[CCCC] INTERNAL CONTROL: system notification\n"
+            "Treat the following as daemon-delivered coordination state for this actor. "
+            "Do not emit a visible reply unless later work explicitly requires one."
+        )
+    else:
+        intro = (
+            "[CCCC] INTERNAL CONTROL\n"
+            "Treat the following as daemon-delivered control-plane input for this session."
+        )
+    return f"{intro}\n\n{content}".strip()
+
+
+def render_system_notify_delivery_text(*, notify: SystemNotifyData) -> str:
+    return render_single_message(
+        PendingMessage(
+            event_id="",
+            by="system",
+            to=[str(notify.target_actor_id or "").strip() or "@all"],
+            text="",
+            kind="system.notify",
+            notify_kind=str(notify.kind or "info"),
+            notify_title=str(notify.title or ""),
+            notify_message=str(notify.message or ""),
+        )
+    )
+
+
 def render_batched_messages(messages: List[PendingMessage], *, reminder_after_index: Optional[int] = None) -> str:
     """Render multiple messages as a batch for PTY delivery."""
     if not messages:
@@ -580,10 +637,11 @@ def render_batched_messages(messages: List[PendingMessage], *, reminder_after_in
     for i, msg in enumerate(messages, 1):
         blocks.append(render_single_message(msg))
 
+    out = "\n\n".join([b for b in blocks if b]).rstrip()
     if reminder_after_index is not None:
-        blocks.append(MCP_REMINDER_LINE)
+        out = append_mcp_reply_reminder(out)
 
-    return "\n\n".join([b for b in blocks if b]).rstrip()
+    return out
 
 
 # ============================================================================
@@ -754,7 +812,7 @@ def deliver_message_with_preamble(
     delivered_before = THROTTLE.get_delivered_chat_count(group.group_id, aid)
     out = (message_text or "").rstrip("\n")
     if out and (delivered_before + 1) % REMINDER_EVERY_N_MESSAGES == 0:
-        out = out + "\n\n" + MCP_REMINDER_LINE
+        out = append_mcp_reply_reminder(out)
     result = pty_submit_text(group, actor_id=aid, text=out)
     if result:
         THROTTLE.add_delivered_chat_count(group.group_id, aid, 1)
@@ -856,11 +914,52 @@ def emit_system_notify(
     if not event_id:
         return event
 
+    headless_control_text = render_headless_control_text(
+        control_kind="system_notify",
+        body=render_system_notify_delivery_text(notify=notify),
+    )
+
     for aid in target_actor_ids:
         actor = find_actor(group, aid)
         if not isinstance(actor, dict):
             continue
+        runtime = str(actor.get("runtime") or "").strip().lower()
         runner_kind = str(actor.get("runner") or "pty").strip()
+        if runner_kind == "headless" and headless_control_text:
+            delivered = False
+            try:
+                if runtime == "codex":
+                    from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
+
+                    if codex_app_supervisor.actor_running(group.group_id, aid):
+                        delivered = bool(
+                            codex_app_supervisor.submit_control_message(
+                                group_id=group.group_id,
+                                actor_id=aid,
+                                text=headless_control_text,
+                                control_kind="system_notify",
+                                event_id=event_id,
+                                ts=event_ts,
+                            )
+                        )
+                elif runtime == "claude":
+                    from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+
+                    if claude_app_supervisor.actor_running(group.group_id, aid):
+                        delivered = bool(
+                            claude_app_supervisor.submit_control_message(
+                                group_id=group.group_id,
+                                actor_id=aid,
+                                text=headless_control_text,
+                                control_kind="system_notify",
+                                event_id=event_id,
+                                ts=event_ts,
+                            )
+                        )
+            except Exception:
+                delivered = False
+            if delivered:
+                continue
         if runner_kind != "pty":
             continue
         if not pty_runner.SUPERVISOR.actor_running(group.group_id, aid):
@@ -895,27 +994,88 @@ def _finalize_delivery_success(
     THROTTLE.mark_delivered(gid, aid)
     if _get_auto_mark_on_delivery(group) and deliverable:
         last_msg = deliverable[-1]
-        try:
-            prev_event_id, prev_ts = get_cursor(group, aid)
-            cursor = set_cursor(group, aid, event_id=last_msg.event_id, ts=last_msg.ts)
-            if (
-                str(cursor.get("event_id") or "") == str(last_msg.event_id or "")
-                and str(cursor.get("ts") or "") == str(last_msg.ts or "")
-                and (str(prev_event_id or "") != str(last_msg.event_id or "") or str(prev_ts or "") != str(last_msg.ts or ""))
-            ):
-                append_event(
-                    group.ledger_path,
-                    kind="chat.read",
-                    group_id=group.group_id,
-                    scope_key="",
-                    by=aid,
-                    data={"actor_id": aid, "event_id": last_msg.event_id},
-                )
-            logger.debug(f"[flush] {gid}/{aid} auto-marked {len(deliverable)} messages as read")
-        except Exception as e:
-            logger.warning(f"[flush] {gid}/{aid} auto-mark failed: {e}")
+        maybe_auto_mark_delivered_event(
+            group,
+            actor_id=aid,
+            event_id=str(last_msg.event_id or ""),
+            ts=str(last_msg.ts or ""),
+        )
     if requeue:
         THROTTLE.requeue_front(gid, aid, requeue)
+
+
+def maybe_auto_mark_delivered_event(
+    group: Group,
+    *,
+    actor_id: str,
+    event_id: str,
+    ts: str,
+) -> bool:
+    """Advance the inbox cursor for a successfully delivered event when enabled.
+
+    Returns True when the resulting cursor covers the delivered event, which lets
+    callers suppress redundant follow-up notifications for the same delivery.
+    """
+    gid = str(group.group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    delivered_event_id = str(event_id or "").strip()
+    delivered_ts = str(ts or "").strip()
+    if not aid or not delivered_event_id or not delivered_ts:
+        return False
+    if not _get_auto_mark_on_delivery(group):
+        return False
+    try:
+        prev_event_id, prev_ts = get_cursor(group, aid)
+        cursor = set_cursor(group, aid, event_id=delivered_event_id, ts=delivered_ts)
+        cursor_event_id = str(cursor.get("event_id") or "")
+        cursor_ts = str(cursor.get("ts") or "")
+        delivered_dt = parse_utc_iso(delivered_ts)
+        cursor_dt = parse_utc_iso(cursor_ts) if cursor_ts else None
+        if delivered_dt is not None and cursor_dt is not None:
+            covers_event = cursor_dt >= delivered_dt
+        else:
+            covers_event = cursor_event_id == delivered_event_id and cursor_ts == delivered_ts
+        if (
+            cursor_event_id == delivered_event_id
+            and cursor_ts == delivered_ts
+            and (str(prev_event_id or "") != delivered_event_id or str(prev_ts or "") != delivered_ts)
+        ):
+            append_event(
+                group.ledger_path,
+                kind="chat.read",
+                group_id=group.group_id,
+                scope_key="",
+                by=aid,
+                data={"actor_id": aid, "event_id": delivered_event_id},
+            )
+        if covers_event:
+            logger.debug(f"[flush] {gid}/{aid} auto-marked delivered event as read event_id={delivered_event_id}")
+        return covers_event
+    except Exception as e:
+        logger.warning(f"[flush] {gid}/{aid} auto-mark failed: {e}")
+        return False
+
+
+def auto_mark_headless_delivery_started(
+    *,
+    group_id: str,
+    actor_id: str,
+    event_id: str,
+    ts: str,
+) -> bool:
+    """Advance read state once a headless runtime has actually accepted a turn."""
+    gid = str(group_id or "").strip()
+    if not gid:
+        return False
+    group = load_group(gid)
+    if group is None:
+        return False
+    return maybe_auto_mark_delivered_event(
+        group,
+        actor_id=actor_id,
+        event_id=event_id,
+        ts=ts,
+    )
 
 
 def _finish_delivery_chain(group: Group, *, actor_id: str) -> None:
@@ -1230,10 +1390,6 @@ def get_headless_targets_for_message(
         # Headless runner only (or PTY fallback when PTY is unsupported)
         runner_kind = str(actor.get("runner") or "pty").strip()
         if runner_kind != "headless" and not (runner_kind == "pty" and not pty_supported):
-            continue
-        
-        # Actor must be running
-        if not headless_runner.SUPERVISOR.actor_running(group.group_id, aid):
             continue
         
         # Check delivery/visibility rules

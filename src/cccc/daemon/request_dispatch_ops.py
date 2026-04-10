@@ -169,6 +169,11 @@ def dispatch_request(
         args,
         effective_runner_kind=deps.effective_runner_kind,
         start_actor_process=deps.start_actor_process,
+        load_actor_private_env=deps.load_actor_private_env,
+        update_actor_private_env=deps.update_actor_private_env,
+        delete_actor_private_env=deps.delete_actor_private_env,
+        get_actor_profile=deps.get_actor_profile,
+        load_actor_profile_secrets=deps.load_actor_profile_secrets,
         remove_headless_state=deps.remove_headless_state,
         remove_pty_state_if_pid=deps.remove_pty_state_if_pid,
     )
@@ -228,7 +233,9 @@ def dispatch_request(
         headless_state_dir_for_group=deps.headless_state_dir_for_group,
         get_actor_profile=deps.get_actor_profile,
         load_actor_profile_secrets=deps.load_actor_profile_secrets,
+        load_actor_private_env=deps.load_actor_private_env,
         update_actor_private_env=deps.update_actor_private_env,
+        delete_actor_private_env=deps.delete_actor_private_env,
     )
     if group_lifecycle_resp is not None:
         return group_lifecycle_resp, False

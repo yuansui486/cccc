@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -25,6 +26,59 @@ _PROVIDER_IDS = {"notebooklm"}
 _SPACE_LANES = {"work", "memory"}
 _JOB_ID_PREFIX = "spj_"
 _PROVIDER_SECRET_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DOC_CACHE_LOCK = threading.Lock()
+_DOC_CACHE: Dict[str, Tuple[Optional[Tuple[int, int]], Dict[str, Any]]] = {}
+_JOBS_SCAN_WARN_TS: float = 0.0
+_JOBS_SCAN_WARN_LOCK = threading.Lock()
+_JOBS_COMPACT_LOCK = threading.Lock()
+_JOB_PAYLOAD_INLINE_MAX_BYTES = 0
+_JOB_TERMINAL_STATES = {"succeeded", "failed", "canceled"}
+
+
+def _jobs_scan_max_bytes() -> int:
+    raw = str(os.environ.get("CCCC_SPACE_JOBS_SCAN_MAX_BYTES") or "").strip()
+    try:
+        value = int(raw) if raw else 16 * 1024 * 1024
+    except Exception:
+        value = 16 * 1024 * 1024
+    return max(1_048_576, value)
+
+
+def _jobs_scan_allowed(path: Path) -> bool:
+    try:
+        size = int(path.stat().st_size or 0)
+    except Exception:
+        return True
+    limit = _jobs_scan_max_bytes()
+    if size <= limit:
+        return True
+    try:
+        with _JOBS_COMPACT_LOCK:
+            if path.exists() and int(path.stat().st_size or 0) > limit:
+                doc = _load_cached_doc(path, normalize=_normalize_jobs_doc)
+                _compact_jobs_doc(path, doc, force=True)
+        if int(path.stat().st_size or 0) <= limit:
+            return True
+    except Exception:
+        pass
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    global _JOBS_SCAN_WARN_TS
+    with _JOBS_SCAN_WARN_LOCK:
+        if now_ts - float(_JOBS_SCAN_WARN_TS or 0.0) >= 30.0:
+            _JOBS_SCAN_WARN_TS = now_ts
+            try:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "space jobs scan skipped: jobs.json too large size=%s limit=%s path=%s",
+                    size,
+                    limit,
+                    path,
+                )
+            except Exception:
+                pass
+    return False
 
 
 def _space_root(home: Path) -> Path:
@@ -45,6 +99,10 @@ def _jobs_path(home: Path) -> Path:
 
 def _history_path(home: Path) -> Path:
     return _space_root(home) / "jobs.history.jsonl"
+
+
+def _job_payload_root(home: Path) -> Path:
+    return _space_root(home) / "job_payloads"
 
 
 def _provider_secret_root(home: Path) -> Path:
@@ -130,6 +188,39 @@ def _save_doc(path: Path, doc: Dict[str, Any]) -> None:
         os.chmod(path, 0o600)
     except Exception:
         pass
+    _update_doc_cache(path, doc)
+
+
+def _doc_cache_key(path: Path) -> str:
+    return str(path.resolve())
+
+
+def _doc_signature(path: Path) -> Optional[Tuple[int, int]]:
+    try:
+        stat = path.stat()
+    except Exception:
+        return None
+    return (int(getattr(stat, "st_mtime_ns", 0) or 0), int(stat.st_size or 0))
+
+
+def _update_doc_cache(path: Path, doc: Dict[str, Any]) -> None:
+    cache_key = _doc_cache_key(path)
+    signature = _doc_signature(path)
+    with _DOC_CACHE_LOCK:
+        _DOC_CACHE[cache_key] = (signature, dict(doc))
+
+
+def _load_cached_doc(path: Path, *, normalize: Callable[[Any], Dict[str, Any]]) -> Dict[str, Any]:
+    cache_key = _doc_cache_key(path)
+    signature = _doc_signature(path)
+    with _DOC_CACHE_LOCK:
+        cached = _DOC_CACHE.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return dict(cached[1])
+    doc = normalize(read_json(path))
+    with _DOC_CACHE_LOCK:
+        _DOC_CACHE[cache_key] = (signature, dict(doc))
+    return dict(doc)
 
 
 def _new_provider_state(provider: str = "notebooklm") -> Dict[str, Any]:
@@ -177,7 +268,7 @@ def _normalize_providers_doc(raw: Any) -> Dict[str, Any]:
 def _load_providers_doc() -> Tuple[Path, Dict[str, Any]]:
     home = ensure_home()
     path = _providers_path(home)
-    return path, _normalize_providers_doc(read_json(path))
+    return path, _load_cached_doc(path, normalize=_normalize_providers_doc)
 
 
 def _new_bindings_doc() -> Dict[str, Any]:
@@ -277,7 +368,7 @@ def _normalize_bindings_doc(raw: Any) -> Dict[str, Any]:
 def _load_bindings_doc() -> Tuple[Path, Dict[str, Any]]:
     home = ensure_home()
     path = _bindings_path(home)
-    return path, _normalize_bindings_doc(read_json(path))
+    return path, _load_cached_doc(path, normalize=_normalize_bindings_doc)
 
 
 def _new_jobs_doc() -> Dict[str, Any]:
@@ -322,10 +413,104 @@ def _normalize_jobs_doc(raw: Any) -> Dict[str, Any]:
     return doc
 
 
+def _jobs_retention_limit() -> int:
+    raw = str(os.environ.get("CCCC_SPACE_JOBS_TERMINAL_KEEP") or "").strip()
+    try:
+        value = int(raw) if raw else 50
+    except Exception:
+        value = 50
+    return max(1, min(value, 5000))
+
+
+def _jobs_retention_days() -> int:
+    raw = str(os.environ.get("CCCC_SPACE_JOBS_TERMINAL_MAX_AGE_DAYS") or "").strip()
+    try:
+        value = int(raw) if raw else 3
+    except Exception:
+        value = 3
+    return max(1, min(value, 365))
+
+
+def _jobs_doc_needs_compaction(doc: Dict[str, Any]) -> bool:
+    jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
+    terminal_count = 0
+    keep_limit = _jobs_retention_limit()
+    cutoff_ts = datetime.now(timezone.utc).timestamp() - (_jobs_retention_days() * 86400)
+    for item in jobs.values():
+        if not isinstance(item, dict):
+            continue
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        if payload:
+            return True
+        state = str(item.get("state") or "").strip().lower()
+        if state in _JOB_TERMINAL_STATES:
+            terminal_count += 1
+            if terminal_count > keep_limit or _job_updated_ts(item) < cutoff_ts:
+                return True
+    return False
+
+
+def _compact_jobs_doc(path: Path, doc: Dict[str, Any], *, force: bool = False) -> Dict[str, Any]:
+    jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
+    if not jobs:
+        return doc
+    if not force and not _jobs_doc_needs_compaction(doc):
+        return doc
+
+    home = ensure_home()
+    keep_limit = _jobs_retention_limit()
+    cutoff_ts = datetime.now(timezone.utc).timestamp() - (_jobs_retention_days() * 86400)
+    terminal_items: List[Tuple[str, Dict[str, Any]]] = []
+    active_items: List[Tuple[str, Dict[str, Any]]] = []
+    for job_id, item in jobs.items():
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state") or "").strip().lower()
+        if state in _JOB_TERMINAL_STATES:
+            terminal_items.append((job_id, item))
+        else:
+            active_items.append((job_id, item))
+
+    terminal_items.sort(key=lambda pair: _job_updated_ts(pair[1]), reverse=True)
+    kept_jobs: Dict[str, Dict[str, Any]] = {}
+    dropped: List[Tuple[str, Dict[str, Any]]] = []
+    for job_id, item in active_items:
+        kept_jobs[job_id] = _stored_job_doc(home, SpaceJob.model_validate(item).model_dump(exclude_none=True))
+    for index, (job_id, item) in enumerate(terminal_items):
+        normalized = SpaceJob.model_validate(item).model_dump(exclude_none=True)
+        keep = index < keep_limit or _job_updated_ts(normalized) >= cutoff_ts
+        if keep:
+            kept_jobs[job_id] = _stored_job_doc(home, normalized)
+        else:
+            dropped.append((job_id, normalized))
+
+    changed = len(kept_jobs) != len(jobs)
+    if not changed:
+        for job_id, kept in kept_jobs.items():
+            current = jobs.get(job_id) if isinstance(jobs.get(job_id), dict) else {}
+            if kept != current:
+                changed = True
+                break
+    if not changed:
+        return doc
+
+    for _, item in dropped:
+        _delete_payload_blob(home, str(item.get("payload_ref") or ""))
+    next_doc = dict(doc)
+    next_doc["jobs"] = kept_jobs
+    _save_doc(path, next_doc)
+    return next_doc
+
+
 def _load_jobs_doc() -> Tuple[Path, Dict[str, Any]]:
     home = ensure_home()
     path = _jobs_path(home)
-    return path, _normalize_jobs_doc(read_json(path))
+    doc = _load_cached_doc(path, normalize=_normalize_jobs_doc)
+    if _jobs_doc_needs_compaction(doc):
+        with _JOBS_COMPACT_LOCK:
+            doc = _load_cached_doc(path, normalize=_normalize_jobs_doc)
+            doc = _compact_jobs_doc(path, doc)
+    return path, doc
 
 
 def _append_history(job_id: str, event: str, detail: Optional[Dict[str, Any]] = None) -> None:
@@ -597,6 +782,105 @@ def _payload_digest(payload: Dict[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(stable.encode("utf-8")).hexdigest()
 
 
+def _payload_digest_slug(payload_digest: str) -> str:
+    value = str(payload_digest or "").strip()
+    if value.startswith("sha256:"):
+        value = value.split(":", 1)[1]
+    value = re.sub(r"[^a-fA-F0-9]+", "", value).lower()
+    return (value or "payload")[:32]
+
+
+def _job_payload_ref(job_id: str, payload_digest: str) -> str:
+    return f"{job_id}.{_payload_digest_slug(payload_digest)}.json"
+
+
+def _job_payload_path(home: Path, payload_ref: str) -> Path:
+    name = str(payload_ref or "").strip()
+    if not name:
+        raise ValueError("missing payload_ref")
+    if "/" in name or "\\" in name or ".." in name:
+        raise ValueError("invalid payload_ref")
+    return _job_payload_root(home) / name
+
+
+def _payload_json_bytes(payload: Dict[str, Any]) -> int:
+    return len(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _read_payload_blob(home: Path, payload_ref: str) -> Dict[str, Any]:
+    try:
+        raw = read_json(_job_payload_path(home, payload_ref))
+    except Exception:
+        return {}
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _write_payload_blob(home: Path, job_id: str, payload: Dict[str, Any], payload_digest: str) -> Tuple[str, int]:
+    ref = _job_payload_ref(job_id, payload_digest)
+    path = _job_payload_path(home, ref)
+    _ensure_dir(path.parent, 0o700)
+    atomic_write_json(path, payload, indent=2)
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+    return ref, _payload_json_bytes(payload)
+
+
+def _delete_payload_blob(home: Path, payload_ref: str) -> None:
+    if not str(payload_ref or "").strip():
+        return
+    try:
+        _job_payload_path(home, payload_ref).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _stored_job_doc(home: Path, item: Dict[str, Any]) -> Dict[str, Any]:
+    stored = dict(item)
+    payload = stored.get("payload") if isinstance(stored.get("payload"), dict) else {}
+    payload_digest = str(stored.get("payload_digest") or "").strip()
+    payload_ref = str(stored.get("payload_ref") or "").strip()
+    if payload and not payload_digest:
+        payload_digest = _payload_digest(payload)
+        stored["payload_digest"] = payload_digest
+    if payload and _payload_json_bytes(payload) > _JOB_PAYLOAD_INLINE_MAX_BYTES:
+        payload_ref, payload_bytes = _write_payload_blob(
+            home,
+            str(stored.get("job_id") or "").strip(),
+            payload,
+            payload_digest,
+        )
+        stored["payload_ref"] = payload_ref
+        stored["payload_bytes"] = payload_bytes
+        stored["payload"] = {}
+        return stored
+    if payload_ref and not payload:
+        stored["payload_bytes"] = int(stored.get("payload_bytes") or 0)
+        return stored
+    stored["payload_ref"] = ""
+    stored["payload_bytes"] = _payload_json_bytes(payload) if payload else int(stored.get("payload_bytes") or 0)
+    return stored
+
+
+def _hydrated_job_doc(home: Path, item: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(item)
+    payload = out.get("payload") if isinstance(out.get("payload"), dict) else {}
+    payload_ref = str(out.get("payload_ref") or "").strip()
+    if not payload and payload_ref:
+        out["payload"] = _read_payload_blob(home, payload_ref)
+    if not payload_ref and not isinstance(out.get("payload"), dict):
+        out["payload"] = {}
+    return out
+
+
+def _job_updated_ts(item: Dict[str, Any]) -> float:
+    parsed = parse_utc_iso(str(item.get("updated_at") or item.get("created_at") or "").strip())
+    if parsed is None:
+        return 0.0
+    return parsed.timestamp()
+
+
 def _default_idempotency_key(
     *,
     provider: str,
@@ -624,6 +908,7 @@ def enqueue_space_job(
     idempotency_key: str = "",
     max_attempts: int = 3,
 ) -> Tuple[Dict[str, Any], bool]:
+    home = ensure_home()
     gid = _safe_id(group_id, field="group_id")
     pid = _provider_or_raise(provider)
     lid = _lane_or_raise(lane)
@@ -661,7 +946,7 @@ def enqueue_space_job(
         if str(model.idempotency_key or "") != idem:
             continue
         if model.state in ("pending", "running", "succeeded"):
-            return model.model_dump(exclude_none=True), True
+            return _hydrated_job_doc(home, model.model_dump(exclude_none=True)), True
 
     now = utc_now_iso()
     job = SpaceJob(
@@ -681,15 +966,16 @@ def enqueue_space_job(
         created_at=now,
         updated_at=now,
     )
-    item = job.model_dump(exclude_none=True)
+    item = _stored_job_doc(home, job.model_dump(exclude_none=True))
     jobs[item["job_id"]] = item
     doc["jobs"] = jobs
     _save_doc(path, doc)
     _append_history(item["job_id"], "created", {"kind": item.get("kind"), "lane": item.get("lane")})
-    return dict(item), False
+    return _hydrated_job_doc(home, item), False
 
 
 def get_space_job(job_id: str) -> Optional[Dict[str, Any]]:
+    home = ensure_home()
     jid = _safe_id(job_id, field="job_id")
     _, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
@@ -697,26 +983,27 @@ def get_space_job(job_id: str) -> Optional[Dict[str, Any]]:
     if not isinstance(item, dict):
         return None
     try:
-        return SpaceJob.model_validate(item).model_dump(exclude_none=True)
+        return _hydrated_job_doc(home, SpaceJob.model_validate(item).model_dump(exclude_none=True))
     except Exception:
         return None
 
 
 def _update_space_job(job_id: str, mutator: Callable[[Dict[str, Any]], Dict[str, Any]]) -> Dict[str, Any]:
+    home = ensure_home()
     jid = _safe_id(job_id, field="job_id")
     path, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
     item = jobs.get(jid)
     if not isinstance(item, dict):
         raise ValueError(f"job not found: {jid}")
-    current = SpaceJob.model_validate(item).model_dump(exclude_none=True)
+    current = _hydrated_job_doc(home, SpaceJob.model_validate(item).model_dump(exclude_none=True))
     candidate = mutator(dict(current))
     model = SpaceJob.model_validate(candidate)
-    out = model.model_dump(exclude_none=True)
+    out = _stored_job_doc(home, model.model_dump(exclude_none=True))
     jobs[jid] = out
     doc["jobs"] = jobs
     _save_doc(path, doc)
-    return out
+    return _hydrated_job_doc(home, out)
 
 
 def mark_space_job_running(job_id: str) -> Dict[str, Any]:
@@ -835,12 +1122,15 @@ def list_space_jobs(
     remote_space_id: str = "",
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
+    home = ensure_home()
     gid = _safe_id(group_id, field="group_id")
     pid = _provider_or_raise(provider)
     lane_filter = _lane_or_raise(lane) if str(lane or "").strip() else ""
     wanted_state = str(state or "").strip()
     wanted_remote = str(remote_space_id or "").strip()
     max_items = max(1, min(int(limit or 50), 500))
+    if not _jobs_scan_allowed(_jobs_path(home)):
+        return []
     _, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
     out: List[Dict[str, Any]] = []
@@ -861,7 +1151,7 @@ def list_space_jobs(
             continue
         if wanted_remote and model.remote_space_id != wanted_remote:
             continue
-        out.append(model.model_dump(exclude_none=True))
+        out.append(_hydrated_job_doc(home, model.model_dump(exclude_none=True)))
     out.sort(key=lambda it: str(it.get("updated_at") or ""), reverse=True)
     return out[:max_items]
 
@@ -870,6 +1160,8 @@ def list_due_space_jobs(*, limit: int = 50) -> List[Dict[str, Any]]:
     max_items = max(1, min(int(limit or 50), 500))
     now_dt = parse_utc_iso(utc_now_iso())
     if now_dt is None:
+        return []
+    if not _jobs_scan_allowed(_jobs_path(ensure_home())):
         return []
     _, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
@@ -908,6 +1200,9 @@ def space_queue_summary(
     pid = _provider_or_raise(provider)
     lane_filter = _lane_or_raise(lane) if str(lane or "").strip() else ""
     wanted_remote = str(remote_space_id or "").strip()
+    if not _jobs_scan_allowed(_jobs_path(ensure_home())):
+        summary = SpaceQueueSummary(pending=0, running=0, failed=0)
+        return summary.model_dump(exclude_none=True)
     _, doc = _load_jobs_doc()
     jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
     pending = 0
@@ -934,6 +1229,26 @@ def space_queue_summary(
             failed += 1
     summary = SpaceQueueSummary(pending=pending, running=running, failed=failed)
     return summary.model_dump(exclude_none=True)
+
+
+def compact_space_jobs_storage() -> Dict[str, Any]:
+    home = ensure_home()
+    path = _jobs_path(home)
+    with _JOBS_COMPACT_LOCK:
+        doc = _load_cached_doc(path, normalize=_normalize_jobs_doc)
+        before_jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
+        before_count = len(before_jobs)
+        before_size = int(path.stat().st_size or 0) if path.exists() else 0
+        next_doc = _compact_jobs_doc(path, doc, force=True)
+        after_jobs = next_doc.get("jobs") if isinstance(next_doc.get("jobs"), dict) else {}
+        after_size = int(path.stat().st_size or 0) if path.exists() else 0
+    return {
+        "before_jobs": before_count,
+        "after_jobs": len(after_jobs),
+        "dropped_jobs": max(0, before_count - len(after_jobs)),
+        "before_bytes": before_size,
+        "after_bytes": after_size,
+    }
 
 
 def space_queue_summaries(*, group_id: str, provider: str = "notebooklm") -> Dict[str, Dict[str, Any]]:

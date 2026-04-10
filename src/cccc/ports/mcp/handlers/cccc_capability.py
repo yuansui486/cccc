@@ -26,7 +26,8 @@ def _skill_runtime_contract_fields(capability_id: str) -> Dict[str, Any]:
         "next_step_hint": (
             "capsule-runtime skill activation is visible in capability_state.active_capsule_skills. "
             "Do not expect new dynamic_tools for skill capsules. If the task needs full local skill scripts/assets, "
-            "install a full skill package into $CODEX_HOME/skills."
+            "install a full skill package into Codex's skills directory "
+            "($CODEX_HOME/skills if CODEX_HOME is explicitly set)."
         ),
     }
 

@@ -1,14 +1,7 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { classNames } from "../utils/classNames";
 import { withAuthToken } from "../services/api/base";
-
-const RUNTIME_LOGO_BASE = import.meta.env.BASE_URL;
-const RUNTIME_LOGO: Record<string, string> = {
-  claude: `${RUNTIME_LOGO_BASE}logos/claude.png`,
-  codex: `${RUNTIME_LOGO_BASE}logos/codex.png`,
-  gemini: `${RUNTIME_LOGO_BASE}logos/gemini.png`,
-};
-
+import { getRuntimeLogoSrc } from "../utils/runtimeLogos";
 export type ActorAvatarProps = {
   avatarUrl?: string | null;
   previewUrl?: string | null;
@@ -43,13 +36,15 @@ export const ActorAvatar = memo(function ActorAvatar({
   const customAvatarSrc = useMemo(() => {
     if (isUser) return null;
     const raw = String(avatarUrl || "").trim();
-    return raw ? withAuthToken(raw) : null;
+    if (!raw) return null;
+    return raw.includes("token=") ? raw : withAuthToken(raw);
   }, [avatarUrl, isUser]);
+  const [failedCustomAvatarSrc, setFailedCustomAvatarSrc] = useState<string | null>(null);
+  const customAvatarFailed = !!customAvatarSrc && failedCustomAvatarSrc === customAvatarSrc;
 
   const logoSrc = useMemo(() => {
     if (isUser) return null;
-    const normalizedRuntime = String(runtime || "").trim().toLowerCase();
-    return normalizedRuntime ? RUNTIME_LOGO[normalizedRuntime] || null : null;
+    return getRuntimeLogoSrc(runtime);
   }, [isUser, runtime]);
 
   const fallbackText = isUser ? "U" : (String(title || "").trim() || "?")[0].toUpperCase();
@@ -71,8 +66,13 @@ export const ActorAvatar = memo(function ActorAvatar({
     >
       {previewSrc ? (
         <img src={previewSrc} alt="" className="h-full w-full object-contain" />
-      ) : customAvatarSrc ? (
-        <img src={customAvatarSrc} alt="" className="h-full w-full object-contain" />
+      ) : customAvatarSrc && !customAvatarFailed ? (
+        <img
+          src={customAvatarSrc}
+          alt=""
+          className="h-full w-full object-contain"
+          onError={() => setFailedCustomAvatarSrc(customAvatarSrc)}
+        />
       ) : logoSrc ? (
         <img src={logoSrc} alt="" className="h-full w-full object-cover" />
       ) : (

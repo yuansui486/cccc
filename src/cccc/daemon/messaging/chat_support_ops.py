@@ -13,8 +13,10 @@ def auto_wake_recipients(
     *,
     by: str,
     disabled_recipient_actor_ids: Callable[[Any, list[str]], list[str]],
+    enabled_recipient_actor_ids: Callable[[Any, list[str]], list[str]],
     find_actor: Callable[[Any, str], Any],
     coerce_bool: Callable[..., bool],
+    is_actor_running: Callable[[Any, str], bool],
     start_actor_process: Callable[..., Dict[str, Any]],
     update_actor: Callable[[Any, str, Dict[str, Any]], Any],
     runner_stop_actor: Callable[[str, str, str], Any],
@@ -23,15 +25,33 @@ def auto_wake_recipients(
     auto_wake_lock: threading.Lock,
     auto_wake_in_progress: set[tuple[str, str]],
 ) -> list[str]:
-    """Best-effort background auto-start for disabled recipients.
+    """Best-effort background auto-start for recipients that are unavailable.
 
     Returns the actor IDs accepted for wake-up scheduling. Actual startup and
     enabling happen asynchronously so chat send/reply latency does not include
     runtime boot cost.
     """
     scheduled: list[str] = []
-    disabled_ids = disabled_recipient_actor_ids(group, to)
-    for actor_id in disabled_ids:
+    candidate_ids: list[str] = []
+    seen_candidates: set[str] = set()
+
+    for actor_id in disabled_recipient_actor_ids(group, to):
+        aid = str(actor_id or "").strip()
+        if not aid or aid == str(by or "").strip() or aid in seen_candidates:
+            continue
+        seen_candidates.add(aid)
+        candidate_ids.append(aid)
+
+    for actor_id in enabled_recipient_actor_ids(group, to):
+        aid = str(actor_id or "").strip()
+        if not aid or aid == str(by or "").strip() or aid in seen_candidates:
+            continue
+        if is_actor_running(group, aid):
+            continue
+        seen_candidates.add(aid)
+        candidate_ids.append(aid)
+
+    for actor_id in candidate_ids:
         key = (str(group.group_id or "").strip(), str(actor_id or "").strip())
         if not key[0] or not key[1]:
             continue
@@ -44,7 +64,8 @@ def auto_wake_recipients(
             with auto_wake_lock:
                 auto_wake_in_progress.discard(key)
             continue
-        if coerce_bool(actor.get("enabled"), default=True):
+        was_enabled = coerce_bool(actor.get("enabled"), default=True)
+        if was_enabled and is_actor_running(group, actor_id):
             with auto_wake_lock:
                 auto_wake_in_progress.discard(key)
             continue
@@ -61,6 +82,7 @@ def auto_wake_recipients(
             wake_runtime: str,
             wake_cmd: list[str],
             wake_env: dict[str, Any],
+            wake_was_enabled: bool,
             wake_key: tuple[str, str],
         ) -> None:
             try:
@@ -75,7 +97,8 @@ def auto_wake_recipients(
                 )
                 if result["success"]:
                     try:
-                        update_actor(group, wake_actor_id, {"enabled": True})
+                        if not wake_was_enabled:
+                            update_actor(group, wake_actor_id, {"enabled": True})
                         request_flush_pending_messages(group, actor_id=wake_actor_id)
                     except Exception as e:
                         try:
@@ -109,6 +132,7 @@ def auto_wake_recipients(
                 "wake_runtime": runtime,
                 "wake_cmd": list(cmd or []),
                 "wake_env": dict(env or {}),
+                "wake_was_enabled": bool(was_enabled),
                 "wake_key": key,
             },
             name=f"cccc-auto-wake-{key[0]}-{key[1]}",

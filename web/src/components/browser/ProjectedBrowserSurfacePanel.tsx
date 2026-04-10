@@ -300,7 +300,7 @@ export function ProjectedBrowserSurfacePanel({
             reconnectTimerRef.current = window.setTimeout(() => {
               reconnectTimerRef.current = null;
               attachSocket();
-            }, 300);
+            }, 800);
             return;
           }
           if (info.ok) {
@@ -522,8 +522,10 @@ export function ProjectedBrowserSurfacePanel({
   const showReconnect = sessionState.state === "failed" || sessionState.state === "closed";
   const fullScreenLabel = isExpanded ? texts.exitFullScreen : texts.fullScreen;
   const panelClassName = classNames(
-    "relative flex flex-col overflow-hidden rounded-3xl border outline-none",
-    isDark ? "border-white/10 bg-slate-950/80" : "border-black/10 bg-[linear-gradient(180deg,#ffffff_0%,#f6f8fb_100%)]",
+    "relative flex flex-col overflow-hidden outline-none",
+    chromeMode === "embedded"
+      ? "rounded-xl"
+      : classNames("rounded-3xl border", isDark ? "border-white/10 bg-slate-950/80" : "border-black/10 bg-[linear-gradient(180deg,#ffffff_0%,#f6f8fb_100%)]"),
     isExpanded ? "h-full w-full shadow-2xl sm:h-[min(92dvh,980px)] sm:w-[min(96vw,1600px)]" : viewportClassName || "flex-1 min-h-0",
   );
 
@@ -537,8 +539,10 @@ export function ProjectedBrowserSurfacePanel({
     >
       <div
         className={classNames(
-          "flex flex-wrap items-center gap-2 border-b px-4 py-3 text-xs",
-          isDark ? "border-white/10 bg-slate-950/70 text-slate-300" : "border-black/10 bg-white/75 text-gray-700",
+          "flex flex-wrap items-center gap-2 text-xs",
+          chromeMode === "embedded"
+            ? classNames("border-b px-2 py-1.5", isDark ? "border-white/6 bg-slate-950/50 text-slate-400" : "border-black/5 bg-black/[0.03] text-gray-600")
+            : classNames("border-b px-4 py-3", isDark ? "border-white/10 bg-slate-950/70 text-slate-300" : "border-black/10 bg-white/75 text-gray-700"),
         )}
       >
         <span
@@ -604,7 +608,7 @@ export function ProjectedBrowserSurfacePanel({
         ) : null}
       </div>
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
+      <div className={classNames("relative flex min-h-0 flex-1 items-center justify-center overflow-hidden", chromeMode === "embedded" ? "" : "p-4")}>
         {frame ? (
           <img
             ref={imageRef}
@@ -612,7 +616,12 @@ export function ProjectedBrowserSurfacePanel({
             alt={texts.frameAlt}
             onMouseDown={handleMouseDown}
             onContextMenu={(event) => event.preventDefault()}
-            className="max-h-full max-w-full select-none rounded-2xl border border-[var(--glass-border-subtle)] object-contain shadow-2xl"
+            className={classNames(
+              "max-h-full max-w-full select-none object-contain",
+              chromeMode === "embedded"
+                ? "h-full w-full"
+                : "rounded-2xl border border-[var(--glass-border-subtle)] shadow-2xl",
+            )}
             draggable={false}
           />
         ) : (

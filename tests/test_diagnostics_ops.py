@@ -49,6 +49,44 @@ class TestDiagnosticsOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_debug_tail_logs_reads_plain_log_files(self) -> None:
+        from cccc.kernel.group import create_group
+        from cccc.kernel.registry import load_registry
+
+        td, cleanup = self._with_home()
+        try:
+            update, _ = self._call("observability_update", {"by": "user", "patch": {"developer_mode": True}})
+            self.assertTrue(update.ok, getattr(update, "error", None))
+
+            home = Path(td)
+            daemon_dir = home / "daemon"
+            daemon_dir.mkdir(parents=True, exist_ok=True)
+            (daemon_dir / "ccccd.log").write_text("daemon-1\ndaemon-2\ndaemon-3\n", encoding="utf-8")
+            (daemon_dir / "cccc-web.log").write_text("web-1\nweb-2\n", encoding="utf-8")
+
+            reg = load_registry()
+            group = create_group(reg, title="diag-logs")
+            im_log = home / "groups" / group.group_id / "state" / "im_bridge.log"
+            im_log.parent.mkdir(parents=True, exist_ok=True)
+            im_log.write_text("im-1\nim-2\nim-3\n", encoding="utf-8")
+
+            daemon_tail, _ = self._call("debug_tail_logs", {"by": "user", "component": "daemon", "lines": 2})
+            self.assertTrue(daemon_tail.ok, getattr(daemon_tail, "error", None))
+            self.assertEqual((daemon_tail.result or {}).get("lines"), ["daemon-2", "daemon-3"])
+
+            web_tail, _ = self._call("debug_tail_logs", {"by": "user", "component": "web", "lines": 2})
+            self.assertTrue(web_tail.ok, getattr(web_tail, "error", None))
+            self.assertEqual((web_tail.result or {}).get("lines"), ["web-1", "web-2"])
+
+            im_tail, _ = self._call(
+                "debug_tail_logs",
+                {"by": "user", "component": "im", "group_id": group.group_id, "lines": 2},
+            )
+            self.assertTrue(im_tail.ok, getattr(im_tail, "error", None))
+            self.assertEqual((im_tail.result or {}).get("lines"), ["im-2", "im-3"])
+        finally:
+            cleanup()
+
     def test_debug_clear_logs_im_requires_group(self) -> None:
         _, cleanup = self._with_home()
         try:

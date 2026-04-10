@@ -32,13 +32,19 @@ def require_pet_foreman(group: Group) -> Dict[str, Any]:
     return foreman
 
 
-def _pet_actor_seed(group: Group) -> Dict[str, Any]:
-    source = require_pet_foreman(group)
-
-    runtime_value = str(source.get("runtime") or "").strip()
-    runner_value = str(source.get("runner") or "").strip()
+def build_pet_actor_seed(
+    group: Group,
+    *,
+    runtime: str,
+    runner: str,
+    command: list[str],
+    env: Dict[str, str],
+    default_scope_key: str,
+    submit: str,
+) -> Dict[str, Any]:
+    runtime_value = str(runtime or "").strip()
+    runner_value = str(runner or "").strip()
     runner = runner_value if runner_value else "pty"
-    command = source.get("command") if isinstance(source.get("command"), list) else []
     runtime = runtime_value if runtime_value else "codex"
     if runtime_start_preflight_error(runtime, list(command), runner=runner):
         for candidate in PRIMARY_RUNTIMES:
@@ -47,7 +53,6 @@ def _pet_actor_seed(group: Group) -> Dict[str, Any]:
             runtime = candidate
             command = get_runtime_command_with_flags(candidate)
             break
-    env = source.get("env") if isinstance(source.get("env"), dict) else {}
     return {
         "title": PET_ACTOR_TITLE,
         "runtime": runtime,
@@ -55,16 +60,31 @@ def _pet_actor_seed(group: Group) -> Dict[str, Any]:
         "command": list(command or get_runtime_command_with_flags(runtime)),
         "env": dict(env or {}),
         "capability_autoload": ["pack:pet"],
-        "default_scope_key": str(source.get("default_scope_key") or group.doc.get("active_scope_key") or "").strip(),
-        "submit": str(source.get("submit") or "enter").strip() or "enter",
+        "default_scope_key": str(default_scope_key or group.doc.get("active_scope_key") or "").strip(),
+        "submit": str(submit or "enter").strip() or "enter",
         "enabled": True,
         "internal_kind": INTERNAL_KIND_PET,
     }
 
 
-def ensure_pet_actor(group: Group) -> Dict[str, Any]:
+def _pet_actor_seed(group: Group) -> Dict[str, Any]:
+    source = require_pet_foreman(group)
+    command = source.get("command") if isinstance(source.get("command"), list) else []
+    env = source.get("env") if isinstance(source.get("env"), dict) else {}
+    return build_pet_actor_seed(
+        group,
+        runtime=str(source.get("runtime") or ""),
+        runner=str(source.get("runner") or ""),
+        command=list(command),
+        env=dict(env),
+        default_scope_key=str(source.get("default_scope_key") or ""),
+        submit=str(source.get("submit") or "enter"),
+    )
+
+
+def ensure_pet_actor(group: Group, *, seed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     current = get_pet_actor(group)
-    seed = _pet_actor_seed(group)
+    seed = dict(seed or _pet_actor_seed(group))
     if current is None:
         return add_actor(
             group,

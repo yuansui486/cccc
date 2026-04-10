@@ -4,6 +4,152 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow SemVer/PEP 440.
 
+## [0.4.10] — 2026-04-10
+
+### Added
+- **Claude headless runtime support** alongside the generalized headless streaming pipeline, enabling structured headless sessions beyond Codex.
+- **Runtime Dock and live trace surfaces in Web**: richer headless previews, compact activity timelines, grouped runtime inspectors, and better runtime state projection across chat and actor views.
+- **Headless runtime plumbing and test coverage**: cache/projection helpers, broader coverage for headless events, runtime startup, Web actor routes, and Windows PTY behavior.
+- **Weixin sidecar support refreshed** with expanded IM bridge adapter-level validation.
+
+### Changed
+- **Headless delivery architecture** generalized from Codex-specific to a shared headless model used consistently across daemon, Web, and MCP surfaces.
+- **Web chat and runtime UX** significantly refined: message reconciliation, activity persistence, runtime previews, composer behavior, per-message identity rendering, and group runtime controls.
+- **Workspace and presentation flows** streamlined through enhanced browser/presentation handling and more resilient scope attachment behavior.
+- **CI and release verification** strengthened with longer timeout coverage, `pytest-timeout` in smoke paths, and tighter release workflow checks.
+
+### Fixed
+- Fixed multiple **headless reply and streaming lifecycle regressions**, including fallback flow errors, message identity drift, canonical-reply reconciliation, and startup-state mismatches.
+- Fixed **missed headless injection for automation-generated `system.notify` events** — automation-triggered notifications now reach running headless agents instead of only landing in the inbox.
+- Fixed **PTY teardown hardening**, unread/index parity edge cases, and additional delivery flow stabilization.
+- Fixed **Web chat rendering regressions**: lost avatars, unstable activity bubbles, stale runtime preview state, and composer alignment under text scaling.
+- Fixed **group start/pause button UI not updating** — `setGroupDoc` now syncs `runtime_status.lifecycle_state` immediately, and `refreshGroups` patches `runtime_status` and `running` from server meta so stale local state no longer overrides the authoritative status.
+- Fixed **Windows PTY wake-path locking** problems and related test instability.
+- Fixed **IM integration reliability**: DingTalk mention handling, Weixin sidecar SDK pinning, and adapter behavior.
+
+## [0.4.9] — 2026-04-05
+
+### Added
+- **WeChat (Weixin) IM bridge**: Node.js sidecar, CLI login/logout, QR-code auth in Web UI, and daemon routes for bridge lifecycle, following the same bind-key authorization model as other adapters.
+- **Text-size accessibility control**: three-tier scale selector (90% / 100% / 125%) persisted per-browser. System-theme icon changed to a display icon; mobile menu now cycles light → dark → system.
+- **Async result contract**: formal `async_result` IPC signaling (accepted/completed/queued) across daemon actor operations.
+- **Assistive-jobs layer**: explicit pet review and profile job kinds requiring verified completion before marking done.
+
+### Changed
+- **Actor launch pipeline unified**: add/update/lifecycle/runtime operations now share one resolution path with consistent async-result semantics; group start/stop reliably awaits per-actor results.
+- **Pet runtime tracks group settings**: desktop-pet enablement syncs with group-settings changes.
+- **Web Pet task advisor is local-first**: local evidence evaluation before surfacing proposals, reducing speculative noise.
+- **Presentation viewer** gained inline web-preview support, topic-aware slide navigation, and split-layout mode for simultaneous conversation and viewing.
+- **Group sidebar** extracted into a standalone component with optimized chunk splitting.
+- **MCP dynamic capability tools** reflect real-time actor state.
+
+### Fixed
+- Fixed idle-standup suppression and silence-activity filters to stay quiet when there is genuinely nothing to act on.
+- Fixed runtime visibility controls so peer and pet tabs show/hide based on actor composition.
+- Fixed context sync and group-space writeback to distinguish accepted vs. completed status.
+- Fixed automation snippet catalog separation so built-in overrides are distinct from user-authored rules.
+
+## [0.4.8] — 2026-03-30
+
+### Added
+- **Windows-friendly env snippet support** in the Web secret editor: `set KEY=VALUE` and `$env:KEY="VALUE"` forms accepted alongside Unix-style entries.
+- **Terminal-derived working state** exposed in the actor list for richer runtime visibility.
+- **Modularized Web API services** for a cleaner frontend integration layer.
+
+### Changed
+- **Web Pet** substantially reworked: review scheduling, reminder generation, decision handling, and task proposals are more reliable and less noisy.
+- **Actor startup** gained stronger runtime preflight checks and clearer daemon transport diagnostics.
+- **Peer-created MCP tasks** now default to self-assignment instead of unassigned.
+- **Ledger and unread-index paths** made faster with reduced overhead.
+
+### Fixed
+- Fixed projected browser session reliability for embedded views and NotebookLM/Google auth flows.
+- Fixed task status and update flows being fragile under rapid MCP task operations.
+- Fixed Web-to-daemon messaging semantics and context/chat UI behavior after the Web API modularization.
+
+## [0.4.7] — 2026-03-23
+
+### Added
+- **Presentation workspace**: slot-based presentation content managed through daemon, Web, and MCP, with a dedicated Chat Presentation rail and viewer flow.
+- **Browser-backed presentation views**: interactive viewer lifecycle with refresh, fullscreen, replacement, and URL entry.
+- **Presentation references in chat**: messages can point to a specific Presentation view with snapshot and compare support.
+- **Web branding controls**: product name and logo asset configuration from the Web settings surface.
+
+### Changed
+- **Task state handling** in Web UI is more structured; task/context workflow logic is tighter.
+- **MCP task update compatibility** improved so status changes are less fragile.
+- **Default `cccc` entry path** now respects top-level `--host` / `--port` overrides throughout supervised Web startup and restart.
+- **Kimi runtime defaults** updated to match the current preferred path.
+
+### Fixed
+- Fixed group/context/unread refresh behavior for better state coherence post-mutation.
+- Fixed general message, panel, and console usability issues across the Web surface.
+
+## [0.4.6] — 2026-03-19
+
+### Added
+- **WeCom IM bridge**: dedicated adapter, Web-side bridge settings, authentication/readiness behavior, and operator docs including a dedicated WeCom setup guide.
+- **Built-in role presets**: first-wave roster (planner, implementer, reviewer, debugger, explorer) with a faster preset-application UI for common actor role starting points.
+
+### Changed
+- **Web context and actor route caching** made more deliberate with proper invalidation after writes, reducing stale readback after actor/context updates.
+- **Prompt and help surface** tightened so startup guidance stays lean; richer guidance lives in the help/preset layers.
+- **Web readiness checks** now tolerate `OSError` and `HTTPException` instead of surfacing brittle failure behavior.
+
+### Fixed
+- Fixed Windows shutdown cleanup for lingering process/lifecycle edge cases.
+- Fixed cache invalidation after actor/context writes to prevent stale Web UI state.
+- Fixed WeCom adapter startup and config flows.
+
+## [0.4.5] — 2026-03-18
+
+### Added
+- **Web Pet panel**: task progress, smarter hints, direct jump to chat/task, and post-stop terminal output snippet after an agent ends a session.
+- **Web health endpoint** made publicly reachable for external health checks and probing.
+- **Supervised Web restart/apply flow** surfaced more clearly from the main `cccc` session.
+
+### Changed
+- **Desktop pet surface removed**: Web Pet is now the primary pet surface (previous Tauri-based implementation retired).
+- **Web Access panel** better aligned with real operator goals: local-only, LAN/private, and externally exposed access postures are clearer.
+- **POSIX background Python startup** now preserves the active virtualenv interpreter path instead of resolving to system Python.
+
+### Fixed
+- Fixed Windows Codex MCP setup to prefer a stable absolute `cccc` entrypoint and avoid false "already installed" detection.
+- Fixed supervised Web child shutdown so Ctrl+C and restart flows behave predictably.
+- Fixed fail-fast MCP startup checks to avoid over-blocking unrelated lifecycle flows.
+- Fixed IM bridge child-process startup to follow the same safer background-process rules as the daemon/Web stack.
+
+## [0.4.4] — 2026-03-16
+
+### Changed
+- **Group settings**: Guidance is now the default first-open tab, matching the visible tab order.
+- **Settings terminology** now more clearly separates built-in automation from user-authored rules and snippets.
+- **Delivery panel** simplified to the only user-facing behavior that remains: PTY delivery auto-advance of the read cursor.
+- **Actor idle alerts** default to `0` (off) for new/default/reset paths without silently changing existing stored values.
+
+### Removed
+- **`min_interval_seconds`** removed from the Web settings UI (daemon/API compatibility preserved).
+
+## [0.4.3] — 2026-03-15
+
+### Added
+- **User-scoped actor profiles** working end-to-end across daemon, Web, and MCP paths.
+- **NotebookLM runtime guidance** injected into the help layer only when the relevant capability is actually active.
+
+### Changed
+- **Guidance stack re-layered**: startup prompt is slimmer; live capability guidance is in `cccc_help`; actor role notes are canonically stored in group help `@actor` blocks instead of leaking into working-state fields.
+- **Task authority model tightened**: `task.restore` follows an archived-only precondition; peers can no longer mutate unassigned tasks outside their own scope.
+- **`agent_state` semantics aligned** across docs, daemon behavior, MCP tooling, and Web expectations.
+- **Group Space bind/unbind status** now tracks the current binding accurately without leaking stale sync residue after rebind cycles.
+- **Runtime support surface narrowed** to runtimes CCCC can set up and operate reliably; standalone Web startup follows the same local-first binding model as the main CLI.
+
+### Fixed
+- Fixed blueprint export/import round-trips so portable fields survive a full cycle without divergence.
+- Fixed Windows MCP reliability: runtime-context resolution and stdio/encoding robustness.
+- Fixed DingTalk sender identity, revoke behavior, `@` targeting, and streaming fallback edge cases.
+- Fixed Web settings, modal overflow, context presentation, and translation coverage gaps.
+- Fixed global browser surfaces to default-scope users to relevant data, reducing machine-global noise for scoped users.
+
 ## [0.4.2] — 2026-02-22
 
 ### Added

@@ -1,9 +1,10 @@
 // SettingsModal renders the settings modal.
-import { lazy, Suspense, useState, useEffect, useRef, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Actor, GroupDoc, GroupSettings, IMStatus, IMPlatform, WebAccessSession } from "../types";
+import { Actor, GroupDoc, GroupSettings, IMStatus, IMPlatform, WebAccessSession, WeixinLoginStatus } from "../types";
 import * as api from "../services/api";
 import { useObservabilityStore } from "../stores";
+import type { RuntimeVisibilityMode } from "../utils/runtimeVisibility";
 import {
   SettingsScope,
   GroupTabId,
@@ -122,8 +123,13 @@ export function SettingsModal({
   // WeCom fields
   const [imWecomBotId, setImWecomBotId] = useState("");
   const [imWecomSecret, setImWecomSecret] = useState("");
+  // Weixin fields
+  const [imWeixinAccountId, setImWeixinAccountId] = useState("");
+  const [imWeixinCommand, setImWeixinCommand] = useState("");
+  const [weixinLoginStatus, setWeixinLoginStatus] = useState<WeixinLoginStatus | null>(null);
   const [imBusy, setImBusy] = useState(false);
   const imLoadSeq = useRef(0);
+  const weixinAutoStartRef = useRef(false);
 
   // IM config drafts cache (per-platform local edits, not yet saved to server)
   const [imConfigDrafts, setImConfigDrafts] = useState<Partial<Record<IMPlatform, IMConfigDraft>>>({});
@@ -133,6 +139,8 @@ export function SettingsModal({
   const [logLevel, setLogLevel] = useState<"INFO" | "DEBUG">("INFO");
   const [terminalBacklogMiB, setTerminalBacklogMiB] = useState(10);
   const [terminalScrollbackLines, setTerminalScrollbackLines] = useState(8000);
+  const [peerRuntimeVisibility, setPeerRuntimeVisibility] = useState<RuntimeVisibilityMode>("visible");
+  const [petRuntimeVisibility, setPetRuntimeVisibility] = useState<RuntimeVisibilityMode>("hidden");
   const [obsBusy, setObsBusy] = useState(false);
 
   // Developer-mode debug views
@@ -253,6 +261,8 @@ export function SettingsModal({
     setImDingtalkRobotCode("");
     setImWecomBotId("");
     setImWecomSecret("");
+    setImWeixinAccountId("");
+    setImWeixinCommand("");
   };
 
   const loadIMStatus = async (opts?: { resetFirst?: boolean }) => {
@@ -296,11 +306,84 @@ export function SettingsModal({
         // WeCom fields
         setImWecomBotId(im.wecom_bot_id || "");
         setImWecomSecret(im.wecom_secret || "");
+        // Weixin fields
+        setImWeixinAccountId(im.weixin_account_id || "");
+        setImWeixinCommand(im.weixin_command || "");
       }
     } catch (e) {
       console.error("Failed to load IM status:", e);
     }
   };
+
+  const toWeixinErrorStatus = useCallback((message: string): WeixinLoginStatus => ({
+    status: "error",
+    logged_in: false,
+    account_id: "",
+    qrcode_url: "",
+    qr_ascii: "",
+    error: String(message || "").trim(),
+    running: false,
+    pid: null,
+    updated_at: new Date().toISOString(),
+  }), []);
+
+  useEffect(() => {
+    if (!isOpen || !groupId || imPlatform !== "weixin") return;
+    let cancelled = false;
+    const loadWeixinStatus = async () => {
+      try {
+        const resp = await api.fetchWeixinLoginStatus(groupId);
+        if (cancelled) return;
+        if (resp.ok) {
+          setWeixinLoginStatus(resp.result ?? null);
+        } else {
+          setWeixinLoginStatus(toWeixinErrorStatus(resp.error?.message || t("imBridge.weixinStatusLoadFailed")));
+        }
+      } catch {
+        if (!cancelled) {
+          setWeixinLoginStatus(toWeixinErrorStatus(t("imBridge.weixinStatusLoadFailed")));
+        }
+      }
+    };
+    void loadWeixinStatus();
+    const timer = window.setInterval(() => {
+      void loadWeixinStatus();
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [groupId, imPlatform, isOpen, t, toWeixinErrorStatus]);
+
+  useEffect(() => {
+    if (imPlatform !== "weixin") {
+      weixinAutoStartRef.current = false;
+      return;
+    }
+    if (!groupId) return;
+    if (!weixinLoginStatus?.logged_in) return;
+    if (!imStatus?.configured || String(imStatus.platform || "") !== "weixin") return;
+    if (imStatus.running) {
+      weixinAutoStartRef.current = false;
+      return;
+    }
+    if (weixinAutoStartRef.current) return;
+
+    weixinAutoStartRef.current = true;
+    void (async () => {
+      setImBusy(true);
+      try {
+        const resp = await api.startIMBridge(groupId);
+        if (resp.ok) {
+          await loadIMStatus();
+        }
+      } catch (e) {
+        console.error("Failed to auto-start weixin bridge:", e);
+      } finally {
+        setImBusy(false);
+      }
+    })();
+  }, [groupId, imPlatform, imStatus, weixinLoginStatus]);
 
   const loadObservability = async () => {
     try {
@@ -319,6 +402,9 @@ export function SettingsModal({
         if (Number.isFinite(scrollbackLines) && scrollbackLines > 0) {
           setTerminalScrollbackLines(Math.max(1000, Math.round(scrollbackLines)));
         }
+        const runtimeVisibility = obs.runtime_visibility || {};
+        setPeerRuntimeVisibility(runtimeVisibility.peer_runtime === "hidden" ? "hidden" : "visible");
+        setPetRuntimeVisibility(runtimeVisibility.pet_runtime === "visible" ? "visible" : "hidden");
       }
     } catch (e) {
       console.error("Failed to load observability settings:", e);
@@ -479,6 +565,8 @@ export function SettingsModal({
     dingtalkRobotCode: imDingtalkRobotCode,
     wecomBotId: imWecomBotId,
     wecomSecret: imWecomSecret,
+    weixinAccountId: imWeixinAccountId,
+    weixinCommand: imWeixinCommand,
   });
 
   // Apply a draft to current IM config fields
@@ -493,6 +581,8 @@ export function SettingsModal({
     setImDingtalkRobotCode(draft.dingtalkRobotCode);
     setImWecomBotId(draft.wecomBotId);
     setImWecomSecret(draft.wecomSecret);
+    setImWeixinAccountId(draft.weixinAccountId);
+    setImWeixinCommand(draft.weixinCommand);
   };
 
   const getCurrentIMSaveRequest = () => ({
@@ -527,6 +617,8 @@ export function SettingsModal({
       setImDingtalkRobotCode("");
       setImWecomBotId("");
       setImWecomSecret("");
+      setImWeixinAccountId("");
+      setImWeixinCommand("");
     }
 
     // 3. Set new platform
@@ -562,6 +654,8 @@ export function SettingsModal({
         setImDingtalkRobotCode("");
         setImWecomBotId("");
         setImWecomSecret("");
+        setImWeixinAccountId("");
+        setImWeixinCommand("");
         await loadIMStatus();
       }
     } catch (e) {
@@ -597,6 +691,48 @@ export function SettingsModal({
     }
   };
 
+  const handleStartWeixinLogin = async () => {
+    if (!groupId) return;
+    setImBusy(true);
+    try {
+      const saveResp = await saveIMConfigDraft(getCurrentIMSaveRequest());
+      if (!saveResp.ok) {
+        setWeixinLoginStatus(toWeixinErrorStatus(saveResp.error?.message || t("imBridge.weixinStartFailed")));
+        return;
+      }
+      await loadIMStatus();
+      const resp = await api.startWeixinLogin(groupId);
+      if (resp.ok) {
+        setWeixinLoginStatus(resp.result ?? null);
+      } else {
+        setWeixinLoginStatus(toWeixinErrorStatus(resp.error?.message || t("imBridge.weixinStartFailed")));
+      }
+    } catch (e) {
+      setWeixinLoginStatus(toWeixinErrorStatus(t("imBridge.weixinStartFailed")));
+      console.error("Failed to start weixin login:", e);
+    } finally {
+      setImBusy(false);
+    }
+  };
+
+  const handleLogoutWeixin = async () => {
+    if (!groupId) return;
+    setImBusy(true);
+    try {
+      const resp = await api.logoutWeixin(groupId);
+      if (resp.ok) {
+        setWeixinLoginStatus(resp.result ?? null);
+      } else {
+        setWeixinLoginStatus(toWeixinErrorStatus(resp.error?.message || t("imBridge.weixinLogoutFailed")));
+      }
+    } catch (e) {
+      setWeixinLoginStatus(toWeixinErrorStatus(t("imBridge.weixinLogoutFailed")));
+      console.error("Failed to logout weixin:", e);
+    } finally {
+      setImBusy(false);
+    }
+  };
+
   const handleSaveObservability = async () => {
     setObsBusy(true);
     try {
@@ -607,6 +743,8 @@ export function SettingsModal({
         logLevel,
         terminalTranscriptPerActorBytes: perActorBytes,
         terminalUiScrollbackLines: scrollbackLines,
+        peerRuntimeVisibility,
+        petRuntimeVisibility,
       });
       if (resp.ok && resp.result?.observability) {
         const obs = resp.result.observability;
@@ -622,6 +760,9 @@ export function SettingsModal({
         if (Number.isFinite(lines) && lines > 0) {
           setTerminalScrollbackLines(Math.max(1000, Math.round(lines)));
         }
+        const runtimeVisibility = obs.runtime_visibility || {};
+        setPeerRuntimeVisibility(runtimeVisibility.peer_runtime === "hidden" ? "hidden" : "visible");
+        setPetRuntimeVisibility(runtimeVisibility.pet_runtime === "visible" ? "visible" : "hidden");
       } else if (resp.ok) {
         await loadObservability();
       }
@@ -927,6 +1068,13 @@ export function SettingsModal({
                   setImWecomBotId={setImWecomBotId}
                   imWecomSecret={imWecomSecret}
                   setImWecomSecret={setImWecomSecret}
+                  imWeixinAccountId={imWeixinAccountId}
+                  setImWeixinAccountId={setImWeixinAccountId}
+                  imWeixinCommand={imWeixinCommand}
+                  setImWeixinCommand={setImWeixinCommand}
+                  weixinLoginStatus={weixinLoginStatus}
+                  onStartWeixinLogin={handleStartWeixinLogin}
+                  onLogoutWeixin={handleLogoutWeixin}
                   imBusy={imBusy}
                   onSaveConfig={handleSaveIMConfig}
                   onRemoveConfig={handleRemoveIMConfig}
@@ -985,6 +1133,10 @@ export function SettingsModal({
                   setTerminalBacklogMiB={setTerminalBacklogMiB}
                   terminalScrollbackLines={terminalScrollbackLines}
                   setTerminalScrollbackLines={setTerminalScrollbackLines}
+                  peerRuntimeVisibility={peerRuntimeVisibility}
+                  setPeerRuntimeVisibility={setPeerRuntimeVisibility}
+                  petRuntimeVisibility={petRuntimeVisibility}
+                  setPetRuntimeVisibility={setPetRuntimeVisibility}
                   obsBusy={obsBusy}
                   onSaveObservability={handleSaveObservability}
                   debugSnapshot={debugSnapshot}

@@ -1296,5 +1296,56 @@ class TestContextV2Ops(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_pet_agent_state_update_allows_user_model_only_and_marks_refresh_complete(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            with patch("cccc.daemon.pet.profile_refresh.assistive_jobs.mark_job_completed") as mark_completed:
+                resp, _ = self._sync(
+                    gid,
+                    [{"op": "agent_state.update", "actor_id": "pet-peer", "user_model": "direct and brief"}],
+                    by="pet-peer",
+                )
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            mark_completed.assert_called_once_with(gid, "pet_profile_refresh")
+            ctx, _ = self._context(gid)
+            self.assertTrue(ctx.ok, getattr(ctx, "error", None))
+            agent_states = ctx.result.get("agent_states") if isinstance(ctx.result, dict) else []
+            pet_state = next((item for item in agent_states if str(item.get("id") or "") == "pet-peer"), None)
+            self.assertIsNotNone(pet_state)
+            warm = (pet_state or {}).get("warm") if isinstance((pet_state or {}).get("warm"), dict) else {}
+            self.assertEqual(str(warm.get("user_model") or ""), "direct and brief")
+        finally:
+            cleanup()
+
+    def test_pet_agent_state_update_rejects_non_user_model_fields(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            resp, _ = self._sync(
+                gid,
+                [{"op": "agent_state.update", "actor_id": "pet-peer", "focus": "should not work"}],
+                by="pet-peer",
+            )
+            self.assertFalse(resp.ok)
+            self.assertIn("only allows user_model", str(getattr(resp.error, "message", "")))
+        finally:
+            cleanup()
+
+    def test_pet_cannot_mutate_shared_tasks(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            resp, _ = self._sync(
+                gid,
+                [{"op": "task.create", "title": "Bad pet task"}],
+                by="pet-peer",
+            )
+            self.assertFalse(resp.ok)
+            self.assertIn("pet cannot run task.create", str(getattr(resp.error, "message", "")))
+        finally:
+            cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

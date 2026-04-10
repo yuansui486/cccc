@@ -81,52 +81,6 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(stored, [valid])
             self.assertEqual(load_pet_decisions(group), [valid])
 
-    def test_replace_preserves_automation_proposal_action(self) -> None:
-        from cccc.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
-
-        with tempfile.TemporaryDirectory() as tmp:
-            group = _FakeGroup("g-demo", Path(tmp))
-            decision = {
-                "id": "decision-auto-1",
-                "kind": "suggestion",
-                "priority": 70,
-                "summary": "Propose one temporary automation reminder rule.",
-                "agent": "Pet Peer",
-                "fingerprint": f"group:{group.group_id}:automation:idle-followup",
-                "action": {
-                    "type": "automation_proposal",
-                    "group_id": group.group_id,
-                    "title": "Temporary reply follow-up rule",
-                    "summary": "Add one short-lived notify rule for stuck replies.",
-                    "actions": [
-                        {
-                            "type": "create_rule",
-                            "rule": {
-                                "id": "pet-temp-reply-followup",
-                                "enabled": True,
-                                "scope": "group",
-                                "to": ["@foreman"],
-                                "trigger": {"kind": "interval", "every_seconds": 900},
-                                "action": {
-                                    "kind": "notify",
-                                    "message": "Check overdue reply loop.",
-                                    "priority": "normal",
-                                },
-                            },
-                        }
-                    ],
-                },
-                "source": {},
-                "updated_at": "",
-            }
-
-            stored = replace_pet_decisions(group, decisions=[decision], actor_id="pet-peer")
-
-            self.assertEqual(stored[0]["action"]["type"], "automation_proposal")
-            self.assertEqual(stored[0]["action"]["title"], "Temporary reply follow-up rule")
-            self.assertEqual(stored[0]["action"]["actions"][0]["type"], "create_rule")
-            self.assertEqual(load_pet_decisions(group)[0]["action"]["type"], "automation_proposal")
-
     def test_replace_compacts_foreman_draft_message_to_next_step_message(self) -> None:
         from cccc.kernel.pet_decisions import replace_pet_decisions
 
@@ -184,6 +138,39 @@ class TestPetDecisionsOps(unittest.TestCase):
 
             stored = replace_pet_decisions(group, decisions=[decision], actor_id="pet-peer")
             self.assertEqual(str(stored[0]["action"]["text"] or ""), "Please share reproduction steps and the error screenshot.")
+
+    def test_replace_preserves_structured_foreman_control_message(self) -> None:
+        from cccc.kernel.pet_decisions import replace_pet_decisions
+
+        with tempfile.TemporaryDirectory() as tmp:
+            group = _FakeGroup("g-demo", Path(tmp))
+            decision = {
+                "id": "decision-foreman-structured",
+                "kind": "suggestion",
+                "priority": 88,
+                "summary": "Send one structured control message to foreman.",
+                "agent": "Pet Peer",
+                "fingerprint": f"group:{group.group_id}:suggestion:waiting-user-structured",
+                "action": {
+                    "type": "draft_message",
+                    "group_id": group.group_id,
+                    "to": ["@foreman"],
+                    "text": (
+                        "Please keep T031 open for now.\n\n"
+                        "- Leave it in waiting_user.\n"
+                        "- I will confirm whether to continue or close after I review the latest evidence."
+                    ),
+                },
+                "source": {},
+                "updated_at": "",
+            }
+
+            stored = replace_pet_decisions(group, decisions=[decision], actor_id="pet-peer")
+
+            self.assertEqual(
+                str(stored[0]["action"]["text"] or ""),
+                "Please keep T031 open for now.\n\n- Leave it in waiting_user.\n- I will confirm whether to continue or close after I review the latest evidence.",
+            )
 
     def test_replace_keeps_task_proposal_reply_pressure_text_from_pet(self) -> None:
         from cccc.kernel.pet_decisions import replace_pet_decisions
@@ -395,6 +382,28 @@ class TestPetDecisionsOps(unittest.TestCase):
         self.assertEqual(load_pet_decisions(group), [])
 
 
+    def test_replace_marks_pet_review_job_completed(self) -> None:
+        from cccc.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
+
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "cccc.daemon.pet.pet_decision_ops.load_group",
+            return_value=_FakeGroup("g-demo", Path(tmp)),
+        ), patch(
+            "cccc.daemon.pet.pet_decision_ops.get_pet_actor",
+            return_value={"id": "pet-peer", "internal_kind": "pet"},
+        ), patch("cccc.daemon.pet.pet_decision_ops.mark_job_completed") as mark_completed:
+            resp = handle_pet_decisions_replace(
+                {
+                    "group_id": "g-demo",
+                    "actor_id": "pet-peer",
+                    "decisions": [self._sample_decision("g-demo")],
+                }
+            )
+
+        self.assertTrue(resp.ok, getattr(resp, "error", None))
+        mark_completed.assert_called_once()
+
+
 class TestPetActorSeed(unittest.TestCase):
     def test_pet_actor_seed_uses_foreman_settings(self) -> None:
         from cccc.kernel.pet_actor import _pet_actor_seed
@@ -455,6 +464,56 @@ class TestPetActorSeed(unittest.TestCase):
         self.assertEqual(seed["command"], ["claude", "--dangerously-skip-permissions"])
 
 
+class TestPetVisibleChatBoundary(unittest.TestCase):
+    def test_pet_cannot_send_visible_chat_directly(self) -> None:
+        from cccc.daemon.messaging import chat_ops
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_group = _FakeGroup("g-demo", Path(tmp))
+            with patch.object(chat_ops, "load_group", return_value=fake_group), patch.object(
+                chat_ops,
+                "get_pet_actor",
+                return_value={"id": "pet-peer", "internal_kind": "pet"},
+            ):
+                resp = chat_ops.handle_send(
+                    {"group_id": "g-demo", "by": "pet-peer", "text": "hi"},
+                    coerce_bool=bool,
+                    normalize_attachments=lambda _group, _raw: [],
+                    effective_runner_kind=lambda runner: runner,
+                    auto_wake_recipients=lambda _group, _to, _by: [],
+                    automation_on_resume=lambda _group: None,
+                    automation_on_new_message=lambda _group: None,
+                    clear_pending_system_notifies=lambda _gid, _kinds: None,
+                )
+
+        self.assertFalse(resp.ok)
+        self.assertEqual(getattr(resp.error, "code", ""), "pet_visible_chat_forbidden")
+
+    def test_pet_cannot_reply_visible_chat_directly(self) -> None:
+        from cccc.daemon.messaging import chat_ops
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_group = _FakeGroup("g-demo", Path(tmp))
+            with patch.object(chat_ops, "load_group", return_value=fake_group), patch.object(
+                chat_ops,
+                "get_pet_actor",
+                return_value={"id": "pet-peer", "internal_kind": "pet"},
+            ):
+                resp = chat_ops.handle_reply(
+                    {"group_id": "g-demo", "by": "pet-peer", "text": "hi", "reply_to": "evt-1"},
+                    coerce_bool=bool,
+                    normalize_attachments=lambda _group, _raw: [],
+                    effective_runner_kind=lambda runner: runner,
+                    auto_wake_recipients=lambda _group, _to, _by: [],
+                    automation_on_resume=lambda _group: None,
+                    automation_on_new_message=lambda _group: None,
+                    clear_pending_system_notifies=lambda _gid, _kinds: None,
+                )
+
+        self.assertFalse(resp.ok)
+        self.assertEqual(getattr(resp.error, "code", ""), "pet_visible_chat_forbidden")
+
+
 class TestPetPromptContract(unittest.TestCase):
     def test_render_pet_system_prompt_declares_outbound_message_boundary(self) -> None:
         from cccc.kernel.pet_prompt import render_pet_system_prompt
@@ -464,14 +523,24 @@ class TestPetPromptContract(unittest.TestCase):
             group.doc = {"title": "demo", "state": "active", "actors": []}
             prompt = render_pet_system_prompt(group, actor={"id": "pet-peer"}, context_payload={})
 
-        self.assertIn("summary is your internal judgment", prompt)
-        self.assertIn("action.text must already be the final message", prompt)
-        self.assertIn("short next-step message", prompt)
-        self.assertIn("task_proposal, summary and action.text must both read like natural next-step guidance", prompt)
+        self.assertIn("user-side draft-first attention assistant", prompt)
+        self.assertIn("surface exactly one current highest-value recommendation", prompt)
+        self.assertIn("use its review_packet as your initial focus", prompt)
+        self.assertIn("Finish every pet_review with exactly one cccc_pet_decisions call", prompt)
+        self.assertIn("action.text must already be the exact message the user would likely want to send next", prompt)
+        self.assertIn("A draft_message may be multi-sentence or a short bullet list", prompt)
+        self.assertIn("Do not call cccc_message_send, cccc_message_reply", prompt)
         self.assertIn("pet_profile_refresh", prompt)
         self.assertIn("data.context.kind=pet_profile_refresh", prompt)
         self.assertIn("do not touch cccc_pet_decisions", prompt)
         self.assertIn('cccc_agent_state(action=update, actor_id=pet-peer, user_model=...)', prompt)
+        self.assertNotIn("Working Style:", prompt)
+        self.assertNotIn("Pet-Specific Help:", prompt)
+        self.assertNotIn("Runtime Snapshot:", prompt)
+        self.assertNotIn("Reply Pressure:", prompt)
+        self.assertNotIn("Coordination Rhythm:", prompt)
+        self.assertNotIn("Proposal Ready:", prompt)
+        self.assertNotIn("(no explicit pet persona note)", prompt)
 
 
 if __name__ == "__main__":

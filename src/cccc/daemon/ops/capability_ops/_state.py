@@ -134,6 +134,13 @@ def _collect_enabled_capabilities(state_doc: Dict[str, Any], *, group_id: str, a
     return ordered, mutated
 
 
+def _quota_exempt_capabilities(*, actor_role: str) -> set[str]:
+    role = str(actor_role or "").strip().lower()
+    if role == "foreman":
+        return {"pack:group-runtime", "pack:diagnostics"}
+    return set()
+
+
 def _set_enabled_capability(
     state_doc: Dict[str, Any],
     *,
@@ -520,7 +527,9 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     group_id=group_id,
                     actor_id=actor_id or "user",
                 )
-                if capability_id not in set(enabled_caps) and len(enabled_caps) >= max_enabled_per_actor:
+                quota_exempt = _quota_exempt_capabilities(actor_role=actor_role)
+                counted_caps = [cap_id for cap_id in enabled_caps if cap_id not in quota_exempt]
+                if capability_id not in set(counted_caps) and len(counted_caps) >= max_enabled_per_actor:
                     return f"quota_enabled_actor_exceeded:{max_enabled_per_actor}"
 
             if scope == "group":

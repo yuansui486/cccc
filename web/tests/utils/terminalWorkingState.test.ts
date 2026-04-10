@@ -8,6 +8,21 @@ import {
 } from "../../src/utils/terminalWorkingState";
 
 describe("terminalWorkingState", () => {
+  it("keeps PTY actors idle without a visible working banner", () => {
+    expect(
+      getActorDisplayWorkingState({
+        id: "peer-1",
+        title: "Peer 1",
+        enabled: true,
+        running: true,
+        runner: "pty",
+        runner_effective: "pty",
+        effective_working_state: "idle",
+        idle_seconds: 0.8,
+      }, null),
+    ).toBe("idle");
+  });
+
   it("detects codex-style prompt lines after ansi stripping", () => {
     const buffer = appendTerminalSignalBuffer("", "\u001b[32m> Improve documentation in @filename\u001b[0m\n");
     expect(isTerminalPromptVisible(buffer)).toBe(true);
@@ -22,17 +37,31 @@ describe("terminalWorkingState", () => {
     expect(isCodexWorkingBannerVisible("◦ Working (6s • esc to interrupt)\n")).toBe(true);
   });
 
-  it("treats codex working banner as stronger than the input box", () => {
+  it("detects a visible codex working banner from a freshly fetched terminal tail", () => {
+    const result = getTerminalSignalFromChunk("", "◦ Working (13s • esc to interrupt)\n", "codex");
+    expect(result.signalKind).toBe("working_output");
+  });
+
+  it("treats the visible codex prompt as stronger than an older banner in the same tail", () => {
     const result = getTerminalSignalFromChunk(
       "",
       "◦ Working (6s • esc to interrupt)\n› Run /review on my current changes\n",
       "codex",
     );
-    expect(result.signalKind).toBe("working_output");
+    expect(result.signalKind).toBe("idle_prompt");
   });
 
   it("treats codex input box as idle only when the working banner is absent", () => {
     const result = getTerminalSignalFromChunk("", "› Run /review on my current changes\n", "codex");
+    expect(result.signalKind).toBe("idle_prompt");
+  });
+
+  it("prefers the visible prompt over an older codex working banner", () => {
+    const result = getTerminalSignalFromChunk(
+      "",
+      "◦ Working (13s • esc to interrupt)\nstream disconnected before completion\n› Find and fix a bug in @filename\ngpt-5.4 default · 41% left · ~/Desktop/waterbang/ai/hr-agent\n",
+      "codex",
+    );
     expect(result.signalKind).toBe("idle_prompt");
   });
 
@@ -88,6 +117,21 @@ describe("terminalWorkingState", () => {
     ).toBe("idle");
   });
 
+  it("does not keep a stale idle prompt elevated forever", () => {
+    expect(
+      getActorDisplayWorkingState(
+        {
+          id: "peer-1",
+          running: true,
+          runner: "pty",
+          effective_working_state: "waiting",
+        },
+        { kind: "idle_prompt", updatedAt: 10_000 },
+        14_500,
+      ),
+    ).toBe("waiting");
+  });
+
   it("temporarily upgrades backend idle to working when fresh terminal output is flowing", () => {
     expect(
       getActorDisplayWorkingState(
@@ -114,6 +158,21 @@ describe("terminalWorkingState", () => {
         },
         { kind: "working_output", updatedAt: 10_000 },
         20_500,
+      ),
+    ).toBe("idle");
+  });
+
+  it("does not apply PTY prompt overrides to headless actors", () => {
+    expect(
+      getActorDisplayWorkingState(
+        {
+          id: "peer-1",
+          running: true,
+          runner: "headless",
+          runner_effective: "headless",
+          effective_working_state: "idle",
+        },
+        null,
       ),
     ).toBe("idle");
   });

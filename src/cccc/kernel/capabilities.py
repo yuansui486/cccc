@@ -41,6 +41,18 @@ CORE_ADMIN_TOOLS: Tuple[str, ...] = (
 
 CORE_TOOL_NAMES: Tuple[str, ...] = CORE_BASIC_TOOLS + CORE_ADMIN_TOOLS
 
+# Pet keeps a dedicated minimal core surface. The mutation lane stays on
+# cccc_pet_decisions, with cccc_agent_state reserved for profile refresh.
+PET_CORE_TOOLS: Tuple[str, ...] = (
+    "cccc_help",
+    "cccc_bootstrap",
+    "cccc_project_info",
+    "cccc_inbox_list",
+    "cccc_inbox_mark_read",
+    "cccc_context_get",
+    "cccc_agent_state",
+)
+
 
 BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
     "pack:group-runtime": {
@@ -174,16 +186,26 @@ def all_pack_tool_name_set() -> Set[str]:
     return names
 
 
+def resolve_core_tool_names(
+    *,
+    actor_role: str = "",
+    is_pet: bool = False,
+) -> Set[str]:
+    if bool(is_pet):
+        return set(PET_CORE_TOOLS)
+    role = str(actor_role or "").strip().lower()
+    if role == "peer":
+        return set(CORE_BASIC_TOOLS)
+    return set(CORE_TOOL_NAMES)
+
+
 def resolve_visible_tool_names(
     enabled_capability_ids: Iterable[str],
     *,
     actor_role: str = "",
+    is_pet: bool = False,
 ) -> Set[str]:
-    role = str(actor_role or "").strip().lower()
-    if role == "peer":
-        visible: Set[str] = set(CORE_BASIC_TOOLS)
-    else:
-        visible = set(CORE_TOOL_NAMES)
+    visible = resolve_core_tool_names(actor_role=actor_role, is_pet=is_pet)
     for cap_id in enabled_capability_ids:
         cap = BUILTIN_CAPABILITY_PACKS.get(str(cap_id))
         if not isinstance(cap, dict):

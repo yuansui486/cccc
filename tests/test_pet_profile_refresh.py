@@ -20,6 +20,11 @@ class _FakeGroup:
 
 
 class TestPetProfileRefresh(unittest.TestCase):
+    def tearDown(self) -> None:
+        from cccc.daemon.pet import assistive_jobs
+
+        assistive_jobs.cancel_job("g-demo", assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH)
+
     def test_record_user_chat_message_skips_paste_noise(self) -> None:
         from cccc.daemon.pet import profile_refresh
 
@@ -28,6 +33,10 @@ class TestPetProfileRefresh(unittest.TestCase):
             group = _FakeGroup("g-demo", root / "groups" / "g-demo")
             noisy = "https://a.example/x\nhttps://b.example/y\nhttps://c.example/z\n" + ("/tmp/demo/path\n" * 6)
             with patch.object(profile_refresh, "ensure_home", return_value=root), patch.object(
+                profile_refresh.assistive_jobs,
+                "ensure_home",
+                return_value=root,
+            ), patch.object(
                 profile_refresh,
                 "load_group",
                 return_value=group,
@@ -53,6 +62,10 @@ class TestPetProfileRefresh(unittest.TestCase):
             root = Path(tmp)
             group = _FakeGroup("g-demo", root / "groups" / "g-demo")
             with patch.object(profile_refresh, "ensure_home", return_value=root), patch.object(
+                profile_refresh.assistive_jobs,
+                "ensure_home",
+                return_value=root,
+            ), patch.object(
                 profile_refresh,
                 "load_group",
                 return_value=group,
@@ -107,6 +120,10 @@ class TestPetProfileRefresh(unittest.TestCase):
             root = Path(tmp)
             group = _FakeGroup("g-demo", root / "groups" / "g-demo")
             with patch.object(profile_refresh, "ensure_home", return_value=root), patch.object(
+                profile_refresh.assistive_jobs,
+                "ensure_home",
+                return_value=root,
+            ), patch.object(
                 profile_refresh,
                 "load_group",
                 return_value=group,
@@ -171,6 +188,10 @@ class TestPetProfileRefresh(unittest.TestCase):
             root = Path(tmp)
             group = _FakeGroup("g-demo", root / "groups" / "g-demo")
             with patch.object(profile_refresh, "ensure_home", return_value=root), patch.object(
+                profile_refresh.assistive_jobs,
+                "ensure_home",
+                return_value=root,
+            ), patch.object(
                 profile_refresh,
                 "load_group",
                 return_value=group,

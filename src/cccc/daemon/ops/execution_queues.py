@@ -9,7 +9,7 @@ from queue import Empty, Queue
 import threading
 from typing import Any, Callable, Deque, Dict, Optional, Tuple
 
-from ...contracts.v1 import DaemonError, DaemonResponse
+from ...contracts.v1 import DaemonError, DaemonResponse, build_async_result_fields
 
 
 @dataclass
@@ -111,7 +111,10 @@ class GroupSpaceSyncRunQueue:
         prv = str(provider or "notebooklm").strip() or "notebooklm"
         sender = str(by or "user").strip() or "user"
         if not gid:
-            return {"accepted": False, "queued": False, "reason": "missing_group_id"}
+            return {
+                **build_async_result_fields(accepted=False, completed=False, queued=False),
+                "reason": "missing_group_id",
+            }
 
         key = (gid, prv)
         with self._lock:
@@ -123,8 +126,12 @@ class GroupSpaceSyncRunQueue:
                     current.by = sender
                 self._wake_event.set()
                 return {
-                    "accepted": True,
-                    "queued": False,
+                    **build_async_result_fields(
+                        accepted=True,
+                        completed=False,
+                        queued=False,
+                        background=True,
+                    ),
                     "reason": "already_pending",
                     "group_id": gid,
                     "provider": prv,
@@ -137,8 +144,12 @@ class GroupSpaceSyncRunQueue:
                 self._pending_by_group[key] = task
                 self._wake_event.set()
                 return {
-                    "accepted": True,
-                    "queued": True,
+                    **build_async_result_fields(
+                        accepted=True,
+                        completed=False,
+                        queued=True,
+                        background=True,
+                    ),
                     "reason": "queued_after_running",
                     "group_id": gid,
                     "provider": prv,
@@ -151,8 +162,12 @@ class GroupSpaceSyncRunQueue:
             self._pending_by_group[key] = task
             self._wake_event.set()
             return {
-                "accepted": True,
-                "queued": True,
+                **build_async_result_fields(
+                    accepted=True,
+                    completed=False,
+                    queued=True,
+                    background=True,
+                ),
                 "reason": "queued",
                 "group_id": gid,
                 "provider": prv,

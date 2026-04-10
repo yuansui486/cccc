@@ -128,6 +128,8 @@ def render_role_system_prompt(
         lines.extend(scope_lines)
     
     # Keep this stable and short. Long-lived playbook details belong in cccc_help.
+    visible_reply_line = "- Visible replies must go through MCP: cccc_message_send / cccc_message_reply."
+
     core_lines = [
         "Working Style:",
         "- Work like a sharp teammate, not a customer-service script.",
@@ -137,8 +139,9 @@ def render_role_system_prompt(
         "",
         "Platform Invariants:",
         "- No fabrication. Verify before claiming done.",
-        "- Visible replies must go through MCP: cccc_message_send / cccc_message_reply.",
+        visible_reply_line,
         "- Terminal output is not delivery.",
+        "- A status message, plan, or promise is not task progress; for action requests, either start the work now or state the exact blocker.",
         "- Cold start or resume: call cccc_bootstrap first, then cccc_help.",
         "- At key transitions, sync shared control-plane state and your cccc_agent_state.",
         "- Once scope is approved, finish it end-to-end; do not ask to continue on obvious next steps.",

@@ -35,6 +35,7 @@ class SendRequest(BaseModel):
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     path: str = Field(default="")
+    quote_text: str = Field(default="")
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
     src_group_id: str = Field(default="")
@@ -283,8 +284,11 @@ class ObservabilityUpdateRequest(BaseModel):
     by: str = Field(default="user")
     developer_mode: Optional[bool] = None
     log_level: Optional[str] = None
+    logger_levels: Optional[Dict[str, str]] = None
     terminal_transcript_per_actor_bytes: Optional[int] = None
     terminal_ui_scrollback_lines: Optional[int] = None
+    peer_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
+    pet_runtime_visibility: Optional[Literal["hidden", "visible"]] = None
 
 
 class RegistryReconcileRequest(BaseModel):
@@ -393,7 +397,7 @@ class GroupSpaceProviderAuthRequest(BaseModel):
 
 class IMSetRequest(BaseModel):
     group_id: str
-    platform: Literal["telegram", "slack", "discord", "feishu", "dingtalk", "wecom"]
+    platform: Literal["telegram", "slack", "discord", "feishu", "dingtalk", "wecom", "weixin"]
     # Legacy single token field (backward compat for telegram/discord)
     token_env: str = ""
     token: str = ""
@@ -411,6 +415,9 @@ class IMSetRequest(BaseModel):
     # WeCom fields
     wecom_bot_id: str = ""
     wecom_secret: str = ""
+    # Weixin fields
+    weixin_account_id: str = ""
+    weixin_command: str = ""
 
 
 class IMActionRequest(BaseModel):

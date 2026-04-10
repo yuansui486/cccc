@@ -191,6 +191,156 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_space_job_store_reuses_cached_jobs_doc_between_reads(self) -> None:
+        from cccc.daemon.space import group_space_store as store
+        from cccc.daemon.space.group_space_store import enqueue_space_job, list_due_space_jobs
+
+        _, cleanup = self._with_home()
+        try:
+            real_read_json = store.read_json
+            read_calls = {"n": 0}
+
+            def _counted_read_json(path):
+                read_calls["n"] += 1
+                return real_read_json(path)
+
+            with patch.object(store, "read_json", side_effect=_counted_read_json):
+                job, deduped = enqueue_space_job(
+                    group_id="g_cache_1",
+                    provider="notebooklm",
+                    remote_space_id="nb_cache_1",
+                    kind="context_sync",
+                    payload={"summary": {"tasks": ["a"]}},
+                    idempotency_key="cache-job-1",
+                )
+                self.assertFalse(deduped)
+                self.assertTrue(str(job.get("job_id") or "").strip())
+
+                due_first = list_due_space_jobs(limit=20)
+                due_second = list_due_space_jobs(limit=20)
+
+            self.assertEqual(len(due_first), 1)
+            self.assertEqual(len(due_second), 1)
+            self.assertLessEqual(read_calls["n"], 2)
+        finally:
+            cleanup()
+
+    def test_space_job_payload_is_stored_out_of_line_and_hydrated_on_read(self) -> None:
+        import json
+        from pathlib import Path
+
+        from cccc.daemon.space.group_space_store import enqueue_space_job, get_space_job
+
+        home, cleanup = self._with_home()
+        try:
+            payload = {
+                "group_id": "g_payload_1",
+                "summary": {"tasks": ["a", "b"], "brief": "x" * 4096},
+                "changes": [{"op": "update", "detail": "sync"}],
+            }
+            job, deduped = enqueue_space_job(
+                group_id="g_payload_1",
+                provider="notebooklm",
+                remote_space_id="nb_payload_1",
+                kind="context_sync",
+                payload=payload,
+                idempotency_key="payload-job-1",
+            )
+            self.assertFalse(deduped)
+            job_id = str(job.get("job_id") or "")
+            self.assertTrue(job_id)
+            self.assertEqual(job.get("payload"), payload)
+
+            jobs_doc = json.loads(Path(home, "state", "space", "jobs.json").read_text(encoding="utf-8"))
+            stored = (((jobs_doc.get("jobs") or {}) if isinstance(jobs_doc, dict) else {}).get(job_id) or {})
+            self.assertEqual(stored.get("payload"), {})
+            self.assertTrue(str(stored.get("payload_ref") or "").strip())
+            self.assertGreater(int(stored.get("payload_bytes") or 0), 0)
+            payload_path = Path(home, "state", "space", "job_payloads", str(stored.get("payload_ref") or ""))
+            self.assertTrue(payload_path.exists())
+
+            hydrated = get_space_job(job_id) or {}
+            self.assertEqual(hydrated.get("payload"), payload)
+        finally:
+            cleanup()
+
+    def test_compact_space_jobs_storage_drops_old_terminal_jobs(self) -> None:
+        import json
+        from pathlib import Path
+
+        from cccc.daemon.space.group_space_store import (
+            compact_space_jobs_storage,
+            enqueue_space_job,
+            get_space_job,
+            mark_space_job_failed,
+            mark_space_job_succeeded,
+        )
+
+        _, cleanup = self._with_home()
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "CCCC_SPACE_JOBS_TERMINAL_KEEP": "1",
+                    "CCCC_SPACE_JOBS_TERMINAL_MAX_AGE_DAYS": "365",
+                },
+                clear=False,
+            ):
+                first, _ = enqueue_space_job(
+                    group_id="g_compact_1",
+                    provider="notebooklm",
+                    remote_space_id="nb_compact_1",
+                    kind="context_sync",
+                    payload={"summary": {"tasks": ["first"]}},
+                    idempotency_key="compact-1",
+                )
+                kept_terminal_ids: list[str] = []
+                for idx in range(20):
+                    item, _ = enqueue_space_job(
+                        group_id="g_compact_1",
+                        provider="notebooklm",
+                        remote_space_id="nb_compact_1",
+                        kind="context_sync",
+                        payload={"summary": {"tasks": [f"keep-{idx}"]}},
+                        idempotency_key=f"compact-keep-{idx}",
+                    )
+                    item_id = str(item.get("job_id") or "")
+                    self.assertTrue(item_id)
+                    mark_space_job_succeeded(item_id, result={"ok": True, "idx": idx})
+                    kept_terminal_ids.append(item_id)
+                active, _ = enqueue_space_job(
+                    group_id="g_compact_1",
+                    provider="notebooklm",
+                    remote_space_id="nb_compact_1",
+                    kind="context_sync",
+                    payload={"summary": {"tasks": ["active"]}},
+                    idempotency_key="compact-3",
+                )
+                first_id = str(first.get("job_id") or "")
+                active_id = str(active.get("job_id") or "")
+                self.assertTrue(first_id and active_id)
+
+                first_done = mark_space_job_failed(first_id, code="space_failed", message="failed")
+                first_payload_ref = str(first_done.get("payload_ref") or "")
+                self.assertTrue(first_payload_ref)
+                jobs_path = Path(os.environ["CCCC_HOME"], "state", "space", "jobs.json")
+                jobs_doc = json.loads(jobs_path.read_text(encoding="utf-8"))
+                jobs = jobs_doc.get("jobs") if isinstance(jobs_doc.get("jobs"), dict) else {}
+                first_item = jobs.get(first_id) if isinstance(jobs.get(first_id), dict) else None
+                if isinstance(first_item, dict):
+                    first_item["updated_at"] = "2025-01-01T00:00:00Z"
+                    first_item["created_at"] = "2025-01-01T00:00:00Z"
+                jobs_path.write_text(json.dumps(jobs_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+
+                stats = compact_space_jobs_storage()
+                self.assertGreaterEqual(int(stats.get("dropped_jobs") or 0), 1)
+                self.assertIsNone(get_space_job(first_id))
+                self.assertIsNotNone(get_space_job(kept_terminal_ids[-1]))
+                self.assertIsNotNone(get_space_job(active_id))
+                self.assertFalse(Path(os.environ["CCCC_HOME"], "state", "space", "job_payloads", first_payload_ref).exists())
+        finally:
+            cleanup()
+
     def test_write_execution_is_serialized_per_remote_space(self) -> None:
         from cccc.daemon.space.group_space_runtime import execute_space_job
         from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding

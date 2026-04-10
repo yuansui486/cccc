@@ -327,6 +327,10 @@ automation:
                 assert group is not None
                 snapshot_path = Path(group.path) / "context" / "summary_snapshot.json"
                 self.assertTrue(snapshot_path.exists())
+
+                from cccc.daemon.context.context_ops import _wait_for_summary_snapshot_rebuild
+
+                _wait_for_summary_snapshot_rebuild(group_id, timeout_s=2.0)
         finally:
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)

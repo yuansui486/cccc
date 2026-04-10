@@ -26,8 +26,8 @@ def cmd_im_set(args: argparse.Namespace) -> int:
         return 2
 
     platform = str(args.platform or "").strip().lower()
-    if platform not in ("telegram", "slack", "discord", "feishu", "dingtalk"):
-        _print_json({"ok": False, "error": {"code": "invalid_platform", "message": "platform must be telegram, slack, discord, feishu, or dingtalk"}})
+    if platform not in ("telegram", "slack", "discord", "feishu", "dingtalk", "wecom", "weixin"):
+        _print_json({"ok": False, "error": {"code": "invalid_platform", "message": "platform must be telegram, slack, discord, feishu, dingtalk, wecom, or weixin"}})
         return 2
 
     # Get token fields
@@ -41,6 +41,10 @@ def cmd_im_set(args: argparse.Namespace) -> int:
     feishu_domain = str(getattr(args, "domain", "") or "").strip()
     dingtalk_robot_code_env = str(getattr(args, "robot_code_env", "") or "").strip()
     dingtalk_robot_code = str(getattr(args, "robot_code", "") or "").strip()
+    wecom_bot_id = str(getattr(args, "wecom_bot_id", "") or "").strip()
+    wecom_secret = str(getattr(args, "wecom_secret", "") or "").strip()
+    weixin_account_id = str(getattr(args, "weixin_account_id", "") or "").strip()
+    weixin_command = str(getattr(args, "weixin_command", "") or "").strip()
 
     # Backward compat: if only token_env provided, use as bot_token_env
     if token_env and not bot_token_env:
@@ -66,6 +70,23 @@ def cmd_im_set(args: argparse.Namespace) -> int:
             except (EOFError, KeyboardInterrupt):
                 print()
                 return 1
+    elif platform == "wecom":
+        if not wecom_bot_id or not wecom_secret:
+            try:
+                if not wecom_bot_id:
+                    print("Enter WeCom Bot ID or env var name (default: WECOM_BOT_ID):")
+                    bot_input = input("> ").strip()
+                    wecom_bot_id = bot_input or "WECOM_BOT_ID"
+                if not wecom_secret:
+                    print("Enter WeCom Secret or env var name (default: WECOM_SECRET):")
+                    secret_input = input("> ").strip()
+                    wecom_secret = secret_input or "WECOM_SECRET"
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 1
+    elif platform == "weixin":
+        # Weixin uses a local Node sidecar. Both fields are optional.
+        pass
     elif not bot_token_env and not token:
         try:
             if platform == "slack":
@@ -138,6 +159,16 @@ def cmd_im_set(args: argparse.Namespace) -> int:
             im_config["dingtalk_robot_code"] = dingtalk_robot_code_env
         elif dingtalk_robot_code:
             im_config["dingtalk_robot_code"] = dingtalk_robot_code
+    elif platform == "wecom":
+        if wecom_bot_id:
+            im_config["wecom_bot_id"] = wecom_bot_id
+        if wecom_secret:
+            im_config["wecom_secret"] = wecom_secret
+    elif platform == "weixin":
+        if weixin_account_id:
+            im_config["weixin_account_id"] = weixin_account_id
+        if weixin_command:
+            im_config["weixin_command"] = weixin_command
 
     im_config = canonicalize_im_config(im_config)
 

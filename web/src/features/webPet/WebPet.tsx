@@ -3,13 +3,12 @@ import { useGroupStore, useUIStore } from "../../stores";
 import { getWebPetPosition, useWebPetStore } from "../../stores/useWebPetStore";
 import {
   fetchActors,
-  fetchAutomation,
   fetchContext,
   fetchGroup,
   fetchLedgerTail,
+  fetchLedgerStatuses,
   fetchPetPeerContext,
   fetchSettings,
-  manageAutomation,
   recordPetDecisionOutcome,
   requestPetPeerReview,
   restartActor,
@@ -18,18 +17,21 @@ import { PetPanel } from "./PetPanel";
 import { PetReminderBubble } from "./PetReminderBubble";
 import { WebPetBubble } from "./WebPetBubble";
 import { diagnosePetManualReview } from "./reviewDiagnostics";
-import { shouldSurfaceReminder, useWebPetData } from "./useWebPetData";
+import { useWebPetData } from "./useWebPetData";
 import { buildPetPeerContext, usePetPeerContext } from "./petPeerContext";
 import { stagePetReminderDraft } from "./petSuggestionDraft";
 import { getBackgroundRefreshDelayMs } from "./reviewTiming";
 import { WEB_PET_BUBBLE_SIZE } from "./constants";
 import { getLatestPetContextRefreshMarker } from "./petContextRefresh";
+import { isManualReviewReminderReady } from "./manualReviewReminder";
 import type { PetReminder } from "./types";
-import type { Actor, GroupContext, GroupDoc, GroupSettings, LedgerEvent } from "../../types";
+import type { Actor, GroupContext, GroupDoc, GroupSettings, LedgerEvent, LedgerEventStatusPayload } from "../../types";
+import { mergeLedgerEvents } from "../../utils/mergeLedgerEvents";
 import i18n from "../../i18n";
 
 const lastKnownDesktopPetEnabledByGroup: Record<string, boolean> = {};
 const BACKGROUND_REFRESH_TIMEOUT_MS = 10_000;
+const BACKGROUND_LEDGER_TAIL_LIMIT = 60;
 const MANUAL_PET_REVIEW_POLL_MS = 900;
 const MANUAL_PET_REVIEW_MAX_ATTEMPTS = 8;
 const EMPTY_EVENTS: LedgerEvent[] = [];
@@ -64,7 +66,7 @@ function handleReminderAction(
       });
       onExecuted?.();
       useUIStore.getState().showNotice({
-        message: tPet("notice.suggestionDrafted", "Draft added to composer"),
+        message: tPet("notice.suggestionDrafted", "Filled into chat composer"),
       });
       break;
     }
@@ -92,39 +94,6 @@ function handleReminderAction(
           error instanceof Error
             ? error.message
             : tPet("notice.actorRestartFailed", "Failed to restart actor");
-        useUIStore.getState().showError(message);
-      });
-      break;
-    }
-    case "automation_proposal": {
-      void fetchAutomation(action.groupId).then((automationResp) => {
-        if (!automationResp.ok) {
-          useUIStore.getState().showError(`${automationResp.error.code}: ${automationResp.error.message}`);
-          return;
-        }
-        const expectedVersion = Number(automationResp.result?.version || 0) || undefined;
-        return manageAutomation(action.groupId, action.actions, expectedVersion).then((resp) => {
-          if (!resp.ok) {
-            useUIStore.getState().showError(`${resp.error.code}: ${resp.error.message}`);
-            return;
-          }
-          void recordPetDecisionOutcome(action.groupId, {
-            fingerprint: reminder.fingerprint,
-            outcome: "executed",
-            decisionId: reminder.id,
-            actionType: action.type,
-            sourceEventId: reminder.source.eventId,
-          });
-          onExecuted?.();
-          useUIStore.getState().showNotice({
-            message: tPet("notice.automationProposalApplied", "Automation proposal applied"),
-          });
-        });
-      }).catch((error) => {
-        const message =
-          error instanceof Error
-            ? error.message
-            : tPet("notice.automationProposalApplyFailed", "Failed to apply automation proposal");
         useUIStore.getState().showError(message);
       });
       break;
@@ -164,6 +133,7 @@ export function WebPet({
   const [reviewInFlight, setReviewInFlight] = useState(false);
   const [petContextRefreshToken, setPetContextRefreshToken] = useState(0);
   const [remoteState, setRemoteState] = useState<RemotePetGroupState>(() => buildEmptyRemoteState());
+  const remoteStateRef = useRef<RemotePetGroupState>(buildEmptyRemoteState());
   const remoteRefreshEpochRef = useRef(0);
   const remoteRefreshInFlightRef = useRef(false);
   const remoteRefreshFailureCountRef = useRef(0);
@@ -172,6 +142,7 @@ export function WebPet({
   const reviewSessionRef = useRef(0);
   const petContextRefreshGroupIdRef = useRef("");
   const latestPetContextRefreshMarkerRef = useRef("");
+  const desktopPetVisibilityFallbackRef = useRef(false);
 
   const isSelectedGroup = String(selectedGroupId || "").trim() === String(groupId || "").trim();
   const groupDoc = isSelectedGroup ? selectedGroupDoc : remoteState.groupDoc;
@@ -185,6 +156,8 @@ export function WebPet({
   );
   const {
     catState,
+    panelData,
+    taskSummaries,
     hint,
     reminders,
     activeReminder,
@@ -204,6 +177,10 @@ export function WebPet({
   const selectedReminder = reminders.find(
     (reminder) => reminder.fingerprint === selectedReminderFingerprint,
   ) || activeReminder || null;
+
+  useEffect(() => {
+    remoteStateRef.current = remoteState;
+  }, [remoteState]);
   const handleReminderActionWithDismiss = useCallback(
     (reminder: PetReminder) => {
       handleReminderAction(reminder, () => {
@@ -258,7 +235,7 @@ export function WebPet({
         if (contextResp.ok) {
           const refreshedContext = buildPetPeerContext(contextResp.result, { status: "loaded" });
           const refreshedReminder =
-            refreshedContext.decisions.find((decision) => shouldSurfaceReminder(decision)) || null;
+            refreshedContext.decisions.find((decision) => isManualReviewReminderReady(decision, groupDoc?.state || "")) || null;
           if (refreshedReminder) {
             reminderReady = true;
             setPetContextRefreshToken((current) => current + 1);
@@ -313,12 +290,14 @@ export function WebPet({
         message: tPet("notice.reviewNoReminders", "No current reminders"),
       });
     })();
-  }, [groupId, reviewInFlight]);
+  }, [groupId, groupDoc?.state, reviewInFlight]);
 
   useEffect(() => {
     const gid = String(groupId || "").trim();
     if (!gid || !groupSettings) return;
-    lastKnownDesktopPetEnabledByGroup[gid] = Boolean(groupSettings.desktop_pet_enabled);
+    const enabled = Boolean(groupSettings.desktop_pet_enabled);
+    lastKnownDesktopPetEnabledByGroup[gid] = enabled;
+    desktopPetVisibilityFallbackRef.current = enabled;
   }, [groupId, groupSettings]);
 
   useEffect(() => {
@@ -379,7 +358,11 @@ export function WebPet({
             fetchGroup(gid, { noCache: true, signal: controller.signal }),
             fetchActors(gid, false, { noCache: true, signal: controller.signal }),
             fetchContext(gid, { detail: "summary", noCache: true, signal: controller.signal }),
-            fetchLedgerTail(gid, 120, { noCache: true, signal: controller.signal }),
+            fetchLedgerTail(gid, BACKGROUND_LEDGER_TAIL_LIMIT, {
+              noCache: true,
+              signal: controller.signal,
+              includeStatuses: false,
+            }),
             fetchSettings(gid, { noCache: true, signal: controller.signal }),
           ]);
         if (cancelled || controller.signal.aborted || remoteRefreshEpochRef.current !== epoch) return;
@@ -389,13 +372,40 @@ export function WebPet({
           ? remoteRefreshFailureCountRef.current + 1
           : 0;
 
+        const mergedEvents = ledgerResp.ok
+          ? mergeLedgerEvents(remoteStateRef.current.events, ledgerResp.result.events || [], BACKGROUND_LEDGER_TAIL_LIMIT)
+          : remoteStateRef.current.events;
         setRemoteState({
           groupDoc: groupResp.ok ? groupResp.result.group : null,
           actors: actorsResp.ok ? actorsResp.result.actors || [] : [],
           groupContext: contextResp.ok ? contextResp.result : null,
           groupSettings: settingsResp.ok ? settingsResp.result.settings || null : groupSettings,
-          events: ledgerResp.ok ? ledgerResp.result.events || [] : [],
+          events: mergedEvents,
         });
+        const eventIds = mergedEvents
+          .filter((event) => event.kind === "chat.message")
+          .map((event) => String(event.id || "").trim())
+          .filter((eventId) => eventId);
+        if (eventIds.length > 0) {
+          const statusesResp = await fetchLedgerStatuses(gid, eventIds, { noCache: true, signal: controller.signal });
+          if (!cancelled && !controller.signal.aborted && remoteRefreshEpochRef.current === epoch && statusesResp.ok) {
+            const statusMap: Record<string, LedgerEventStatusPayload> = statusesResp.result.statuses || {};
+            setRemoteState((current) => ({
+              ...current,
+              events: current.events.map((event) => {
+                const eventId = String(event.id || "").trim();
+                const patch = eventId ? statusMap[eventId] : null;
+                if (!patch) return event;
+                return {
+                  ...event,
+                  _read_status: patch.read_status ?? event._read_status,
+                  _ack_status: patch.ack_status ?? event._ack_status,
+                  _obligation_status: patch.obligation_status ?? event._obligation_status,
+                };
+              }),
+            }));
+          }
+        }
       } finally {
         window.clearTimeout(timeout);
         if (remoteRefreshAbortRef.current === controller) {
@@ -498,7 +508,10 @@ export function WebPet({
     if (groupSettings) {
       return Boolean(groupSettings.desktop_pet_enabled);
     }
-    return Boolean(lastKnownDesktopPetEnabledByGroup[gid]);
+    if (Object.prototype.hasOwnProperty.call(lastKnownDesktopPetEnabledByGroup, gid)) {
+      return Boolean(lastKnownDesktopPetEnabledByGroup[gid]);
+    }
+    return desktopPetVisibilityFallbackRef.current;
   })();
 
   if (!groupId || !desktopPetEnabled) {
@@ -529,6 +542,8 @@ export function WebPet({
         <PetPanel
           reminder={selectedReminder}
           reminders={reminders}
+          companion={petContext.companion}
+          taskSummaries={taskSummaries.length > 0 ? taskSummaries : panelData.agents.map((agent) => agent.focus).filter(Boolean)}
           reviewInFlight={reviewInFlight}
           onDismiss={dismissReminder}
           onAction={handleReminderActionWithDismiss}
@@ -545,6 +560,7 @@ export function WebPet({
         groupId={groupId}
         stackIndex={stackIndex}
         state={catState}
+        companion={petContext.companion}
         hint={hint}
         reaction={reaction}
         onPress={handleBubblePress}
