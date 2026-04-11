@@ -110,11 +110,12 @@ def is_actor_running(group_id: str, actor_id: str, runner_kind: str) -> bool:
     group = load_group(group_id)
     actor = find_actor(group, actor_id) if group is not None else None
     runtime = str(actor.get("runtime") or "").strip().lower() if isinstance(actor, dict) else ""
-    if runtime == "codex":
+    effective_runner = _effective_runner_kind(runner_kind)
+    if runtime == "codex" and effective_runner == "headless":
         return codex_app_supervisor.actor_running(group_id, actor_id)
-    if runtime == "claude" and _effective_runner_kind(runner_kind) == "headless":
+    if runtime == "claude" and effective_runner == "headless":
         return claude_app_supervisor.actor_running(group_id, actor_id)
-    if _effective_runner_kind(runner_kind) == "headless":
+    if effective_runner == "headless":
         return headless_runner.SUPERVISOR.actor_running(group_id, actor_id)
     else:
         return pty_runner.SUPERVISOR.actor_running(group_id, actor_id)
@@ -136,11 +137,12 @@ def stop_actor(group_id: str, actor_id: str, runner_kind: str) -> None:
     group = load_group(group_id)
     actor = find_actor(group, actor_id) if group is not None else None
     runtime = str(actor.get("runtime") or "").strip().lower() if isinstance(actor, dict) else ""
-    if runtime == "codex":
+    effective_runner = _effective_runner_kind(runner_kind)
+    if runtime == "codex" and effective_runner == "headless":
         codex_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
-    elif runtime == "claude" and _effective_runner_kind(runner_kind) == "headless":
+    elif runtime == "claude" and effective_runner == "headless":
         claude_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
-    elif _effective_runner_kind(runner_kind) == "headless":
+    elif effective_runner == "headless":
         headless_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
     else:
         pty_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)

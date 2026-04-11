@@ -1,13 +1,22 @@
 // Actor action helpers extracted from ActorTab-related logic.
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useGroupStore, useUIStore, useModalStore, useInboxStore, useFormStore } from "../stores";
 import * as api from "../services/api";
 import type { Actor, SupportedRuntime } from "../types";
 import { formatCapabilityIdInput } from "../utils/capabilityAutoload";
 import { getEffectiveActorRunner } from "../utils/headlessRuntimeSupport";
 
+const ACTOR_START_RECONCILE_DELAYS_MS = [1200, 3500] as const;
+
 export function useActorActions(groupId: string) {
-  const { refreshActors, refreshGroups, loadGroup, clearStreamingEventsForActor } = useGroupStore();
+  const {
+    refreshActors,
+    refreshGroups,
+    loadGroup,
+    clearStreamingEventsForActor,
+    updateActorActivity,
+    updateGroupRuntimeState,
+  } = useGroupStore();
   const { setBusy, setActiveTab, showError } = useUIStore();
   const { openModal, setEditingActor } = useModalStore();
   const { setInboxActorId, setInboxMessages } = useInboxStore();
@@ -16,12 +25,65 @@ export function useActorActions(groupId: string) {
 
   // Local state: terminal epoch is used to force a terminal re-mount.
   const [termEpochByActor, setTermEpochByActor] = useState<Record<string, number>>({});
+  const reconcileTimersRef = useRef<Record<string, number[]>>({});
+
+  useEffect(() => {
+    return () => {
+      const timersByActor = reconcileTimersRef.current;
+      for (const actorId of Object.keys(timersByActor)) {
+        for (const timerId of timersByActor[actorId] || []) {
+          window.clearTimeout(timerId);
+        }
+      }
+      reconcileTimersRef.current = {};
+    };
+  }, []);
+
+  const clearReconcileTimers = useCallback((actorId: string) => {
+    const key = String(actorId || "").trim();
+    if (!key) return;
+    for (const timerId of reconcileTimersRef.current[key] || []) {
+      window.clearTimeout(timerId);
+    }
+    delete reconcileTimersRef.current[key];
+  }, []);
+
+  const scheduleRuntimeReconcile = useCallback((actorId: string) => {
+    const key = String(actorId || "").trim();
+    if (!groupId || !key) return;
+    clearReconcileTimers(key);
+    reconcileTimersRef.current[key] = ACTOR_START_RECONCILE_DELAYS_MS.map((delayMs) =>
+      window.setTimeout(() => {
+        void Promise.allSettled([refreshActors(groupId), refreshGroups()]);
+      }, delayMs)
+    );
+  }, [clearReconcileTimers, groupId, refreshActors, refreshGroups]);
+
+  const optimisticMarkRunning = useCallback((actorId: string, reason: string) => {
+    const key = String(actorId || "").trim();
+    if (!groupId || !key) return;
+    const updatedAt = new Date().toISOString();
+    updateActorActivity([{
+      id: key,
+      running: true,
+      idle_seconds: null,
+      effective_working_state: "waiting",
+      effective_working_reason: reason,
+      effective_working_updated_at: updatedAt,
+      effective_active_task_id: null,
+    }]);
+    updateGroupRuntimeState(groupId, {
+      lifecycle_state: "active",
+      runtime_running: true,
+    });
+  }, [groupId, updateActorActivity, updateGroupRuntimeState]);
 
   // Start/stop actor
   const toggleActorEnabled = useCallback(
     async (actor: Actor) => {
       if (!actor || !groupId) return;
       const isRunning = actor.running ?? actor.enabled ?? false;
+      const wantsStart = !isRunning;
       setBusy(`actor-${isRunning ? "stop" : "start"}:${actor.id}`);
       try {
         const resp = isRunning
@@ -32,11 +94,17 @@ export function useActorActions(groupId: string) {
           return;
         }
         await Promise.all([refreshActors(), refreshGroups()]);
+        if (wantsStart) {
+          optimisticMarkRunning(actor.id, "actor_start_requested");
+          scheduleRuntimeReconcile(actor.id);
+        } else {
+          clearReconcileTimers(actor.id);
+        }
       } finally {
         setBusy("");
       }
     },
-    [groupId, setBusy, showError, refreshActors, refreshGroups]
+    [clearReconcileTimers, groupId, optimisticMarkRunning, refreshActors, refreshGroups, scheduleRuntimeReconcile, setBusy, showError]
   );
 
   // Restart actor
@@ -50,6 +118,8 @@ export function useActorActions(groupId: string) {
           showError(`${resp.error.code}: ${resp.error.message}`);
         }
         await Promise.all([refreshActors(), refreshGroups()]);
+        optimisticMarkRunning(actor.id, "actor_restart_requested");
+        scheduleRuntimeReconcile(actor.id);
         setTermEpochByActor((prev) => ({
           ...prev,
           [actor.id]: (prev[actor.id] || 0) + 1,
@@ -58,7 +128,7 @@ export function useActorActions(groupId: string) {
         setBusy("");
       }
     },
-    [groupId, setBusy, showError, refreshActors, refreshGroups]
+    [groupId, optimisticMarkRunning, refreshActors, refreshGroups, scheduleRuntimeReconcile, setBusy, showError]
   );
 
   // Edit actor (initialize form state and open modal).

@@ -70,6 +70,32 @@ class TestRunnerKindNoFallback(unittest.TestCase):
             else:
                 os.environ["CCCC_HOME"] = old_home
 
+    def test_codex_pty_uses_pty_supervisor_for_running_and_stop(self) -> None:
+        from cccc.daemon.actors import runner_ops
+
+        fake_group = object()
+        with patch.object(runner_ops, "load_group", return_value=fake_group), patch.object(
+            runner_ops, "find_actor", return_value={"runtime": "codex", "runner": "pty"}
+        ), patch.object(
+            runner_ops.codex_app_supervisor, "actor_running", return_value=False
+        ) as codex_running, patch.object(
+            runner_ops.pty_runner.SUPERVISOR, "actor_running", return_value=True
+        ) as pty_running:
+            self.assertTrue(runner_ops.is_actor_running("g1", "a1", "pty"))
+            codex_running.assert_not_called()
+            pty_running.assert_called_once_with("g1", "a1")
+
+        with patch.object(runner_ops, "load_group", return_value=fake_group), patch.object(
+            runner_ops, "find_actor", return_value={"runtime": "codex", "runner": "pty"}
+        ), patch.object(
+            runner_ops.codex_app_supervisor, "stop_actor"
+        ) as codex_stop, patch.object(
+            runner_ops.pty_runner.SUPERVISOR, "stop_actor"
+        ) as pty_stop:
+            runner_ops.stop_actor("g1", "a1", "pty")
+            codex_stop.assert_not_called()
+            pty_stop.assert_called_once_with(group_id="g1", actor_id="a1")
+
 
 if __name__ == "__main__":
     unittest.main()
