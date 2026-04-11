@@ -7,7 +7,7 @@ import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/tim
 import { classNames } from "../utils/classNames";
 import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
-import { getAttachmentAwareMessageText } from "../utils/messageAttachments";
+import { getAttachmentAwareMessageText, hasBlobAttachmentPath, normalizeAttachmentPath } from "../utils/messageAttachments";
 import { selectStreamingReplySession, useGroupStore } from "../stores";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
 import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
@@ -577,13 +577,13 @@ export const MessageBubble = memo(function MessageBubble({
         .filter((a): a is MessageAttachment => a != null && typeof a === "object")
         .map((a) => ({
             kind: String(a.kind || "file"),
-            path: String(a.path || ""),
+            path: normalizeAttachmentPath(String(a.path || "")),
             title: String(a.title || ""),
             bytes: Number(a.bytes || 0),
             mime_type: String(a.mime_type || ""),
             local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
         }))
-        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
+        .filter((a) => hasBlobAttachmentPath(a) || a.local_preview_url.startsWith("blob:"));
     const displayMessageText = useMemo(() => {
         return getAttachmentAwareMessageText(messageText, rawAttachments, sourcePlatform);
     }, [messageText, rawAttachments, sourcePlatform]);

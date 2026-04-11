@@ -11,8 +11,23 @@ const IMAGE_ATTACHMENT_EXTENSIONS = new Set([
   ".avif",
 ]);
 
+export function normalizeAttachmentPath(value: string): string {
+  return String(value || "").trim().replace(/\\/g, "/");
+}
+
+export function getAttachmentBlobName(attachment: MessageAttachment): string {
+  const normalizedPath = normalizeAttachmentPath(String(attachment.path || ""));
+  if (!normalizedPath) return "";
+  const parts = normalizedPath.split("/");
+  return parts[parts.length - 1] || "";
+}
+
+export function hasBlobAttachmentPath(attachment: MessageAttachment): boolean {
+  return normalizeAttachmentPath(String(attachment.path || "")).startsWith("state/blobs/");
+}
+
 function attachmentPathOrName(attachment: MessageAttachment): string {
-  return String(attachment.path || attachment.title || "").trim().toLowerCase();
+  return normalizeAttachmentPath(String(attachment.path || attachment.title || "")).toLowerCase();
 }
 
 function attachmentExtension(attachment: MessageAttachment): string {

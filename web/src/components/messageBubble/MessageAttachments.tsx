@@ -1,7 +1,7 @@
 import type { MessageAttachment } from "../../types";
 import { withAuthToken } from "../../services/api/base";
 import { classNames } from "../../utils/classNames";
-import { isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
+import { getAttachmentBlobName, isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
 import { FileIcon } from "../Icons";
 import { ImagePreview } from "./ImagePreview";
 
@@ -30,8 +30,7 @@ export function MessageAttachments({
       {imageAttachments.length > 0 && (
         <div className="mt-3 flex max-w-full flex-wrap items-start gap-2">
           {imageAttachments.map((attachment, index) => {
-            const parts = String(attachment.path || "").split("/");
-            const blobName = parts[parts.length - 1] || "";
+            const blobName = getAttachmentBlobName(attachment);
             const href = attachment.local_preview_url || withAuthToken(
               `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
             );
@@ -52,8 +51,7 @@ export function MessageAttachments({
       {fileAttachments.length > 0 && (
         <div className="mt-3 flex max-w-full flex-wrap items-start gap-2">
           {fileAttachments.map((attachment, index) => {
-            const parts = String(attachment.path || "").split("/");
-            const blobName = parts[parts.length - 1] || "";
+            const blobName = getAttachmentBlobName(attachment);
             const href = attachment.local_preview_url || withAuthToken(
               `/api/v1/groups/${encodeURIComponent(blobGroupId)}/blobs/${encodeURIComponent(blobName)}`
             );
