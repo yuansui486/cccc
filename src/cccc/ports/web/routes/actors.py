@@ -531,21 +531,19 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         gid = str(group_id or "").strip()
 
         async def _fetch() -> Dict[str, Any]:
-            if include_internal:
-                try:
-                    return await ctx.daemon(
-                        {
-                            "op": "actor_list",
-                            "args": {
-                                "group_id": gid,
-                                "include_unread": include_unread,
-                                "include_internal": include_internal,
-                            },
-                        }
-                    )
-                except Exception:
-                    return await run_in_threadpool(_read_actor_list_local, gid, include_unread=include_unread)
-            return await run_in_threadpool(_read_actor_list_local, gid, include_unread=include_unread)
+            try:
+                return await ctx.daemon(
+                    {
+                        "op": "actor_list",
+                        "args": {
+                            "group_id": gid,
+                            "include_unread": include_unread,
+                            "include_internal": include_internal,
+                        },
+                    }
+                )
+            except Exception:
+                return await run_in_threadpool(_read_actor_list_local, gid, include_unread=include_unread)
 
         cache_suffix = "unread_internal" if include_internal and include_unread else (
             "readonly_internal" if include_internal else ("unread" if include_unread else "readonly")

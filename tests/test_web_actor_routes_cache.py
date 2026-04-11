@@ -44,6 +44,11 @@ class TestWebActorRoutesCache(unittest.TestCase):
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
+    def _daemon_unavailable_actor_list(self, req: dict):
+        if str(req.get("op") or "") == "actor_list":
+            return {"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}}
+        return self._local_call_daemon(req)
+
     def _create_group(self) -> str:
         from cccc.kernel.group import create_group
         from cccc.kernel.registry import load_registry
@@ -112,7 +117,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 time.sleep(0.12)
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer 1"}]}}
 
-            with patch("cccc.ports.web.routes.actors._read_actor_list_local", side_effect=fake_read_actor_list_local):
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
+                "cccc.ports.web.routes.actors._read_actor_list_local",
+                side_effect=fake_read_actor_list_local,
+            ):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/actors"
 
@@ -154,7 +162,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 actor_list_reads += 1
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer 1"}]}}
 
-            with patch("cccc.ports.web.routes.actors._read_actor_list_local", side_effect=fake_read_actor_list_local):
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
+                "cccc.ports.web.routes.actors._read_actor_list_local",
+                side_effect=fake_read_actor_list_local,
+            ):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/actors"
                     first = client.get(path)
@@ -186,7 +197,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer stale"}]}}
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer fresh"}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
                 "cccc.ports.web.routes.actors._read_actor_list_local",
                 side_effect=fake_read_actor_list_local,
             ):
@@ -235,6 +246,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "running": True}]}}
 
             def fake_call_daemon(req: dict):
+                if str(req.get("op") or "") == "actor_list":
+                    return {"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}}
                 if str(req.get("op") or "") == "group_start":
                     return {"ok": True, "result": {}}
                 return self._local_call_daemon(req)
@@ -288,6 +301,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "running": True}]}}
 
             def fake_call_daemon(req: dict):
+                if str(req.get("op") or "") == "actor_list":
+                    return {"ok": False, "error": {"code": "daemon_unavailable", "message": "ccccd unavailable"}}
                 if str(req.get("op") or "") == "group_start":
                     return {"ok": True, "result": {}}
                 return self._local_call_daemon(req)
@@ -330,7 +345,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
 
             agent_state = AgentsData(agents=[AgentState(id="peer-1", hot=AgentStateHot(active_task_id="T123"))])
 
-            with patch("cccc.ports.web.routes.actors.ContextStorage.load_agents", return_value=agent_state), patch(
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
+                "cccc.ports.web.routes.actors.ContextStorage.load_agents",
+                return_value=agent_state,
+            ), patch(
                 "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
@@ -360,7 +378,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
             self._add_actor(group_id, runtime="claude")
             write_pty_state(group_id, "peer-1", pid=43210)
 
-            with patch(
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
                 "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
@@ -398,7 +416,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
             state_doc["pid"] = 43210
             state_path.write_text(json.dumps(state_doc), encoding="utf-8")
 
-            with patch(
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
                 "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
@@ -459,8 +477,9 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 },
             )
 
-            with self._client() as client:
-                resp = client.get(f"/api/v1/groups/{group_id}/actors")
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list):
+                with self._client() as client:
+                    resp = client.get(f"/api/v1/groups/{group_id}/actors")
 
             self.assertEqual(resp.status_code, 200)
             actor = resp.json()["result"]["actors"][0]
@@ -495,7 +514,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 },
             )
 
-            with patch(
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
                 "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
@@ -535,7 +554,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 time.sleep(0.12)
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "unread_count": 2}]}}
 
-            with patch("cccc.ports.web.routes.actors._read_actor_list_local", side_effect=fake_read_actor_list_local):
+            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_actor_list), patch(
+                "cccc.ports.web.routes.actors._read_actor_list_local",
+                side_effect=fake_read_actor_list_local,
+            ):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/actors?include_unread=1"
 
@@ -560,5 +582,49 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     second_follow_up = client.get(path)
                     self.assertEqual(second_follow_up.status_code, 200)
                     self.assertEqual(actor_list_reads, 2)
+        finally:
+            cleanup()
+
+    def test_actor_list_route_prefers_daemon_state_over_local_fallback(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            os.environ.pop("CCCC_WEB_MODE", None)
+            group_id = self._create_group()
+            self._add_actor(group_id, runtime="codex")
+
+            def fake_call_daemon(req: dict):
+                if str(req.get("op") or "") != "actor_list":
+                    return self._local_call_daemon(req)
+                return {
+                    "ok": True,
+                    "result": {
+                        "actors": [
+                            {
+                                "id": "peer-1",
+                                "title": "peer-1",
+                                "runner": "pty",
+                                "runner_effective": "pty",
+                                "runtime": "codex",
+                                "enabled": True,
+                                "running": True,
+                                "idle_seconds": 12.0,
+                                "effective_working_state": "waiting",
+                                "effective_working_reason": "pty_no_prompt_waiting",
+                            }
+                        ]
+                    },
+                }
+
+            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "cccc.ports.web.routes.actors._read_actor_list_local",
+                return_value={"ok": True, "result": {"actors": [{"id": "peer-1", "running": False}]}},
+            ):
+                with self._client() as client:
+                    resp = client.get(f"/api/v1/groups/{group_id}/actors")
+
+            self.assertEqual(resp.status_code, 200)
+            actor = resp.json()["result"]["actors"][0]
+            self.assertTrue(bool(actor["running"]))
+            self.assertEqual(actor["effective_working_state"], "waiting")
         finally:
             cleanup()
