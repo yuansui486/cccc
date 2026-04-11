@@ -116,6 +116,7 @@ export function useActorActions(groupId: string) {
         const resp = await api.restartActor(groupId, actor.id);
         if (!resp.ok) {
           showError(`${resp.error.code}: ${resp.error.message}`);
+          return;
         }
         await Promise.all([refreshActors(), refreshGroups()]);
         optimisticMarkRunning(actor.id, "actor_restart_requested");
