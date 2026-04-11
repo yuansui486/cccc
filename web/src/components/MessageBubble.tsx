@@ -7,7 +7,7 @@ import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/tim
 import { classNames } from "../utils/classNames";
 import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
-import { getAttachmentAwareMessageText, hasRenderableAttachmentSource } from "../utils/messageAttachments";
+import { getAttachmentAwareMessageText, hasRenderableAttachmentSource, normalizeAttachmentPath } from "../utils/messageAttachments";
 import { selectStreamingReplySession, useGroupStore } from "../stores";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
 import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
@@ -578,7 +578,7 @@ export const MessageBubble = memo(function MessageBubble({
         .filter((a): a is MessageAttachment => a != null && typeof a === "object")
         .map((a) => ({
             kind: String(a.kind || "file"),
-            path: String(a.path || ""),
+            path: normalizeAttachmentPath(String(a.path || "")),
             title: String(a.title || ""),
             bytes: Number(a.bytes || 0),
             mime_type: String(a.mime_type || ""),

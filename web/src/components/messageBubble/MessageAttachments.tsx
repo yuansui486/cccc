@@ -1,7 +1,7 @@
 import type { MessageAttachment } from "../../types";
 import { withAuthToken } from "../../services/api/base";
 import { classNames } from "../../utils/classNames";
-import { hasRenderableAttachmentSource, isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
+import { getAttachmentBlobName, hasRenderableAttachmentSource, isImageAttachment, isSvgAttachment } from "../../utils/messageAttachments";
 import { FileIcon } from "../Icons";
 import { ImagePreview } from "./ImagePreview";
 
@@ -12,8 +12,7 @@ function resolveAttachmentHref(attachment: MessageAttachment, blobGroupId: strin
   const downloadUrl = String(attachment.download_url || "").trim();
   if (downloadUrl) return downloadUrl;
 
-  const parts = String(attachment.path || "").split("/");
-  const blobName = parts[parts.length - 1] || "";
+  const blobName = getAttachmentBlobName(attachment);
   if (!blobName) return "";
 
   return withAuthToken(
@@ -47,10 +46,9 @@ export function MessageAttachments({
         <div className="mt-3 flex max-w-full flex-wrap items-start gap-2">
           {imageAttachments.map((attachment, index) => {
             if (!hasRenderableAttachmentSource(attachment)) return null;
-            const parts = String(attachment.path || "").split("/");
-            const blobName = parts[parts.length - 1] || "";
             const href = resolveAttachmentHref(attachment, blobGroupId);
             if (!href) return null;
+            const blobName = getAttachmentBlobName(attachment);
             const label = attachment.title || blobName || "image";
             return (
               <ImagePreview
@@ -69,10 +67,9 @@ export function MessageAttachments({
         <div className="mt-3 flex max-w-full flex-wrap items-start gap-2">
           {fileAttachments.map((attachment, index) => {
             if (!hasRenderableAttachmentSource(attachment)) return null;
-            const parts = String(attachment.path || "").split("/");
-            const blobName = parts[parts.length - 1] || "";
             const href = resolveAttachmentHref(attachment, blobGroupId);
             if (!href) return null;
+            const blobName = getAttachmentBlobName(attachment);
             const label = attachment.title || blobName || "file";
             return (
               <a

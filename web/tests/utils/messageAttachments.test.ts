@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAttachmentBlobName,
   getAttachmentAwareMessageText,
   hasRenderableAttachmentSource,
+  hasBlobAttachmentPath,
   isImageAttachment,
   isRedundantWecomImagePlaceholder,
+  normalizeAttachmentPath,
   isSvgAttachment,
 } from "../../src/utils/messageAttachments";
 
@@ -91,5 +94,19 @@ describe("messageAttachments", () => {
     };
 
     expect(hasRenderableAttachmentSource(attachment)).toBe(true);
+  });
+
+  it("normalizes Windows-style blob paths so WeCom attachments remain renderable", () => {
+    const attachment = {
+      kind: "image",
+      path: "state\\blobs\\sha_demo.png",
+      title: "demo.png",
+      mime_type: "image/png",
+    };
+
+    expect(normalizeAttachmentPath(attachment.path)).toBe("state/blobs/sha_demo.png");
+    expect(hasBlobAttachmentPath(attachment)).toBe(true);
+    expect(getAttachmentBlobName(attachment)).toBe("sha_demo.png");
+    expect(isImageAttachment(attachment)).toBe(true);
   });
 });
