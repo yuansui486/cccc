@@ -1,6 +1,6 @@
 {
   "createGroup": {
-    "title": "创建工作组",
+    "title": "创建团队",
     "subtitle": "选择一个项目目录开始协作",
     "quickSelect": "快速选择",
     "projectDirectory": "项目目录",
@@ -15,7 +15,7 @@
     "blueprintHint": "应用 actor、设置、自动化规则/模板，以及 CCCC_HOME 下的工作组引导覆盖（CCCC_PREAMBLE.md / CCCC_HELP.md）。",
     "creating": "创建中…",
     "createFromBlueprint": "从蓝图创建工作组",
-    "createGroup": "创建工作组"
+    "createGroup": "创建团队"
   },
   "groupEdit": {
     "title": "编辑工作组",
