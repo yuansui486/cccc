@@ -56,7 +56,7 @@ describe("rolePresets", () => {
   });
 
   it("looks up presets by id", () => {
-    expect(getRolePresetById("implementer")?.name).toBe("Implementer");
+    expect(getRolePresetById("implementer")?.name).toBe("交付执行");
     expect(getRolePresetById("")).toBeNull();
     expect(getRolePresetById("missing")).toBeNull();
   });

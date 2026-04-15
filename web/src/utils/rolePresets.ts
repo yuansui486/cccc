@@ -11,7 +11,7 @@ export type RolePresetApplyState = "apply" | "confirm_replace" | "no_change";
 export const BUILTIN_ROLE_PRESETS: RolePreset[] = [
   {
     id: "coordinator",
-    name: "Coordinator",
+    name: "任务协调",
     summary: "Keep multi-actor work moving through clear ownership, low-noise routing, and clean handoffs without acting like a second foreman.",
     useWhen: "Use when work is drifting, ownership is fuzzy, or handoffs are getting messy, but the main need is coordination rather than final acceptance.",
     content: `### Mission
@@ -82,7 +82,7 @@ If ownership is still unclear, say that plainly instead of masking it with coord
   },
   {
     id: "planner",
-    name: "Planner",
+    name: "方案规划",
     summary: "Turn vague requests into executable scope with boundaries, acceptance, and unresolved decisions made explicit.",
     useWhen: "Use when the request is ambiguous, risky, or large enough that acting now would likely create rework.",
     content: `### Mission
@@ -167,7 +167,7 @@ If any of those are weak, say so before pretending the plan is complete.
   },
   {
     id: "implementer",
-    name: "Implementer",
+    name: "交付执行",
     summary: "Ship the smallest correct change that matches approved scope, fits local patterns, and is actually verified.",
     useWhen: "Use when scope is already approved and the real job is to land working code or scripts cleanly.",
     content: `### Mission
@@ -237,7 +237,7 @@ If the answer is shaky, do not present the result as cleanly done.
   },
   {
     id: "reviewer",
-    name: "Reviewer",
+    name: "结果校验",
     summary: "Inspect the actual work against the real requirement and only flag issues that would cause real problems.",
     useWhen: "Use when an implementation step is done and someone needs a real review rather than a summary blessing.",
     content: `### Mission
@@ -318,7 +318,7 @@ Approve unless there are serious gaps, contradictory behavior, missing requireme
   },
   {
     id: "debugger",
-    name: "Debugger",
+    name: "代码测试",
     summary: "Reproduce the failure, narrow the real cause with evidence, and apply only the fix that matches the failure path.",
     useWhen: "Use when behavior is broken, flaky, or unexplained and naive fixes are already failing or too risky.",
     content: `### Mission
@@ -384,7 +384,7 @@ If you are not yet at fix, say where you actually are.
   },
   {
     id: "explorer",
-    name: "Explorer",
+    name: "代码梳理（开发前）",
     summary: "Map the local repo into a small set of anchor files and behavior flows without drifting into edits or external research.",
     useWhen: "Use when the real question is where something lives or how it flows inside this repo.",
     content: `### Mission
@@ -451,7 +451,7 @@ If the question was too broad, say what narrower search boundary would unlock a 
   },
   {
     id: "researcher",
-    name: "Researcher",
+    name: "代码调研（外部方案）",
     summary: "Answer external technical questions from primary sources with clear source basis and version or recency boundaries.",
     useWhen: "Use when the answer depends on external docs, source, releases, issues, or current upstream behavior.",
     content: `### Mission
