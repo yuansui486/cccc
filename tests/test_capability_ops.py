@@ -142,6 +142,112 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_onecolleague_skill_library_refresh_confirm_and_rollback(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            calls: list[tuple[str, dict[str, Any]]] = []
+
+            def fake_get_json_obj(url: str, **kwargs: Any) -> dict[str, Any]:
+                calls.append((url, dict(kwargs)))
+                self.assertNotIn("headers", kwargs)
+                if url.endswith("/source/metadata"):
+                    return {
+                        "source_id": "onecolleague_skill_library",
+                        "display_name": "OneColleague Skill Library",
+                        "schema_version": "1",
+                    }
+                if "/capabilities/index" in url:
+                    return {
+                        "server_time": "2026-04-28T00:00:00Z",
+                        "items": [
+                            {
+                                "capability_id": "skill:onecolleague:test-skill",
+                                "kind": "skill",
+                                "name": "test-skill",
+                                "description_short": "Test skill",
+                                "source_record_id": "test-skill",
+                                "source_record_version": "1.0.0",
+                                "updated_at_source": "2026-04-28T00:00:00Z",
+                                "checksum": "sha256:test",
+                            }
+                        ],
+                    }
+                if "/capabilities/records" in url:
+                    return {
+                        "items": [
+                            {
+                                "capability_id": "skill:onecolleague:test-skill",
+                                "kind": "skill",
+                                "name": "test-skill",
+                                "description_short": "Test skill",
+                                "source_uri": "http://skills.local/skills/test-skill",
+                                "source_record_id": "test-skill",
+                                "source_record_version": "1.0.0",
+                                "updated_at_source": "2026-04-28T00:00:00Z",
+                                "tags": ["skill", "onecolleague"],
+                                "trust_tier": "tier1",
+                                "source_tier": "tier1",
+                                "qualification_status": "qualified",
+                                "capsule_text": "Use this test skill for focused verification.",
+                                "requires_capabilities": [],
+                                "checksum": "sha256:test",
+                            }
+                        ]
+                    }
+                raise AssertionError(f"unexpected url: {url}")
+
+            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
+                update_resp, _ = self._call(
+                    "capability_source_config_update",
+                    {"subscription_link": "http://skills.local/api/v1/skill-library", "enabled": True, "by": "user"},
+                )
+                self.assertTrue(update_resp.ok, getattr(update_resp, "error", None))
+                self.assertEqual((update_resp.result or {}).get("source", {}).get("subscription_link"), "http://skills.local/api/v1/skill-library")
+
+                test_resp, _ = self._call("capability_source_test", {"by": "user"})
+                self.assertTrue(test_resp.ok, getattr(test_resp, "error", None))
+
+                refresh_resp, _ = self._call("capability_source_refresh", {"by": "user"})
+                self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
+                summary = (refresh_resp.result or {}).get("summary") or {}
+                self.assertEqual(summary.get("new"), 1)
+                self.assertEqual(summary.get("pending"), 1)
+
+            pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
+            self.assertTrue(pending_resp.ok, getattr(pending_resp, "error", None))
+            items = (pending_resp.result or {}).get("items") or []
+            self.assertEqual(len(items), 1)
+            pending_id = str(items[0]["pending_id"])
+
+            probe_resp, _ = self._call(
+                "capability_source_pending_probe",
+                {"group_id": gid, "by": "user", "actor_id": "user", "pending_ids": [pending_id]},
+            )
+            self.assertTrue(probe_resp.ok, getattr(probe_resp, "error", None))
+            self.assertTrue(((probe_resp.result or {}).get("results") or [])[0].get("ok"))
+
+            confirm_resp, _ = self._call(
+                "capability_source_pending_confirm",
+                {"group_id": gid, "by": "user", "actor_id": "user", "pending_ids": [pending_id]},
+            )
+            self.assertTrue(confirm_resp.ok, getattr(confirm_resp, "error", None))
+            self.assertTrue(((confirm_resp.result or {}).get("results") or [])[0].get("ok"))
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {"query": "test-skill", "include_indexed": True, "limit": 20},
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            ids = {str(item.get("capability_id") or "") for item in ((overview_resp.result or {}).get("items") or [])}
+            self.assertIn("skill:onecolleague:test-skill", ids)
+
+            rollback_resp, _ = self._call("capability_source_rollback", {"pending_id": pending_id, "by": "user"})
+            self.assertTrue(rollback_resp.ok, getattr(rollback_resp, "error", None))
+            self.assertEqual((rollback_resp.result or {}).get("rollback_action"), "removed_new_record")
+        finally:
+            cleanup()
+
     def test_pet_capability_state_uses_minimal_core_surface(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -3692,6 +3798,7 @@ class TestCapabilityOps(unittest.TestCase):
                     "patch": {
                         "defaults": {"source_level": {
                             "manual_import": "indexed",
+                            "onecolleague_skill_library": "indexed",
                             "mcp_registry_official": "indexed",
                             "anthropic_skills": "indexed",
                             "github_skills_curated": "indexed",

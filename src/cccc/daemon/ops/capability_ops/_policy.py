@@ -64,6 +64,7 @@ def _policy_default_compiled() -> Dict[str, Any]:
         "source_levels": {
             "cccc_builtin": _LEVEL_MOUNTED,
             "manual_import": _LEVEL_MOUNTED,
+            "onecolleague_skill_library": _LEVEL_MOUNTED,
             "anthropic_skills": _LEVEL_MOUNTED,
             "github_skills_curated": _LEVEL_MOUNTED,
             "skillsmp_remote": _LEVEL_MOUNTED,

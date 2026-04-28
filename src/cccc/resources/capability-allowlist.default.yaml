@@ -15,6 +15,7 @@ defaults:
   source_level:
     cccc_builtin: mounted
     manual_import: mounted
+    onecolleague_skill_library: mounted
     anthropic_skills: mounted
     github_skills_curated: mounted
     skillsmp_remote: indexed
@@ -48,6 +49,9 @@ sources:
   - source_id: manual_import
     enabled: true
     rationale: "Agent/user imported records from arbitrary external references."
+  - source_id: onecolleague_skill_library
+    enabled: true
+    rationale: "OneColleague skill library source served by done-hub agent-service."
   - source_id: anthropic_skills
     enabled: true
     rationale: "Official Anthropic skill source."

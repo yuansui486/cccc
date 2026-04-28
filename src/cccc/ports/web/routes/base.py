@@ -419,6 +419,109 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         }
         return await ctx.daemon({"op": "capability_block", "args": args})
 
+    def _normalize_onecolleague_source_id(source_id: str) -> str:
+        normalized = str(source_id or "").strip().replace("-", "_")
+        if normalized != "onecolleague_skill_library":
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "unknown_capability_source", "message": f"unknown capability source: {source_id}"},
+            )
+        return "onecolleague_skill_library"
+
+    async def _json_body(request: Request) -> Dict[str, Any]:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail={"code": "invalid_request", "message": "request body must be an object"})
+        return payload
+
+    def _reject_read_only_capability_source() -> None:
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Capability source write endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+
+    @global_router.get("/api/v1/capabilities/sources/{source_id}", dependencies=[Depends(require_admin)])
+    async def capability_source_config_get(source_id: str) -> Dict[str, Any]:
+        """Get fixed OneColleague skill library source configuration."""
+        _normalize_onecolleague_source_id(source_id)
+        return await ctx.daemon({"op": "capability_source_config_get", "args": {"by": "user"}})
+
+    @global_router.put("/api/v1/capabilities/sources/{source_id}", dependencies=[Depends(require_admin)])
+    async def capability_source_config_update(source_id: str, request: Request) -> Dict[str, Any]:
+        """Update fixed OneColleague skill library source configuration."""
+        _reject_read_only_capability_source()
+        _normalize_onecolleague_source_id(source_id)
+        payload = await _json_body(request)
+        args: Dict[str, Any] = {"by": str(payload.get("by") or "user").strip() or "user"}
+        if "enabled" in payload:
+            args["enabled"] = bool(payload.get("enabled"))
+        if "base_url" in payload:
+            args["base_url"] = str(payload.get("base_url") or "").strip()
+        if "subscription_link" in payload:
+            args["subscription_link"] = str(payload.get("subscription_link") or "").strip()
+        return await ctx.daemon({"op": "capability_source_config_update", "args": args})
+
+    @global_router.post("/api/v1/capabilities/sources/{source_id}/test", dependencies=[Depends(require_admin)])
+    async def capability_source_test(source_id: str, request: Request) -> Dict[str, Any]:
+        """Test fixed OneColleague skill library source metadata endpoint."""
+        _reject_read_only_capability_source()
+        _normalize_onecolleague_source_id(source_id)
+        payload = await _json_body(request)
+        args: Dict[str, Any] = {"by": str(payload.get("by") or "user").strip() or "user"}
+        if "base_url" in payload:
+            args["base_url"] = str(payload.get("base_url") or "").strip()
+        if "subscription_link" in payload:
+            args["subscription_link"] = str(payload.get("subscription_link") or "").strip()
+        return await ctx.daemon({"op": "capability_source_test", "args": args})
+
+    @global_router.post("/api/v1/capabilities/sources/{source_id}/refresh", dependencies=[Depends(require_admin)])
+    async def capability_source_refresh(source_id: str, request: Request) -> Dict[str, Any]:
+        """Refresh fixed OneColleague skill library source into pending updates."""
+        _reject_read_only_capability_source()
+        _normalize_onecolleague_source_id(source_id)
+        payload = await _json_body(request)
+        args: Dict[str, Any] = {
+            "by": str(payload.get("by") or "user").strip() or "user",
+            "limit": int(payload.get("limit") or 200),
+            "updated_since": str(payload.get("updated_since") or "").strip(),
+        }
+        if "base_url" in payload:
+            args["base_url"] = str(payload.get("base_url") or "").strip()
+        if "subscription_link" in payload:
+            args["subscription_link"] = str(payload.get("subscription_link") or "").strip()
+        return await ctx.daemon({"op": "capability_source_refresh", "args": args})
+
+    @global_router.get("/api/v1/capabilities/sources/{source_id}/pending", dependencies=[Depends(require_admin)])
+    async def capability_source_pending_list(source_id: str, status: str = "") -> Dict[str, Any]:
+        """List candidate updates for the fixed OneColleague skill library source."""
+        _normalize_onecolleague_source_id(source_id)
+        return await ctx.daemon({"op": "capability_source_pending_list", "args": {"by": "user", "status": str(status or "")}})
+
+    @global_router.post("/api/v1/capabilities/sources/{source_id}/pending/confirm", dependencies=[Depends(require_admin)])
+    async def capability_source_pending_confirm(source_id: str, request: Request) -> Dict[str, Any]:
+        """Confirm import of selected fixed-source pending updates without enabling them."""
+        _reject_read_only_capability_source()
+        _normalize_onecolleague_source_id(source_id)
+        payload = await _json_body(request)
+        return await ctx.daemon(
+            {
+                "op": "capability_source_pending_confirm",
+                "args": {
+                    "by": str(payload.get("by") or "user").strip() or "user",
+                    "actor_id": str(payload.get("actor_id") or payload.get("by") or "user").strip() or "user",
+                    "group_id": str(payload.get("group_id") or "").strip(),
+                    "pending_ids": payload.get("pending_ids") if isinstance(payload.get("pending_ids"), list) else [],
+                },
+            }
+        )
+
     @global_router.put("/api/v1/observability", dependencies=[Depends(require_admin)])
     async def observability_update(req: ObservabilityUpdateRequest) -> Dict[str, Any]:
         """Update global observability settings (daemon-owned persistence)."""

@@ -245,6 +245,19 @@ from ._handlers import (  # noqa: F401
     handle_capability_uninstall,
     handle_capability_tool_call,
 )
+from ._onecolleague_source import (  # noqa: F401
+    ONECOLLEAGUE_SOURCE_ID,
+    ONECOLLEAGUE_DEFAULT_BASE_URL,
+    handle_capability_source_config_get,
+    handle_capability_source_config_update,
+    handle_capability_source_test,
+    handle_capability_source_refresh,
+    handle_capability_source_pending_list,
+    handle_capability_source_pending_probe,
+    handle_capability_source_pending_confirm,
+    handle_capability_source_pending_ignore,
+    handle_capability_source_rollback,
+)
 
 def try_handle_capability_op(op: str, args: Dict[str, Any]) -> Optional[DaemonResponse]:
     if op == "capability_allowlist_get":
@@ -271,4 +284,22 @@ def try_handle_capability_op(op: str, args: Dict[str, Any]) -> Optional[DaemonRe
         return handle_capability_uninstall(args)
     if op == "capability_tool_call":
         return handle_capability_tool_call(args)
+    if op == "capability_source_config_get":
+        return handle_capability_source_config_get(args)
+    if op == "capability_source_config_update":
+        return handle_capability_source_config_update(args)
+    if op == "capability_source_test":
+        return handle_capability_source_test(args)
+    if op == "capability_source_refresh":
+        return handle_capability_source_refresh(args)
+    if op == "capability_source_pending_list":
+        return handle_capability_source_pending_list(args)
+    if op == "capability_source_pending_probe":
+        return handle_capability_source_pending_probe(args)
+    if op == "capability_source_pending_confirm":
+        return handle_capability_source_pending_confirm(args)
+    if op == "capability_source_pending_ignore":
+        return handle_capability_source_pending_ignore(args)
+    if op == "capability_source_rollback":
+        return handle_capability_source_rollback(args)
     return None
