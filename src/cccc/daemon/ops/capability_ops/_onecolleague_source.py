@@ -24,7 +24,7 @@ from ._documents import _load_catalog_doc, _save_catalog_doc, _source_state_temp
 from ._handlers import _normalize_import_record, _refresh_source_record_counts, handle_capability_import
 
 ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library"
-ONECOLLEAGUE_DEFAULT_BASE_URL = "http://127.0.0.1:8012/api/v1/skill-library"
+ONECOLLEAGUE_DEFAULT_BASE_URL = "http://dongdongkc.top:8012/api/v1/skill-library"
 _SOURCE_LOCK = threading.RLock()
 _HIGH_RISK_TAGS = {
     "computer_use",
