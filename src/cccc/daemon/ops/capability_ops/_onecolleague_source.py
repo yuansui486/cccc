@@ -56,6 +56,7 @@ _DIFF_FIELDS = (
     "requires_capabilities",
 )
 _VOLATILE_RECORD_FIELDS = {"last_synced_at", "sync_state", "health_status"}
+_HASH_FIELDS = {"content_hash", "checksum"}
 
 
 def _source_doc_path():
@@ -197,6 +198,29 @@ def _extract_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _canonical_record(record: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in record.items() if k not in _VOLATILE_RECORD_FIELDS}
+
+
+def _canonical_platform_hash(record: Dict[str, Any]) -> str:
+    payload = {k: v for k, v in record.items() if k not in _HASH_FIELDS}
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _validate_platform_hash(raw: Dict[str, Any], index_item: Optional[Dict[str, Any]]) -> Tuple[str, List[str]]:
+    idx = index_item if isinstance(index_item, dict) else {}
+    actual = _canonical_platform_hash(raw)
+    record_hash = str(raw.get("content_hash") or "").strip()
+    index_hash = str(idx.get("checksum") or idx.get("content_hash") or "").strip()
+    errors: List[str] = []
+    if not record_hash:
+        errors.append("missing_record_content_hash")
+    elif record_hash != actual:
+        errors.append("record_content_hash_mismatch")
+    if index_hash and record_hash and index_hash != record_hash:
+        errors.append("index_checksum_mismatch")
+    elif index_hash and index_hash != actual:
+        errors.append("index_checksum_mismatch")
+    return actual, errors
 
 
 def _records_equal(a: Optional[Dict[str, Any]], b: Dict[str, Any]) -> bool:
@@ -406,11 +430,16 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
         records: Dict[str, Dict[str, Any]] = {}
         invalid: List[Dict[str, str]] = []
         for raw in raw_records:
+            raw_cap_id = str(raw.get("capability_id") or "").strip()
             try:
+                actual_hash, hash_errors = _validate_platform_hash(raw, index_by_id.get(raw_cap_id))
+                if hash_errors:
+                    invalid.append({"capability_id": raw_cap_id, "error": ",".join(hash_errors), "computed_hash": actual_hash})
+                    continue
                 rec = _normalize_platform_record(raw)
                 records[str(rec.get("capability_id") or "")] = rec
             except Exception as e:
-                invalid.append({"capability_id": str(raw.get("capability_id") or ""), "error": str(e)})
+                invalid.append({"capability_id": raw_cap_id, "error": str(e)})
 
         with _CATALOG_LOCK:
             _, catalog_doc = _load_catalog_doc()

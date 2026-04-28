@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import tempfile
 import unittest
@@ -147,6 +148,26 @@ class TestCapabilityOps(unittest.TestCase):
         try:
             gid = self._create_group()
             calls: list[tuple[str, dict[str, Any]]] = []
+            platform_record = {
+                "capability_id": "skill:onecolleague:test-skill",
+                "kind": "skill",
+                "name": "test-skill",
+                "description_short": "Test skill",
+                "source_uri": "http://skills.local/skills/test-skill",
+                "source_record_id": "test-skill",
+                "source_record_version": "1.0.0",
+                "updated_at_source": "2026-04-28T00:00:00Z",
+                "tags": ["skill", "onecolleague"],
+                "trust_tier": "tier1",
+                "source_tier": "tier1",
+                "qualification_status": "qualified",
+                "capsule_text": "Use this test skill for focused verification.",
+                "requires_capabilities": [],
+            }
+            platform_hash = "sha256:" + hashlib.sha256(
+                json.dumps(platform_record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            platform_record["content_hash"] = platform_hash
 
             def fake_get_json_obj(url: str, **kwargs: Any) -> dict[str, Any]:
                 calls.append((url, dict(kwargs)))
@@ -169,32 +190,12 @@ class TestCapabilityOps(unittest.TestCase):
                                 "source_record_id": "test-skill",
                                 "source_record_version": "1.0.0",
                                 "updated_at_source": "2026-04-28T00:00:00Z",
-                                "checksum": "sha256:test",
+                                "checksum": platform_hash,
                             }
                         ],
                     }
                 if "/capabilities/records" in url:
-                    return {
-                        "items": [
-                            {
-                                "capability_id": "skill:onecolleague:test-skill",
-                                "kind": "skill",
-                                "name": "test-skill",
-                                "description_short": "Test skill",
-                                "source_uri": "http://skills.local/skills/test-skill",
-                                "source_record_id": "test-skill",
-                                "source_record_version": "1.0.0",
-                                "updated_at_source": "2026-04-28T00:00:00Z",
-                                "tags": ["skill", "onecolleague"],
-                                "trust_tier": "tier1",
-                                "source_tier": "tier1",
-                                "qualification_status": "qualified",
-                                "capsule_text": "Use this test skill for focused verification.",
-                                "requires_capabilities": [],
-                                "checksum": "sha256:test",
-                            }
-                        ]
-                    }
+                    return {"items": [dict(platform_record)]}
                 raise AssertionError(f"unexpected url: {url}")
 
             with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
@@ -245,6 +246,69 @@ class TestCapabilityOps(unittest.TestCase):
             rollback_resp, _ = self._call("capability_source_rollback", {"pending_id": pending_id, "by": "user"})
             self.assertTrue(rollback_resp.ok, getattr(rollback_resp, "error", None))
             self.assertEqual((rollback_resp.result or {}).get("rollback_action"), "removed_new_record")
+        finally:
+            cleanup()
+
+    def test_onecolleague_skill_library_refresh_rejects_hash_mismatch(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            def fake_get_json_obj(url: str, **kwargs: Any) -> dict[str, Any]:
+                self.assertNotIn("headers", kwargs)
+                if "/capabilities/index" in url:
+                    return {
+                        "items": [
+                            {
+                                "capability_id": "skill:onecolleague:bad-hash",
+                                "kind": "skill",
+                                "name": "bad-hash",
+                                "description_short": "Bad hash",
+                                "source_record_id": "bad-hash",
+                                "source_record_version": "1.0.0",
+                                "updated_at_source": "2026-04-28T00:00:00Z",
+                                "checksum": "sha256:not-the-real-hash",
+                            }
+                        ],
+                    }
+                if "/capabilities/records" in url:
+                    return {
+                        "items": [
+                            {
+                                "capability_id": "skill:onecolleague:bad-hash",
+                                "kind": "skill",
+                                "name": "bad-hash",
+                                "description_short": "Bad hash",
+                                "source_uri": "http://skills.local/skills/bad-hash",
+                                "source_record_id": "bad-hash",
+                                "source_record_version": "1.0.0",
+                                "updated_at_source": "2026-04-28T00:00:00Z",
+                                "tags": ["skill"],
+                                "trust_tier": "tier1",
+                                "source_tier": "tier1",
+                                "qualification_status": "qualified",
+                                "capsule_text": "This record should not import because the hash is wrong.",
+                                "requires_capabilities": [],
+                                "content_hash": "sha256:not-the-real-hash",
+                            }
+                        ]
+                    }
+                raise AssertionError(f"unexpected url: {url}")
+
+            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
+                update_resp, _ = self._call(
+                    "capability_source_config_update",
+                    {"subscription_link": "http://skills.local/api/v1/skill-library", "enabled": True, "by": "user"},
+                )
+                self.assertTrue(update_resp.ok, getattr(update_resp, "error", None))
+                refresh_resp, _ = self._call("capability_source_refresh", {"by": "user"})
+                self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
+                result = refresh_resp.result or {}
+                self.assertEqual((result.get("summary") or {}).get("invalid"), 1)
+                self.assertEqual((result.get("summary") or {}).get("pending"), 0)
+                self.assertIn("content_hash_mismatch", ((result.get("invalid") or [])[0].get("error") or ""))
+
+            pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
+            self.assertTrue(pending_resp.ok, getattr(pending_resp, "error", None))
+            self.assertEqual((pending_resp.result or {}).get("items"), [])
         finally:
             cleanup()
 
