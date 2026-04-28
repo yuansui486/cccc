@@ -5,6 +5,7 @@ import hashlib
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -72,6 +73,15 @@ class TestCapabilityOps(unittest.TestCase):
             },
         )
         self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
+
+    def _skill_zip_bytes(self, files: dict[str, str] | None = None) -> bytes:
+        import io
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, text in (files or {"demo-skill/SKILL.md": "Use this full skill package.\n"}).items():
+                zf.writestr(name, text)
+        return buf.getvalue()
 
     def _seed_runtime_external_install(
         self,
@@ -246,6 +256,237 @@ class TestCapabilityOps(unittest.TestCase):
             rollback_resp, _ = self._call("capability_source_rollback", {"pending_id": pending_id, "by": "user"})
             self.assertTrue(rollback_resp.ok, getattr(rollback_resp, "error", None))
             self.assertEqual((rollback_resp.result or {}).get("rollback_action"), "removed_new_record")
+        finally:
+            cleanup()
+
+    def test_onecolleague_skill_package_confirm_installs_after_refresh_only(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        home, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            package_bytes = self._skill_zip_bytes({"demo-skill/SKILL.md": "Use this complete package.\n", "demo-skill/scripts/run.sh": "echo ok\n"})
+            package_sha = hashlib.sha256(package_bytes).hexdigest()
+            platform_record = {
+                "capability_id": "skill:onecolleague:demo-skill",
+                "kind": "skill",
+                "name": "demo-skill",
+                "description_short": "Demo package skill",
+                "source_uri": "http://skills.local/skills/demo-skill",
+                "source_record_id": "demo-skill",
+                "source_record_version": "1.0.0",
+                "updated_at_source": "2026-04-28T00:00:00Z",
+                "tags": ["skill", "onecolleague"],
+                "trust_tier": "tier1",
+                "source_tier": "tier1",
+                "qualification_status": "qualified",
+                "capsule_text": "Use this complete package.",
+                "requires_capabilities": [],
+                "install_mode": "codex_skill_package",
+                "skill_package_url": "http://skills.local/packages/demo-skill.zip",
+                "skill_package_sha256": package_sha,
+                "skill_package_size": len(package_bytes),
+                "package_format": "zip",
+                "skill_slug": "demo-skill",
+            }
+            platform_hash = "sha256:" + hashlib.sha256(
+                json.dumps(platform_record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            platform_record["content_hash"] = platform_hash
+
+            def fake_get_json_obj(url: str, **kwargs: Any) -> dict[str, Any]:
+                self.assertNotIn("headers", kwargs)
+                if "/capabilities/index" in url:
+                    return {
+                        "server_time": "2026-04-28T00:00:00Z",
+                        "items": [
+                            {
+                                "capability_id": "skill:onecolleague:demo-skill",
+                                "kind": "skill",
+                                "name": "demo-skill",
+                                "source_record_version": "1.0.0",
+                                "checksum": platform_hash,
+                            }
+                        ],
+                    }
+                if "/capabilities/records" in url:
+                    return {"items": [dict(platform_record)]}
+                if url.endswith("/source/metadata"):
+                    return {"source_id": "onecolleague_skill_library"}
+                raise AssertionError(f"unexpected url: {url}")
+
+            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj), patch(
+                "cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes",
+                return_value=package_bytes,
+            ) as download:
+                refresh_resp, _ = self._call("capability_source_refresh", {"by": "user", "subscription_link": "http://skills.local/api/v1/skill-library"})
+                self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
+                download.assert_not_called()
+
+                pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
+                pending_id = str(((pending_resp.result or {}).get("items") or [])[0]["pending_id"])
+
+                confirm_resp, _ = self._call(
+                    "capability_source_pending_confirm",
+                    {"group_id": gid, "by": "user", "actor_id": "user", "pending_ids": [pending_id]},
+                )
+                self.assertTrue(confirm_resp.ok, getattr(confirm_resp, "error", None))
+                download.assert_called_once()
+                result = ((confirm_resp.result or {}).get("results") or [])[0]
+                self.assertTrue(result.get("ok"))
+                package_install = result.get("package_install") if isinstance(result.get("package_install"), dict) else {}
+                extracted = Path(str(package_install.get("extracted_path") or ""))
+                self.assertTrue((extracted / "SKILL.md").is_file())
+                self.assertTrue((extracted / "scripts" / "run.sh").is_file())
+
+                catalog_path, catalog_doc = ops._load_catalog_doc()
+                rec = catalog_doc.get("records", {}).get("skill:onecolleague:demo-skill")
+                self.assertEqual(str((rec or {}).get("install_mode") or ""), "codex_skill_package")
+                self.assertEqual(str(((rec or {}).get("install_spec") or {}).get("package_sha256") or ""), package_sha)
+
+            self.assertFalse((Path(home) / ".codex" / "skills" / "demo-skill").exists())
+        finally:
+            cleanup()
+
+    def test_skill_package_rejects_zip_slip_and_symlink(self) -> None:
+        from cccc.daemon.ops.capability_ops import ensure_codex_skill_package_installed
+
+        _, cleanup = self._with_home()
+        try:
+            zip_slip = self._skill_zip_bytes({"../SKILL.md": "bad\n"})
+            rec = {
+                "capability_id": "skill:onecolleague:bad",
+                "kind": "skill",
+                "name": "bad",
+                "install_mode": "codex_skill_package",
+                "install_spec": {
+                    "package_url": "http://skills.local/bad.zip",
+                    "package_sha256": hashlib.sha256(zip_slip).hexdigest(),
+                    "package_size": len(zip_slip),
+                    "package_format": "zip",
+                    "skill_slug": "bad",
+                },
+            }
+            with patch("cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=zip_slip):
+                with self.assertRaisesRegex(ValueError, "unsafe package path"):
+                    ensure_codex_skill_package_installed(rec)
+
+            import io
+
+            buf = io.BytesIO()
+            info = zipfile.ZipInfo("bad/link")
+            info.external_attr = (0o120777 << 16)
+            with zipfile.ZipFile(buf, "w") as zf:
+                zf.writestr("bad/SKILL.md", "ok\n")
+                zf.writestr(info, "SKILL.md")
+            symlink_zip = buf.getvalue()
+            rec["install_spec"]["package_sha256"] = hashlib.sha256(symlink_zip).hexdigest()
+            rec["install_spec"]["package_size"] = len(symlink_zip)
+            with patch("cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=symlink_zip):
+                with self.assertRaisesRegex(ValueError, "unsupported package entry type"):
+                    ensure_codex_skill_package_installed(rec)
+        finally:
+            cleanup()
+
+    def test_skill_package_import_requires_zip_skill_md_entrypoint(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            base_record = {
+                "capability_id": "skill:onecolleague:bad-entry",
+                "kind": "skill",
+                "name": "bad-entry",
+                "description_short": "Bad entry",
+                "source_record_id": "bad-entry",
+                "source_record_version": "1.0.0",
+                "capsule_text": "Bad package metadata.",
+                "install_mode": "codex_skill_package",
+                "skill_package_url": "http://skills.local/bad-entry.zip",
+                "skill_package_sha256": "a" * 64,
+                "skill_package_size": 123,
+                "package_format": "zip",
+                "entrypoint": "README.md",
+            }
+            resp, _ = self._call(
+                "capability_import",
+                {"group_id": gid, "actor_id": "peer-1", "record": base_record, "dry_run": True, "probe": False, "by": "peer-1"},
+            )
+            self.assertFalse(resp.ok)
+            self.assertIn("entrypoint must be SKILL.md", str(getattr(resp, "error", None).message if getattr(resp, "error", None) else ""))
+
+            bad_format = dict(base_record)
+            bad_format["entrypoint"] = "SKILL.md"
+            bad_format["package_format"] = "tar"
+            resp, _ = self._call(
+                "capability_import",
+                {"group_id": gid, "actor_id": "peer-1", "record": bad_format, "dry_run": True, "probe": False, "by": "peer-1"},
+            )
+            self.assertFalse(resp.ok)
+            self.assertIn("package_format must be zip", str(getattr(resp, "error", None).message if getattr(resp, "error", None) else ""))
+        finally:
+            cleanup()
+
+    def test_onecolleague_pending_confirm_revalidates_content_hash_before_install(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            record = {
+                "capability_id": "skill:onecolleague:tampered",
+                "kind": "skill",
+                "name": "tampered",
+                "description_short": "Tampered package skill",
+                "source_id": "onecolleague_skill_library",
+                "source_record_id": "tampered",
+                "source_record_version": "1.0.0",
+                "updated_at_source": "2026-04-28T00:00:00Z",
+                "tags": ["skill"],
+                "trust_tier": "tier1",
+                "source_tier": "tier1",
+                "qualification_status": "qualified",
+                "capsule_text": "This pending item was modified after refresh.",
+                "requires_capabilities": [],
+                "install_mode": "codex_skill_package",
+                "install_spec": {
+                    "package_url": "http://skills.local/tampered.zip",
+                    "package_sha256": "a" * 64,
+                    "package_size": 123,
+                    "package_format": "zip",
+                    "skill_slug": "tampered",
+                },
+            }
+            record_hash = "sha256:" + hashlib.sha256(
+                json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            record["capsule_text"] = "This pending item was modified after refresh and hash capture."
+            pending_doc = {
+                "v": 1,
+                "items": {
+                    "p1": {
+                        "pending_id": "p1",
+                        "source_id": "onecolleague_skill_library",
+                        "capability_id": "skill:onecolleague:tampered",
+                        "status": "new",
+                        "checksum": "sha256:not-the-current-record",
+                        "record_content_hash": record_hash,
+                        "record": record,
+                    }
+                },
+            }
+            pending_path = Path(os.environ["CCCC_HOME"]) / "state" / "capabilities" / "onecolleague_skill_library_pending.json"
+            pending_path.parent.mkdir(parents=True, exist_ok=True)
+            pending_path.write_text(json.dumps(pending_doc), encoding="utf-8")
+
+            with patch("cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes") as download:
+                confirm_resp, _ = self._call(
+                    "capability_source_pending_confirm",
+                    {"group_id": gid, "by": "user", "actor_id": "user", "pending_ids": ["p1"]},
+                )
+            self.assertTrue(confirm_resp.ok, getattr(confirm_resp, "error", None))
+            download.assert_not_called()
+            result = ((confirm_resp.result or {}).get("results") or [])[0]
+            self.assertFalse(bool(result.get("ok")))
+            self.assertEqual(((result.get("error") or {}).get("code")), "pending_record_hash_mismatch")
         finally:
             cleanup()
 

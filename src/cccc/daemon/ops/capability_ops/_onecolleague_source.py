@@ -22,6 +22,7 @@ from ....util.time import utc_now_iso
 from ._common import _CATALOG_LOCK, _capability_root, _error, _http_get_json_obj
 from ._documents import _load_catalog_doc, _save_catalog_doc, _source_state_template
 from ._handlers import _normalize_import_record, _refresh_source_record_counts, handle_capability_import
+from ._skill_packages import ensure_codex_skill_package_installed, is_codex_skill_package_record
 
 ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library"
 ONECOLLEAGUE_DEFAULT_BASE_URL = "http://dongdongkc.top:8012/api/v1/skill-library"
@@ -221,6 +222,24 @@ def _validate_platform_hash(raw: Dict[str, Any], index_item: Optional[Dict[str, 
     elif index_hash and index_hash != actual:
         errors.append("index_checksum_mismatch")
     return actual, errors
+
+
+def _validate_pending_record_hash(record: Dict[str, Any], item: Dict[str, Any]) -> List[str]:
+    expected = str(item.get("record_content_hash") or "").strip()
+    if not expected:
+        return []
+    actual = "sha256:" + hashlib.sha256(
+        json.dumps(_canonical_record(record), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if actual != expected:
+        return ["pending_record_content_hash_mismatch"]
+    return []
+
+
+def _pending_record_hash(record: Dict[str, Any]) -> str:
+    return "sha256:" + hashlib.sha256(
+        json.dumps(_canonical_record(record), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _records_equal(a: Optional[Dict[str, Any]], b: Dict[str, Any]) -> bool:
@@ -476,6 +495,7 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
                 "old_version": str(previous.get("source_record_version") or "") if isinstance(previous, dict) else "",
                 "new_version": version,
                 "checksum": checksum,
+                "record_content_hash": _pending_record_hash(record),
                 "risk_level": risk_level,
                 "risk_reasons": risk_reasons,
                 "requires_confirmation": True,
@@ -628,6 +648,27 @@ def handle_capability_source_pending_confirm(args: Dict[str, Any]) -> DaemonResp
             if not record:
                 results.append({"pending_id": pid, "ok": False, "error": {"code": "missing_record", "message": "pending item has no import record"}})
                 continue
+            hash_errors = _validate_pending_record_hash(record, item)
+            if hash_errors:
+                results.append(
+                    {
+                        "pending_id": pid,
+                        "ok": False,
+                        "error": {
+                            "code": "pending_record_hash_mismatch",
+                            "message": ",".join(hash_errors),
+                            "details": {"hash_errors": hash_errors},
+                        },
+                    }
+                )
+                continue
+            package_install: Dict[str, Any] = {}
+            if is_codex_skill_package_record(record):
+                try:
+                    package_install = ensure_codex_skill_package_installed(record)
+                except Exception as e:
+                    results.append({"pending_id": pid, "ok": False, "error": {"code": "skill_package_install_failed", "message": str(e)}})
+                    continue
             resp = handle_capability_import(
                 {
                     "group_id": group_id,
@@ -644,6 +685,8 @@ def handle_capability_source_pending_confirm(args: Dict[str, Any]) -> DaemonResp
             payload = {"pending_id": pid, "ok": bool(resp.ok), "result": resp.result if resp.ok else None}
             if not resp.ok and resp.error is not None:
                 payload["error"] = {"code": resp.error.code, "message": resp.error.message, "details": resp.error.details}
+            if package_install:
+                payload["package_install"] = package_install
             results.append(payload)
         with _SOURCE_LOCK:
             path, doc = _load_pending_doc()

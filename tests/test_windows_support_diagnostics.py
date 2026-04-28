@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -157,6 +159,133 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
 
         self.assertFalse(bool(result.get("success")))
         self.assertIn("not in PATH", str(result.get("error") or ""))
+
+    def test_codex_actor_start_injects_skill_package_overlay_codex_home(self) -> None:
+        from cccc.daemon.actors import actor_runtime_ops
+        from cccc.daemon.ops import capability_ops as ops
+
+        old_home = os.environ.get("CCCC_HOME")
+        old_codex_home = os.environ.get("CODEX_HOME")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                os.environ["CCCC_HOME"] = td
+                source_codex = Path(td) / "source-codex"
+                source_codex.mkdir()
+                (source_codex / "auth.json").write_text('{"ok":true}\n', encoding="utf-8")
+                (source_codex / "config.toml").write_text("[mcp_servers]\n", encoding="utf-8")
+                os.environ["CODEX_HOME"] = str(source_codex)
+
+                skill_root = Path(td) / "installed-skill"
+                skill_root.mkdir()
+                (skill_root / "SKILL.md").write_text("Use mounted package.\n", encoding="utf-8")
+                state_path = Path(td) / "state" / "capabilities" / "skill_packages" / "install_state.json"
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state_path.write_text(
+                    json.dumps(
+                        {
+                            "v": 1,
+                            "packages": {
+                                "skill:onecolleague:demo": {
+                                    "capability_id": "skill:onecolleague:demo",
+                                    "skill_slug": "demo",
+                                    "package_sha256": "a" * 64,
+                                    "extracted_path": str(skill_root),
+                                    "state": "installed",
+                                }
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                catalog_path, catalog_doc = ops._load_catalog_doc()
+                catalog_doc["records"]["skill:onecolleague:demo"] = {
+                    "capability_id": "skill:onecolleague:demo",
+                    "kind": "skill",
+                    "name": "demo",
+                    "source_id": "onecolleague_skill_library",
+                    "qualification_status": "qualified",
+                    "enable_supported": True,
+                    "capsule_text": "Use mounted package.",
+                    "install_mode": "codex_skill_package",
+                    "install_spec": {
+                        "package_url": "http://skills.local/demo.zip",
+                        "package_sha256": "a" * 64,
+                        "package_size": 10,
+                        "package_format": "zip",
+                        "skill_slug": "demo",
+                    },
+                }
+                ops._save_catalog_doc(catalog_path, catalog_doc)
+
+                group = SimpleNamespace(
+                    group_id="g1",
+                    doc={
+                        "active_scope_key": "scope1",
+                        "actors": [
+                            {
+                                "id": "peer1",
+                                "default_scope_key": "scope1",
+                                "runner": "headless",
+                                "runtime": "codex",
+                                "command": ["codex"],
+                                "env": {},
+                                "capability_autoload": ["skill:onecolleague:demo"],
+                            }
+                        ],
+                    },
+                    save=lambda: None,
+                    ledger_path=str(Path(td) / "ledger.jsonl"),
+                )
+                captured: dict[str, object] = {}
+
+                def _start_actor(**kwargs: object) -> None:
+                    captured.update(kwargs)
+
+                with patch.object(actor_runtime_ops.codex_app_supervisor, "start_actor", side_effect=_start_actor), patch.object(
+                    actor_runtime_ops,
+                    "append_event",
+                    return_value={"id": "evt1"},
+                ), patch.object(actor_runtime_ops, "publish_event", create=True), patch.object(
+                    actor_runtime_ops,
+                    "request_pet_review",
+                ):
+                    result = actor_runtime_ops.start_actor_process(
+                        group,
+                        "peer1",
+                        command=["codex"],
+                        env={},
+                        runner="headless",
+                        runtime="codex",
+                        by="user",
+                        find_scope_url=lambda _group, _scope_key: td,
+                        effective_runner_kind=lambda runner: runner,
+                        merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+                        normalize_runtime_command=lambda _runtime, command: list(command),
+                        ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
+                        inject_actor_context_env=lambda env, gid, aid: {**dict(env), "CCCC_GROUP_ID": gid, "CCCC_ACTOR_ID": aid},
+                        prepare_pty_env=lambda env: dict(env),
+                        pty_backlog_bytes=lambda: 1024,
+                        write_headless_state=lambda _gid, _aid: None,
+                        write_pty_state=lambda _gid, _aid, _pid: None,
+                        clear_preamble_sent=lambda _group, _aid: None,
+                        throttle_reset_actor=lambda _gid, _aid: None,
+                        supported_runtimes=("codex",),
+                    )
+
+                self.assertTrue(bool(result.get("success")), result)
+                env = captured.get("env") if isinstance(captured.get("env"), dict) else {}
+                overlay = Path(str(env.get("CODEX_HOME") or ""))
+                self.assertTrue((overlay / "skills" / "demo" / "SKILL.md").is_file())
+                self.assertFalse((source_codex / "skills" / "demo").exists())
+        finally:
+            if old_home is None:
+                os.environ.pop("CCCC_HOME", None)
+            else:
+                os.environ["CCCC_HOME"] = old_home
+            if old_codex_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_codex_home
 
     def test_windows_pty_does_not_fallback_to_spawn_without_env(self) -> None:
         from cccc.runners import pty_win

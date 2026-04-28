@@ -17,6 +17,17 @@ from ...runners.platform_support import pty_support_error_message
 from ..pet.review_scheduler import request_pet_review
 
 
+def _prepare_codex_skill_overlay(group: Any, actor_id: str, env: Dict[str, Any]) -> Dict[str, str]:
+    try:
+        from ..ops.capability_ops import prepare_codex_skill_package_overlay_for_actor
+    except Exception:
+        return {}
+    overlay_env = prepare_codex_skill_package_overlay_for_actor(group, actor_id, env)
+    if not isinstance(overlay_env, dict):
+        return {}
+    return {str(k): str(v) for k, v in overlay_env.items() if str(k).strip() and str(v).strip()}
+
+
 class ActorLaunchConfig(TypedDict):
     actor: Dict[str, Any]
     runtime: str
@@ -224,6 +235,12 @@ def start_actor_process(
     cwd = launch_spec["cwd"]
     runtime = launch_spec["runtime"]
     runner = launch_spec["runner"]
+
+    if runtime == "codex":
+        try:
+            effective_env.update(_prepare_codex_skill_overlay(group, actor_id, effective_env))
+        except Exception as e:
+            return {"success": False, "error": f"failed to prepare Codex skill package overlay: {e}"}
 
     if effective_runner != "headless":
         if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):

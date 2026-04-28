@@ -224,6 +224,12 @@ from ._install import (  # noqa: F401
     _invoke_installed_external_tool,
     _invoke_installed_external_tool_with_aliases,
 )
+from ._skill_packages import (  # noqa: F401
+    normalize_codex_skill_package_spec,
+    is_codex_skill_package_record,
+    ensure_codex_skill_package_installed,
+    prepare_codex_skill_package_overlay_for_actor,
+)
 from ._handlers import (  # noqa: F401
     _curated_install_metadata,
     _build_curated_records_from_policy,

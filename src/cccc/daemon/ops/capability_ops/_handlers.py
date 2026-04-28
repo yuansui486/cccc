@@ -57,6 +57,7 @@ from ._install import (
 )
 from ._policy import _normalize_policy_level
 from ._remote import _mark_source_disabled
+from ._skill_packages import normalize_codex_skill_package_spec
 from ._state import (
     _binding_state_allows_external_tool,
     _install_state_allows_external_tool,
@@ -874,6 +875,7 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         rec.update(recommendation_fields)
         return rec
 
+    install_mode, install_spec = normalize_codex_skill_package_spec(raw_record)
     capsule_text = str(raw_record.get("capsule_text") or "").strip()
     if not capsule_text:
         raise ValueError("skill import requires record.capsule_text")
@@ -894,8 +896,8 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         "updated_at_source": updated_at_source,
         "last_synced_at": now_iso,
         "sync_state": "imported",
-        "install_mode": "builtin",
-        "install_spec": {},
+        "install_mode": install_mode,
+        "install_spec": install_spec,
         "requirements": {},
         "license": license_text,
         "trust_tier": trust_tier,
