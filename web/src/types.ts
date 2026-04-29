@@ -328,6 +328,40 @@ export type CapabilitySourceState = {
   error?: string;
 };
 
+export type OneColleagueCapabilitySource = {
+  source_id: string;
+  enabled: boolean;
+  base_url?: string;
+  last_synced_at?: string;
+  last_success_at?: string;
+  last_error?: string;
+  last_cursor?: string;
+  updated_since?: string;
+  last_summary?: Record<string, number>;
+};
+
+export type OneColleaguePendingCapability = {
+  pending_id: string;
+  source_id?: string;
+  capability_id: string;
+  kind?: string;
+  name?: string;
+  status?: string;
+  old_version?: string;
+  new_version?: string;
+  checksum?: string;
+  risk_level?: string;
+  risk_reasons?: string[];
+  requires_confirmation?: boolean;
+  diff?: Array<Record<string, unknown>>;
+  created_at?: string;
+  updated_at?: string;
+  imported_at?: string;
+  record?: CapabilityImportRecord | null;
+  import_result?: Record<string, unknown>;
+  probe_result?: Record<string, unknown>;
+};
+
 export type CapabilityBlockEntry = {
   capability_id: string;
   scope?: string;
@@ -352,6 +386,16 @@ export type CapabilityEnabledEntry = {
 export type CapabilityStateResult = {
   group_id: string;
   actor_id: string;
+  enabled_capabilities?: string[];
+  active_capsule_skills?: Array<{
+    capability_id: string;
+    name?: string;
+    description_short?: string;
+    source_id?: string;
+    source_uri?: string;
+    policy_level?: string;
+  }>;
+  autoload_capabilities?: string[];
   enabled: CapabilityEnabledEntry[];
   dynamic_tools?: Array<{ name: string; capability_id: string; description?: string }>;
 };

@@ -12,6 +12,8 @@ import type {
   GroupSettings,
   LedgerEvent,
   MessageRef,
+  OneColleagueCapabilitySource,
+  OneColleaguePendingCapability,
   Task,
 } from "../../types";
 import {
@@ -226,6 +228,95 @@ export async function blockCapabilityGlobal(capabilityId: string, blocked: boole
   });
 }
 
+export async function fetchOneColleagueCapabilitySource() {
+  return apiJson<{ source: OneColleagueCapabilitySource }>(
+    "/api/v1/capabilities/sources/onecolleague_skill_library",
+  );
+}
+
+export async function updateOneColleagueCapabilitySource(opts: {
+  enabled?: boolean;
+  baseUrl?: string;
+  subscriptionLink?: string;
+}) {
+  const body: Record<string, unknown> = { by: "user" };
+  if (typeof opts.enabled === "boolean") body.enabled = opts.enabled;
+  if (opts.baseUrl !== undefined) body.base_url = String(opts.baseUrl || "").trim();
+  if (opts.subscriptionLink !== undefined) body.subscription_link = String(opts.subscriptionLink || "").trim();
+  return apiJson<{ action_id?: string; source: OneColleagueCapabilitySource }>(
+    "/api/v1/capabilities/sources/onecolleague_skill_library",
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function testOneColleagueCapabilitySource(opts?: {
+  baseUrl?: string;
+  subscriptionLink?: string;
+}) {
+  const body: Record<string, unknown> = { by: "user" };
+  if (opts?.baseUrl !== undefined) body.base_url = String(opts.baseUrl || "").trim();
+  if (opts?.subscriptionLink !== undefined) body.subscription_link = String(opts.subscriptionLink || "").trim();
+  return apiJson<Record<string, unknown>>(
+    "/api/v1/capabilities/sources/onecolleague_skill_library/test",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function refreshOneColleagueCapabilitySource(opts?: {
+  limit?: number;
+  updatedSince?: string;
+  baseUrl?: string;
+  subscriptionLink?: string;
+}) {
+  const body: Record<string, unknown> = {
+    by: "user",
+    limit: Number.isFinite(Number(opts?.limit)) ? Math.trunc(Number(opts?.limit)) : 200,
+  };
+  if (opts?.updatedSince !== undefined) body.updated_since = String(opts.updatedSince || "").trim();
+  if (opts?.baseUrl !== undefined) body.base_url = String(opts.baseUrl || "").trim();
+  if (opts?.subscriptionLink !== undefined) body.subscription_link = String(opts.subscriptionLink || "").trim();
+  return apiJson<{
+    action_id?: string;
+    source?: OneColleagueCapabilitySource;
+    summary?: Record<string, number>;
+    invalid?: Array<Record<string, unknown>>;
+    pending_count?: number;
+  }>("/api/v1/capabilities/sources/onecolleague_skill_library/refresh", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchOneColleaguePendingCapabilities(status = "") {
+  const params = new URLSearchParams();
+  if (String(status || "").trim()) params.set("status", String(status || "").trim());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiJson<{ items: OneColleaguePendingCapability[]; count: number }>(
+    `/api/v1/capabilities/sources/onecolleague_skill_library/pending${suffix}`,
+  );
+}
+
+export async function confirmOneColleaguePendingCapabilities(groupId: string, pendingIds: string[], actorId = "user") {
+  return apiJson<{ action_id?: string; results: Array<Record<string, unknown>> }>(
+    "/api/v1/capabilities/sources/onecolleague_skill_library/pending/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        by: "user",
+        actor_id: actorId || "user",
+        group_id: groupId,
+        pending_ids: pendingIds,
+      }),
+    },
+  );
+}
+
 export async function fetchGroupCapabilityState(groupId: string, actorId: string = "user") {
   const params = new URLSearchParams();
   if (actorId) params.set("actor_id", actorId);
@@ -245,17 +336,22 @@ export async function enableGroupCapability(
     cleanup?: boolean;
   },
 ) {
+  const body: Record<string, unknown> = {
+    capability_id: capabilityId,
+    enabled: opts?.enabled ?? true,
+    scope: opts?.scope || "session",
+    actor_id: opts?.actorId || "user",
+    reason: opts?.reason || "",
+    cleanup: opts?.cleanup || false,
+  };
+  if (typeof opts?.ttlSeconds === "number" && Number.isFinite(opts.ttlSeconds)) {
+    body.ttl_seconds = Math.trunc(opts.ttlSeconds);
+  } else if ((opts?.scope || "session") === "session") {
+    body.ttl_seconds = 3600;
+  }
   return apiJson<Record<string, unknown>>(`/api/v1/groups/${encodeURIComponent(groupId)}/capabilities/enable`, {
     method: "POST",
-    body: JSON.stringify({
-      capability_id: capabilityId,
-      enabled: opts?.enabled ?? true,
-      scope: opts?.scope || "session",
-      actor_id: opts?.actorId || "user",
-      ttl_seconds: opts?.ttlSeconds || 3600,
-      reason: opts?.reason || "",
-      cleanup: opts?.cleanup || false,
-    }),
+    body: JSON.stringify(body),
   });
 }
 

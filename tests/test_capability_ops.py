@@ -260,6 +260,137 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_onecolleague_skill_store_web_flow_surfaces_import_and_enable_state(self) -> None:
+        from cccc.contracts.v1 import DaemonRequest
+        from cccc.daemon.server import handle_request
+        from cccc.ports.web.app import create_app
+        from fastapi.testclient import TestClient
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group("skill-store-web")
+            self._add_actor(gid, "agent1")
+            platform_record = {
+                "capability_id": "skill:onecolleague:store-flow",
+                "kind": "skill",
+                "name": "store-flow",
+                "description_short": "Store flow skill",
+                "source_uri": "http://skills.local/skills/store-flow",
+                "source_record_id": "store-flow",
+                "source_record_version": "1.2.3",
+                "updated_at_source": "2026-04-29T00:00:00Z",
+                "tags": ["skill", "onecolleague"],
+                "trust_tier": "tier1",
+                "source_tier": "tier1",
+                "qualification_status": "qualified",
+                "capsule_text": "Use this store flow skill for storefront verification.",
+                "requires_capabilities": [],
+            }
+            platform_hash = "sha256:" + hashlib.sha256(
+                json.dumps(platform_record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            platform_record["content_hash"] = platform_hash
+
+            def fake_get_json_obj(url: str, **kwargs: Any) -> dict[str, Any]:
+                self.assertNotIn("headers", kwargs)
+                if url.endswith("/source/metadata"):
+                    return {
+                        "source_id": "onecolleague_skill_library",
+                        "display_name": "OneColleague Skill Library",
+                        "schema_version": "1",
+                    }
+                if "/capabilities/index" in url:
+                    return {
+                        "server_time": "2026-04-29T00:00:00Z",
+                        "items": [
+                            {
+                                "capability_id": platform_record["capability_id"],
+                                "kind": "skill",
+                                "name": "store-flow",
+                                "description_short": "Store flow skill",
+                                "source_record_id": "store-flow",
+                                "source_record_version": "1.2.3",
+                                "updated_at_source": "2026-04-29T00:00:00Z",
+                                "checksum": platform_hash,
+                            }
+                        ],
+                    }
+                if "/capabilities/records" in url:
+                    return {"items": [dict(platform_record)]}
+                raise AssertionError(f"unexpected url: {url}")
+
+            def local_call_daemon(req: dict[str, Any], **_: Any) -> dict[str, Any]:
+                resp, _mutated = handle_request(DaemonRequest.model_validate(req))
+                return resp.model_dump()
+
+            with (
+                patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj),
+                patch("cccc.ports.web.app.call_daemon", side_effect=local_call_daemon),
+            ):
+                with TestClient(create_app()) as client:
+                    source_resp = client.get("/api/v1/capabilities/sources/onecolleague_skill_library")
+                    self.assertEqual(source_resp.status_code, 200)
+                    self.assertTrue(source_resp.json().get("ok"), source_resp.json())
+
+                    refresh_resp = client.post(
+                        "/api/v1/capabilities/sources/onecolleague_skill_library/refresh",
+                        json={"by": "user", "limit": 200},
+                    )
+                    self.assertEqual(refresh_resp.status_code, 200)
+                    refresh_body = refresh_resp.json()
+                    self.assertTrue(refresh_body.get("ok"), refresh_body)
+                    self.assertEqual(((refresh_body.get("result") or {}).get("summary") or {}).get("new"), 1)
+
+                    pending_resp = client.get("/api/v1/capabilities/sources/onecolleague_skill_library/pending")
+                    self.assertEqual(pending_resp.status_code, 200)
+                    pending_body = pending_resp.json()
+                    self.assertTrue(pending_body.get("ok"), pending_body)
+                    pending_items = (pending_body.get("result") or {}).get("items") or []
+                    self.assertEqual(len(pending_items), 1)
+                    pending_id = str(pending_items[0].get("pending_id") or "")
+
+                    confirm_resp = client.post(
+                        "/api/v1/capabilities/sources/onecolleague_skill_library/pending/confirm",
+                        json={"group_id": gid, "actor_id": "agent1", "pending_ids": [pending_id]},
+                    )
+                    self.assertEqual(confirm_resp.status_code, 200)
+                    confirm_body = confirm_resp.json()
+                    self.assertTrue(confirm_body.get("ok"), confirm_body)
+                    self.assertTrue(((confirm_body.get("result") or {}).get("results") or [])[0].get("ok"))
+
+                    overview_resp = client.get("/api/v1/capabilities/overview?query=store-flow&include_indexed=true&limit=20")
+                    self.assertEqual(overview_resp.status_code, 200)
+                    overview_body = overview_resp.json()
+                    self.assertTrue(overview_body.get("ok"), overview_body)
+                    overview_items = (overview_body.get("result") or {}).get("items") or []
+                    self.assertIn("skill:onecolleague:store-flow", {str(item.get("capability_id") or "") for item in overview_items})
+
+                    enable_resp = client.post(
+                        f"/api/v1/groups/{gid}/capabilities/enable",
+                        json={
+                            "actor_id": "agent1",
+                            "capability_id": "skill:onecolleague:store-flow",
+                            "enabled": True,
+                            "scope": "actor",
+                            "ttl_seconds": 0,
+                            "reason": "skill_store_test",
+                        },
+                    )
+                    self.assertEqual(enable_resp.status_code, 200)
+                    enable_body = enable_resp.json()
+                    self.assertTrue(enable_body.get("ok"), enable_body)
+
+                    state_resp = client.get(f"/api/v1/groups/{gid}/capabilities/state?actor_id=agent1")
+                    self.assertEqual(state_resp.status_code, 200)
+                    state_body = state_resp.json()
+                    self.assertTrue(state_body.get("ok"), state_body)
+                    state = state_body.get("result") or {}
+                    self.assertIn("skill:onecolleague:store-flow", state.get("enabled_capabilities") or [])
+                    active_ids = {str(item.get("capability_id") or "") for item in state.get("active_capsule_skills") or []}
+                    self.assertIn("skill:onecolleague:store-flow", active_ids)
+        finally:
+            cleanup()
+
     def test_onecolleague_skill_package_confirm_installs_after_refresh_only(self) -> None:
         from cccc.daemon.ops import capability_ops as ops
 

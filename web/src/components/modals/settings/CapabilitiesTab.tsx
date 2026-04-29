@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
-import { CapabilityBlockEntry, CapabilityOverviewItem, CapabilityReadinessPreview, CapabilitySourceState } from "../../../types";
+import {
+  Actor,
+  CapabilityBlockEntry,
+  CapabilityOverviewItem,
+  CapabilityReadinessPreview,
+  CapabilitySourceState,
+  CapabilityStateResult,
+  OneColleagueCapabilitySource,
+  OneColleaguePendingCapability,
+} from "../../../types";
 import { cardClass } from "./types";
 
 interface CapabilitiesTabProps {
   isDark: boolean;
   isActive: boolean;
+  groupId?: string;
 }
 
 type SourceVisibility = "all" | "enabled" | "disabled";
@@ -26,6 +36,7 @@ const SOURCE_PRIORITY: Record<string, number> = {
   clawhub_remote: 6,
   skillsmp_remote: 7,
   manual_import: 8,
+  onecolleague_skill_library: 9,
 };
 const EXTERNAL_SOURCE_IDS = [
   "manual_import",
@@ -37,6 +48,9 @@ const EXTERNAL_SOURCE_IDS = [
   "openclaw_skills_remote",
   "clawskills_remote",
 ] as const;
+
+const ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library";
+const DEFAULT_ENABLE_ACTOR_ID = "user";
 
 function normalizeExternalCapabilitySafetyMode(value: unknown): ExternalCapabilitySafetyMode {
   return String(value || "").trim().toLowerCase() === "conservative" ? "conservative" : "normal";
@@ -50,11 +64,29 @@ function firstRecommendationLine(value?: string[]) {
   return Array.isArray(value) ? String(value[0] || "").trim() : "";
 }
 
-export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabProps) {
+function asResultArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : [];
+}
+
+function pendingImportOk(item: OneColleaguePendingCapability): boolean {
+  const result = item.import_result && typeof item.import_result === "object"
+    ? item.import_result as Record<string, unknown>
+    : {};
+  return Boolean(result.ok);
+}
+
+function versionLabel(value: unknown): string {
+  return String(value || "").trim() || "-";
+}
+
+export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: CapabilitiesTabProps) {
   const { t } = useTranslation("settings");
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState("");
   const [err, setErr] = useState("");
+  const [storeErr, setStoreErr] = useState("");
   const [query, setQuery] = useState("");
   const [sourceQuery, setSourceQuery] = useState("");
   const [sourceVisibility, setSourceVisibility] = useState<SourceVisibility>("all");
@@ -69,15 +101,26 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
   const [blocked, setBlocked] = useState<CapabilityBlockEntry[]>([]);
   const [allowlistSources, setAllowlistSources] = useState<Array<{ source_id: string; enabled: boolean; rationale?: string }>>([]);
   const [externalSafetyMode, setExternalSafetyMode] = useState<ExternalCapabilitySafetyMode>("normal");
+  const [oneColleagueSource, setOneColleagueSource] = useState<OneColleagueCapabilitySource | null>(null);
+  const [pendingItems, setPendingItems] = useState<OneColleaguePendingCapability[]>([]);
+  const [storeSummary, setStoreSummary] = useState<Record<string, number>>({});
+  const [storeInvalidCount, setStoreInvalidCount] = useState(0);
+  const [actors, setActors] = useState<Actor[]>([]);
+  const [enableActorId, setEnableActorId] = useState(DEFAULT_ENABLE_ACTOR_ID);
+  const [actorCapabilityState, setActorCapabilityState] = useState<CapabilityStateResult | null>(null);
 
   const load = useCallback(async () => {
     if (!isActive) return;
     setLoading(true);
     setErr("");
     try {
-      const [overviewResp, allowlistResp] = await Promise.all([
+      const [overviewResp, allowlistResp, sourceResp, pendingResp, actorsResp, stateResp] = await Promise.all([
         api.fetchCapabilityOverview({ includeIndexed: true, limit: 1200 }),
         api.fetchCapabilityAllowlist(),
+        api.fetchOneColleagueCapabilitySource(),
+        api.fetchOneColleaguePendingCapabilities(),
+        groupId ? api.fetchActors(groupId, false, { noCache: true }) : Promise.resolve(null),
+        groupId ? api.fetchGroupCapabilityState(groupId, enableActorId) : Promise.resolve(null),
       ]);
       if (!overviewResp.ok) {
         setErr(overviewResp.error?.message || t("capabilities.failedLoad"));
@@ -120,6 +163,24 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
           normalizeExternalCapabilitySafetyMode(allowlistResp.result?.external_capability_safety_mode)
         );
       }
+      if (sourceResp.ok) {
+        setOneColleagueSource(sourceResp.result?.source || null);
+        setStoreSummary(sourceResp.result?.source?.last_summary || {});
+      }
+      if (pendingResp.ok) {
+        setPendingItems(Array.isArray(pendingResp.result?.items) ? pendingResp.result.items : []);
+      }
+      if (actorsResp?.ok) {
+        const nextActors = Array.isArray(actorsResp.result?.actors) ? actorsResp.result.actors : [];
+        setActors(nextActors);
+      } else if (!groupId) {
+        setActors([]);
+      }
+      if (stateResp?.ok) {
+        setActorCapabilityState(stateResp.result || null);
+      } else if (!groupId) {
+        setActorCapabilityState(null);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : t("capabilities.failedLoad"));
       setItems([]);
@@ -128,7 +189,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
     } finally {
       setLoading(false);
     }
-  }, [isActive, t]);
+  }, [enableActorId, groupId, isActive, t]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -204,6 +265,91 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
     if (showAllSources) return filteredSources;
     return filteredSources.slice(0, SOURCE_PREVIEW_LIMIT);
   }, [filteredSources, showAllSources]);
+
+  const oneColleagueRows = useMemo(() => {
+    return items
+      .filter((row) => String(row.source_id || "").trim() === ONECOLLEAGUE_SOURCE_ID)
+      .sort((a, b) => String(a.name || a.capability_id || "").localeCompare(String(b.name || b.capability_id || "")));
+  }, [items]);
+
+  const activePendingItems = useMemo(() => {
+    return pendingItems.filter((item) => {
+      const status = String(item.status || "").trim();
+      return status && !["imported", "ignored", "rolled_back"].includes(status);
+    });
+  }, [pendingItems]);
+
+  const importablePendingItems = useMemo(() => {
+    return activePendingItems.filter((item) => item.record && typeof item.record === "object");
+  }, [activePendingItems]);
+
+  const importedPendingItems = useMemo(() => {
+    return pendingItems.filter((item) => String(item.status || "").trim() === "imported" || pendingImportOk(item));
+  }, [pendingItems]);
+
+  const enabledCapabilitySet = useMemo(() => {
+    const out = new Set<string>();
+    const enabled = actorCapabilityState?.enabled_capabilities;
+    if (Array.isArray(enabled)) {
+      for (const capId of enabled) {
+        const id = String(capId || "").trim();
+        if (id) out.add(id);
+      }
+    }
+    const entries = actorCapabilityState?.enabled;
+    if (Array.isArray(entries)) {
+      for (const row of entries) {
+        const id = String(row.capability_id || "").trim();
+        if (id) out.add(id);
+      }
+    }
+    return out;
+  }, [actorCapabilityState]);
+
+  const activeSkillSet = useMemo(() => {
+    const out = new Set<string>();
+    const rows = actorCapabilityState?.active_capsule_skills;
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const id = String(row.capability_id || "").trim();
+        if (id) out.add(id);
+      }
+    }
+    return out;
+  }, [actorCapabilityState]);
+
+  const actorOptions = useMemo(() => {
+    const rows = actors
+      .filter((actor) => String(actor.internal_kind || "").trim() === "")
+      .map((actor) => ({
+        actor_id: String(actor.id || "").trim(),
+        label: String(actor.title || actor.id || "").trim(),
+      }))
+      .filter((actor) => actor.actor_id);
+    return rows.length ? rows : [{ actor_id: DEFAULT_ENABLE_ACTOR_ID, label: t("capabilities.store.userActor") }];
+  }, [actors, t]);
+
+  useEffect(() => {
+    if (!isActive || !groupId) return;
+    const actorIds = actorOptions.map((actor) => actor.actor_id);
+    if (actorIds.length === 0) return;
+    if (!actorIds.includes(enableActorId)) {
+      setEnableActorId(actorIds[0]);
+    }
+  }, [actorOptions, enableActorId, groupId, isActive]);
+
+  const storeCounts = useMemo(() => {
+    const enabled = oneColleagueRows.filter((row) => enabledCapabilitySet.has(String(row.capability_id || "").trim())).length;
+    const active = oneColleagueRows.filter((row) => activeSkillSet.has(String(row.capability_id || "").trim())).length;
+    return {
+      published: Number(oneColleagueSource?.last_summary?.new || 0) + Number(oneColleagueSource?.last_summary?.updated || 0),
+      pending: importablePendingItems.length,
+      imported: oneColleagueRows.length,
+      enabled,
+      active,
+      importedHistory: importedPendingItems.length,
+    };
+  }, [activeSkillSet, enabledCapabilitySet, importablePendingItems.length, importedPendingItems.length, oneColleagueRows, oneColleagueSource]);
 
   const registrySourceOptions = useMemo(() => {
     const out = new Set<string>();
@@ -428,6 +574,118 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
     }
   };
 
+  const refreshStore = async () => {
+    setBusyKey("store:refresh");
+    setStoreErr("");
+    try {
+      const resp = await api.refreshOneColleagueCapabilitySource({ limit: 200 });
+      if (!resp.ok) {
+        setStoreErr(resp.error?.message || t("capabilities.store.failedRefresh"));
+        return;
+      }
+      setStoreSummary(resp.result?.summary || {});
+      setStoreInvalidCount(Array.isArray(resp.result?.invalid) ? resp.result.invalid.length : 0);
+      await load();
+    } catch (e) {
+      setStoreErr(e instanceof Error ? e.message : t("capabilities.store.failedRefresh"));
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const testStoreSource = async () => {
+    setBusyKey("store:test");
+    setStoreErr("");
+    try {
+      const resp = await api.testOneColleagueCapabilitySource();
+      if (!resp.ok) {
+        setStoreErr(resp.error?.message || t("capabilities.store.failedTest"));
+        return;
+      }
+      await load();
+    } catch (e) {
+      setStoreErr(e instanceof Error ? e.message : t("capabilities.store.failedTest"));
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const confirmPending = async (pendingId: string) => {
+    const pid = String(pendingId || "").trim();
+    if (!pid || !groupId) return;
+    setBusyKey(`store:confirm:${pid}`);
+    setStoreErr("");
+    try {
+      const resp = await api.confirmOneColleaguePendingCapabilities(groupId, [pid], enableActorId);
+      if (!resp.ok) {
+        setStoreErr(resp.error?.message || t("capabilities.store.failedConfirm"));
+        return;
+      }
+      const failed = asResultArray(resp.result?.results).find((row) => row.ok === false);
+      if (failed) {
+        const error = failed.error && typeof failed.error === "object" ? failed.error as Record<string, unknown> : {};
+        setStoreErr(String(error.message || t("capabilities.store.failedConfirm")));
+        return;
+      }
+      await load();
+    } catch (e) {
+      setStoreErr(e instanceof Error ? e.message : t("capabilities.store.failedConfirm"));
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const confirmAllPending = async () => {
+    if (!groupId || importablePendingItems.length === 0) return;
+    setBusyKey("store:confirmAll");
+    setStoreErr("");
+    try {
+      const resp = await api.confirmOneColleaguePendingCapabilities(
+        groupId,
+        importablePendingItems.map((item) => String(item.pending_id || "").trim()).filter(Boolean),
+        enableActorId,
+      );
+      if (!resp.ok) {
+        setStoreErr(resp.error?.message || t("capabilities.store.failedConfirm"));
+        return;
+      }
+      const failed = asResultArray(resp.result?.results).filter((row) => row.ok === false);
+      if (failed.length) {
+        setStoreErr(t("capabilities.store.partialConfirmFailed", { count: failed.length }));
+      }
+      await load();
+    } catch (e) {
+      setStoreErr(e instanceof Error ? e.message : t("capabilities.store.failedConfirm"));
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const toggleCapabilityEnabled = async (capabilityId: string, nextEnabled: boolean) => {
+    const capId = String(capabilityId || "").trim();
+    if (!capId || !groupId) return;
+    setBusyKey(`store:enable:${capId}`);
+    setStoreErr("");
+    try {
+      const resp = await api.enableGroupCapability(groupId, capId, {
+        enabled: nextEnabled,
+        scope: enableActorId === DEFAULT_ENABLE_ACTOR_ID ? "session" : "actor",
+        actorId: enableActorId,
+        ttlSeconds: nextEnabled && enableActorId === DEFAULT_ENABLE_ACTOR_ID ? 3600 : 0,
+        reason: "onecolleague_skill_store",
+      });
+      if (!resp.ok) {
+        setStoreErr(resp.error?.message || t("capabilities.failedEnable"));
+        return;
+      }
+      await load();
+    } catch (e) {
+      setStoreErr(e instanceof Error ? e.message : t("capabilities.failedEnable"));
+    } finally {
+      setBusyKey("");
+    }
+  };
+
   const toggleBlock = async (row: CapabilityOverviewItem | CapabilityBlockEntry, nextBlocked: boolean) => {
     const capabilityId = String(row.capability_id || "").trim();
     if (!capabilityId) return;
@@ -472,6 +730,186 @@ export function CapabilitiesTab({ isDark: _isDark, isActive }: CapabilitiesTabPr
         {err ? (
           <div className="mt-3 text-xs text-rose-600 dark:text-rose-400" role="alert">{err}</div>
         ) : null}
+      </div>
+
+      <div className={cardClass()}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("capabilities.store.title")}</div>
+            <div className="text-xs mt-1 text-[var(--color-text-muted)]">{t("capabilities.store.hint")}</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                {t("capabilities.store.sourceStatus", {
+                  status: oneColleagueSource?.enabled ? t("capabilities.sourceEnabled") : t("capabilities.sourceDisabled"),
+                })}
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                {t("capabilities.store.pendingCount", { count: storeCounts.pending })}
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                {t("capabilities.store.importedCount", { count: storeCounts.imported })}
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                {t("capabilities.store.enabledCount", { count: storeCounts.enabled })}
+              </span>
+            </div>
+            {oneColleagueSource?.base_url ? (
+              <div className="mt-2 text-[11px] break-all text-[var(--color-text-tertiary)]">
+                {t("capabilities.store.baseUrl")}: {oneColleagueSource.base_url}
+              </div>
+            ) : null}
+            {oneColleagueSource?.last_success_at ? (
+              <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                {t("capabilities.store.lastSynced")}: {oneColleagueSource.last_success_at}
+              </div>
+            ) : null}
+            {oneColleagueSource?.last_error ? (
+              <div className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">
+                {t("capabilities.store.lastError")}: {oneColleagueSource.last_error}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <button
+              type="button"
+              className="glass-btn px-3 py-2 rounded-lg text-xs min-h-[38px] text-[var(--color-text-secondary)]"
+              disabled={busyKey === "store:test"}
+              onClick={() => void testStoreSource()}
+            >
+              {busyKey === "store:test" ? t("common:loading") : t("capabilities.store.test")}
+            </button>
+            <button
+              type="button"
+              className="glass-btn px-3 py-2 rounded-lg text-xs min-h-[38px] text-[var(--color-text-secondary)]"
+              disabled={busyKey === "store:refresh"}
+              onClick={() => void refreshStore()}
+            >
+              {busyKey === "store:refresh" ? t("common:loading") : t("capabilities.store.refresh")}
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded-lg text-xs min-h-[38px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 disabled:opacity-50"
+              disabled={!groupId || importablePendingItems.length === 0 || busyKey === "store:confirmAll"}
+              onClick={() => void confirmAllPending()}
+            >
+              {busyKey === "store:confirmAll" ? t("common:loading") : t("capabilities.store.importAll")}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-4">
+          {(["new", "updated", "unchanged", "invalid"] as const).map((key) => (
+            <div key={key} className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
+              <div className="text-[10px] uppercase text-[var(--color-text-muted)]">{t(`capabilities.store.summary.${key}`)}</div>
+              <div className="text-lg font-semibold text-[var(--color-text-primary)]">
+                {key === "invalid" ? storeInvalidCount || Number(storeSummary.invalid || 0) : Number(storeSummary[key] || 0)}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(180px,240px)] md:items-center">
+          <div className="text-[11px] text-[var(--color-text-tertiary)]">{t("capabilities.store.actorHint")}</div>
+          <select
+            value={enableActorId}
+            onChange={(e) => setEnableActorId(e.target.value || DEFAULT_ENABLE_ACTOR_ID)}
+            className="glass-input rounded-lg px-2 py-2 text-xs min-h-[38px] text-[var(--color-text-primary)]"
+          >
+            {actorOptions.map((actor) => (
+              <option key={actor.actor_id} value={actor.actor_id}>{actor.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {!groupId ? (
+          <div className="mt-3 text-xs text-amber-600 dark:text-amber-300">{t("capabilities.store.requireGroup")}</div>
+        ) : null}
+        {storeErr ? (
+          <div className="mt-3 text-xs text-rose-600 dark:text-rose-400" role="alert">{storeErr}</div>
+        ) : null}
+
+        <div className="mt-4">
+          <div className="text-xs font-semibold text-[var(--color-text-primary)]">{t("capabilities.store.pendingTitle")}</div>
+          <div className="mt-2 space-y-2">
+            {activePendingItems.length === 0 ? (
+              <div className="text-xs text-[var(--color-text-muted)]">{t("capabilities.store.noPending")}</div>
+            ) : (
+              activePendingItems.map((item) => {
+                const pendingId = String(item.pending_id || "");
+                const status = String(item.status || "");
+                const capId = String(item.capability_id || "");
+                return (
+                  <div key={pendingId} className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate text-[var(--color-text-primary)]">{String(item.name || capId)}</div>
+                        <div className="text-[11px] truncate text-[var(--color-text-tertiary)]">{capId}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-600 dark:text-amber-300">{status}</span>
+                          {item.kind ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{item.kind}</span> : null}
+                          {item.risk_level ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{item.risk_level}</span> : null}
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                            {t("capabilities.store.versionChange", { old: versionLabel(item.old_version), next: versionLabel(item.new_version) })}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="px-2.5 py-1.5 rounded text-xs min-h-[34px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 disabled:opacity-50"
+                        disabled={!groupId || !item.record || busyKey === `store:confirm:${pendingId}`}
+                        onClick={() => void confirmPending(pendingId)}
+                      >
+                        {busyKey === `store:confirm:${pendingId}` ? t("common:loading") : t("capabilities.store.importOne")}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <div className="text-xs font-semibold text-[var(--color-text-primary)]">{t("capabilities.store.importedTitle")}</div>
+          <div className="mt-2 max-h-72 overflow-auto space-y-2">
+            {oneColleagueRows.length === 0 ? (
+              <div className="text-xs text-[var(--color-text-muted)]">{t("capabilities.store.noImported")}</div>
+            ) : (
+              oneColleagueRows.map((row) => {
+                const capId = String(row.capability_id || "");
+                const enabledNow = enabledCapabilitySet.has(capId);
+                const activeNow = activeSkillSet.has(capId);
+                return (
+                  <div key={capId} className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate text-[var(--color-text-primary)]">{String(row.name || capId)}</div>
+                        <div className="text-[11px] truncate text-[var(--color-text-tertiary)]">{capId}</div>
+                        {String(row.description_short || "").trim() ? (
+                          <div className="text-[11px] mt-1 text-[var(--color-text-tertiary)]">{String(row.description_short || "")}</div>
+                        ) : null}
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">{t("capabilities.store.imported")}</span>
+                          {enabledNow ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-sky-500/15 text-sky-600 dark:text-sky-300">{t("capabilities.store.enabled")}</span> : null}
+                          {activeNow ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-violet-500/15 text-violet-600 dark:text-violet-300">{t("capabilities.store.active")}</span> : null}
+                          {row.policy_level ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{row.policy_level}</span> : null}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={`px-2.5 py-1.5 rounded text-xs min-h-[34px] border disabled:opacity-50 ${enabledNow ? "bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/30" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"}`}
+                        disabled={!groupId || busyKey === `store:enable:${capId}`}
+                        onClick={() => void toggleCapabilityEnabled(capId, !enabledNow)}
+                      >
+                        {busyKey === `store:enable:${capId}` ? t("common:loading") : enabledNow ? t("capabilities.disableForGroup") : t("capabilities.enableForGroup")}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       </div>
 
       <div className={cardClass()}>

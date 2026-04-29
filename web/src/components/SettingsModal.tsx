@@ -911,6 +911,7 @@ export function SettingsModal({
   const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
 
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
+    { id: "capabilities" as const, label: t("tabs.capabilities") },
     ...(globalSettingsEnabled
       ? [
           { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
@@ -1107,6 +1108,14 @@ export function SettingsModal({
                 <BrandingTab
                   isDark={isDark}
                   isActive={scope === "global" && activeTab === "branding"}
+                />
+              )}
+
+              {activeTab === "capabilities" && (
+                <CapabilitiesTab
+                  isDark={isDark}
+                  isActive={scope === "global" && activeTab === "capabilities"}
+                  groupId={groupId}
                 />
               )}
 
