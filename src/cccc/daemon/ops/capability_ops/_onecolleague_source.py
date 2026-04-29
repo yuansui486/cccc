@@ -13,7 +13,7 @@ import json
 import threading
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import urlencode, urljoin
 
 from ....contracts.v1 import DaemonResponse
 from ....util.fs import atomic_write_json, read_json
@@ -318,39 +318,6 @@ def _normalize_platform_record(raw: Dict[str, Any]) -> Dict[str, Any]:
     return _normalize_import_record(candidate)
 
 
-def _rewrite_platform_url_to_source_base(raw_url: Any, base_url: str) -> str:
-    url = str(raw_url or "").strip()
-    if not url:
-        return ""
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return url
-    host = (parsed.hostname or "").strip().lower()
-    if host not in {"0.0.0.0", "::", "localhost", "127.0.0.1"}:
-        return url
-    base = urlparse(_normalize_base_url(base_url))
-    if base.scheme not in {"http", "https"} or not base.netloc:
-        return url
-    if host in {"localhost", "127.0.0.1"} and (base.hostname or "").strip().lower() in {"localhost", "127.0.0.1"}:
-        return url
-    return urlunparse((base.scheme, base.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
-
-
-def _normalize_platform_record_for_source(raw: Dict[str, Any], base_url: str) -> Dict[str, Any]:
-    candidate = dict(raw)
-    for key in ("source_uri", "package_url", "skill_package_url"):
-        if str(candidate.get(key) or "").strip():
-            candidate[key] = _rewrite_platform_url_to_source_base(candidate.get(key), base_url)
-    spec = candidate.get("install_spec")
-    if isinstance(spec, dict):
-        next_spec = dict(spec)
-        for key in ("package_url", "skill_package_url"):
-            if str(next_spec.get(key) or "").strip():
-                next_spec[key] = _rewrite_platform_url_to_source_base(next_spec.get(key), base_url)
-        candidate["install_spec"] = next_spec
-    return _normalize_platform_record(candidate)
-
-
 def _http_get_platform(base_url: str, rel: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     # The OneColleague skill library read API is public by design; do not send Authorization.
     return _unwrap_payload(_http_get_json_obj(_join_url(base_url, rel, params=params), timeout=12.0))
@@ -488,7 +455,7 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
                 if hash_errors:
                     invalid.append({"capability_id": raw_cap_id, "error": ",".join(hash_errors), "computed_hash": actual_hash})
                     continue
-                rec = _normalize_platform_record_for_source(raw, base_url)
+                rec = _normalize_platform_record(raw)
                 records[str(rec.get("capability_id") or "")] = rec
             except Exception as e:
                 invalid.append({"capability_id": raw_cap_id, "error": str(e)})
