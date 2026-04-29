@@ -418,7 +418,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "kind": "skill",
                 "name": "demo-skill",
                 "description_short": "Demo package skill",
-                "source_uri": "http://skills.local/skills/demo-skill",
+                "source_uri": "http://0.0.0.0:8012/api/v1/skill-library/capabilities/skill:onecolleague:demo-skill",
                 "source_record_id": "demo-skill",
                 "source_record_version": "1.0.0",
                 "updated_at_source": "2026-04-28T00:00:00Z",
@@ -429,7 +429,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "capsule_text": "Use this complete package.",
                 "requires_capabilities": [],
                 "install_mode": "codex_skill_package",
-                "skill_package_url": "http://skills.local/packages/demo-skill.zip",
+                "skill_package_url": "http://0.0.0.0:8012/api/v1/skill-library/packages/demo-skill/1.0.0",
                 "skill_package_sha256": package_sha,
                 "skill_package_size": len(package_bytes),
                 "package_format": "zip",
@@ -478,6 +478,10 @@ class TestCapabilityOps(unittest.TestCase):
                 )
                 self.assertTrue(confirm_resp.ok, getattr(confirm_resp, "error", None))
                 download.assert_called_once()
+                self.assertEqual(
+                    download.call_args.args[0],
+                    "http://skills.local/api/v1/skill-library/packages/demo-skill/1.0.0",
+                )
                 result = ((confirm_resp.result or {}).get("results") or [])[0]
                 self.assertTrue(result.get("ok"))
                 package_install = result.get("package_install") if isinstance(result.get("package_install"), dict) else {}
@@ -489,6 +493,8 @@ class TestCapabilityOps(unittest.TestCase):
                 catalog_path, catalog_doc = ops._load_catalog_doc()
                 rec = catalog_doc.get("records", {}).get("skill:onecolleague:demo-skill")
                 self.assertEqual(str((rec or {}).get("install_mode") or ""), "codex_skill_package")
+                self.assertEqual(str((rec or {}).get("source_uri") or ""), "http://skills.local/api/v1/skill-library/capabilities/skill:onecolleague:demo-skill")
+                self.assertEqual(str(((rec or {}).get("install_spec") or {}).get("package_url") or ""), "http://skills.local/api/v1/skill-library/packages/demo-skill/1.0.0")
                 self.assertEqual(str(((rec or {}).get("install_spec") or {}).get("package_sha256") or ""), package_sha)
 
                 enable_resp, _ = self._call(
