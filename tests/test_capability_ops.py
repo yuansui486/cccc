@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -263,9 +264,23 @@ class TestCapabilityOps(unittest.TestCase):
         from cccc.daemon.ops import capability_ops as ops
 
         home, cleanup = self._with_home()
+        old_codex_home = os.environ.get("CODEX_HOME")
         try:
             gid = self._create_group()
-            package_bytes = self._skill_zip_bytes({"demo-skill/SKILL.md": "Use this complete package.\n", "demo-skill/scripts/run.sh": "echo ok\n"})
+            source_codex = Path(home) / "source-codex"
+            source_codex.mkdir()
+            (source_codex / "auth.json").write_text('{"ok":true}\n', encoding="utf-8")
+            (source_codex / "config.toml").write_text("[mcp_servers]\n", encoding="utf-8")
+            os.environ["CODEX_HOME"] = str(source_codex)
+
+            arbitrary_files = {
+                "SKILL.md": "Use this complete package.\n",
+                "playbooks/checklist.md": "- verify arbitrary directories\n",
+                "bin-tools/run.sh": "echo ok\n",
+                "knowledge base/notes.txt": "space-containing directory survives\n",
+                "nested/custom/deep.json": '{"ok":true}\n',
+            }
+            package_bytes = self._skill_zip_bytes(arbitrary_files)
             package_sha = hashlib.sha256(package_bytes).hexdigest()
             platform_record = {
                 "capability_id": "skill:onecolleague:demo-skill",
@@ -337,15 +352,67 @@ class TestCapabilityOps(unittest.TestCase):
                 package_install = result.get("package_install") if isinstance(result.get("package_install"), dict) else {}
                 extracted = Path(str(package_install.get("extracted_path") or ""))
                 self.assertTrue((extracted / "SKILL.md").is_file())
-                self.assertTrue((extracted / "scripts" / "run.sh").is_file())
+                for rel_path in arbitrary_files:
+                    self.assertTrue((extracted / rel_path).is_file(), rel_path)
 
                 catalog_path, catalog_doc = ops._load_catalog_doc()
                 rec = catalog_doc.get("records", {}).get("skill:onecolleague:demo-skill")
                 self.assertEqual(str((rec or {}).get("install_mode") or ""), "codex_skill_package")
                 self.assertEqual(str(((rec or {}).get("install_spec") or {}).get("package_sha256") or ""), package_sha)
 
+                enable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": "skill:onecolleague:demo-skill",
+                        "scope": "actor",
+                        "enabled": True,
+                    },
+                )
+                self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+                enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+                self.assertTrue(bool(enable_result.get("enabled")))
+                self.assertEqual(str(enable_result.get("state") or ""), "runnable")
+
+                state_resp, _ = self._call("capability_state", {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"})
+                self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+                state = state_resp.result if isinstance(state_resp.result, dict) else {}
+                self.assertIn("skill:onecolleague:demo-skill", state.get("enabled_capabilities") or [])
+                binding_states = state.get("external_binding_states") if isinstance(state.get("external_binding_states"), dict) else {}
+                skill_binding = binding_states.get("skill:onecolleague:demo-skill") if isinstance(binding_states.get("skill:onecolleague:demo-skill"), dict) else {}
+                self.assertEqual(str(skill_binding.get("state") or ""), "runnable")
+                active_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+                active_ids = {str(item.get("capability_id") or "") for item in active_skills if isinstance(item, dict)}
+                self.assertIn("skill:onecolleague:demo-skill", active_ids)
+
+                group = SimpleNamespace(
+                    group_id=gid,
+                    doc={
+                        "actors": [
+                            {
+                                "id": "peer-1",
+                                "runtime": "codex",
+                                "runner": "headless",
+                                "capability_autoload": ["skill:onecolleague:demo-skill"],
+                            }
+                        ]
+                    },
+                )
+                overlay_env = ops.prepare_codex_skill_package_overlay_for_actor(group, "peer-1", {})
+                overlay = Path(str(overlay_env.get("CODEX_HOME") or ""))
+                self.assertTrue(overlay.is_dir())
+                for rel_path in arbitrary_files:
+                    self.assertTrue((overlay / "skills" / "demo-skill" / rel_path).is_file(), rel_path)
+                self.assertFalse((source_codex / "skills" / "demo-skill").exists())
+
             self.assertFalse((Path(home) / ".codex" / "skills" / "demo-skill").exists())
         finally:
+            if old_codex_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_codex_home
             cleanup()
 
     def test_skill_package_rejects_zip_slip_and_symlink(self) -> None:
