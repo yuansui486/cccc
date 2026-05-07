@@ -78,7 +78,7 @@ export function BlueprintTab({ isDark, groupId, groupTitle }: BlueprintTabProps)
         setErr(resp.error?.message || t("blueprint.failedToExport"));
         return;
       }
-      const filename = resp.result?.filename || `cccc-group-template--${groupTitle || groupId}.yaml`;
+      const filename = resp.result?.filename || `onecolleague-group-template--${groupTitle || groupId}.yaml`;
       downloadTextFile(filename, String(resp.result?.template || ""));
       setExportInfo(t("blueprint.downloaded"));
       window.setTimeout(() => setExportInfo(""), 1200);

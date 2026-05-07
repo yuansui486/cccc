@@ -1042,23 +1042,23 @@ class IMBridge:
         verbose_str = "on" if sub.verbose else "off"
         platform = str(getattr(self.adapter, "platform", "") or "").strip().lower() or "telegram"
         if platform == "telegram":
-            tip = "Tip: in groups @mention the bot, and in DM plain text is sent to foreman by default."
+            tip = "提示：群聊里 @ 机器人即可发送消息；私聊普通文本默认发给负责人。"
         elif platform in ("slack", "discord"):
-            tip = "Channel tip: @mention the bot to route plain text. Use /send for explicit recipients."
+            tip = "提示：频道里 @ 机器人即可发送普通文本；需要指定收件人时使用 /send。"
         else:
-            tip = "Tip: plain text routes to foreman by default; use /send for explicit recipients."
+            tip = "提示：普通文本默认发给负责人；需要指定收件人时使用 /send。"
         target_label = self.group.doc.get("title", self.group.group_id)
         group_id = self.group.group_id
         if was_subscribed:
-            headline = f"✅ Already authorized for this chat ({target_label} [{group_id}])"
+            headline = f"✅ 当前会话已授权（{target_label} [{group_id}]）"
         else:
-            headline = f"✅ Subscribed to {target_label} [{group_id}]"
+            headline = f"✅ 已订阅 {target_label} [{group_id}]"
         self.adapter.send_message(
             chat_id,
             f"{headline}\n"
-            f"Verbose mode: {verbose_str}\n"
+            f"详细模式：{verbose_str}\n"
             f"{tip}\n"
-            f"Use /help for commands.",
+            f"发送 /help 查看可用命令。",
             thread_id=thread_id,
         )
         self._log(f"[subscribe] chat={chat_id} thread={thread_id} title={chat_title}")
@@ -1071,19 +1071,19 @@ class IMBridge:
         was_subscribed = self.subscribers.unsubscribe(chat_id, thread_id=thread_id)
         self.key_manager.revoke(chat_id, thread_id)
         if was_subscribed:
-            self.adapter.send_message(chat_id, "👋 Unsubscribed and authorization revoked. Use /subscribe to re-authenticate.", thread_id=thread_id)
+            self.adapter.send_message(chat_id, "👋 已取消订阅并撤销授权。如需重新接收消息，请再次发送 /subscribe 完成授权。", thread_id=thread_id)
         else:
-            self.adapter.send_message(chat_id, "ℹ️ You were not subscribed. Authorization revoked.", thread_id=thread_id)
+            self.adapter.send_message(chat_id, "ℹ️ 当前会话原本未订阅，授权已撤销。", thread_id=thread_id)
         self._log(f"[unsubscribe] chat={chat_id} thread={thread_id} (auth revoked)")
 
     def _handle_verbose(self, chat_id: str, thread_id: int = 0) -> None:
         """Handle /verbose command (toggle)."""
         new_value = self.subscribers.toggle_verbose(chat_id, thread_id=thread_id)
         if new_value is None:
-            self.adapter.send_message(chat_id, "ℹ️ Please /subscribe first.", thread_id=thread_id)
+            self.adapter.send_message(chat_id, "ℹ️ 请先发送 /subscribe 完成授权和订阅。", thread_id=thread_id)
         else:
-            status = "ON - showing all messages" if new_value else "OFF - showing only messages to you"
-            self.adapter.send_message(chat_id, f"👁 Verbose mode: {status}", thread_id=thread_id)
+            status = "已开启，会显示全部消息" if new_value else "已关闭，只显示发给你的消息"
+            self.adapter.send_message(chat_id, f"👁 详细模式：{status}", thread_id=thread_id)
         self._log(f"[verbose] chat={chat_id} thread={thread_id} new_value={new_value}")
 
     def _handle_status(self, chat_id: str, thread_id: int = 0) -> None:

@@ -8,6 +8,33 @@ type DoneHubSessionResult = {
   session?: DoneHubSession | null;
 };
 
+export type DoneHubTeamPreset = {
+  id?: number;
+  slug: string;
+  name?: string;
+  title?: string;
+  description_short?: string;
+  description?: string;
+  version?: string;
+  status?: string;
+  config_filename?: string;
+  config_size_bytes?: number;
+  config_sha256?: string;
+  config_summary?: Record<string, unknown>;
+  updated_at?: string | null;
+};
+
+type DoneHubTeamPresetsResult = {
+  items?: DoneHubTeamPreset[];
+};
+
+type DoneHubTeamPresetDownloadResult = {
+  template?: string;
+  filename?: string;
+  content_type?: string;
+  sha256?: string;
+};
+
 export const DONE_HUB_BASE_URL = "https://peer.shierkeji.com";
 const DONE_HUB_BASE_URL_ERROR = "Login service URL is invalid.";
 
@@ -102,6 +129,26 @@ export async function refreshDoneHubSession(
   return request<DoneHubSessionResult>("/api/v1/done_hub/self", {
     base_url: normalizedBaseUrl,
     access_token: String(accessToken || "").trim(),
+  });
+}
+
+export async function listDoneHubTeamPresets(
+  session: DoneHubSession,
+): Promise<DoneHubApiResponse<DoneHubTeamPresetsResult>> {
+  return request<DoneHubTeamPresetsResult>("/api/v1/done_hub/team_presets/list", {
+    base_url: session.base_url,
+    access_token: session.access_token,
+  });
+}
+
+export async function downloadDoneHubTeamPreset(
+  session: DoneHubSession,
+  presetId: string,
+): Promise<DoneHubApiResponse<DoneHubTeamPresetDownloadResult>> {
+  return request<DoneHubTeamPresetDownloadResult>("/api/v1/done_hub/team_presets/download", {
+    base_url: session.base_url,
+    access_token: session.access_token,
+    preset_id: String(presetId || "").trim(),
   });
 }
 

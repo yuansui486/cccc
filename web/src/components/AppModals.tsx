@@ -33,6 +33,11 @@ import { buildPresentationRefForSlot } from "../utils/presentationRefs";
 import { formatGroupSettingsUpdateError } from "../utils/groupSettingsErrors";
 import { getEffectiveActorRunner, normalizeActorRunner } from "../utils/headlessRuntimeSupport";
 import {
+  downloadDoneHubTeamPreset,
+  listDoneHubTeamPresets,
+  type DoneHubTeamPreset,
+} from "../services/doneHub";
+import {
   useGroupStore,
   useUIStore,
   useModalStore,
@@ -232,7 +237,6 @@ export function AppModals({
     createGroupName,
     createGroupTemplateFile,
     dirItems,
-    dirSuggestions,
     currentDir,
     parentDir,
     showDirBrowser,
@@ -249,6 +253,10 @@ export function AppModals({
   const [createTemplatePreview, setCreateTemplatePreview] = useState<TemplatePreviewDetailsProps["template"] | null>(null);
   const [createTemplateError, setCreateTemplateError] = useState("");
   const [createTemplateBusy, setCreateTemplateBusy] = useState(false);
+  const [teamPresets, setTeamPresets] = useState<DoneHubTeamPreset[]>([]);
+  const [teamPresetsBusy, setTeamPresetsBusy] = useState(false);
+  const [teamPresetsError, setTeamPresetsError] = useState("");
+  const [selectedTeamPresetSlug, setSelectedTeamPresetSlug] = useState("");
   const [dirBrowseError, setDirBrowseError] = useState("");
   const [actorProfiles, setActorProfiles] = useState<ActorProfile[]>([]);
   const [actorProfilesBusy, setActorProfilesBusy] = useState(false);
@@ -945,22 +953,96 @@ export function AppModals({
     }
   };
 
+  const previewCreateGroupTemplate = async (file: File): Promise<TemplatePreviewDetailsProps["template"] | null> => {
+    const resp = await api.previewTemplate(file);
+    if (!resp.ok) {
+      setCreateTemplateError(resp.error?.message || t('invalidTemplate'));
+      return null;
+    }
+    const template = (resp.result?.template || null) as TemplatePreviewDetailsProps["template"] | null;
+    setCreateTemplatePreview(template);
+    return template;
+  };
+
   const handleSelectCreateGroupTemplate = async (file: File | null) => {
     setCreateGroupTemplateFile(file);
     setCreateTemplatePreview(null);
     setCreateTemplateError("");
+    setSelectedTeamPresetSlug("");
     if (!file) return;
 
     setCreateTemplateBusy(true);
     try {
-      const resp = await api.previewTemplate(file);
-      if (!resp.ok) {
-        setCreateTemplateError(resp.error?.message || t('invalidTemplate'));
-        return;
-      }
-      setCreateTemplatePreview(resp.result?.template || null);
+      await previewCreateGroupTemplate(file);
     } catch {
       setCreateTemplateError(t('failedToLoadTemplate'));
+    } finally {
+      setCreateTemplateBusy(false);
+    }
+  };
+
+  const loadTeamPresets = useCallback(async () => {
+    if (!modals.createGroup) return;
+    setTeamPresetsError("");
+    if (!doneHubSession) {
+      setTeamPresets([]);
+      setTeamPresetsError(t("modals:createGroup.presetsRequireLogin"));
+      return;
+    }
+    setTeamPresetsBusy(true);
+    try {
+      const resp = await listDoneHubTeamPresets(doneHubSession);
+      if (!resp.ok) {
+        setTeamPresets([]);
+        setTeamPresetsError(resp.error?.message || t("modals:createGroup.presetsLoadFailed"));
+        return;
+      }
+      setTeamPresets(Array.isArray(resp.result?.items) ? resp.result.items : []);
+    } catch {
+      setTeamPresets([]);
+      setTeamPresetsError(t("modals:createGroup.presetsLoadFailed"));
+    } finally {
+      setTeamPresetsBusy(false);
+    }
+  }, [doneHubSession, modals.createGroup, t]);
+
+  useEffect(() => {
+    if (modals.createGroup) {
+      void loadTeamPresets();
+    } else {
+      setSelectedTeamPresetSlug("");
+      setTeamPresetsError("");
+    }
+  }, [loadTeamPresets, modals.createGroup]);
+
+  const handleSelectTeamPreset = async (preset: DoneHubTeamPreset) => {
+    if (!doneHubSession) {
+      setTeamPresetsError(t("modals:createGroup.presetsRequireLogin"));
+      return;
+    }
+    const presetId = String(preset.slug || preset.id || "").trim();
+    if (!presetId) return;
+    setSelectedTeamPresetSlug(presetId);
+    setCreateTemplateBusy(true);
+    setCreateTemplateError("");
+    try {
+      const resp = await downloadDoneHubTeamPreset(doneHubSession, presetId);
+      if (!resp.ok) {
+        setCreateTemplateError(resp.error?.message || t("modals:createGroup.presetDownloadFailed"));
+        return;
+      }
+      const text = String(resp.result?.template || "");
+      const filename = String(resp.result?.filename || preset.config_filename || `${presetId}.yaml`).trim();
+      const file = new File([text], filename, { type: String(resp.result?.content_type || "text/yaml") });
+      setCreateGroupTemplateFile(file);
+      setCreateTemplatePreview(null);
+      const template = await previewCreateGroupTemplate(file);
+      const templateTitle = String(template?.title || "").trim();
+      const summary = preset.config_summary && typeof preset.config_summary === "object" ? preset.config_summary : {};
+      const summaryTitle = String(summary.title || "").trim();
+      setCreateGroupName(templateTitle || summaryTitle || String(preset.name || preset.title || "").trim());
+    } catch {
+      setCreateTemplateError(t("modals:createGroup.presetDownloadFailed"));
     } finally {
       setCreateTemplateBusy(false);
     }
@@ -1013,6 +1095,7 @@ export function AppModals({
       setCreateTemplatePreview(null);
       setCreateTemplateError("");
       setCreateTemplateBusy(false);
+      setSelectedTeamPresetSlug("");
       closeModal("createGroup");
       await refreshGroups();
       setSelectedGroupId(groupId);
@@ -1711,11 +1794,14 @@ export function AppModals({
       <CreateGroupModal
         isOpen={modals.createGroup}
         busy={busy}
-        dirSuggestions={dirSuggestions}
         dirItems={dirItems}
         currentDir={currentDir}
         parentDir={parentDir}
         showDirBrowser={showDirBrowser}
+        teamPresets={teamPresets}
+        teamPresetsBusy={teamPresetsBusy}
+        teamPresetsError={teamPresetsError}
+        selectedTeamPresetSlug={selectedTeamPresetSlug}
         createGroupPath={createGroupPath}
         setCreateGroupPath={setCreateGroupPath}
         createGroupName={createGroupName}
@@ -1725,6 +1811,7 @@ export function AppModals({
         templateError={createTemplateError}
         templateBusy={createTemplateBusy}
         onSelectTemplate={handleSelectCreateGroupTemplate}
+        onSelectTeamPreset={handleSelectTeamPreset}
         dirBrowseError={dirBrowseError}
         onFetchDirContents={handleFetchDirContents}
         onCreateGroup={handleCreateGroup}
@@ -1735,6 +1822,7 @@ export function AppModals({
           setCreateTemplatePreview(null);
           setCreateTemplateError("");
           setCreateTemplateBusy(false);
+          setSelectedTeamPresetSlug("");
           setDirBrowseError("");
         }}
       />

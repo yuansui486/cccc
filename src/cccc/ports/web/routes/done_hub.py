@@ -4,12 +4,12 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException
 
-from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, RouteContext
+from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, DoneHubTeamPresetRequest, RouteContext
 
 _DONE_HUB_TIMEOUT = 15.0
 _TOKEN_PAGE_SIZE = 100
@@ -420,5 +420,75 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
 
         return {"ok": True, "result": {"session": _normalize_profile(base_url, self_payload)}}
+
+    @router.post("/team_presets/list")
+    async def done_hub_team_presets_list(req: DoneHubTeamPresetRequest) -> Dict[str, Any]:
+        base_url = _normalize_base_url(req.base_url)
+        access_token = str(req.access_token or "").strip()
+        if not access_token:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "missing_access_token", "message": "missing access_token"},
+            )
+
+        try:
+            async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
+                resp = await client.get(
+                    f"{base_url}/api/v1/team-presets",
+                    headers=_auth_headers(access_token),
+                )
+                if resp.status_code >= 400:
+                    return {"ok": False, "error": {"code": "done_hub_team_presets_failed", "message": f"agent-service returned HTTP {resp.status_code}"}}
+                try:
+                    payload = resp.json()
+                except Exception:
+                    return {"ok": False, "error": {"code": "done_hub_team_presets_failed", "message": "agent-service returned invalid JSON"}}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
+
+        items = payload.get("items") if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            items = []
+        return {"ok": True, "result": {"items": [item for item in items if isinstance(item, dict)]}}
+
+    @router.post("/team_presets/download")
+    async def done_hub_team_preset_download(req: DoneHubTeamPresetRequest) -> Dict[str, Any]:
+        base_url = _normalize_base_url(req.base_url)
+        access_token = str(req.access_token or "").strip()
+        preset_id = str(req.preset_id or "").strip()
+        if not access_token:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "missing_access_token", "message": "missing access_token"},
+            )
+        if not preset_id:
+            raise HTTPException(status_code=400, detail={"code": "missing_preset_id", "message": "missing preset_id"})
+
+        try:
+            async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
+                resp = await client.get(
+                    f"{base_url}/api/v1/team-presets/{quote(preset_id, safe='')}/config",
+                    headers=_auth_headers(access_token),
+                )
+                if resp.status_code >= 400:
+                    return {"ok": False, "error": {"code": "done_hub_team_preset_download_failed", "message": f"agent-service returned HTTP {resp.status_code}"}}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
+
+        filename = ""
+        disposition = str(resp.headers.get("content-disposition") or "")
+        match = re.search(r'filename="?([^";]+)"?', disposition)
+        if match:
+            filename = match.group(1).strip()
+        template = resp.text
+        return {
+            "ok": True,
+            "result": {
+                "template": template,
+                "filename": filename or f"{preset_id}.yaml",
+                "content_type": str(resp.headers.get("content-type") or ""),
+                "sha256": str(resp.headers.get("x-team-preset-sha256") or ""),
+            },
+        }
 
     return [router]

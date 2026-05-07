@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { useId } from "react";
-import { DirItem, DirSuggestion } from "../../types";
+import type { DoneHubTeamPreset } from "../../services/doneHub";
+import { DirItem } from "../../types";
 import { TemplatePreviewDetails } from "../TemplatePreviewDetails";
 import type { TemplatePreviewDetailsProps } from "../TemplatePreviewDetails";
 import { useModalA11y } from "../../hooks/useModalA11y";
-import { ArrowDownIcon, DownloadIcon, FileIcon, FolderIcon, HomeIcon, PlusIcon } from "../Icons";
+import { FileIcon, FolderIcon, PlusIcon } from "../Icons";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -13,11 +14,14 @@ export interface CreateGroupModalProps {
   isOpen: boolean;
   busy: string;
 
-  dirSuggestions: DirSuggestion[];
   dirItems: DirItem[];
   currentDir: string;
   parentDir: string | null;
   showDirBrowser: boolean;
+  teamPresets: DoneHubTeamPreset[];
+  teamPresetsBusy: boolean;
+  teamPresetsError: string;
+  selectedTeamPresetSlug: string;
 
   createGroupPath: string;
   setCreateGroupPath: (path: string) => void;
@@ -28,6 +32,7 @@ export interface CreateGroupModalProps {
   templateError: string;
   templateBusy: boolean;
   onSelectTemplate: (file: File | null) => void;
+  onSelectTeamPreset: (preset: DoneHubTeamPreset) => void;
 
   dirBrowseError?: string;
   onFetchDirContents: (path: string) => void;
@@ -39,11 +44,14 @@ export interface CreateGroupModalProps {
 export function CreateGroupModal({
   isOpen,
   busy,
-  dirSuggestions,
   dirItems,
   currentDir,
   parentDir,
   showDirBrowser,
+  teamPresets,
+  teamPresetsBusy,
+  teamPresetsError,
+  selectedTeamPresetSlug,
   createGroupPath,
   setCreateGroupPath,
   createGroupName,
@@ -54,6 +62,7 @@ export function CreateGroupModal({
   templateBusy,
   dirBrowseError,
   onSelectTemplate,
+  onSelectTeamPreset,
   onFetchDirContents,
   onCreateGroup,
   onClose,
@@ -63,19 +72,6 @@ export function CreateGroupModal({
   const { modalRef } = useModalA11y(isOpen, onClose);
   const blueprintInputId = useId();
   if (!isOpen) return null;
-
-  const renderDirSuggestionIcon = (suggestion: DirSuggestion) => {
-    const name = String(suggestion.name || "").trim().toLowerCase();
-    const path = String(suggestion.path || "").trim().toLowerCase();
-    const iconClassName = "h-[1.05rem] w-[1.05rem]";
-
-    if (name.includes("home")) return <HomeIcon className={iconClassName} />;
-    if (name.includes("desktop")) return <FolderIcon className={iconClassName} />;
-    if (name.includes("download")) return <DownloadIcon className={iconClassName} />;
-    if (name.includes("document")) return <FileIcon className={iconClassName} />;
-    if (name.includes("current") || path.endsWith("/.cccc")) return <ArrowDownIcon className={iconClassName} />;
-    return <FolderIcon className={iconClassName} />;
-  };
 
   return (
     <div
@@ -97,33 +93,52 @@ export function CreateGroupModal({
           </div>
           <div className="text-sm mt-1 text-[var(--color-text-muted)]">{t("createGroup.subtitle")}</div>
         </div>
-        <div className="p-6 space-y-5 overflow-y-auto min-h-0 flex-1 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))]">
-          {dirSuggestions.length > 0 && !createGroupPath && (
-            <div>
-              <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("createGroup.quickSelect")}</label>
-              <div className="grid grid-cols-2 gap-2">
-                {dirSuggestions.slice(0, 6).map((s) => (
+        <div className="p-6 space-y-5 overflow-y-auto min-h-0 flex-1 bg-[radial-gradient(circle_at_top,rgba(219,234,254,0.82),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgb(248,251,255),rgb(240,247,255))] dark:bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.16),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(13,24,42,0.98),rgba(8,15,28,1))]">
+          <div>
+            <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("createGroup.quickSelect")}</label>
+            <div className="grid grid-cols-1 gap-2">
+              {teamPresetsBusy ? (
+                <div className="rounded-xl px-3 py-3 text-sm glass-card text-[var(--color-text-muted)]">
+                  {t("createGroup.presetsLoading")}
+                </div>
+              ) : teamPresetsError ? (
+                <div className="rounded-xl px-3 py-3 text-sm border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                  {teamPresetsError}
+                </div>
+              ) : teamPresets.length > 0 ? (
+                teamPresets.slice(0, 8).map((preset) => {
+                  const slug = String(preset.slug || preset.id || "").trim();
+                  const title = String(preset.name || preset.title || slug).trim();
+                  const summary = preset.config_summary && typeof preset.config_summary === "object" ? preset.config_summary : {};
+                  const configTitle = String(summary.title || "").trim();
+                  return (
                   <button
-                    key={s.path}
-                    className="flex items-center gap-3 px-3 py-2 rounded-xl transition-colors text-left min-h-[56px] glass-card"
-                    onClick={() => {
-                      setCreateGroupPath(s.path);
-                      setCreateGroupName(s.path.split("/").filter(Boolean).pop() || "");
-                      onFetchDirContents(s.path);
-                    }}
+                    key={slug || title}
+                    type="button"
+                    className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors text-left min-h-[58px] glass-card ${
+                      selectedTeamPresetSlug === slug ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] shadow-[var(--glass-accent-shadow)]" : ""
+                    }`}
+                    onClick={() => onSelectTeamPreset(preset)}
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)]">
-                      {renderDirSuggestionIcon(s)}
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]">
+                      <FileIcon className="h-[1.05rem] w-[1.05rem]" />
                     </span>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium truncate text-[var(--color-text-secondary)]">{s.name}</div>
-                      <div className="text-[10px] truncate text-[var(--color-text-muted)]">{s.path}</div>
+                      <div className="text-sm font-medium truncate text-[var(--color-text-secondary)]">{title}</div>
+                      <div className="text-[10px] truncate text-[var(--color-text-muted)]">
+                        {configTitle || preset.description_short || preset.description || t("createGroup.presetNoDescription")}
+                      </div>
                     </div>
                   </button>
-                ))}
-              </div>
+                  );
+                })
+              ) : (
+                <div className="rounded-xl px-3 py-3 text-sm glass-card text-[var(--color-text-muted)]">
+                  {t("createGroup.presetsEmpty")}
+                </div>
+              )}
             </div>
-          )}
+          </div>
           <div>
             <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("createGroup.projectDirectory")}</label>
             <div className="flex gap-2">
@@ -233,7 +248,7 @@ export function CreateGroupModal({
                   className={`inline-flex min-h-[40px] cursor-pointer items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
                     templateBusy || busy === "create"
                       ? "pointer-events-none opacity-50 border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)]"
-                      : "border border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white hover:bg-black hover:border-black dark:border-white dark:bg-white dark:text-[rgb(35,36,37)] dark:hover:bg-white/92"
+                      : "glass-btn-accent text-[var(--color-accent-primary)]"
                   }`}
                 >
                   <PlusIcon className="mr-2 h-4 w-4" />

@@ -16,7 +16,7 @@ export const labelClass = (_isDark?: boolean) =>
   `block text-xs mb-1 text-[var(--color-text-secondary)]`;
 
 export const primaryButtonClass = (_busy?: boolean) =>
-  `inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm min-h-[44px] font-medium transition-[background-color,border-color,color,box-shadow] disabled:opacity-50 disabled:cursor-not-allowed border border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white hover:bg-black hover:border-black shadow-sm dark:border-white dark:bg-white dark:text-[rgb(35,36,37)] dark:hover:bg-white/92 dark:hover:border-white`;
+  `glass-btn-accent inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm min-h-[44px] font-medium text-[var(--color-accent-primary)] transition-[background-color,border-color,color,box-shadow] disabled:opacity-50 disabled:cursor-not-allowed`;
 
 export const secondaryButtonClass = (size: "sm" | "md" = "md") =>
   `inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] hover:bg-[var(--glass-bg-hover)] active:bg-[var(--glass-bg-active)] ${
@@ -50,13 +50,13 @@ export const cardClass = (_isDark?: boolean) =>
 export const settingsWorkspaceShellClass = (_isDark?: boolean) =>
   `overflow-hidden rounded-[22px] border backdrop-blur-xl ${
     _isDark
-      ? "border-white/10 bg-[linear-gradient(180deg,rgba(19,20,24,0.88),rgba(10,11,14,0.96))] shadow-[0_28px_100px_rgba(0,0,0,0.36)]"
-      : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(246,248,251,0.96))] shadow-[0_28px_100px_rgba(15,23,42,0.06)]"
+      ? "border-sky-300/14 bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.14),rgba(255,255,255,0)_38%),linear-gradient(180deg,rgba(13,24,42,0.9),rgba(8,15,28,0.96))] shadow-[0_28px_100px_rgba(15,23,42,0.34)]"
+      : "border-sky-200/70 bg-[radial-gradient(circle_at_top,rgba(219,234,254,0.64),rgba(255,255,255,0)_38%),linear-gradient(180deg,rgba(248,251,255,0.99),rgba(240,247,255,0.96))] shadow-[0_28px_100px_rgba(37,99,235,0.08)]"
   }`;
 
 export const settingsWorkspaceHeaderClass = (_isDark?: boolean) =>
   `flex items-start justify-between gap-4 px-4 py-4 sm:px-5 sm:py-4 ${
-    _isDark ? "border-b border-white/8 bg-white/[0.03]" : "border-b border-black/6 bg-[rgba(18,18,20,0.018)]"
+    _isDark ? "border-b border-sky-200/10 bg-sky-300/[0.035]" : "border-b border-sky-200/60 bg-sky-100/24"
   }`;
 
 export const settingsWorkspaceBodyClass =
@@ -65,20 +65,20 @@ export const settingsWorkspaceBodyClass =
 export const settingsWorkspacePanelClass = (_isDark?: boolean) =>
   `rounded-[18px] border p-3.5 sm:p-4 ${
     _isDark
-      ? "border-white/10 bg-[linear-gradient(180deg,rgba(24,26,31,0.9),rgba(13,14,18,0.98))]"
-      : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(246,248,251,0.96))]"
+      ? "border-sky-200/10 bg-[linear-gradient(180deg,rgba(16,32,56,0.9),rgba(9,18,34,0.98))]"
+      : "border-sky-200/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(240,247,255,0.94))]"
   }`;
 
 export const settingsWorkspaceSoftPanelClass = (_isDark?: boolean) =>
   `rounded-[18px] border px-4 py-3 sm:px-4 sm:py-4 ${
     _isDark
-      ? "border-white/8 bg-white/[0.03]"
-      : "border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(246,248,251,0.88))]"
+      ? "border-sky-200/10 bg-sky-300/[0.035]"
+      : "border-sky-200/50 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(239,246,255,0.9))]"
   }`;
 
 export const settingsWorkspaceActionBarClass = (_isDark?: boolean) =>
   `mt-0 flex flex-wrap items-center gap-2 border-t px-4 py-3 sm:px-5 ${
-    _isDark ? "border-white/8 bg-white/[0.02]" : "border-black/6 bg-black/[0.015]"
+    _isDark ? "border-sky-200/10 bg-sky-300/[0.025]" : "border-sky-200/60 bg-sky-100/24"
   }`;
 
 export const preClass = (_isDark?: boolean) =>

@@ -127,7 +127,7 @@ def group_template_export(args: Dict[str, Any]) -> DaemonResponse:
         return _error("template_export_failed", str(e))
     text = dump_group_template(tpl)
     title = str(group.doc.get("title") or "").strip()
-    filename = f"cccc-group-template--{_slug_filename(title)}.yaml"
+    filename = f"onecolleague-group-template--{_slug_filename(title)}.yaml"
     return DaemonResponse(ok=True, result={"template": text, "filename": filename})
 
 

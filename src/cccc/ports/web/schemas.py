@@ -347,6 +347,12 @@ class DoneHubSelfRequest(BaseModel):
     access_token: str = Field(default="")
 
 
+class DoneHubTeamPresetRequest(BaseModel):
+    base_url: str = Field(default="")
+    access_token: str = Field(default="")
+    preset_id: str = Field(default="")
+
+
 def _normalize_reply_required(v: Any) -> bool:
     """Normalize reply_required values from JSON/form payloads.
 
