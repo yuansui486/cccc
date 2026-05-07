@@ -1023,15 +1023,15 @@ class IMBridge:
             key = self.key_manager.generate_key(chat_id, thread_id, platform)
             self.adapter.send_message(
                 chat_id,
-                f"🔑 Authorization required.\n\n"
-                f"Open CCCC Web → Settings → IM Bridge, then approve this request in Pending Requests "
-                f"(or paste this key in Bind):\n"
+                f"🔑 需要授权。\n\n"
+                f"打开一号同事 → 设置 → 当前工作组 → IM 桥接，在待处理请求中批准此请求"
+                f"（也可以在绑定入口粘贴这个密钥）：\n"
                 f"`{key}`\n\n"
-                f"If foreman is online, send this message to foreman:\n"
-                f"`Please help bind my IM key: {key}`\n\n"
-                f"Or run in terminal:\n"
+                f"如果负责人在线，请把这条消息发给负责人：\n"
+                f"`请帮我绑定 IM 密钥：{key}`\n\n"
+                f"也可以在终端运行：\n"
                 f"`cccc im bind --key {key}`\n\n"
-                f"Key expires in 10 minutes.",
+                f"密钥 10 分钟后过期。",
                 thread_id=thread_id,
             )
             self._log(f"[subscribe] Pending auth key generated for chat={chat_id} thread={thread_id}")

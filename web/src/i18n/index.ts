@@ -65,16 +65,17 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    fallbackLng: "en",
+    lng: "zh",
+    fallbackLng: "zh",
     defaultNS: "common",
     ns: ["common", "layout", "chat", "modals", "settings", "actors", "webPet"],
     interpolation: {
       escapeValue: false, // React already escapes
     },
     detection: {
-      order: ["localStorage", "navigator"],
+      order: [],
       lookupLocalStorage: "cccc-language",
-      caches: ["localStorage"],
+      caches: [],
     },
     supportedLngs: SUPPORTED_LANGUAGES,
     nonExplicitSupportedLngs: true,

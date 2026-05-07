@@ -237,13 +237,13 @@ export function CreateGroupModal({
                   }`}
                 >
                   <PlusIcon className="mr-2 h-4 w-4" />
-                  {t("common:chooseFile", "Choose File")}
+                  {t("common:chooseFile", "选择文件")}
                 </label>
                 <div className="min-w-0 flex-1 text-sm text-[var(--color-text-secondary)]">
                   <div className="truncate">
-                    {createGroupTemplateFile ? createGroupTemplateFile.name : t("common:noFileChosen", "No file chosen")}
+                    {createGroupTemplateFile ? createGroupTemplateFile.name : t("common:noFileChosen", "未选择文件")}
                   </div>
-                  <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">YAML / YML / JSON</div>
+                  <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{t("common:fileTypeYamlJson", "支持 YAML / YML / JSON")}</div>
                 </div>
                 {createGroupTemplateFile && (
                   <Button

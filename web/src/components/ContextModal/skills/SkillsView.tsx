@@ -77,12 +77,12 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
 
       if (!overviewResp.ok) {
         setItems([]);
-        setError(overviewResp.error?.message || tr("context.failedToLoadSkills", "Failed to load skills."));
+        setError(overviewResp.error?.message || tr("context.failedToLoadSkills", "加载技能失败。"));
         return;
       }
       if (!groupStateResp.ok) {
         setGroupState(null);
-        setError(groupStateResp.error?.message || tr("context.failedToLoadSkillState", "Failed to load group skill state."));
+        setError(groupStateResp.error?.message || tr("context.failedToLoadSkillState", "加载工作组技能状态失败。"));
         return;
       }
 
@@ -93,7 +93,7 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
       setItems([]);
       setGroupState(null);
       setActorStates({});
-      setError(err instanceof Error ? err.message : tr("context.failedToLoadSkills", "Failed to load skills."));
+      setError(err instanceof Error ? err.message : tr("context.failedToLoadSkills", "加载技能失败。"));
     } finally {
       setLoading(false);
     }
@@ -153,12 +153,12 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
         reason: "context_modal_group_skill_default",
       });
       if (!resp.ok) {
-        setError(resp.error?.message || tr("context.failedToUpdateSkill", "Failed to update skill."));
+        setError(resp.error?.message || tr("context.failedToUpdateSkill", "更新技能失败。"));
         return;
       }
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : tr("context.failedToUpdateSkill", "Failed to update skill."));
+      setError(err instanceof Error ? err.message : tr("context.failedToUpdateSkill", "更新技能失败。"));
     } finally {
       setBusyKey("");
     }
@@ -169,21 +169,21 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className={classNames("text-lg font-semibold", "text-[var(--color-text-primary)]")}>
-            {tr("context.skillsTitle", "Skills")}
+            {tr("context.skillsTitle", "技能")}
           </div>
           <div className={classNames("mt-1 text-sm", ui.subtleTextClass)}>
-            {tr("context.skillsHint", "Set the workgroup skill defaults. Group-enabled skills are effective for current agents and inherited by later agents.")}
+            {tr("context.skillsHint", "设置工作组默认技能。工作组启用的技能会立即对当前智能体生效，并由后续新增智能体继承。")}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-[var(--glass-panel-bg)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
-            {tr("context.skillsAvailableCount", "{{count}} available", { count: skillRows.length })}
+            {tr("context.skillsAvailableCount", "{{count}} 个可用", { count: skillRows.length })}
           </span>
           <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
-            {tr("context.skillsEnabledCount", "{{count}} enabled", { count: enabledSkillCount })}
+            {tr("context.skillsEnabledCount", "已启用 {{count}} 个", { count: enabledSkillCount })}
           </span>
           <button type="button" onClick={() => void load()} disabled={loading} className={ui.buttonSecondaryClass}>
-            {loading ? tr("context.loading", "Loading...") : tr("context.refresh", "Refresh")}
+            {loading ? tr("context.loading", "加载中…") : tr("context.refresh", "刷新")}
           </button>
         </div>
       </div>
@@ -193,7 +193,7 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
           className={ui.inputClass}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={tr("context.skillsSearchPlaceholder", "Search skills")}
+          placeholder={tr("context.skillsSearchPlaceholder", "搜索技能")}
         />
       </div>
 
@@ -206,7 +206,7 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
       <div className="mt-4 grid gap-3">
         {skillRows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--glass-border-subtle)] px-3 py-4 text-sm text-[var(--color-text-muted)]">
-            {loading ? tr("context.loadingSkills", "Loading skills...") : tr("context.noSkills", "No skills available.")}
+            {loading ? tr("context.loadingSkills", "正在加载技能…") : tr("context.noSkills", "暂无可用技能。")}
           </div>
         ) : (
           skillRows.map((row) => {
@@ -226,12 +226,12 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {enabled ? (
                         <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
-                          {tr("context.skillGroupDefault", "Group default")}
+                          {tr("context.skillGroupDefault", "工作组默认")}
                         </span>
                       ) : null}
                       {actorIds.length > 0 ? (
                         <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">
-                          {tr("context.skillSyncedActors", "{{synced}}/{{total}} agents", { synced: syncedActors, total: actorIds.length })}
+                          {tr("context.skillSyncedActors", "{{synced}}/{{total}} 个智能体", { synced: syncedActors, total: actorIds.length })}
                         </span>
                       ) : null}
                       {cleanId(row.source_id) ? (
@@ -246,7 +246,7 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
                       ) : null}
                       {row.blocked_global ? (
                         <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-600 dark:text-rose-300">
-                          {tr("context.skillBlocked", "Blocked")}
+                          {tr("context.skillBlocked", "已阻止")}
                         </span>
                       ) : null}
                     </div>
@@ -255,8 +255,8 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
                     type="button"
                     role="switch"
                     aria-checked={enabled}
-                    aria-label={enabled ? tr("context.disableSkill", "Disable skill") : tr("context.enableSkill", "Enable skill")}
-                    title={enabled ? tr("context.disableSkill", "Disable skill") : tr("context.enableSkill", "Enable skill")}
+                    aria-label={enabled ? tr("context.disableSkill", "关闭技能") : tr("context.enableSkill", "启用技能")}
+                    title={enabled ? tr("context.disableSkill", "关闭技能") : tr("context.enableSkill", "启用技能")}
                     disabled={loading || busyKey === capId || enableBlocked}
                     onClick={() => void toggleGroupDefault(capId, !enabled)}
                     className={ui.switchTrackClass(enabled)}

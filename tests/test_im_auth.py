@@ -575,7 +575,8 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
 
         self.assertEqual(len(adapter.sent_messages), 1)
         _chat_id, text, _thread_id = adapter.sent_messages[0]
-        self.assertIn("Authorization required", text)
+        self.assertIn("需要授权", text)
+        self.assertIn("打开一号同事", text)
 
 
     def test_unsubscribe_reloads_auth_state_and_revokes_daemon_authorized_chat(self) -> None:

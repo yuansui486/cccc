@@ -44,7 +44,7 @@ export function DesktopPetView({
     return (
       <section className={classNames(ui.surfaceClass, "p-4")}>
         <div className={classNames("text-sm", ui.mutedTextClass)}>
-          {tr("context.desktopPetUnavailable", "Web Pet settings are unavailable in this context.")}
+          {tr("context.desktopPetUnavailable", "当前上下文暂时无法修改 Web 宠物设置。")}
         </div>
       </section>
     );
@@ -55,13 +55,13 @@ export function DesktopPetView({
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         <div>
           <div className={classNames("flex items-center gap-2 text-lg font-semibold", "text-[var(--color-text-primary)]")}>
-            {tr("context.desktopPetTitle", "Web Pet")}
+            {tr("context.desktopPetTitle", "Web 宠物")}
             <span className="rounded-md bg-cyan-500/15 px-2 py-0.5 text-xs font-semibold leading-none text-cyan-400">
-              {tr("context.betaBadge", "Beta")}
+              {tr("context.betaBadge", "测试版")}
             </span>
           </div>
           <div className={classNames("mt-1 text-sm", ui.subtleTextClass)}>
-            {tr("context.desktopPetHint", "Show a floating web pet in the corner that reflects this team's status.")}
+            {tr("context.desktopPetHint", "在网页角落显示一只浮动 Web 宠物，实时反映该团队的工作状态。")}
           </div>
         </div>
 
@@ -69,17 +69,17 @@ export function DesktopPetView({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className={classNames("text-sm font-medium", "text-[var(--color-text-primary)]")}>
-                {tr("context.desktopPetSwitchLabel", "Enable Web Pet")}
+                {tr("context.desktopPetSwitchLabel", "启用 Web 宠物")}
               </div>
               <div className={classNames("mt-1 text-xs", ui.mutedTextClass)}>
-                {tr("context.desktopPetTabHint", "Each enabled group shows its own Web Pet in the web UI.")}
+                {tr("context.desktopPetTabHint", "每个启用的工作组都会在 Web UI 中显示自己的 Web 宠物。")}
               </div>
             </div>
             <button
               type="button"
               role="switch"
               aria-checked={desktopPetEnabled}
-              aria-label={tr("context.desktopPetSwitchLabel", "Enable Web Pet")}
+              aria-label={tr("context.desktopPetSwitchLabel", "启用 Web 宠物")}
               onClick={() => onToggleDesktopPet(!desktopPetEnabled)}
               disabled={viewBusy}
               className={ui.switchTrackClass(desktopPetEnabled)}
