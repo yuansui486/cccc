@@ -11,13 +11,18 @@ import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
 
 const TEAM_PRESET_ICON_URLS = [
-  "/team-presets/1_team.png",
-  "/team-presets/2_产品调研.png",
-  "/team-presets/3_代码编写.png",
-  "/team-presets/4_个人助理.png",
-  "/team-presets/5_人事招聘.png",
-  "/team-presets/6_私域销售.png",
+  "team-presets/1_team.png",
+  "team-presets/2_产品调研.png",
+  "team-presets/3_代码编写.png",
+  "team-presets/4_个人助理.png",
+  "team-presets/5_人事招聘.png",
+  "team-presets/6_私域销售.png",
 ];
+
+function getTeamPresetIconUrl(index: number): string {
+  const relativePath = TEAM_PRESET_ICON_URLS[index % TEAM_PRESET_ICON_URLS.length];
+  return `${import.meta.env.BASE_URL}${relativePath}`;
+}
 
 export interface CreateGroupModalProps {
   isOpen: boolean;
@@ -120,7 +125,7 @@ export function CreateGroupModal({
                   const title = String(preset.name || preset.title || slug).trim();
                   const summary = preset.config_summary && typeof preset.config_summary === "object" ? preset.config_summary : {};
                   const configTitle = String(summary.title || "").trim();
-                  const iconUrl = TEAM_PRESET_ICON_URLS[index % TEAM_PRESET_ICON_URLS.length];
+                  const iconUrl = getTeamPresetIconUrl(index);
                   return (
                   <button
                     key={slug || title}
