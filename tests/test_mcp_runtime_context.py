@@ -36,7 +36,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
                 }
             return {}
 
-        with patch.dict(os.environ, {"CCCC_HOME": "", "CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False), patch(
+        with patch.dict(os.environ, {}, clear=True), patch(
             "cccc.ports.mcp.common._iter_ancestor_pids",
             return_value=[100, 42, 1],
         ), patch(
@@ -51,6 +51,36 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(ctx.home, str(fake_home))
         self.assertEqual(ctx.group_id, "g_ancestor")
         self.assertEqual(ctx.actor_id, "foreman-ancestor")
+
+    def test_runtime_context_explicit_empty_env_suppresses_ancestor_recovery(self) -> None:
+        from cccc.ports.mcp.common import _runtime_context
+
+        fake_home = Path("/tmp/cccc-runtime-home").resolve()
+
+        def _fake_proc_environ(pid: int) -> dict[str, str]:
+            if pid == 42:
+                return {
+                    "CCCC_HOME": str(fake_home),
+                    "CCCC_GROUP_ID": "g_ancestor",
+                    "CCCC_ACTOR_ID": "foreman-ancestor",
+                }
+            return {}
+
+        with patch.dict(os.environ, {"CCCC_HOME": "", "CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=True), patch(
+            "cccc.ports.mcp.common._iter_ancestor_pids",
+            return_value=[100, 42, 1],
+        ), patch(
+            "cccc.ports.mcp.common._proc_environ",
+            side_effect=_fake_proc_environ,
+        ), patch(
+            "cccc.ports.mcp.common.cccc_home",
+            return_value=fake_home,
+        ):
+            ctx = _runtime_context()
+
+        self.assertEqual(ctx.home, str(fake_home))
+        self.assertEqual(ctx.group_id, "")
+        self.assertEqual(ctx.actor_id, "")
 
     def test_runtime_context_falls_back_to_pty_state(self) -> None:
         from cccc.ports.mcp.common import _runtime_context
@@ -72,7 +102,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {"CCCC_HOME": "", "CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False), patch(
+            with patch.dict(os.environ, {}, clear=True), patch(
                 "cccc.ports.mcp.common._iter_ancestor_pids",
                 return_value=[100, 42, 1],
             ), patch(
@@ -87,6 +117,42 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(ctx.home, str(home))
         self.assertEqual(ctx.group_id, "g_state")
         self.assertEqual(ctx.actor_id, "管理员")
+
+    def test_runtime_context_explicit_empty_env_suppresses_pty_state_recovery(self) -> None:
+        from cccc.ports.mcp.common import _runtime_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            state_path = home / "groups" / "g_state" / "state" / "runners" / "pty" / "管理员.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "kind": "pty",
+                        "group_id": "g_state",
+                        "actor_id": "管理员",
+                        "pid": 42,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"CCCC_HOME": "", "CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=True), patch(
+                "cccc.ports.mcp.common._iter_ancestor_pids",
+                return_value=[100, 42, 1],
+            ), patch(
+                "cccc.ports.mcp.common._proc_environ",
+                return_value={},
+            ), patch(
+                "cccc.ports.mcp.common.cccc_home",
+                return_value=home,
+            ):
+                ctx = _runtime_context()
+
+        self.assertEqual(ctx.home, str(home))
+        self.assertEqual(ctx.group_id, "")
+        self.assertEqual(ctx.actor_id, "")
 
     def test_call_daemon_uses_recovered_home(self) -> None:
         from cccc.ports.mcp.common import _RuntimeContext, _call_daemon_or_raise
