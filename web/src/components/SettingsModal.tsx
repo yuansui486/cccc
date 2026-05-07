@@ -366,25 +366,6 @@ export function SettingsModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Only load when the modal opens or groupId changes.
   }, [isOpen, groupId]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (scope !== "global" || globalTab !== "developer") return;
-    void loadRegistryPreview();
-  }, [isOpen, scope, globalTab]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (scope !== "global" || globalTab !== "developer") return;
-    void loadRuntimeInfo();
-  }, [isOpen, scope, globalTab]);
-
-  useEffect(() => {
-    if (!isOpen || !developerMode) return;
-    if (scope !== "global" || globalTab !== "developer") return;
-    void loadLogTail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Keep refresh tied to modal/view controls; callback identity is not meaningful here.
-  }, [developerMode, globalTab, groupId, isOpen, logComponent, logLines, scope]);
-
   // ============ Data Loading ============
 
   const loadObservability = async () => {
@@ -1077,27 +1058,6 @@ export function SettingsModal({
                 />
               )}
 
-              {activeTab === "delivery" && (
-                <DeliveryTab
-                  isDark={isDark}
-                  busy={busy}
-                  autoMarkOnDelivery={autoMarkOnDelivery}
-                  setAutoMarkOnDelivery={setAutoMarkOnDelivery}
-                  onSave={handleSaveDeliverySettings}
-                  onAutoSave={handleAutoSave}
-                />
-              )}
-
-              {activeTab === "messaging" && (
-                <MessagingTab
-                  isDark={isDark}
-                  busy={busy}
-                  defaultSendTo={defaultSendTo}
-                  setDefaultSendTo={setDefaultSendTo}
-                  onSave={handleSaveMessagingSettings}
-                />
-              )}
-
               {activeTab === "im" && (
                 <IMBridgeTab
                   isDark={isDark}
@@ -1138,58 +1098,7 @@ export function SettingsModal({
                 />
               )}
 
-              {activeTab === "transcript" && (
-                <TranscriptTab
-                  isDark={isDark}
-                  busy={busy}
-                  groupId={groupId}
-                  devActors={devActors}
-                  terminalVisibility={terminalVisibility}
-                  setTerminalVisibility={setTerminalVisibility}
-                  terminalNotifyTail={terminalNotifyTail}
-                  setTerminalNotifyTail={setTerminalNotifyTail}
-                  terminalNotifyLines={terminalNotifyLines}
-                  setTerminalNotifyLines={setTerminalNotifyLines}
-                  onSaveTranscriptSettings={handleSaveTranscriptSettings}
-                  tailActorId={tailActorId}
-                  setTailActorId={setTailActorId}
-                  tailMaxChars={tailMaxChars}
-                  setTailMaxChars={setTailMaxChars}
-                  tailStripAnsi={tailStripAnsi}
-                  setTailStripAnsi={setTailStripAnsi}
-                  tailCompact={tailCompact}
-                  setTailCompact={setTailCompact}
-                  tailText={tailText}
-                  tailHint={tailHint}
-                  tailErr={tailErr}
-                  tailBusy={tailBusy}
-                  tailCopyInfo={tailCopyInfo}
-                  onLoadTail={loadTerminalTail}
-                  onCopyTail={copyTailLastLines}
-                  onClearTail={clearTail}
-                />
-              )}
-
               {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
-
-              {activeTab === "assistants" && (
-                <AssistantsTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  isActive={scope === "group" && activeTab === "assistants"}
-                  petEnabled={Boolean(settings?.desktop_pet_enabled)}
-                  busy={busy}
-                  onUpdatePetEnabled={(enabled) => onUpdateSettings({ desktop_pet_enabled: enabled })}
-                />
-              )}
-
-              {activeTab === "space" && (
-                <GroupSpaceTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  isActive={scope === "group" && activeTab === "space"}
-                />
-              )}
 
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
 
@@ -1217,66 +1126,6 @@ export function SettingsModal({
                 />
               )}
 
-              {activeTab === "branding" && (
-                <BrandingTab
-                  isDark={isDark}
-                  isActive={scope === "global" && activeTab === "branding"}
-                />
-              )}
-
-              {activeTab === "webAccess" && (
-                <WebAccessTab
-                  isDark={isDark}
-                  isActive={scope === "global" && activeTab === "webAccess"}
-                />
-              )}
-
-
-              {activeTab === "developer" && (
-                <DeveloperTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  runtimeVersion={runtimeVersion}
-                  daemonVersion={daemonVersion}
-                  runtimeInfoErr={runtimeInfoErr}
-                  developerMode={developerMode}
-                  setDeveloperMode={setDeveloperMode}
-                  logLevel={logLevel}
-                  setLogLevel={setLogLevel}
-                  terminalBacklogMiB={terminalBacklogMiB}
-                  setTerminalBacklogMiB={setTerminalBacklogMiB}
-                  terminalScrollbackLines={terminalScrollbackLines}
-                  setTerminalScrollbackLines={setTerminalScrollbackLines}
-                  peerRuntimeVisibility={peerRuntimeVisibility}
-                  setPeerRuntimeVisibility={setPeerRuntimeVisibility}
-                  petRuntimeVisibility={petRuntimeVisibility}
-                  setPetRuntimeVisibility={setPetRuntimeVisibility}
-                  obsBusy={obsBusy}
-                  onSaveObservability={handleSaveObservability}
-                  debugSnapshot={debugSnapshot}
-                  debugSnapshotErr={debugSnapshotErr}
-                  debugSnapshotBusy={debugSnapshotBusy}
-                  onLoadDebugSnapshot={loadDebugSnapshot}
-                  onClearDebugSnapshot={() => {
-                    setDebugSnapshot("");
-                    setDebugSnapshotErr("");
-                  }}
-                  logComponent={logComponent}
-                  setLogComponent={setLogComponent}
-                  logLines={logLines}
-                  setLogLines={setLogLines}
-                  logText={logText}
-                  logErr={logErr}
-                  logBusy={logBusy}
-                  onLoadLogTail={loadLogTail}
-                  onClearLogs={handleClearLogs}
-                  registryBusy={registryBusy}
-                  registryErr={registryErr}
-                  registryResult={registryResult}
-                  onPreviewRegistry={loadRegistryPreview}
-                  onReconcileRegistry={handleReconcileRegistry}
-                />
-              )}
               </Suspense>
             )}
           </div>
