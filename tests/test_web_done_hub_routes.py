@@ -187,12 +187,13 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_presets_proxy_uses_bearer_token(self) -> None:
         base = "https://peer.shierkeji.com"
+        preset_base = "http://dongdongkc.top:8012"
         calls: list[tuple[str, str, dict]] = []
 
         def _factory(*args, **kwargs):
             return _FakeAsyncClient(
                 {
-                    ("GET", f"{base}/api/v1/team-presets"): _FakeResponse(
+                    ("GET", f"{preset_base}/api/v1/team-presets"): _FakeResponse(
                         200,
                         {
                             "items": [
@@ -222,15 +223,45 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         headers = calls[0][2].get("headers") or {}
         self.assertEqual(headers.get("Authorization"), "Bearer token-32")
 
+    def test_done_hub_team_presets_falls_back_to_agent_service_base(self) -> None:
+        base = "https://peer.shierkeji.com"
+        preset_base = "http://dongdongkc.top:8012"
+        calls: list[tuple[str, str, dict]] = []
+
+        def _factory(*args, **kwargs):
+            return _FakeAsyncClient(
+                {
+                    ("GET", f"{preset_base}/api/v1/team-presets"): _FakeResponse(
+                        200,
+                        {"items": [{"slug": "video-skill", "name": "动画制作团队"}]},
+                    ),
+                },
+                calls,
+            )
+
+        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+            client = self._create_client()
+            resp = client.post(
+                "/api/v1/done_hub/team_presets/list",
+                json={"base_url": base, "access_token": "token-32"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(bool(body.get("ok")))
+        self.assertEqual(((body.get("result") or {}).get("items") or [])[0]["slug"], "video-skill")
+        self.assertEqual(calls[0][0:2], ("GET", f"{preset_base}/api/v1/team-presets"))
+
     def test_done_hub_team_preset_download_returns_template_text(self) -> None:
         base = "https://peer.shierkeji.com"
+        preset_base = "http://dongdongkc.top:8012"
         calls: list[tuple[str, str, dict]] = []
         template = "kind: cccc.group_template\nv: 1\ntitle: 自由剪辑skill\nactors: []\n"
 
         def _factory(*args, **kwargs):
             return _FakeAsyncClient(
                 {
-                    ("GET", f"{base}/api/v1/team-presets/skill-team/config"): _FakeResponse(
+                    ("GET", f"{preset_base}/api/v1/team-presets/skill-team/config"): _FakeResponse(
                         200,
                         {},
                         text=template,

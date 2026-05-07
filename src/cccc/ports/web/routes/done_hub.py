@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -15,6 +16,7 @@ _DONE_HUB_TIMEOUT = 15.0
 _TOKEN_PAGE_SIZE = 100
 _CODEX_BASE_URL = "https://peer.shierkeji.com/v1"
 _GEMINI_BASE_URL = "https://peer.shierkeji.com/gemini"
+_TEAM_PRESET_BASE_URLS = ("http://dongdongkc.top:8012", "http://127.0.0.1:8012")
 _CLIENT_CONFIG_ERROR_MESSAGE = "登录成功，但本机客户端配置写入失败，请稍后重试或联系管理员。"
 
 
@@ -34,6 +36,23 @@ def _normalize_base_url(raw: str) -> str:
             detail={"code": "invalid_base_url", "message": "base_url must be an absolute http(s) URL"},
         )
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
+
+
+def _candidate_team_preset_base_urls(login_base_url: str) -> list[str]:
+    candidates: list[str] = []
+    for raw in (
+        os.environ.get("CCCC_DONE_HUB_TEAM_PRESET_BASE_URL", ""),
+        os.environ.get("ONECOLLEAGUE_TEAM_PRESET_BASE_URL", ""),
+        *_TEAM_PRESET_BASE_URLS,
+        login_base_url,
+    ):
+        try:
+            normalized = _normalize_base_url(str(raw or ""))
+        except HTTPException:
+            continue
+        if normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
 
 
 def _extract_error_message(payload: Any, *, fallback: str) -> str:
@@ -431,20 +450,30 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 detail={"code": "missing_access_token", "message": "missing access_token"},
             )
 
-        try:
-            async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(
-                    f"{base_url}/api/v1/team-presets",
-                    headers=_auth_headers(access_token),
-                )
-                if resp.status_code >= 400:
-                    return {"ok": False, "error": {"code": "done_hub_team_presets_failed", "message": f"agent-service returned HTTP {resp.status_code}"}}
+        errors: list[str] = []
+        payload: Dict[str, Any] | None = None
+        async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
+            for candidate_base_url in _candidate_team_preset_base_urls(base_url):
                 try:
-                    payload = resp.json()
+                    resp = await client.get(
+                        f"{candidate_base_url}/api/v1/team-presets",
+                        headers=_auth_headers(access_token),
+                    )
+                except httpx.HTTPError as exc:
+                    errors.append(f"{candidate_base_url}: {exc}")
+                    continue
+                if resp.status_code >= 400:
+                    errors.append(f"{candidate_base_url}: HTTP {resp.status_code}")
+                    continue
+                try:
+                    parsed = resp.json()
                 except Exception:
                     return {"ok": False, "error": {"code": "done_hub_team_presets_failed", "message": "agent-service returned invalid JSON"}}
-        except httpx.HTTPError as exc:
-            return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
+                payload = parsed if isinstance(parsed, dict) else {}
+                break
+        if payload is None:
+            message = "; ".join(errors) if errors else "agent-service team preset endpoint unavailable"
+            return {"ok": False, "error": {"code": "done_hub_team_presets_failed", "message": message}}
 
         items = payload.get("items") if isinstance(payload, dict) else []
         if not isinstance(items, list):
@@ -464,16 +493,26 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if not preset_id:
             raise HTTPException(status_code=400, detail={"code": "missing_preset_id", "message": "missing preset_id"})
 
-        try:
-            async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
-                resp = await client.get(
-                    f"{base_url}/api/v1/team-presets/{quote(preset_id, safe='')}/config",
-                    headers=_auth_headers(access_token),
-                )
-                if resp.status_code >= 400:
-                    return {"ok": False, "error": {"code": "done_hub_team_preset_download_failed", "message": f"agent-service returned HTTP {resp.status_code}"}}
-        except httpx.HTTPError as exc:
-            return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
+        errors: list[str] = []
+        resp: httpx.Response | None = None
+        async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
+            for candidate_base_url in _candidate_team_preset_base_urls(base_url):
+                try:
+                    candidate_resp = await client.get(
+                        f"{candidate_base_url}/api/v1/team-presets/{quote(preset_id, safe='')}/config",
+                        headers=_auth_headers(access_token),
+                    )
+                except httpx.HTTPError as exc:
+                    errors.append(f"{candidate_base_url}: {exc}")
+                    continue
+                if candidate_resp.status_code >= 400:
+                    errors.append(f"{candidate_base_url}: HTTP {candidate_resp.status_code}")
+                    continue
+                resp = candidate_resp
+                break
+        if resp is None:
+            message = "; ".join(errors) if errors else "agent-service team preset config unavailable"
+            return {"ok": False, "error": {"code": "done_hub_team_preset_download_failed", "message": message}}
 
         filename = ""
         disposition = str(resp.headers.get("content-disposition") or "")
