@@ -1,7 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
-import { cardClass, labelClass, primaryButtonClass } from "./types";
+import {
+  labelClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsWorkspaceActionBarClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
+} from "./types";
 import { TemplatePreviewDetails } from "../../TemplatePreviewDetails";
 import type { TemplatePreviewDetailsProps } from "../../TemplatePreviewDetails";
 
@@ -113,17 +123,24 @@ export function BlueprintTab({ isDark, groupId, groupTitle }: BlueprintTabProps)
 
   const diff = preview?.diff;
   const tpl = preview?.template;
+  const filePickerId = "blueprint-import-file-input";
+  const canResetImportState = !!file || !!preview || !!err;
 
   return (
     <div className="space-y-4">
       {err && <div className="text-sm text-red-600 dark:text-rose-300">{err}</div>}
 
-      <div className={cardClass(isDark)}>
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("blueprint.exportTitle")}</div>
-        <div className="text-xs mt-1 text-[var(--color-text-tertiary)]">
-          {t("blueprint.exportDescription")}
+      <div className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("blueprint.exportTitle")}</div>
+            <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+              {t("blueprint.exportDescription")}
+            </div>
+          </div>
         </div>
-        <div className="mt-3 flex items-center gap-2">
+
+        <div className={settingsWorkspaceActionBarClass(isDark)}>
           <button className={primaryButtonClass(busy)} onClick={handleExport} disabled={busy}>
             {t("blueprint.exportBlueprint")}
           </button>
@@ -131,39 +148,57 @@ export function BlueprintTab({ isDark, groupId, groupTitle }: BlueprintTabProps)
         </div>
       </div>
 
-      <div className={cardClass(isDark)}>
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("blueprint.importTitle")}</div>
-        <div className="text-xs mt-1 text-[var(--color-text-tertiary)]">
-          {t("blueprint.importDescription")}
-        </div>
-
-        <div className="mt-3">
-          <label className={labelClass(isDark)}>{t("blueprint.blueprintFile")}</label>
-          <input
-            key={file ? file.name : "none"}
-            type="file"
-            accept=".yaml,.yml,.json"
-            className="text-sm text-[var(--color-text-secondary)]"
-            disabled={busy}
-            onChange={(e) => {
-              const f = e.target.files && e.target.files.length > 0 ? e.target.files[0] : null;
-              setFile(f);
-              setPreview(null);
-              setErr("");
-              if (f) void loadPreview(f);
-            }}
-          />
-        </div>
-
-        {busy && <div className="mt-2 text-xs text-[var(--color-text-muted)]">{t("blueprint.working")}</div>}
-
-        {tpl && diff && (
-          <div className="mt-3">
-            <TemplatePreviewDetails isDark={isDark} template={tpl} diff={diff} wrap={false} />
+      <div className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("blueprint.importTitle")}</div>
+            <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+              {t("blueprint.importDescription")}
+            </div>
           </div>
-        )}
+        </div>
 
-        <div className="mt-3 flex items-center gap-2">
+        <div className={settingsWorkspaceBodyClass}>
+          <div className={settingsWorkspaceSoftPanelClass(isDark)}>
+            <label className={labelClass(isDark)}>{t("blueprint.blueprintFile")}</label>
+            <input
+              key={file ? file.name : "none"}
+              id={filePickerId}
+              type="file"
+              accept=".yaml,.yml,.json"
+              className="sr-only"
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files && e.target.files.length > 0 ? e.target.files[0] : null;
+                setFile(f);
+                setPreview(null);
+                setErr("");
+                if (f) void loadPreview(f);
+              }}
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <label
+                htmlFor={filePickerId}
+                className={`${secondaryButtonClass()} ${busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
+                aria-disabled={busy}
+              >
+                {t("common:chooseFile", "Choose File")}
+              </label>
+              <div className={`min-w-0 text-sm ${file ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-muted)]"}`}>
+                <span className="block truncate">{file?.name || t("common:noFileChosen", "No file chosen")}</span>
+              </div>
+            </div>
+            {busy && <div className="mt-3 text-xs text-[var(--color-text-muted)]">{t("blueprint.working")}</div>}
+          </div>
+
+          {tpl && diff && (
+            <div className={settingsWorkspacePanelClass(isDark)}>
+              <TemplatePreviewDetails isDark={isDark} template={tpl} diff={diff} wrap={false} />
+            </div>
+          )}
+        </div>
+
+        <div className={settingsWorkspaceActionBarClass(isDark)}>
           <button
             className={primaryButtonClass(busy)}
             onClick={handleImportReplace}
@@ -172,18 +207,20 @@ export function BlueprintTab({ isDark, groupId, groupTitle }: BlueprintTabProps)
           >
             {t("blueprint.applyReplace")}
           </button>
-          <button
-            type="button"
-            className="glass-btn px-4 py-2 rounded-lg text-sm min-h-[44px] transition-colors disabled:opacity-50 text-[var(--color-text-secondary)]"
-            disabled={busy}
-            onClick={() => {
-              setFile(null);
-              setPreview(null);
-              setErr("");
-            }}
-          >
-            {t("common:close")}
-          </button>
+          {canResetImportState ? (
+            <button
+              type="button"
+              className={secondaryButtonClass()}
+              disabled={busy}
+              onClick={() => {
+                setFile(null);
+                setPreview(null);
+                setErr("");
+              }}
+            >
+              {t("common:reset")}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

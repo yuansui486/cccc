@@ -293,6 +293,7 @@ def start_actor_activity_thread(
 
     def _actor_activity_loop() -> None:
         interval = max(1.0, float(interval_seconds or 1.0))
+        prev_runtime_by_group: Dict[str, Dict[str, Dict[str, Any]]] = {}
         while not stop_event.is_set():
             try:
                 groups_base = home / "groups"
@@ -377,15 +378,75 @@ def start_actor_activity_thread(
                             actors_data.append(payload)
                             actors_snapshot[aid] = payload
                         replace_group_runtime(gid, actors_snapshot)
+
+                        # Broadcast running actors in-memory (daemon IPC).
                         if actors_data:
-                            event_broadcaster.publish({
+                            activity_event = {
                                 "id": uuid.uuid4().hex,
                                 "kind": "actor.activity",
                                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                                 "group_id": gid,
                                 "by": "system",
                                 "data": {"actors": actors_data},
-                            })
+                            }
+                            event_broadcaster.publish(activity_event)
+
+                        # Detect working-state transitions so the web port
+                        # (which tails the ledger file) also receives the
+                        # update.  Without this, actor.activity only flows
+                        # through the in-memory EventBroadcaster and never
+                        # reaches the web frontend.
+                        prev_snapshot = prev_runtime_by_group.get(gid, {})
+                        state_changed = len(actors_snapshot) != len(prev_snapshot)
+                        if not state_changed:
+                            for aid, payload in actors_snapshot.items():
+                                prev_actor = prev_snapshot.get(aid)
+                                if prev_actor is None or payload.get("effective_working_state") != prev_actor.get("effective_working_state"):
+                                    state_changed = True
+                                    break
+                        # Emit "stopped" entries for actors that disappeared
+                        # (crashed/stopped since last tick) so the web
+                        # frontend can clear stale "working" halos.
+                        stopped_entries: list[Dict[str, Any]] = []
+                        for prev_aid, prev_actor in prev_snapshot.items():
+                            if prev_aid not in actors_snapshot:
+                                prev_runner = str(prev_actor.get("runner_effective") or "pty").strip() or "pty"
+                                state_changed = True
+                                stopped_entries.append({
+                                    "id": prev_aid,
+                                    "running": False,
+                                    "runner_effective": prev_runner,
+                                    "idle_seconds": None,
+                                    "effective_working_state": "stopped",
+                                    "effective_working_reason": "runner_not_running",
+                                    "effective_working_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                    "effective_active_task_id": None,
+                                })
+                        prev_runtime_by_group[gid] = {
+                            aid: {
+                                "effective_working_state": p.get("effective_working_state"),
+                                "runner_effective": p.get("runner_effective"),
+                            }
+                            for aid, p in actors_snapshot.items()
+                        }
+                        if state_changed:
+                            ledger_actors = actors_data + stopped_entries
+                            if ledger_actors:
+                                try:
+                                    from ..kernel.ledger import append_event
+                                    append_event(
+                                        group.ledger_path,
+                                        kind="actor.activity",
+                                        group_id=gid,
+                                        scope_key="",
+                                        by="system",
+                                        data={"actors": ledger_actors},
+                                    )
+                                except Exception as e:
+                                    _log_loop_error(
+                                        f"actor_activity ledger append failed group={gid} actor_count={len(ledger_actors)}",
+                                        e,
+                                    )
             except Exception as e:
                 _log_loop_error("actor_activity_tick failed", e)
             stop_event.wait(interval)

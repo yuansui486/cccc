@@ -65,6 +65,7 @@ def _policy_default_compiled() -> Dict[str, Any]:
             "cccc_builtin": _LEVEL_MOUNTED,
             "manual_import": _LEVEL_MOUNTED,
             "onecolleague_skill_library": _LEVEL_MOUNTED,
+            "agent_self_proposed": _LEVEL_INDEXED,
             "anthropic_skills": _LEVEL_MOUNTED,
             "github_skills_curated": _LEVEL_MOUNTED,
             "skillsmp_remote": _LEVEL_MOUNTED,
@@ -74,7 +75,9 @@ def _policy_default_compiled() -> Dict[str, Any]:
             "mcp_registry_official": _LEVEL_MOUNTED,
         },
         "capability_levels": {},
-        "skill_source_levels": {},
+        "skill_source_levels": {
+            "agent_self_proposed": _LEVEL_MOUNTED,
+        },
         "role_pinned": {},
         "curated_mcp_entries": [],
         "curated_skill_entries": [],
@@ -234,7 +237,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
         )
 
     skills = doc.get("skills") if isinstance(doc.get("skills"), dict) else {}
-    skill_source_levels: Dict[str, str] = {}
+    skill_source_levels: Dict[str, str] = dict(compiled.get("skill_source_levels") or {})
     for item in skills.get("source_overrides") if isinstance(skills.get("source_overrides"), list) else []:
         if not isinstance(item, dict):
             continue

@@ -3,6 +3,9 @@ import { InfoIcon } from "../../Icons";
 import { ScrollFade } from "../../ScrollFade";
 import type { SettingsScope } from "./types";
 import { ScopeTooltip } from "./ScopeTooltip";
+import {
+  settingsWorkspaceSoftPanelClass,
+} from "./types";
 
 interface SettingsTabOption {
   id: string;
@@ -35,25 +38,51 @@ export function SettingsNavigation({
   const { t } = useTranslation("settings");
   const globalScopeTitle = globalEnabled ? t("navigation.globalScopeTitle") : t("navigation.globalLockedTitle");
   const globalScopeContent = globalEnabled ? t("navigation.globalScopeContent") : t("navigation.globalLockedContent");
+  const scopeButtonClass = (active: boolean) =>
+    `w-full flex items-center justify-between rounded-[16px] border px-3.5 py-2.5 text-left text-sm font-semibold transition-[background-color,border-color,color,box-shadow] ${
+      active
+        ? "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg-active)] text-[var(--color-text-primary)] shadow-[0_10px_30px_rgba(15,23,42,0.06)]"
+        : "border-transparent bg-transparent text-[var(--color-text-tertiary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
+    }`;
+  const tabButtonClass = (active: boolean) =>
+    `w-full flex items-center rounded-[14px] px-3 py-2.5 text-sm font-medium transition-[background-color,border-color,color,box-shadow] ${
+      active
+        ? "border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg-active)] text-[var(--color-text-primary)] shadow-[0_8px_22px_rgba(15,23,42,0.05)]"
+        : "border border-transparent text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
+    }`;
+  const mobileScopeButtonClass = (active: boolean) =>
+    `flex-1 relative flex items-center justify-center px-3 py-2.5 rounded-xl text-sm min-h-[44px] font-medium transition-[background-color,border-color,color,box-shadow] ${
+      active
+        ? "border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg-active)] text-[var(--color-text-primary)] shadow-sm"
+        : "border border-transparent bg-transparent text-[var(--color-text-tertiary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
+    }`;
+
   return (
     <>
-      <aside className="hidden sm:flex sm:flex-col w-48 border-r flex-shrink-0 bg-[var(--glass-panel-bg)] border-[var(--glass-border-subtle)]">
-        <div className="p-3 space-y-3">
-          <div className="px-3 text-[10px] font-bold uppercase tracking-wider opacity-30 text-[var(--color-text-tertiary)]">
+      <aside
+        className={`hidden border-r border-[var(--glass-border-subtle)] sm:flex sm:w-60 lg:w-[16.5rem] sm:flex-col shrink-0 ${
+          isDark
+            ? "bg-[linear-gradient(180deg,rgba(20,22,26,0.96),rgba(14,15,18,0.92))]"
+            : "bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(247,249,252,0.94))]"
+        }`}
+      >
+        <div className="border-b border-[var(--glass-border-subtle)] px-4 pb-3 pt-4 lg:px-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
             {t("navigation.targetScope")}
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="mt-3 flex flex-col gap-2">
             <button
               type="button"
               onClick={() => onScopeChange("group")}
               disabled={!groupId}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left font-semibold transition-colors ${
-                scope === "group"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
-                  : "hover:bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-tertiary)]"
-              } disabled:opacity-40`}
+              className={`${scopeButtonClass(scope === "group")} disabled:opacity-40`}
             >
-              <span>{t("navigation.thisGroup")}</span>
+              <div className="min-w-0">
+                <div>{t("navigation.thisGroup")}</div>
+                <div className="mt-0.5 truncate text-[11px] font-medium text-[var(--color-text-muted)]">
+                  {scopeRootUrl || groupId || "—"}
+                </div>
+              </div>
               <ScopeTooltip
                 isDark={isDark}
                 title={t("navigation.groupScopeTitle")}
@@ -81,13 +110,14 @@ export function SettingsNavigation({
               type="button"
               onClick={() => onScopeChange("global")}
               disabled={!globalEnabled}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left font-semibold transition-colors ${
-                scope === "global"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
-                  : "hover:bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-tertiary)]"
-              } disabled:opacity-40`}
+              className={`${scopeButtonClass(scope === "global")} disabled:opacity-40`}
             >
-              <span>{t("navigation.global")}</span>
+              <div className="min-w-0">
+                <div>{t("navigation.global")}</div>
+                <div className="mt-0.5 text-[11px] font-medium text-[var(--color-text-muted)]">
+                  {globalEnabled ? globalScopeTitle : t("navigation.globalLockedTitle")}
+                </div>
+              </div>
               <ScopeTooltip
                 isDark={isDark}
                 title={globalScopeTitle}
@@ -109,37 +139,32 @@ export function SettingsNavigation({
           </div>
         </div>
 
-        <div className="mx-3 border-b border-[var(--glass-border-subtle)]" />
-
-        <nav className="flex-1 overflow-y-auto scrollbar-subtle p-3 pb-4 space-y-1 [scrollbar-gutter:stable]">
+        <nav className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4 pt-3 lg:px-4">
+          <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            {t("navigation.sections", { defaultValue: "Sections" })}
+          </div>
+          <div className="space-y-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`w-full flex items-center px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                activeTab === tab.id
-                  ? "glass-tab-active text-sky-700 dark:text-sky-300"
-                  : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--glass-tab-bg-hover)]"
-              }`}
+              className={tabButtonClass(activeTab === tab.id)}
             >
               {tab.label}
             </button>
           ))}
+          </div>
         </nav>
       </aside>
 
       <div className="sm:hidden flex flex-col flex-shrink-0">
-        <div className="px-5 py-3 border-b border-[var(--glass-border-subtle)]">
+        <div className="px-4 py-3 border-b border-[var(--glass-border-subtle)]">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => onScopeChange("group")}
               disabled={!groupId}
-              className={`flex-1 relative flex items-center justify-center px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors ${
-                scope === "group"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
-                  : "glass-btn text-[var(--color-text-secondary)]"
-              } disabled:opacity-40`}
+              className={`${mobileScopeButtonClass(scope === "group")} disabled:opacity-40`}
             >
               <span>{t("navigation.thisGroup")}</span>
               <div className="absolute right-1 top-1/2 -translate-y-1/2">
@@ -171,11 +196,7 @@ export function SettingsNavigation({
               type="button"
               onClick={() => onScopeChange("global")}
               disabled={!globalEnabled}
-              className={`flex-1 relative flex items-center justify-center px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors ${
-                scope === "global"
-                  ? "bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
-                  : "glass-btn text-[var(--color-text-secondary)]"
-              } disabled:opacity-40`}
+              className={`${mobileScopeButtonClass(scope === "global")} disabled:opacity-40`}
             >
               <span>{t("navigation.global")}</span>
               <div className="absolute right-1 top-1/2 -translate-y-1/2">
@@ -203,16 +224,16 @@ export function SettingsNavigation({
 
         <ScrollFade
           className="flex-shrink-0 w-full border-b border-[var(--glass-border-subtle)]"
-          innerClassName="flex min-h-[48px]"
+          innerClassName="flex min-h-[54px] px-4 py-2"
           fadeWidth={20}
         >
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`flex-shrink-0 px-4 py-2.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              className={`${settingsWorkspaceSoftPanelClass(isDark)} flex-shrink-0 px-4 py-2.5 text-xs font-medium whitespace-nowrap ${
                 activeTab === tab.id
-                  ? "text-sky-700 dark:text-sky-300 border-b-2 border-sky-600 dark:border-sky-300"
+                  ? "!border-[var(--glass-border-subtle)] !bg-[var(--glass-tab-bg-active)] text-[var(--color-text-primary)]"
                   : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
               }`}
             >

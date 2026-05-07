@@ -16,7 +16,7 @@
   "nextShort": "next: {{value}}",
   "headlessAgent": "Headless Agent",
   "headlessDescription": "This agent runs without a terminal. It communicates via MCP tools and the inbox system.",
-  "headlessStreamDescription": "This agent runs headlessly. Live work appears in Chat, and formal replies must be sent with message tools.",
+  "headlessStreamDescription": "This agent runs headlessly. Live work appears in the runtime dock ticker and inspect panel; formal replies must be sent with message tools.",
   "streamingOutput": "Streaming output",
   "noStreamingOutputYet": "There is no streaming output to show yet.",
   "statusRunning": "Status: Running",
@@ -189,6 +189,43 @@
   "rolePresetSelectPlaceholder": "Choose a built-in preset",
   "rolePresetSelectPrompt": "Choose a preset, then apply it into the draft below.",
   "applyPreset": "Apply",
+  "rolePresetCatalog": {
+    "coordinator": {
+      "name": "Coordinator",
+      "summary": "Keep multi-actor work moving through clear ownership, low-noise routing, and clean handoffs without acting like a second foreman.",
+      "useWhen": "Use when work is drifting, ownership is fuzzy, or handoffs are getting messy, but the main need is coordination rather than final acceptance."
+    },
+    "planner": {
+      "name": "Planner",
+      "summary": "Turn vague requests into executable scope with boundaries, acceptance, and unresolved decisions made explicit.",
+      "useWhen": "Use when the request is ambiguous, risky, or large enough that acting now would likely create rework."
+    },
+    "implementer": {
+      "name": "Implementer",
+      "summary": "Ship the smallest correct change that matches approved scope, fits local patterns, and is actually verified.",
+      "useWhen": "Use when scope is already approved and the real job is to land working code or scripts cleanly."
+    },
+    "reviewer": {
+      "name": "Reviewer",
+      "summary": "Inspect the actual work against the real requirement and only flag issues that would cause real problems.",
+      "useWhen": "Use when an implementation step is done and someone needs a real review rather than a summary blessing."
+    },
+    "debugger": {
+      "name": "Debugger",
+      "summary": "Reproduce the failure, narrow the real cause with evidence, and apply only the fix that matches the failure path.",
+      "useWhen": "Use when behavior is broken, flaky, or unexplained and naive fixes are already failing or too risky."
+    },
+    "explorer": {
+      "name": "Explorer",
+      "summary": "Map the local repo into a small set of anchor files and behavior flows without drifting into edits or external research.",
+      "useWhen": "Use when the real question is where something lives or how it flows inside this repo."
+    },
+    "researcher": {
+      "name": "Researcher",
+      "summary": "Answer external technical questions from primary sources with clear source basis and version or recency boundaries.",
+      "useWhen": "Use when the answer depends on external docs, source, releases, issues, or current upstream behavior."
+    }
+  },
   "rolePresetAppliedNotice": "Preset \"{{name}}\" copied into the role-notes draft.",
   "rolePresetAlreadyMatchesDraft": "Preset \"{{name}}\" already matches the current draft.",
   "rolePresetReplaceConfirm": "Replace the current role-notes draft with the built-in preset \"{{name}}\"?",

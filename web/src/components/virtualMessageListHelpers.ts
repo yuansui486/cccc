@@ -49,6 +49,31 @@ export function getAutoFollowTrigger(input: {
   return null;
 }
 
+export function shouldDetachChatFollowOnScroll(input: {
+  followMode: "follow" | "detached";
+  previousTop: number;
+  currentTop: number;
+  atBottom: boolean;
+  isContainerResizing: boolean;
+  topLoadThresholdPx?: number;
+}): boolean {
+  if (input.followMode !== "follow") return false;
+  if (input.isContainerResizing || input.atBottom) return false;
+
+  const topLoadThresholdPx = Math.max(0, Number(input.topLoadThresholdPx) || 0);
+  if (input.currentTop <= topLoadThresholdPx) return true;
+  return input.currentTop < input.previousTop - 4;
+}
+
+export function shouldAutoScrollToBottom(input: {
+  followMode: "follow" | "detached";
+  isAtBottom: boolean;
+  forceStickToBottom: boolean;
+}): boolean {
+  if (input.forceStickToBottom) return true;
+  return input.followMode === "follow" && input.isAtBottom;
+}
+
 export function getStableMessageKey(message: LedgerEvent | undefined, index: number): string | number {
   if (message?.kind === "chat.message" && message.data && typeof message.data === "object") {
     const eventId = typeof message.id === "string" ? String(message.id || "").trim() : "";

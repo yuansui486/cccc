@@ -19,6 +19,9 @@ from ._common import (
     _runtime_path,
 )
 
+_SELF_PROPOSED_SKILL_PREFIX = "skill:agent_self_proposed:"
+
+
 def _source_state_template(sync_state: str = "never") -> Dict[str, Any]:
     return {
         "sync_state": sync_state,
@@ -29,6 +32,24 @@ def _source_state_template(sync_state: str = "never") -> Dict[str, Any]:
         "next_cursor": "",
         "updated_since": "",
     }
+
+
+def _normalize_catalog_enable_supported(capability_id: str, candidate: Dict[str, Any]) -> None:
+    kind = str(candidate.get("kind") or "").strip().lower()
+    source_id = str(candidate.get("source_id") or "").strip()
+    if kind != "skill" or source_id != "agent_self_proposed":
+        return
+    qualification = str(candidate.get("qualification_status") or "").strip().lower()
+    if not capability_id.startswith(_SELF_PROPOSED_SKILL_PREFIX):
+        candidate["enable_supported"] = False
+        candidate["qualification_status"] = "blocked"
+        reasons = candidate.get("qualification_reasons")
+        reason_list = [str(x).strip() for x in reasons if str(x).strip()] if isinstance(reasons, list) else []
+        if "legacy_agent_self_proposed_namespace" not in reason_list:
+            reason_list.append("legacy_agent_self_proposed_namespace")
+        candidate["qualification_reasons"] = reason_list
+        return
+    candidate["enable_supported"] = bool(qualification != "blocked")
 
 
 def _new_state_doc() -> Dict[str, Any]:
@@ -53,6 +74,7 @@ def _new_catalog_doc() -> Dict[str, Any]:
         "updated_at": now,
         "sources": {
             "manual_import": _source_state_template("never"),
+            "agent_self_proposed": _source_state_template("never"),
             "mcp_registry_official": _source_state_template("never"),
             "anthropic_skills": _source_state_template("never"),
             "github_skills_curated": _source_state_template("never"),
@@ -241,6 +263,7 @@ def _normalize_catalog_doc(raw: Any) -> Dict[str, Any]:
                 continue
             candidate = dict(item)
             candidate["capability_id"] = cap_id
+            _normalize_catalog_enable_supported(cap_id, candidate)
             records[cap_id] = candidate
     doc["records"] = records
     return doc
@@ -464,8 +487,9 @@ def _load_catalog_doc() -> Tuple[Path, Dict[str, Any]]:
 
 def _save_catalog_doc(path: Path, doc: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    doc["updated_at"] = utc_now_iso()
-    atomic_write_json(path, doc, indent=2)
+    normalized = _normalize_catalog_doc(doc)
+    normalized["updated_at"] = utc_now_iso()
+    atomic_write_json(path, normalized, indent=2)
 
 
 def _load_runtime_doc() -> Tuple[Path, Dict[str, Any]]:
@@ -477,4 +501,3 @@ def _save_runtime_doc(path: Path, doc: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     doc["updated_at"] = utc_now_iso()
     atomic_write_json(path, doc, indent=2)
-

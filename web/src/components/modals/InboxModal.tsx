@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Actor, LedgerEvent } from "../../types";
 import { formatFullTime, formatTime } from "../../utils/time";
-import { MarkdownRenderer } from "../MarkdownRenderer";
+import { LazyMarkdownRenderer } from "../LazyMarkdownRenderer";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { getRecipientDisplayLabel } from "../../utils/displayText";
 
@@ -107,9 +107,10 @@ export function InboxModal({ isOpen, actorId, actors, messages, busy, onClose, o
                 <div className="text-xs font-medium truncate text-[var(--color-text-secondary)]">{getDisplayName(ev.by || "") || "—"}</div>
               </div>
               <div className="mt-2 text-sm break-words">
-                <MarkdownRenderer
+                <LazyMarkdownRenderer
                   content={formatEventLine(ev, getDisplayName)}
                   className="text-[var(--color-text-primary)]"
+                  fallback={<div className="whitespace-pre-wrap break-words">{formatEventLine(ev, getDisplayName)}</div>}
                 />
               </div>
             </div>

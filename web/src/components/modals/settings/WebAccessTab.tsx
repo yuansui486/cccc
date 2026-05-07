@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { GroupMeta, RemoteAccessState, WebAccessSession } from "../../../types";
 import { InfoIcon } from "../../Icons";
+import { BodyPortal } from "../../ui/BodyPortal";
 import { InfoPopover } from "./InfoPopover";
 import * as api from "../../../services/api";
 import {
-  cardClass,
   inputClass,
   labelClass,
   primaryButtonClass,
@@ -15,8 +14,14 @@ import {
   settingsDialogBodyClass,
   settingsDialogFooterClass,
   settingsDialogHeaderClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
 } from "./types";
 import { useModalA11y } from "../../../hooks/useModalA11y";
+import { copyTextToClipboard } from "../../../utils/copy";
 
 interface WebAccessTabProps {
   isDark: boolean;
@@ -49,24 +54,6 @@ function statusChipClass(_isDark: boolean, tone: "neutral" | "good" | "warn") {
     return "border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400";
   }
   return "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]";
-}
-
-async function copyText(value: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    const el = document.createElement("textarea");
-    el.value = value;
-    el.style.position = "fixed";
-    el.style.left = "-9999px";
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(el);
-    return ok;
-  }
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -791,10 +778,12 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
         setError(resp.error?.message || t("webAccess.revealFailed"));
         return;
       }
-      const ok = await copyText(resp.result.token);
+      const ok = await copyTextToClipboard(resp.result.token);
       if (ok) {
         setCopiedTokenId(tokenId);
         window.setTimeout(() => setCopiedTokenId(null), 1500);
+      } else {
+        setError(t("common:copyFailed"));
       }
     } catch {
       setError(t("webAccess.revealFailed"));
@@ -803,10 +792,12 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
 
   const copyNewToken = async () => {
     if (!newToken) return;
-    const ok = await copyText(newToken);
+    const ok = await copyTextToClipboard(newToken);
     if (ok) {
       setCopiedNewToken(true);
       window.setTimeout(() => setCopiedNewToken(false), 1500);
+    } else {
+      setError(t("common:copyFailed"));
     }
   };
 
@@ -1021,7 +1012,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      const ok = await copyText(restartDialog.restartCommand);
+                      const ok = await copyTextToClipboard(restartDialog.restartCommand);
                       if (ok) pushHint(t("webAccess.copied"));
                     }}
                     className={`${secondaryButtonClass("sm")} mt-2`}
@@ -1035,7 +1026,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      const ok = await copyText(restartDialog.standaloneCommand);
+                      const ok = await copyTextToClipboard(restartDialog.standaloneCommand);
                       if (ok) pushHint(t("webAccess.copied"));
                     }}
                     className={`${secondaryButtonClass("sm")} mt-2`}
@@ -1054,7 +1045,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             <button
               type="button"
               onClick={async () => {
-                const ok = await copyText(restartDialog.remoteUrl || "");
+                const ok = await copyTextToClipboard(restartDialog.remoteUrl || "");
                 if (ok) pushHint(t("webAccess.copied"));
               }}
               className={secondaryButtonClass()}
@@ -1072,116 +1063,121 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("webAccess.title")}</h3>
-            <InfoPopover
-              isDark={isDark}
-              title={t("webAccess.howItWorksTitle")}
-              content={
-                <ul className="space-y-1">
-                  <li>• {t("webAccess.howItWorksActivateLogin")}</li>
-                  <li>• {t("webAccess.howItWorksAutoLogin")}</li>
-                  <li>• {t("webAccess.howItWorksRemotePolicy")}</li>
-                </ul>
-              }
-              placement="bottom-start"
-              maxWidthClassName="max-w-[320px]"
-            >
-              {(getReferenceProps, setReference) => (
-                <button
-                  type="button"
-                  ref={setReference as never}
-                  {...getReferenceProps()}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] transition-colors"
-                  aria-label={t("webAccess.howItWorksTitle")}
-                >
-                  <InfoIcon size={14} />
-                </button>
-              )}
-            </InfoPopover>
-          </div>
-          <p className="mt-1 text-xs text-[var(--color-text-muted)]">{t("webAccess.description")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={busy || saveBusy || startBusy || stopBusy || createBusy || editBusy}
-          className="glass-btn px-3 py-2 rounded-lg text-xs min-h-[40px] transition-colors text-[var(--color-text-secondary)] disabled:opacity-50"
-        >
-          {busy ? t("common:loading") : t("webAccess.refresh")}
-        </button>
-      </div>
-
-      {(error || hint) && (
-        <div className={`rounded-lg border px-3 py-2 text-xs ${error
-          ? "border-red-500/30 bg-red-500/15 text-red-600 dark:text-red-400"
-          : "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-        }`}>
-          {error || hint}
-        </div>
-      )}
-
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-        <div className={cardClass()}>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.cards.reachability")}</div>
-          <div className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(isDark, reachabilitySummary.tone)}`}>{reachabilitySummary.label}</div>
-          <div className="mt-3 text-sm leading-6 text-[var(--color-text-secondary)]">{reachabilitySummary.detail}</div>
-        </div>
-
-        <div className={cardClass()}>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.cards.accessControl")}</div>
-          <div className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(isDark, accessSummary.tone)}`}>{accessSummary.label}</div>
-          <div className="mt-3 text-sm leading-6 text-[var(--color-text-secondary)]">{accessSummary.detail}</div>
-
-          <div className="mt-4 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.currentBrowserTitle")}</div>
-                <div className="mt-1 text-sm font-medium text-[var(--color-text-primary)]">{currentBrowserSummary.label}</div>
-                <div className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">{currentBrowserSummary.detail}</div>
-              </div>
+      <div className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("webAccess.title")}</h3>
               <InfoPopover
                 isDark={isDark}
-                title={t("webAccess.currentBrowserTitle")}
+                title={t("webAccess.howItWorksTitle")}
                 content={
-                  <div className="space-y-2">
-                    {loginActive ? <div>{t("webAccess.currentBrowserVerifyHint")}</div> : null}
-                    {session?.current_browser_signed_in ? <div>{t("webAccess.signOutHint")}</div> : null}
-                  </div>
+                  <ul className="space-y-1">
+                    <li>• {t("webAccess.howItWorksActivateLogin")}</li>
+                    <li>• {t("webAccess.howItWorksAutoLogin")}</li>
+                    <li>• {t("webAccess.howItWorksRemotePolicy")}</li>
+                  </ul>
                 }
+                placement="bottom-start"
+                maxWidthClassName="max-w-[320px]"
               >
                 {(getReferenceProps, setReference) => (
                   <button
                     type="button"
                     ref={setReference as never}
                     {...getReferenceProps()}
-                    className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors ${statusChipClass(isDark, currentBrowserSummary.tone)}`}
-                    aria-label={t("webAccess.currentBrowserTitle")}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] transition-colors"
+                    aria-label={t("webAccess.howItWorksTitle")}
                   >
-                    <InfoIcon size={12} />
+                    <InfoIcon size={14} />
                   </button>
                 )}
               </InfoPopover>
             </div>
-            {session?.current_browser_signed_in ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleSignOut()}
-                  disabled={signOutBusy}
-                  className="glass-btn px-3 py-2 rounded-lg text-xs text-[var(--color-text-secondary)] disabled:opacity-50"
-                >
-                  {signOutBusy ? t("common:loading") : t("webAccess.signOut")}
-                </button>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">{t("webAccess.description")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={busy || saveBusy || startBusy || stopBusy || createBusy || editBusy}
+            className={secondaryButtonClass("sm")}
+          >
+            {busy ? t("common:loading") : t("webAccess.refresh")}
+          </button>
+        </div>
+
+        <div className={settingsWorkspaceBodyClass}>
+          {(error || hint) && (
+            <div className={`rounded-lg border px-3 py-2 text-xs ${error
+              ? "border-red-500/30 bg-red-500/15 text-red-600 dark:text-red-400"
+              : "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+            }`}>
+              {error || hint}
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+            <div className={settingsWorkspacePanelClass(isDark)}>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.cards.reachability")}</div>
+              <div className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(isDark, reachabilitySummary.tone)}`}>{reachabilitySummary.label}</div>
+              <div className="mt-3 text-sm leading-6 text-[var(--color-text-secondary)]">{reachabilitySummary.detail}</div>
+            </div>
+
+            <div className={settingsWorkspacePanelClass(isDark)}>
+              <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.cards.accessControl")}</div>
+              <div className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(isDark, accessSummary.tone)}`}>{accessSummary.label}</div>
+              <div className="mt-3 text-sm leading-6 text-[var(--color-text-secondary)]">{accessSummary.detail}</div>
+
+              <div className={`mt-4 ${settingsWorkspaceSoftPanelClass(isDark)}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.currentBrowserTitle")}</div>
+                    <div className="mt-1 text-sm font-medium text-[var(--color-text-primary)]">{currentBrowserSummary.label}</div>
+                    <div className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">{currentBrowserSummary.detail}</div>
+                  </div>
+                  <InfoPopover
+                    isDark={isDark}
+                    title={t("webAccess.currentBrowserTitle")}
+                    content={
+                      <div className="space-y-2">
+                        {loginActive ? <div>{t("webAccess.currentBrowserVerifyHint")}</div> : null}
+                        {session?.current_browser_signed_in ? <div>{t("webAccess.signOutHint")}</div> : null}
+                      </div>
+                    }
+                  >
+                    {(getReferenceProps, setReference) => (
+                      <button
+                        type="button"
+                        ref={setReference as never}
+                        {...getReferenceProps()}
+                        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors ${statusChipClass(isDark, currentBrowserSummary.tone)}`}
+                        aria-label={t("webAccess.currentBrowserTitle")}
+                      >
+                        <InfoIcon size={12} />
+                      </button>
+                    )}
+                  </InfoPopover>
+                </div>
+                {session?.current_browser_signed_in ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleSignOut()}
+                      disabled={signOutBusy}
+                      className={secondaryButtonClass()}
+                    >
+                      {signOutBusy ? t("common:loading") : t("webAccess.signOut")}
+                    </button>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
         </div>
       </div>
 
-      <section className={cardClass()}>
+      <section className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("webAccess.accessControlTitle")}</h4>
@@ -1199,8 +1195,10 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             </div>
           ) : null}
         </div>
+        </div>
 
-        <div className="mt-4 space-y-3">
+        <div className={settingsWorkspaceBodyClass}>
+        <div className="space-y-3">
           {!canAccessGlobalSettings ? (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/15 p-6 text-sm text-amber-600 dark:text-amber-400">
               <div className="font-medium">{t("webAccess.managementLockedTitle")}</div>
@@ -1223,7 +1221,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
               const tokenId = token.token_id || "";
               const isEditing = editingTokenId === tokenId;
               return (
-                <div key={tokenId || token.user_id} className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
+                <div key={tokenId || token.user_id} className={settingsWorkspacePanelClass(isDark)}>
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1249,7 +1247,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                           type="button"
                           onClick={() => { if (!tokenId) return; startEdit(token); }}
                           disabled={!tokenId || deleteBusyTokenId === tokenId}
-                          className={`px-3 py-2 rounded-lg text-xs glass-btn text-[var(--color-text-secondary)] disabled:opacity-50`}
+                          className={secondaryButtonClass("sm")}
                         >
                           {t("webAccess.edit")}
                         </button>
@@ -1258,7 +1256,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                         type="button"
                         onClick={() => void revealAndCopy(tokenId)}
                         disabled={!tokenId || deleteBusyTokenId === tokenId}
-                        className={`px-3 py-2 rounded-lg text-xs glass-btn text-[var(--color-text-secondary)] disabled:opacity-50`}
+                        className={secondaryButtonClass("sm")}
                       >
                         {copiedTokenId === tokenId ? t("webAccess.copied") : t("webAccess.copyToken")}
                       </button>
@@ -1270,7 +1268,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                           setPendingDeleteTokenId((prev) => (prev === tokenId ? null : tokenId));
                         }}
                         disabled={!tokenId || deleteBusyTokenId === tokenId}
-                        className="px-3 py-2 rounded-lg text-xs bg-red-500/15 text-red-600 dark:text-red-400 hover:bg-red-500/25 border border-red-500/30 disabled:opacity-50"
+                        className="inline-flex min-h-[36px] items-center justify-center rounded-xl border border-rose-500/30 bg-rose-500/12 px-3 py-1.5 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-500/18 disabled:opacity-50 dark:text-rose-300"
                       >
                         {t("webAccess.delete")}
                       </button>
@@ -1285,7 +1283,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                           type="button"
                           onClick={() => void handleDeleteAccessToken(tokenId)}
                           disabled={deleteBusyTokenId === tokenId}
-                          className="px-3 py-2 rounded-lg text-xs bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+                          className="inline-flex min-h-[36px] items-center justify-center rounded-xl border border-rose-600 bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-50"
                         >
                           {deleteBusyTokenId === tokenId ? t("common:loading") : t("webAccess.delete")}
                         </button>
@@ -1293,7 +1291,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                           type="button"
                           onClick={() => setPendingDeleteTokenId(null)}
                           disabled={deleteBusyTokenId === tokenId}
-                          className={`px-3 py-2 rounded-lg text-xs glass-btn text-[var(--color-text-secondary)] disabled:opacity-50`}
+                          className={secondaryButtonClass("sm")}
                         >
                           {t("webAccess.cancel")}
                         </button>
@@ -1302,7 +1300,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                   )}
 
                   {isEditing && (
-                    <div className="mt-3 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-3">
+                    <div className={`mt-3 ${settingsWorkspaceSoftPanelClass(isDark)}`}>
                       <div className="text-xs font-medium text-[var(--color-text-secondary)]">{t("webAccess.editScopeTitle")}</div>
                       <div className="mt-2 max-h-44 overflow-y-auto space-y-2 pr-1">
                         {groups.length === 0 ? (
@@ -1331,7 +1329,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                         <button type="button" onClick={() => void saveEdit()} disabled={editBusy} className={primaryButtonClass(editBusy)}>
                           {editBusy ? t("webAccess.saving") : t("webAccess.save")}
                         </button>
-                        <button type="button" onClick={() => { setEditingTokenId(null); setEditGroups(new Set()); }} className={`px-3 py-2 rounded-lg text-xs glass-btn text-[var(--color-text-secondary)]`}>
+                        <button type="button" onClick={() => { setEditingTokenId(null); setEditGroups(new Set()); }} className={secondaryButtonClass("sm")}>
                           {t("webAccess.cancel")}
                         </button>
                       </div>
@@ -1342,9 +1340,11 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             })
           )}
         </div>
+        </div>
       </section>
 
-      <section className={cardClass()}>
+      <section className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("webAccess.reachabilityTitle")}</h4>
@@ -1356,8 +1356,10 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             </div>
           </div>
         </div>
+        </div>
 
-        <div className="mt-4 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-4">
+        <div className={settingsWorkspaceBodyClass}>
+        <div className={settingsWorkspacePanelClass(isDark)}>
           <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.accessGoalTitle")}</div>
           <div className="mt-1 text-xs leading-6 text-[var(--color-text-muted)]">{t("webAccess.accessGoalDescription")}</div>
           <div className="mt-3 grid gap-2 xl:grid-cols-3">
@@ -1390,7 +1392,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
           </div>
         </div>
 
-        <div className="mt-4 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-4">
+        <div className={settingsWorkspacePanelClass(isDark)}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.selectedGoalTitle")}</div>
@@ -1449,7 +1451,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                 </div>
               </label>
               {remoteMethodValue === "tailscale" ? (
-                <div className="mt-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-3 text-xs leading-6 text-sky-700 dark:text-sky-300">
+                <div className="mt-3 rounded-lg border border-black/10 bg-[rgb(245,245,245)] px-3 py-3 text-xs leading-6 text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white">
                   <div className="font-medium">{t("webAccess.privateMethodTailscaleTitle")}</div>
                   <div className="mt-1">{t("webAccess.privateMethodTailscaleHint")}</div>
                 </div>
@@ -1528,7 +1530,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                 <button
                   type="button"
                   onClick={async () => {
-                    const ok = await copyText(remoteState.endpoint || "");
+                const ok = await copyTextToClipboard(remoteState.endpoint || "");
                     if (ok) pushHint(t("webAccess.copied"));
                   }}
                   className={secondaryButtonClass()}
@@ -1560,7 +1562,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
         </div>
 
         {showAdvanced ? (
-          <div className="mt-3 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-4">
+          <div className={settingsWorkspacePanelClass(isDark)}>
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{t("webAccess.advancedTitle")}</div>
               <div className="mt-1 text-xs leading-6 text-[var(--color-text-muted)]">{t("webAccess.advancedDescription")}</div>
@@ -1683,21 +1685,25 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             </div>
           </div>
         ) : null}
+        </div>
       </section>
 
-      {createDialog && typeof document !== "undefined" ? createPortal(createDialog, document.body) : createDialog}
-      {restartRequiredDialog && typeof document !== "undefined" ? createPortal(restartRequiredDialog, document.body) : restartRequiredDialog}
+      {createDialog ? <BodyPortal>{createDialog}</BodyPortal> : null}
+      {restartRequiredDialog ? <BodyPortal>{restartRequiredDialog}</BodyPortal> : null}
 
-      <section className={cardClass()}>
+      <section className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("webAccess.interactionModeTitle")}</h4>
         <p className={`mt-1 text-xs text-[var(--color-text-muted)]`}>{t("webAccess.interactionModeDescription")}</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div className={`rounded-lg border p-3 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]`}>
+        </div>
+        <div className={settingsWorkspaceBodyClass}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className={settingsWorkspaceSoftPanelClass(isDark)}>
             <div className={`text-xs font-medium text-[var(--color-text-secondary)]`}>{t("webAccess.currentModeTitle")}</div>
             <div className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(isDark, modeSummary.tone)}`}>{modeSummary.label}</div>
             <div className={`mt-3 text-sm text-[var(--color-text-secondary)]`}>{modeSummary.detail}</div>
           </div>
-          <div className={`rounded-lg border p-3 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]`}>
+          <div className={settingsWorkspaceSoftPanelClass(isDark)}>
             <div className={`text-xs font-medium text-[var(--color-text-secondary)]`}>{t("webAccess.modeGuideTitle")}</div>
             <ul className={`mt-2 space-y-2 text-xs text-[var(--color-text-secondary)]`}>
               <li>• {t("webAccess.modeGuideNormal")}</li>
@@ -1705,6 +1711,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
               <li>• {t("webAccess.modeGuideSwitch")}</li>
             </ul>
           </div>
+        </div>
         </div>
       </section>
     </div>

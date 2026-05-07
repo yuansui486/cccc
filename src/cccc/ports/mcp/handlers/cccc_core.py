@@ -604,6 +604,29 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             sections.append("\n".join(lines_space).rstrip())
 
     if active_list or autoload_list:
+        def _skill_scope_label(item: Dict[str, Any]) -> str:
+            sources = item.get("activation_sources") if isinstance(item.get("activation_sources"), list) else []
+            parts: List[str] = []
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                scope = str(source.get("scope") or "").strip()
+                if not scope:
+                    continue
+                if scope == "session":
+                    ttl = source.get("ttl_seconds")
+                    try:
+                        ttl_i = int(ttl)
+                    except (TypeError, ValueError):
+                        ttl_i = -1
+                    if ttl_i >= 0:
+                        parts.append(f"session ttl={ttl_i}s")
+                    else:
+                        parts.append("session")
+                else:
+                    parts.append(scope)
+            return ", ".join(parts)
+
         def _append_skill_preview(lines_ref: List[str], item: Dict[str, Any]) -> None:
             preview = str(item.get("capsule_preview") or "").strip()
             if not preview:
@@ -637,6 +660,9 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
                 name = str(item.get("name") or sid).strip()
                 desc = str(item.get("description_short") or "").strip()
                 line = f"  - {name} ({sid})"
+                scope_label = _skill_scope_label(item)
+                if scope_label:
+                    line += f" [scope: {scope_label}]"
                 if desc:
                     line += f": {desc[:120]}"
                 lines.append(line)

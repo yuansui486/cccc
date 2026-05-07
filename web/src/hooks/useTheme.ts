@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import { Theme } from "../types";
+import { syncDocumentBrandingTheme } from "../utils/branding";
 
 const THEME_STORAGE_KEY = "cccc-theme";
 
@@ -35,6 +36,7 @@ function applyTheme(theme: Theme) {
       effectiveTheme === "dark" ? "#0b1530" : "#7dd3fc"
     );
   }
+  syncDocumentBrandingTheme();
 }
 
 // Subscribe to system theme changes.
@@ -67,14 +69,17 @@ export function useTheme() {
   }, [theme, systemTheme]);
 
   const setTheme = useCallback((newTheme: Theme) => {
+    applyTheme(newTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, newTheme);
     setThemeState(newTheme);
   }, []);
 
   const toggleTheme = useCallback(() => {
     setThemeState((current) => {
-      if (current === "light") return "dark";
-      if (current === "dark") return "system";
-      return "light";
+      const nextTheme = current === "light" ? "dark" : current === "dark" ? "system" : "light";
+      applyTheme(nextTheme);
+      localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+      return nextTheme;
     });
   }, []);
 

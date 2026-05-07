@@ -137,9 +137,10 @@ cccc actor add review --runtime codex
 
 ### Use @Mentions Wisely
 
-- `@all` for announcements or general questions
-- `@foreman` for coordination decisions
+- `@all` for announcements, urgent shared constraints, or true team-wide questions
+- `@foreman` for coordination decisions, planning, and routing work
 - `@specific-agent` for targeted tasks
+- Use task-backed delegation when a task needs a durable owner, done criterion, evidence, handoff, or acceptance trail
 
 ### Provide Context
 

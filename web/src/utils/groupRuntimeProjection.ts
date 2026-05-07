@@ -13,13 +13,21 @@ export function computeGroupRuntimePatch({
   actors,
 }: GroupRuntimePatchArgs): Pick<GroupMeta, "running" | "state" | "runtime_status"> {
   const metaRuntime = getGroupRuntimeStatus(group);
-  const docRuntime = getGroupRuntimeStatus(groupDoc);
+  const hasDocRuntime = Boolean(
+    groupDoc
+    && (
+      groupDoc.runtime_status
+      || typeof groupDoc.state === "string"
+      || typeof groupDoc.running === "boolean"
+    )
+  );
+  const docRuntime = hasDocRuntime ? getGroupRuntimeStatus(groupDoc) : null;
   const runtimeRunning =
-    docRuntime.runtime_running || metaRuntime.runtime_running || (Array.isArray(actors) && actors.some((actor) => !!actor.running));
+    Boolean(docRuntime?.runtime_running) || metaRuntime.runtime_running || (Array.isArray(actors) && actors.some((actor) => !!actor.running));
 
   const runtimeStatus = {
     ...metaRuntime,
-    ...docRuntime,
+    ...(docRuntime || {}),
     runtime_running: runtimeRunning,
   };
 

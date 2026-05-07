@@ -139,7 +139,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       const cached = isSelected ? null : getCachedGroupView(gid);
       const patch = computeGroupRuntimePatch({
         group,
-        groupDoc: isSelected ? groupDoc : (cached?.groupDoc || null),
+        groupDoc: isSelected ? groupDoc : null,
         actors: isSelected ? actors : (cached?.actors || []),
       });
       return {

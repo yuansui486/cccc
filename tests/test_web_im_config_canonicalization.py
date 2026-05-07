@@ -36,6 +36,16 @@ class TestWebImConfigCanonicalization(unittest.TestCase):
             "wecom_secret": "sec456",
         })
 
+    def test_canonicalize_drops_legacy_weixin_command(self) -> None:
+        from cccc.ports.im.config_schema import canonicalize_im_config
+
+        result = canonicalize_im_config({
+            "platform": "weixin",
+            "weixin_command": "node scripts/im/weixin_sidecar.mjs",
+        })
+
+        self.assertEqual(result, {"platform": "weixin"})
+
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
         td_ctx = tempfile.TemporaryDirectory()

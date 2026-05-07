@@ -15,7 +15,7 @@ from unittest.mock import patch
 class TestCapabilityOps(unittest.TestCase):
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
-        td_ctx = tempfile.TemporaryDirectory()
+        td_ctx = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         td = td_ctx.__enter__()
         os.environ["CCCC_HOME"] = td
 
@@ -2488,6 +2488,19 @@ class TestCapabilityOps(unittest.TestCase):
             }
             self.assertEqual(by_id.get("mcp:manual"), "unavailable")
             self.assertEqual(by_id.get("mcp:shared"), "scope_mismatch")
+            rows_by_id = {
+                str(item.get("capability_id") or ""): item
+                for item in hidden
+                if isinstance(item, dict)
+            }
+            manual_row = rows_by_id.get("mcp:manual") if isinstance(rows_by_id.get("mcp:manual"), dict) else {}
+            self.assertEqual(str(manual_row.get("name") or ""), "manual")
+            self.assertEqual(str(manual_row.get("description_short") or ""), "manual")
+            self.assertEqual(str(manual_row.get("kind") or ""), "mcp_toolpack")
+            self.assertEqual(str(manual_row.get("source_id") or ""), "anthropic_skills")
+            shared_row = rows_by_id.get("mcp:shared") if isinstance(rows_by_id.get("mcp:shared"), dict) else {}
+            self.assertEqual(str(shared_row.get("name") or ""), "shared")
+            self.assertEqual(str(shared_row.get("description_short") or ""), "shared")
         finally:
             cleanup()
 
@@ -3195,6 +3208,20 @@ class TestCapabilityOps(unittest.TestCase):
             active_capsule_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
             active_ids = {str(item.get("capability_id") or "") for item in active_capsule_skills if isinstance(item, dict)}
             self.assertIn("skill:anthropic:triage", active_ids)
+            active_row = next(
+                (
+                    item
+                    for item in active_capsule_skills
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:anthropic:triage"
+                ),
+                {},
+            )
+            activation_sources = (
+                active_row.get("activation_sources")
+                if isinstance(active_row.get("activation_sources"), list)
+                else []
+            )
+            self.assertEqual({str(item.get("scope") or "") for item in activation_sources if isinstance(item, dict)}, {"actor"})
         finally:
             cleanup()
 
@@ -3246,6 +3273,41 @@ class TestCapabilityOps(unittest.TestCase):
             autoload_skills = state.get("autoload_skills") if isinstance(state.get("autoload_skills"), list) else []
             autoload_ids = {str(item.get("capability_id") or "") for item in autoload_skills if isinstance(item, dict)}
             self.assertIn("skill:anthropic:triage", autoload_ids)
+
+            autoload_result = ops.apply_actor_capability_autoload(
+                group_id=gid,
+                actor_id="peer-1",
+                autoload_capabilities=["skill:anthropic:triage"],
+            )
+            self.assertIn("skill:anthropic:triage", autoload_result.get("applied") or [])
+            self.assertFalse(autoload_result.get("skipped") or [])
+
+            active_state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(active_state_resp.ok, getattr(active_state_resp, "error", None))
+            active_state = active_state_resp.result if isinstance(active_state_resp.result, dict) else {}
+            active_capsule_skills = (
+                active_state.get("active_capsule_skills")
+                if isinstance(active_state.get("active_capsule_skills"), list)
+                else []
+            )
+            active_row = next(
+                (
+                    item
+                    for item in active_capsule_skills
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:anthropic:triage"
+                ),
+                {},
+            )
+            self.assertTrue(active_row)
+            activation_sources = (
+                active_row.get("activation_sources")
+                if isinstance(active_row.get("activation_sources"), list)
+                else []
+            )
+            self.assertEqual({str(item.get("scope") or "") for item in activation_sources if isinstance(item, dict)}, {"actor"})
         finally:
             cleanup()
 
@@ -4396,6 +4458,1347 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_capability_import_agent_self_proposed_skill_source_is_narrowly_enableable(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "dry_run": True,
+                    "probe": False,
+                    "record": {
+                        "capability_id": "skill:agent_self_proposed:repro-triage",
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Repro Triage",
+                        "description_short": "Reusable repro-first triage checklist",
+                        "capsule_text": (
+                            "Skill: Repro Triage\n"
+                            "When to use:\n"
+                            "- Recurring debugging work after a stable repro path was found.\n"
+                            "Avoid when:\n"
+                            "- One-off status reporting.\n"
+                            "Procedure:\n"
+                            "1. Capture the failing trigger.\n"
+                            "Pitfalls:\n"
+                            "- Do not generalize one lucky workaround.\n"
+                            "Verification:\n"
+                            "- Re-run the same repro case."
+                        ),
+                    },
+                },
+            )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            result = resp.result if isinstance(resp.result, dict) else {}
+            record = result.get("record") if isinstance(result.get("record"), dict) else {}
+            self.assertEqual(str(record.get("source_id") or ""), "agent_self_proposed")
+            self.assertEqual(str(result.get("effective_policy_level") or ""), "mounted")
+            self.assertTrue(bool(result.get("enableable_now")))
+            readiness = result.get("readiness_preview") if isinstance(result.get("readiness_preview"), dict) else {}
+            self.assertEqual(str(readiness.get("preview_status") or ""), "enableable")
+        finally:
+            cleanup()
+
+    def test_self_evolution_curated_skills_have_actionable_capsules(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            policy = ops._allowlist_policy()
+            records = ops._build_curated_records_from_policy(policy)
+            for capability_id in [
+                "skill:anthropic:skill-creator",
+                "skill:github:blader:claudeception",
+            ]:
+                record = records.get(capability_id) if isinstance(records.get(capability_id), dict) else {}
+                capsule_text = str(record.get("capsule_text") or "")
+                self.assertIn("When to use:", capsule_text)
+                self.assertIn("Avoid when:", capsule_text)
+                self.assertIn("Procedure:", capsule_text)
+                self.assertIn("Pitfalls:", capsule_text)
+                self.assertIn("Verification:", capsule_text)
+                self.assertIn("skill:agent_self_proposed:", capsule_text)
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_skill_persists_enables_and_is_visible(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:agent_self_proposed:self-evolution-smoke"
+
+            resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "enable_after_import": True,
+                    "scope": "session",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Evolution Smoke",
+                        "description_short": "Smoke-test skill for autonomous proposal visibility.",
+                        "capsule_text": (
+                            "Skill: Self Evolution Smoke\n"
+                            "When to use:\n"
+                            "- Verify that self-proposed skill proposals are visible and activatable.\n"
+                            "Avoid when:\n"
+                            "- Production workflow execution.\n"
+                            "Procedure:\n"
+                            "1. Import and enable the proposed skill.\n"
+                            "Pitfalls:\n"
+                            "- Do not confuse catalog presence with runtime activation.\n"
+                            "Verification:\n"
+                            "- Re-read capability_state.active_capsule_skills."
+                        ),
+                    },
+                },
+            )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            result = resp.result if isinstance(resp.result, dict) else {}
+            self.assertIn(str(result.get("state") or ""), {"activation_pending", "runnable"})
+            self.assertEqual(str(result.get("scope") or ""), "session")
+            self.assertEqual(str(result.get("effective_policy_level") or ""), "mounted")
+            self.assertTrue(bool(result.get("enableable_now")))
+            enable_result = result.get("enable_result") if isinstance(result.get("enable_result"), dict) else {}
+            self.assertEqual(str(enable_result.get("scope") or ""), "session")
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "user", "by": "user"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            enabled = set(state.get("enabled_capabilities") or [])
+            self.assertIn(capability_id, enabled)
+            active_capsule_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+            active_rows = [item for item in active_capsule_skills if isinstance(item, dict)]
+            active_ids = {str(item.get("capability_id") or "") for item in active_rows}
+            self.assertIn(capability_id, active_ids)
+            active_row = next(item for item in active_rows if str(item.get("capability_id") or "") == capability_id)
+            self.assertEqual(str(active_row.get("source_id") or ""), "agent_self_proposed")
+
+            _, catalog_doc = ops._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            record = rows.get(capability_id) if isinstance(rows.get(capability_id), dict) else {}
+            self.assertEqual(str(record.get("source_id") or ""), "agent_self_proposed")
+            self.assertEqual(str(record.get("origin_group_id") or ""), gid)
+            self.assertEqual(str(record.get("qualification_status") or ""), "qualified")
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {
+                    "query": capability_id,
+                    "limit": 50,
+                    "include_indexed": True,
+                },
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            overview_result = overview_resp.result if isinstance(overview_resp.result, dict) else {}
+            overview_items = overview_result.get("items") if isinstance(overview_result.get("items"), list) else []
+            overview_row = next(
+                (
+                    item
+                    for item in overview_items
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertTrue(overview_row)
+            self.assertEqual(str(overview_row.get("source_id") or ""), "agent_self_proposed")
+            self.assertEqual(str(overview_row.get("source_record_id") or ""), capability_id)
+            self.assertEqual(str(overview_row.get("origin_group_id") or ""), gid)
+            self.assertTrue(str(overview_row.get("updated_at_source") or "").strip())
+            self.assertTrue(str(overview_row.get("last_synced_at") or "").strip())
+            self.assertIn("Self Evolution Smoke", str(overview_row.get("capsule_text") or ""))
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_reimport_reports_update_and_active_binding(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:agent_self_proposed:self-evolution-active-update"
+
+            def _capsule(version: str, procedure: str) -> str:
+                return (
+                    "Skill: Self Evolution Active Update\n"
+                    "When to use:\n"
+                    f"- Maintain an active self-proposed skill after {version} evidence.\n"
+                    "Avoid when:\n"
+                    "- The skill is not already scoped to the current actor.\n"
+                    "Procedure:\n"
+                    f"1. {procedure}\n"
+                    "Pitfalls:\n"
+                    "- Use import_action for create/update/unchanged state.\n"
+                    "Verification:\n"
+                    "- Re-read capability_state.active_capsule_skills."
+                )
+
+            first_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "enable_after_import": True,
+                    "scope": "session",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Evolution Active Update",
+                        "description_short": "initial active update guidance",
+                        "capsule_text": _capsule("initial", "Capture the first proven active path."),
+                    },
+                },
+            )
+            self.assertTrue(first_resp.ok, getattr(first_resp, "error", None))
+            first = first_resp.result if isinstance(first_resp.result, dict) else {}
+            self.assertEqual(str(first.get("import_action") or ""), "created")
+            self.assertEqual(str(first.get("scope") or ""), "session")
+            self.assertFalse(bool(first.get("record_changed")))
+            self.assertFalse(bool(first.get("already_active")))
+            self.assertTrue(bool(first.get("active_after_import")))
+            self.assertNotIn("deduped", first)
+            self.assertNotIn("record_existed", first)
+            self.assertIn(str(first.get("state") or ""), {"activation_pending", "runnable"})
+
+            second_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Evolution Active Update",
+                        "description_short": "revised active update guidance",
+                        "capsule_text": _capsule("revised", "Patch the active capability_id in place."),
+                    },
+                },
+            )
+            self.assertTrue(second_resp.ok, getattr(second_resp, "error", None))
+            second = second_resp.result if isinstance(second_resp.result, dict) else {}
+            self.assertEqual(str(second.get("import_action") or ""), "updated")
+            self.assertEqual(str(second.get("scope") or ""), "session")
+            self.assertTrue(bool(second.get("record_changed")))
+            self.assertTrue(bool(second.get("already_active")))
+            self.assertTrue(bool(second.get("active_after_import")))
+            self.assertNotIn("deduped", second)
+            self.assertNotIn("record_existed", second)
+            self.assertEqual(str(second.get("state") or ""), "runnable")
+            second_readiness = second.get("readiness_preview") if isinstance(second.get("readiness_preview"), dict) else {}
+            self.assertEqual(str(second_readiness.get("preview_status") or ""), "active")
+            self.assertEqual(str(second_readiness.get("next_step") or ""), "none")
+            self.assertTrue(bool(second_readiness.get("already_active")))
+            second_record = second.get("record") if isinstance(second.get("record"), dict) else {}
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            active_rows = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+            active_row = next(
+                (
+                    item
+                    for item in active_rows
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertIn("Patch the active capability_id in place.", str(active_row.get("capsule_text") or ""))
+            self.assertIn("Verification:", str(active_row.get("capsule_text") or ""))
+
+            search_resp, _ = self._call(
+                "capability_search",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "query": capability_id,
+                    "include_external": True,
+                    "limit": 20,
+                },
+            )
+            self.assertTrue(search_resp.ok, getattr(search_resp, "error", None))
+            search_result = search_resp.result if isinstance(search_resp.result, dict) else {}
+            search_items = search_result.get("items") if isinstance(search_result.get("items"), list) else []
+            search_row = next(
+                (
+                    item
+                    for item in search_items
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertEqual(str(search_row.get("enable_hint") or ""), "active")
+            search_readiness = (
+                search_row.get("readiness_preview") if isinstance(search_row.get("readiness_preview"), dict) else {}
+            )
+            self.assertEqual(str(search_readiness.get("preview_status") or ""), "active")
+            self.assertEqual(str(search_readiness.get("next_step") or ""), "none")
+            self.assertTrue(bool(search_readiness.get("already_active")))
+
+            third_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Evolution Active Update",
+                        "description_short": "revised active update guidance",
+                        "capsule_text": _capsule("revised", "Patch the active capability_id in place."),
+                    },
+                },
+            )
+            self.assertTrue(third_resp.ok, getattr(third_resp, "error", None))
+            third = third_resp.result if isinstance(third_resp.result, dict) else {}
+            self.assertEqual(str(third.get("import_action") or ""), "unchanged")
+            self.assertEqual(str(third.get("scope") or ""), "session")
+            self.assertFalse(bool(third.get("record_changed")))
+            self.assertTrue(bool(third.get("already_active")))
+            self.assertTrue(bool(third.get("active_after_import")))
+            self.assertNotIn("deduped", third)
+            self.assertNotIn("record_existed", third)
+            self.assertEqual(str(third.get("state") or ""), "runnable")
+            third_readiness = third.get("readiness_preview") if isinstance(third.get("readiness_preview"), dict) else {}
+            self.assertEqual(str(third_readiness.get("preview_status") or ""), "active")
+            self.assertEqual(str(third_readiness.get("next_step") or ""), "none")
+            self.assertTrue(bool(third_readiness.get("already_active")))
+            third_record = third.get("record") if isinstance(third.get("record"), dict) else {}
+            self.assertEqual(
+                str(third_record.get("last_synced_at") or ""),
+                str(second_record.get("last_synced_at") or ""),
+            )
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_invalid_update_preserves_active_record(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:agent_self_proposed:self-evolution-invalid-update"
+            initial_capsule = (
+                "Skill: Self Evolution Invalid Update\n"
+                "When to use:\n"
+                "- Preserve the last valid skill when a malformed update arrives.\n"
+                "Avoid when:\n"
+                "- The update already passes the required capsule template.\n"
+                "Procedure:\n"
+                "1. Keep the active record intact.\n"
+                "Pitfalls:\n"
+                "- Do not let an invalid update remove a live capsule.\n"
+                "Verification:\n"
+                "- Re-read active_capsule_skills and the catalog row."
+            )
+            invalid_capsule = (
+                "Skill: Self Evolution Invalid Update\n"
+                "When to use:\n"
+                "- This malformed update intentionally omits one required section.\n"
+                "Avoid when:\n"
+                "- The existing active record is more complete.\n"
+                "Procedure:\n"
+                "1. This should be rejected before it overwrites catalog state.\n"
+                "Verification:\n"
+                "- This should never replace the active record."
+            )
+
+            first_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "enable_after_import": True,
+                    "scope": "session",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Evolution Invalid Update",
+                        "description_short": "initial valid capsule",
+                        "capsule_text": initial_capsule,
+                    },
+                },
+            )
+            self.assertTrue(first_resp.ok, getattr(first_resp, "error", None))
+            first = first_resp.result if isinstance(first_resp.result, dict) else {}
+            self.assertTrue(bool(first.get("active_after_import")))
+
+            invalid_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Evolution Invalid Update",
+                        "description_short": "malformed update",
+                        "capsule_text": invalid_capsule,
+                    },
+                },
+            )
+            self.assertFalse(invalid_resp.ok)
+            self.assertEqual(getattr(invalid_resp.error, "code", ""), "capability_import_invalid")
+            details = invalid_resp.error.details if invalid_resp.error is not None else {}
+            self.assertTrue(bool(details.get("active_record_preserved")))
+            self.assertTrue(bool(details.get("already_active")))
+            self.assertIn("pitfalls", details.get("missing_sections") or [])
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            active_rows = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+            active_row = next(
+                (
+                    item
+                    for item in active_rows
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertIn("Keep the active record intact.", str(active_row.get("capsule_text") or ""))
+            self.assertNotIn("This should be rejected", str(active_row.get("capsule_text") or ""))
+
+            _, catalog_doc = ops._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            record = rows.get(capability_id) if isinstance(rows.get(capability_id), dict) else {}
+            self.assertEqual(str(record.get("qualification_status") or ""), "qualified")
+            self.assertIn("Keep the active record intact.", str(record.get("capsule_text") or ""))
+            self.assertNotIn("This should be rejected", str(record.get("capsule_text") or ""))
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_skill_reimport_updates_same_record(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:agent_self_proposed:self-evolution-maintenance"
+
+            def _capsule(version: str, procedure: str) -> str:
+                return (
+                    "Skill: Self Evolution Maintenance\n"
+                    "When to use:\n"
+                    f"- Maintain a self-proposed skill after {version} evidence.\n"
+                    "Avoid when:\n"
+                    "- The existing skill belongs to an external curated source.\n"
+                    "Procedure:\n"
+                    f"1. {procedure}\n"
+                    "Pitfalls:\n"
+                    "- Do not create a near-duplicate for the same workflow.\n"
+                    "Verification:\n"
+                    "- Re-read the catalog record by capability_id."
+                )
+
+            for version, procedure in [
+                ("initial", "Capture the first proven maintenance path."),
+                ("revised", "Patch the existing capability_id with revised capsule_text."),
+            ]:
+                resp, _ = self._call(
+                    "capability_import",
+                    {
+                        "group_id": gid,
+                        "by": "peer-1",
+                        "actor_id": "peer-1",
+                        "probe": False,
+                        "record": {
+                            "capability_id": capability_id,
+                            "kind": "skill",
+                            "source_id": "agent_self_proposed",
+                            "name": "Self Evolution Maintenance",
+                            "description_short": f"{version} maintenance guidance",
+                            "capsule_text": _capsule(version, procedure),
+                        },
+                    },
+                )
+                self.assertTrue(resp.ok, getattr(resp, "error", None))
+
+            _, catalog_doc = ops._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            matching_ids = [cap_id for cap_id in rows.keys() if str(cap_id or "") == capability_id]
+            self.assertEqual(matching_ids, [capability_id])
+
+            record = rows.get(capability_id) if isinstance(rows.get(capability_id), dict) else {}
+            self.assertEqual(str(record.get("source_id") or ""), "agent_self_proposed")
+            self.assertEqual(str(record.get("description_short") or ""), "revised maintenance guidance")
+            capsule_text = str(record.get("capsule_text") or "")
+            self.assertIn("Patch the existing capability_id with revised capsule_text.", capsule_text)
+            self.assertNotIn("Capture the first proven maintenance path.", capsule_text)
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_reimport_preserves_origin_group(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            origin_gid = self._create_group()
+            other_gid = self._create_group()
+            self._add_actor(origin_gid, "peer-1", by="user")
+            self._add_actor(other_gid, "peer-2", by="user")
+            capability_id = "skill:agent_self_proposed:origin-group-preserved"
+
+            def _capsule(version: str) -> str:
+                return (
+                    "Skill: Origin Group Preserved\n"
+                    "When to use:\n"
+                    f"- Track origin group metadata during {version} imports.\n"
+                    "Avoid when:\n"
+                    "- The record is not self-proposed.\n"
+                    "Procedure:\n"
+                    "1. Re-import the same capability id from another group.\n"
+                    "Pitfalls:\n"
+                    "- Do not silently reassign the origin group on edit.\n"
+                    "Verification:\n"
+                    "- Re-read the catalog record and overview row."
+                )
+
+            first_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": origin_gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Origin Group Preserved",
+                        "description_short": "initial origin group",
+                        "origin_group_id": other_gid,
+                        "capsule_text": _capsule("initial"),
+                    },
+                },
+            )
+            self.assertTrue(first_resp.ok, getattr(first_resp, "error", None))
+
+            second_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": other_gid,
+                    "by": "peer-2",
+                    "actor_id": "peer-2",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Origin Group Preserved",
+                        "description_short": "updated elsewhere",
+                        "origin_group_id": other_gid,
+                        "capsule_text": _capsule("cross-group update"),
+                    },
+                },
+            )
+            self.assertTrue(second_resp.ok, getattr(second_resp, "error", None))
+            second = second_resp.result if isinstance(second_resp.result, dict) else {}
+            second_record = second.get("record") if isinstance(second.get("record"), dict) else {}
+            self.assertEqual(str(second_record.get("origin_group_id") or ""), origin_gid)
+
+            _, catalog_doc = ops._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            record = rows.get(capability_id) if isinstance(rows.get(capability_id), dict) else {}
+            self.assertEqual(str(record.get("origin_group_id") or ""), origin_gid)
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {
+                    "query": capability_id,
+                    "limit": 200,
+                    "include_indexed": True,
+                },
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            overview = overview_resp.result if isinstance(overview_resp.result, dict) else {}
+            rows = overview.get("items") if isinstance(overview.get("items"), list) else []
+            row = next(
+                (
+                    item
+                    for item in rows
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertTrue(row)
+            self.assertEqual(str(row.get("origin_group_id") or ""), origin_gid)
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_skill_requires_template_sections(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "dry_run": True,
+                    "probe": False,
+                    "record": {
+                        "capability_id": "skill:agent_self_proposed:thin-note",
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Thin Note",
+                        "capsule_text": "Use a triage checklist.",
+                    },
+                },
+            )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            result = resp.result if isinstance(resp.result, dict) else {}
+            record = result.get("record") if isinstance(result.get("record"), dict) else {}
+            self.assertEqual(str(record.get("qualification_status") or ""), "blocked")
+            reasons = record.get("qualification_reasons") if isinstance(record.get("qualification_reasons"), list) else []
+            self.assertTrue(any("missing_agent_self_proposed_sections" in str(item) for item in reasons))
+            self.assertFalse(bool(result.get("enableable_now")))
+            self.assertEqual(str(result.get("enable_block_reason") or ""), "qualification_blocked")
+            readiness = result.get("readiness_preview") if isinstance(result.get("readiness_preview"), dict) else {}
+            self.assertEqual(str(readiness.get("preview_status") or ""), "blocked")
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_skill_requires_canonical_namespace(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "dry_run": True,
+                    "probe": False,
+                    "record": {
+                        "capability_id": "skill:github:example:self-proposed-collision",
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Self Proposed Collision",
+                        "capsule_text": (
+                            "Skill: Self Proposed Collision\n"
+                            "When to use:\n"
+                            "- Verify namespace collision protection.\n"
+                            "Avoid when:\n"
+                            "- Writing curated namespace records.\n"
+                            "Procedure:\n"
+                            "1. Try to import a self-proposed skill under a curated namespace.\n"
+                            "Pitfalls:\n"
+                            "- A valid capsule body must not bypass namespace protection.\n"
+                            "Verification:\n"
+                            "- The import is rejected before catalog persistence."
+                        ),
+                    },
+                },
+            )
+
+            self.assertFalse(resp.ok)
+            self.assertEqual(resp.error.code if resp.error else "", "capability_import_invalid")
+            self.assertIn("skill:agent_self_proposed:", resp.error.message if resp.error else "")
+        finally:
+            cleanup()
+
+    def test_legacy_agent_self_proposed_skill_namespace_is_not_enableable(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:agent:legacy-self-proposed"
+
+            path, catalog_doc = ops._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            rows[capability_id] = {
+                "capability_id": capability_id,
+                "kind": "skill",
+                "source_id": "agent_self_proposed",
+                "name": "Legacy Self Proposed",
+                "description_short": "Legacy non-canonical self-proposed skill.",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "capsule_text": (
+                    "Skill: Legacy Self Proposed\n"
+                    "When to use:\n"
+                    "- Verify legacy namespace rejection.\n"
+                    "Avoid when:\n"
+                    "- Enabling current self-proposed skills.\n"
+                    "Procedure:\n"
+                    "1. Try to enable the legacy capability id.\n"
+                    "Pitfalls:\n"
+                    "- Do not carry old skill:agent: ids forward.\n"
+                    "Verification:\n"
+                    "- Enable returns capability_unavailable."
+                ),
+            }
+            catalog_doc["records"] = rows
+            ops._save_catalog_doc(path, catalog_doc)
+            _, normalized_catalog = ops._load_catalog_doc()
+            normalized_rows = (
+                normalized_catalog.get("records") if isinstance(normalized_catalog.get("records"), dict) else {}
+            )
+            normalized_row = (
+                normalized_rows.get(capability_id)
+                if isinstance(normalized_rows.get(capability_id), dict)
+                else {}
+            )
+            self.assertFalse(bool(normalized_row.get("enable_supported")))
+            self.assertEqual(str(normalized_row.get("qualification_status") or ""), "blocked")
+            qualification_reasons = (
+                normalized_row.get("qualification_reasons")
+                if isinstance(normalized_row.get("qualification_reasons"), list)
+                else []
+            )
+            self.assertIn("legacy_agent_self_proposed_namespace", qualification_reasons)
+
+            runtime_path, runtime_doc = ops._load_runtime_doc()
+            ops._record_runtime_recent_success(
+                runtime_doc,
+                capability_id=capability_id,
+                group_id=gid,
+                actor_id="peer-1",
+                action="enable",
+            )
+            ops._save_runtime_doc(runtime_path, runtime_doc)
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {
+                    "query": capability_id,
+                    "limit": 10,
+                    "include_indexed": True,
+                },
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            overview = overview_resp.result if isinstance(overview_resp.result, dict) else {}
+            items = overview.get("items") if isinstance(overview.get("items"), list) else []
+            row = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertFalse(bool(row.get("enable_supported")))
+            readiness = row.get("readiness_preview") if isinstance(row.get("readiness_preview"), dict) else {}
+            self.assertEqual(str(readiness.get("preview_status") or ""), "blocked")
+            self.assertEqual(
+                str(readiness.get("enable_block_reason") or ""),
+                "legacy_agent_self_proposed_namespace",
+            )
+            self.assertEqual(
+                str(readiness.get("next_step") or ""),
+                "reimport_under_canonical_self_proposed_id",
+            )
+            self.assertEqual(str(readiness.get("canonical_prefix") or ""), "skill:agent_self_proposed:")
+            self.assertIn("recent_success", readiness)
+
+            actor_update, _ = self._call(
+                "actor_update",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "user",
+                    "patch": {"capability_autoload": [capability_id]},
+                },
+            )
+            self.assertTrue(actor_update.ok, getattr(actor_update, "error", None))
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            actor_autoload = (
+                state.get("actor_autoload_capabilities")
+                if isinstance(state.get("actor_autoload_capabilities"), list)
+                else []
+            )
+            self.assertIn(capability_id, actor_autoload)
+            autoload_skills = state.get("autoload_skills") if isinstance(state.get("autoload_skills"), list) else []
+            autoload_ids = {str(item.get("capability_id") or "") for item in autoload_skills if isinstance(item, dict)}
+            self.assertNotIn(capability_id, autoload_ids)
+            active_skills = (
+                state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+            )
+            active_ids = {str(item.get("capability_id") or "") for item in active_skills if isinstance(item, dict)}
+            self.assertNotIn(capability_id, active_ids)
+            hidden_rows = state.get("hidden_capabilities") if isinstance(state.get("hidden_capabilities"), list) else []
+            hidden = next(
+                (
+                    item
+                    for item in hidden_rows
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            self.assertEqual(str(hidden.get("reason") or ""), "legacy_agent_self_proposed_namespace")
+            self.assertEqual(str(hidden.get("name") or ""), "Legacy Self Proposed")
+            self.assertEqual(str(hidden.get("description_short") or ""), "Legacy non-canonical self-proposed skill.")
+            self.assertEqual(str(hidden.get("kind") or ""), "skill")
+            self.assertEqual(str(hidden.get("source_id") or ""), "agent_self_proposed")
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "capability_id": capability_id,
+                    "scope": "session",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            self.assertEqual(str(enable_result.get("state") or ""), "blocked")
+            self.assertEqual(str(enable_result.get("reason") or ""), "legacy_agent_self_proposed_namespace")
+            diagnostics = (
+                enable_result.get("diagnostics")
+                if isinstance(enable_result.get("diagnostics"), list)
+                else []
+            )
+            codes = {str(item.get("code") or "") for item in diagnostics if isinstance(item, dict)}
+            self.assertIn("legacy_agent_self_proposed_namespace", codes)
+            hints = {
+                str(hint or "")
+                for item in diagnostics
+                if isinstance(item, dict)
+                for hint in (item.get("action_hints") if isinstance(item.get("action_hints"), list) else [])
+            }
+            self.assertIn("reimport_the_capsule_under_skill_agent_self_proposed_stable_slug", hints)
+            self.assertIn("call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration", hints)
+
+            uninstall_resp, _ = self._call(
+                "capability_uninstall",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": capability_id,
+                    "reason": "cleanup legacy self-proposed skill",
+                },
+            )
+            self.assertTrue(uninstall_resp.ok, getattr(uninstall_resp, "error", None))
+            uninstall_result = uninstall_resp.result if isinstance(uninstall_resp.result, dict) else {}
+            self.assertTrue(bool(uninstall_result.get("removed_record")))
+            self.assertGreaterEqual(int(uninstall_result.get("removed_actor_autoload") or 0), 1)
+
+            _, catalog_after = ops._load_catalog_doc()
+            rows_after = catalog_after.get("records") if isinstance(catalog_after.get("records"), dict) else {}
+            self.assertNotIn(capability_id, rows_after)
+
+            actor_list, _ = self._call("actor_list", {"group_id": gid, "by": "user"})
+            self.assertTrue(actor_list.ok, getattr(actor_list, "error", None))
+            actors = actor_list.result.get("actors") if isinstance(actor_list.result, dict) else []
+            peer = next(
+                (item for item in actors if isinstance(item, dict) and str(item.get("id") or "") == "peer-1"),
+                {},
+            )
+            self.assertNotIn(capability_id, peer.get("capability_autoload") or [])
+        finally:
+            cleanup()
+
+    def test_capability_uninstall_self_proposed_skill_removes_record_and_references(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "skill:agent_self_proposed:delete-cleanly"
+            capsule_text = (
+                "Skill: Remove Cleanly\n"
+                "When to use:\n"
+                "- Verify self-proposed skill removal.\n"
+                "Avoid when:\n"
+                "- Deleting curated skills.\n"
+                "Procedure:\n"
+                "1. Uninstall the self-proposed skill and clean references.\n"
+                "Pitfalls:\n"
+                "- Catalog deletion without autoload cleanup leaves stale references.\n"
+                "Verification:\n"
+                "- Re-read catalog, actor autoload, profile defaults, and capability state."
+            )
+            import_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "enable_after_import": True,
+                    "scope": "session",
+                    "probe": False,
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Delete Cleanly",
+                        "description_short": "delete cleanup validation",
+                        "capsule_text": capsule_text,
+                    },
+                },
+            )
+            self.assertTrue(import_resp.ok, getattr(import_resp, "error", None))
+
+            actor_update, _ = self._call(
+                "actor_update",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "user",
+                    "patch": {"capability_autoload": [capability_id, "pack:space"]},
+                },
+            )
+            self.assertTrue(actor_update.ok, getattr(actor_update, "error", None))
+
+            profile_upsert, _ = self._call(
+                "actor_profile_upsert",
+                {
+                    "by": "user",
+                    "profile": {
+                        "name": "Delete Cleanup Profile",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "command": [],
+                        "submit": "enter",
+                        "capability_defaults": {
+                            "autoload_capabilities": [capability_id, "pack:space"],
+                            "default_scope": "actor",
+                        },
+                    },
+                },
+            )
+            self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
+            profile = (profile_upsert.result or {}).get("profile") if isinstance(profile_upsert.result, dict) else {}
+            profile_id = str(profile.get("id") or "").strip() if isinstance(profile, dict) else ""
+            self.assertTrue(profile_id)
+
+            uninstall_resp, _ = self._call(
+                "capability_uninstall",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": capability_id,
+                    "reason": "user removed generated skill",
+                },
+            )
+            self.assertTrue(uninstall_resp.ok, getattr(uninstall_resp, "error", None))
+            uninstall_result = uninstall_resp.result if isinstance(uninstall_resp.result, dict) else {}
+            self.assertTrue(bool(uninstall_result.get("removed_record")))
+            self.assertGreaterEqual(int(uninstall_result.get("removed_bindings") or 0), 1)
+            self.assertGreaterEqual(int(uninstall_result.get("removed_actor_autoload") or 0), 1)
+            self.assertGreaterEqual(int(uninstall_result.get("removed_profile_autoload") or 0), 1)
+
+            _, catalog_doc = ops._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            self.assertNotIn(capability_id, rows)
+
+            actor_list, _ = self._call("actor_list", {"group_id": gid, "by": "user"})
+            self.assertTrue(actor_list.ok, getattr(actor_list, "error", None))
+            actors = actor_list.result.get("actors") if isinstance(actor_list.result, dict) else []
+            peer = next(
+                (item for item in actors if isinstance(item, dict) and str(item.get("id") or "") == "peer-1"),
+                {},
+            )
+            self.assertNotIn(capability_id, peer.get("capability_autoload") or [])
+            self.assertIn("pack:space", peer.get("capability_autoload") or [])
+
+            profile_get, _ = self._call("actor_profile_get", {"by": "user", "profile_id": profile_id})
+            self.assertTrue(profile_get.ok, getattr(profile_get, "error", None))
+            profile_after = (profile_get.result or {}).get("profile") if isinstance(profile_get.result, dict) else {}
+            defaults = profile_after.get("capability_defaults") if isinstance(profile_after, dict) else {}
+            profile_autoload = defaults.get("autoload_capabilities") if isinstance(defaults, dict) else []
+            self.assertNotIn(capability_id, profile_autoload)
+            self.assertIn("pack:space", profile_autoload)
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            self.assertNotIn(capability_id, state.get("enabled_capabilities") or [])
+            active_rows = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
+            active_ids = {str(item.get("capability_id") or "") for item in active_rows if isinstance(item, dict)}
+            self.assertNotIn(capability_id, active_ids)
+        finally:
+            cleanup()
+
+    def test_capability_state_reports_capability_usage_summary(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            self._add_actor(gid, "peer-2", by="user")
+            capability_id = "skill:agent_self_proposed:usage-summary"
+            capsule_text = (
+                "Skill: Usage Summary\n"
+                "When to use:\n"
+                "- Verify current-use display for generated skills.\n"
+                "Avoid when:\n"
+                "- The skill is not self-proposed.\n"
+                "Procedure:\n"
+                "1. Enable the skill at group, actor, session, and autoload scopes.\n"
+                "Pitfalls:\n"
+                "- A settings UI must not confuse current state with next action.\n"
+                "Verification:\n"
+                "- Re-read capability_state.capability_usage."
+            )
+            import_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Usage Summary",
+                        "description_short": "usage summary validation",
+                        "capsule_text": capsule_text,
+                    },
+                    "probe": False,
+                },
+            )
+            self.assertTrue(import_resp.ok, getattr(import_resp, "error", None))
+
+            profile_upsert, _ = self._call(
+                "actor_profile_upsert",
+                {
+                    "by": "user",
+                    "profile": {
+                        "name": "Usage Summary Profile",
+                        "runtime": "custom",
+                        "runner": "headless",
+                        "command": [],
+                        "submit": "enter",
+                        "capability_defaults": {
+                            "autoload_capabilities": [capability_id],
+                            "default_scope": "actor",
+                        },
+                    },
+                },
+            )
+            self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
+            profile = (profile_upsert.result or {}).get("profile") if isinstance(profile_upsert.result, dict) else {}
+            profile_id = str(profile.get("id") or "").strip() if isinstance(profile, dict) else ""
+            self.assertTrue(profile_id)
+            profile_actor, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-3",
+                    "runtime": "custom",
+                    "runner": "headless",
+                    "profile_id": profile_id,
+                    "by": "user",
+                },
+            )
+            self.assertTrue(profile_actor.ok, getattr(profile_actor, "error", None))
+
+            for actor_id, scope in (("user", "group"), ("peer-1", "actor"), ("peer-2", "session")):
+                enable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": actor_id,
+                        "capability_id": capability_id,
+                        "scope": scope,
+                        "ttl_seconds": 3600,
+                    },
+                )
+                self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+
+            actor_update, _ = self._call(
+                "actor_update",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "user",
+                    "patch": {"capability_autoload": [capability_id]},
+                },
+            )
+            self.assertTrue(actor_update.ok, getattr(actor_update, "error", None))
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "capability_id": capability_id,
+                },
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state_result = state_resp.result if isinstance(state_resp.result, dict) else {}
+            usage = state_result.get("capability_usage") if isinstance(state_result.get("capability_usage"), dict) else {}
+            self.assertEqual(usage.get("capability_id"), capability_id)
+            self.assertTrue(usage.get("used"))
+            self.assertTrue(usage.get("group_enabled"))
+            self.assertEqual(int(usage.get("group_actor_count") or 0), 3)
+            self.assertEqual(int(usage.get("active_actor_count") or 0), 3)
+            self.assertEqual(int(usage.get("startup_autoload_actor_count") or 0), 2)
+            self.assertIn("peer-1", {str(item.get("actor_id") or "") for item in usage.get("actor_enabled") or []})
+            self.assertIn("peer-2", {str(item.get("actor_id") or "") for item in usage.get("session_enabled") or []})
+            self.assertIn("peer-1", {str(item.get("actor_id") or "") for item in usage.get("actor_autoload") or []})
+            profile_autoload_rows = usage.get("profile_autoload") if isinstance(usage.get("profile_autoload"), list) else []
+            profile_autoload_peer = next(
+                (
+                    item
+                    for item in profile_autoload_rows
+                    if isinstance(item, dict) and str(item.get("actor_id") or "") == "peer-3"
+                ),
+                {},
+            )
+            self.assertEqual(str(profile_autoload_peer.get("profile_id") or ""), profile_id)
+            self.assertEqual(str(profile_autoload_peer.get("profile_name") or ""), "Usage Summary Profile")
+            session_rows = usage.get("session_enabled") if isinstance(usage.get("session_enabled"), list) else []
+            self.assertTrue(any(int(item.get("ttl_seconds") or 0) > 0 for item in session_rows if isinstance(item, dict)))
+
+            peer_state_resp, _ = self._call(
+                "capability_state",
+                {
+                    "group_id": gid,
+                    "by": "peer-2",
+                    "actor_id": "peer-2",
+                },
+            )
+            self.assertTrue(peer_state_resp.ok, getattr(peer_state_resp, "error", None))
+            peer_state = peer_state_resp.result if isinstance(peer_state_resp.result, dict) else {}
+            active_rows = (
+                peer_state.get("active_capsule_skills")
+                if isinstance(peer_state.get("active_capsule_skills"), list)
+                else []
+            )
+            active_row = next(
+                (
+                    item
+                    for item in active_rows
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            activation_sources = (
+                active_row.get("activation_sources")
+                if isinstance(active_row.get("activation_sources"), list)
+                else []
+            )
+            source_scopes = {str(item.get("scope") or "") for item in activation_sources if isinstance(item, dict)}
+            self.assertEqual(source_scopes, {"group", "session"})
+            session_sources = [
+                item
+                for item in activation_sources
+                if isinstance(item, dict) and str(item.get("scope") or "") == "session"
+            ]
+            self.assertTrue(any(int(item.get("ttl_seconds") or 0) > 0 for item in session_sources))
+        finally:
+            cleanup()
+
+    def test_self_proposed_actor_assignment_persists_autoload_and_can_activate_now(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            self._add_actor(gid, "peer-2", by="user")
+            capability_id = "skill:agent_self_proposed:assignment-activate-now"
+            capsule_text = (
+                "Skill: Assignment Activate Now\n"
+                "When to use:\n"
+                "- Verify actor assignment writes startup autoload and supports immediate activation.\n"
+                "Avoid when:\n"
+                "- The skill should only be tried in a temporary session.\n"
+                "Procedure:\n"
+                "1. Persist actor capability_autoload, then enable actor scope for immediate use.\n"
+                "Pitfalls:\n"
+                "- Autoload metadata alone is not current runtime activation.\n"
+                "Verification:\n"
+                "- Re-read actor_autoload_capabilities and active_capsule_skills."
+            )
+            import_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "record": {
+                        "capability_id": capability_id,
+                        "kind": "skill",
+                        "source_id": "agent_self_proposed",
+                        "name": "Assignment Activate Now",
+                        "description_short": "assignment activation validation",
+                        "capsule_text": capsule_text,
+                    },
+                    "probe": False,
+                },
+            )
+            self.assertTrue(import_resp.ok, getattr(import_resp, "error", None))
+
+            actor_update, _ = self._call(
+                "actor_update",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "user",
+                    "patch": {"capability_autoload": [capability_id]},
+                },
+            )
+            self.assertTrue(actor_update.ok, getattr(actor_update, "error", None))
+
+            before_enable, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(before_enable.ok, getattr(before_enable, "error", None))
+            before_state = before_enable.result if isinstance(before_enable.result, dict) else {}
+            self.assertIn(capability_id, before_state.get("actor_autoload_capabilities") or [])
+            before_active = (
+                before_state.get("active_capsule_skills")
+                if isinstance(before_state.get("active_capsule_skills"), list)
+                else []
+            )
+            before_active_ids = {
+                str(item.get("capability_id") or "")
+                for item in before_active
+                if isinstance(item, dict)
+            }
+            self.assertNotIn(capability_id, before_active_ids)
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": capability_id,
+                    "scope": "actor",
+                    "enabled": True,
+                    "reason": "web_self_proposed_actor_assignment",
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+
+            after_enable, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(after_enable.ok, getattr(after_enable, "error", None))
+            after_state = after_enable.result if isinstance(after_enable.result, dict) else {}
+            self.assertIn(capability_id, after_state.get("actor_autoload_capabilities") or [])
+            self.assertIn(capability_id, after_state.get("enabled_capabilities") or [])
+            after_active = (
+                after_state.get("active_capsule_skills")
+                if isinstance(after_state.get("active_capsule_skills"), list)
+                else []
+            )
+            after_active_ids = {
+                str(item.get("capability_id") or "")
+                for item in after_active
+                if isinstance(item, dict)
+            }
+            self.assertIn(capability_id, after_active_ids)
+
+            other_actor, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-2", "by": "peer-2"},
+            )
+            self.assertTrue(other_actor.ok, getattr(other_actor, "error", None))
+            other_state = other_actor.result if isinstance(other_actor.result, dict) else {}
+            self.assertNotIn(capability_id, other_state.get("enabled_capabilities") or [])
+        finally:
+            cleanup()
+
+    def test_capability_import_agent_self_proposed_mcp_stays_indexed_by_default(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "dry_run": True,
+                    "probe": False,
+                    "record": {
+                        "capability_id": "mcp:example/agent-proposed-tool",
+                        "kind": "mcp_toolpack",
+                        "source_id": "agent_self_proposed",
+                        "install_mode": "command",
+                        "install_spec": {
+                            "command": ["uvx", "demo-mcp"],
+                        },
+                    },
+                },
+            )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            result = resp.result if isinstance(resp.result, dict) else {}
+            record = result.get("record") if isinstance(result.get("record"), dict) else {}
+            self.assertEqual(str(record.get("source_id") or ""), "agent_self_proposed")
+            self.assertEqual(str(result.get("effective_policy_level") or ""), "indexed")
+            self.assertFalse(bool(result.get("enableable_now")))
+            self.assertEqual(str(result.get("enable_block_reason") or ""), "policy_level_indexed")
+            readiness = result.get("readiness_preview") if isinstance(result.get("readiness_preview"), dict) else {}
+            self.assertEqual(str(readiness.get("preview_status") or ""), "blocked")
+        finally:
+            cleanup()
+
     def test_capability_import_dry_run_reports_policy_indexed_block(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -4612,7 +6015,9 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             result = resp.result if isinstance(resp.result, dict) else {}
             self.assertEqual(str(result.get("state") or ""), "activation_pending")
+            self.assertEqual(str(result.get("scope") or ""), "actor")
             enable_result = result.get("enable_result") if isinstance(result.get("enable_result"), dict) else {}
+            self.assertEqual(str(enable_result.get("scope") or ""), "actor")
             skill = enable_result.get("skill") if isinstance(enable_result.get("skill"), dict) else {}
             self.assertEqual(str(skill.get("capability_id") or ""), capability_id)
 
@@ -4627,6 +6032,20 @@ class TestCapabilityOps(unittest.TestCase):
             active_capsule_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
             active_ids = {str(item.get("capability_id") or "") for item in active_capsule_skills if isinstance(item, dict)}
             self.assertIn(capability_id, active_ids)
+            active_row = next(
+                (
+                    item
+                    for item in active_capsule_skills
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == capability_id
+                ),
+                {},
+            )
+            activation_sources = (
+                active_row.get("activation_sources")
+                if isinstance(active_row.get("activation_sources"), list)
+                else []
+            )
+            self.assertEqual({str(item.get("scope") or "") for item in activation_sources if isinstance(item, dict)}, {"actor"})
 
             _, catalog_doc = ops._load_catalog_doc()
             rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
@@ -4694,6 +6113,27 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertEqual(item.get("avoid_when"), ["greenfield feature implementation"])
             self.assertEqual(item.get("gotchas"), ["capture concrete failing evidence before routing work"])
             self.assertEqual(str(item.get("evidence_kind") or ""), "error log plus minimal repro note")
+
+            paged_resp, _ = self._call(
+                "capability_overview",
+                {
+                    "query": "",
+                    "limit": 1,
+                    "offset": 0,
+                    "include_indexed": True,
+                    "kind": "skill",
+                    "source_id": "github_skills_curated",
+                },
+            )
+            self.assertTrue(paged_resp.ok, getattr(paged_resp, "error", None))
+            paged_result = paged_resp.result if isinstance(paged_resp.result, dict) else {}
+            paged_items = paged_result.get("items") if isinstance(paged_result.get("items"), list) else []
+            self.assertEqual(len(paged_items), 1)
+            self.assertGreaterEqual(int(paged_result.get("total_count") or 0), 1)
+            self.assertIn("has_more", paged_result)
+            only_item = paged_items[0] if paged_items and isinstance(paged_items[0], dict) else {}
+            self.assertEqual(str(only_item.get("kind") or ""), "skill")
+            self.assertEqual(str(only_item.get("source_id") or ""), "github_skills_curated")
         finally:
             cleanup()
 

@@ -206,16 +206,19 @@ def _find_runtime_binding_from_pty_state(home: str, ancestor_pids: Iterable[int]
 
 
 def _runtime_context() -> _RuntimeContext:
+    home_explicit = "CCCC_HOME" in os.environ
+    gid_explicit = "CCCC_GROUP_ID" in os.environ
+    aid_explicit = "CCCC_ACTOR_ID" in os.environ
     home = _normalize_home(_env_str("CCCC_HOME"))
     gid = _env_str("CCCC_GROUP_ID")
     aid = _env_str("CCCC_ACTOR_ID")
 
     ancestor_pids = _iter_ancestor_pids()
-    if not home:
+    if not home and not home_explicit:
         home = _normalize_home(_first_ancestor_env_value(ancestor_pids, "CCCC_HOME"))
-    if not gid:
+    if not gid and not gid_explicit:
         gid = _first_ancestor_env_value(ancestor_pids, "CCCC_GROUP_ID")
-    if not aid:
+    if not aid and not aid_explicit:
         aid = _first_ancestor_env_value(ancestor_pids, "CCCC_ACTOR_ID")
 
     default_home = _normalize_home(str(cccc_home()))
@@ -224,13 +227,15 @@ def _runtime_context() -> _RuntimeContext:
         if item and item not in candidate_homes:
             candidate_homes.append(item)
 
-    if not gid or not aid:
+    if (not gid and not gid_explicit) or (not aid and not aid_explicit):
         for candidate in candidate_homes:
             recovered = _find_runtime_binding_from_pty_state(candidate, ancestor_pids)
             if not recovered:
                 continue
-            gid = gid or recovered[0]
-            aid = aid or recovered[1]
+            if not gid and not gid_explicit:
+                gid = recovered[0]
+            if not aid and not aid_explicit:
+                aid = recovered[1]
             home = home or candidate
             if gid and aid:
                 break

@@ -3,17 +3,22 @@ import { useTranslation } from "react-i18next";
 import * as api from "../services/api";
 import { CapabilityOverviewItem } from "../types";
 import { normalizeCapabilityIdList } from "../utils/capabilityAutoload";
+import { Input } from "./ui/input";
+import { Surface } from "./ui/surface";
 
 interface CapabilityPickerProps {
   isDark: boolean;
   value: string[];
   onChange: (next: string[]) => void;
+  active?: boolean;
   disabled?: boolean;
   label?: string;
   hint?: string;
 }
 
 const BADGE_CLASS = "bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] border border-[var(--glass-border-subtle)]";
+const CAPABILITY_PICKER_FETCH_LIMIT = 200;
+const CAPABILITY_PICKER_QUERY_DEBOUNCE_MS = 250;
 
 function firstRecommendationLine(value?: string[]) {
   return Array.isArray(value) ? String(value[0] || "").trim() : "";
@@ -23,6 +28,7 @@ export function CapabilityPicker({
   isDark: _isDark,
   value,
   onChange,
+  active = true,
   disabled = false,
   label = "",
   hint = "",
@@ -31,17 +37,35 @@ export function CapabilityPicker({
   const selected = normalizeCapabilityIdList(value);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState<CapabilityOverviewItem[]>([]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(String(query || "").trim());
+    }, CAPABILITY_PICKER_QUERY_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  useEffect(() => {
+    if (!active) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const run = async () => {
       setLoading(true);
       setError("");
       try {
-        const resp = await api.fetchCapabilityOverview({ includeIndexed: true, limit: 1200 });
+        const resp = await api.fetchCapabilityOverview({
+          includeIndexed: true,
+          limit: CAPABILITY_PICKER_FETCH_LIMIT,
+          query: debouncedQuery || undefined,
+        });
         if (cancelled) return;
         if (!resp.ok) {
           setError(resp.error?.message || "Failed to load capabilities");
@@ -61,7 +85,7 @@ export function CapabilityPicker({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [active, debouncedQuery]);
 
   const candidateRows = useMemo(() => {
     const q = String(query || "").trim().toLowerCase();
@@ -133,19 +157,24 @@ export function CapabilityPicker({
         )}
       </div>
 
-      <input
+      <Input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         disabled={disabled}
         placeholder={t("capabilities.searchPlaceholder")}
-        className="w-full rounded-lg border px-3 py-2 text-sm min-h-[40px] glass-input text-[var(--color-text-primary)]"
+        className="rounded-lg px-3 py-2 min-h-[40px]"
       />
 
-      <div
-        className="mt-2 rounded-lg border max-h-56 overflow-auto border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]"
+      <Surface
+        variant="subtle"
+        padding="none"
+        radius="md"
+        className="mt-2 max-h-56 overflow-auto border-[var(--glass-border-subtle)]"
       >
-        {loading ? (
+        {!active ? (
+          <div className="px-3 py-3 text-xs text-[var(--color-text-tertiary)]">{t("capabilities.openToLoad", { defaultValue: "Open this section to load capabilities." })}</div>
+        ) : loading ? (
           <div className="px-3 py-3 text-xs text-[var(--color-text-tertiary)]">{t("capabilities.loading")}</div>
         ) : error ? (
           <div className="px-3 py-3 text-xs text-rose-700 dark:text-rose-300">{error}</div>
@@ -210,7 +239,7 @@ export function CapabilityPicker({
             );
           })
         )}
-      </div>
+      </Surface>
 
       {hint ? <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">{hint}</div> : null}
     </div>

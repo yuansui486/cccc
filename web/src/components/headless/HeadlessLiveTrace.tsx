@@ -1,8 +1,9 @@
-import { Suspense, lazy, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import {
   buildHeadlessPreviewRenderGroups,
   buildHeadlessPreviewTimelineEntries,
+  type HeadlessPreviewRenderGroup,
   type HeadlessPreviewTimelineEntry,
 } from "../../pages/chat/headlessPreviewTimeline";
 import type { HeadlessPreviewSession, StreamingActivity } from "../../types";
@@ -12,6 +13,8 @@ import {
   formatStreamingActivityKind,
   getStructuredStreamingActivityLabel,
 } from "../messageBubble/helpers";
+import { LazyMarkdownRenderer } from "../LazyMarkdownRenderer";
+import { ClockIcon, SparklesIcon } from "../Icons";
 
 type HeadlessLiveTraceDensity = "compact" | "expanded";
 
@@ -30,10 +33,6 @@ type HeadlessLiveTraceProps = {
   density?: HeadlessLiveTraceDensity;
   className?: string;
 };
-
-const LazyMarkdownRenderer = lazy(() =>
-  import("../MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
-);
 
 function shouldRenderPreviewMarkdown(streamPhase: string | null | undefined): boolean {
   return String(streamPhase || "").trim().toLowerCase() === "final_answer";
@@ -134,7 +133,7 @@ function buildActivityNarrative(
 function getMessageTextClassName(density: HeadlessLiveTraceDensity, isDark: boolean): string {
   if (density === "expanded") {
     return classNames(
-      "whitespace-pre-wrap break-words text-[13.5px] leading-[1.6]",
+      "whitespace-pre-wrap break-words text-[13.5px] leading-[1.65]",
       isDark ? "text-slate-100" : "text-gray-900"
     );
   }
@@ -147,6 +146,7 @@ function getMessageTextClassName(density: HeadlessLiveTraceDensity, isDark: bool
 function getTracePhaseLabel(streamPhase: string): string {
   const normalized = String(streamPhase || "").trim().toLowerCase();
   if (normalized === "final_answer") return "Reply";
+  if (normalized === "commentary") return "Reasoning";
   return "";
 }
 
@@ -156,24 +156,44 @@ function getActivityBandClassName(density: HeadlessLiveTraceDensity): string {
 
 function getActivityRowClassName(density: HeadlessLiveTraceDensity, isDark: boolean, live: boolean): string {
   return classNames(
-    "flex min-w-0 items-center gap-2 border",
+    "flex min-w-0 items-center gap-2.5 border backdrop-blur-sm transition-colors",
     density === "expanded"
-      ? "min-h-[28px] rounded-xl px-2.5 py-1.5"
-      : "min-h-[24px] rounded-lg px-2 py-1",
+      ? "min-h-[32px] rounded-2xl px-3 py-2"
+      : "min-h-[26px] rounded-xl px-2.5 py-1.5",
     live
-      ? (isDark ? "border-cyan-300/16 bg-cyan-300/[0.07]" : "border-cyan-500/14 bg-cyan-500/[0.07]")
-      : (isDark ? "border-white/8 bg-white/[0.025]" : "border-slate-200 bg-slate-50/90")
+      ? (isDark ? "border-white/12 bg-white/[0.06] shadow-[0_12px_28px_rgba(0,0,0,0.18)]" : "border-black/10 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]")
+      : (isDark ? "border-white/8 bg-white/[0.03]" : "border-slate-200/90 bg-slate-50/88")
   );
 }
 
 function getActivityKindBadgeClassName(density: HeadlessLiveTraceDensity, isDark: boolean, live: boolean): string {
   return classNames(
     "inline-flex shrink-0 rounded-full border font-mono font-semibold uppercase tracking-[0.14em]",
-    density === "expanded" ? "px-1.5 py-[3px] text-[9px]" : "px-1.5 py-[2px] text-[8px]",
+    density === "expanded" ? "px-2 py-[4px] text-[9px]" : "px-1.5 py-[2px] text-[8px]",
     live
-      ? (isDark ? "border-cyan-300/20 bg-cyan-300/10 text-cyan-100" : "border-cyan-500/18 bg-cyan-500/10 text-cyan-700")
-      : (isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-slate-200 bg-white text-slate-600")
+      ? (isDark ? "border-white/12 bg-white/[0.1] text-white" : "border-black/10 bg-slate-100 text-[rgb(35,36,37)]")
+      : (isDark ? "border-white/10 bg-white/[0.05] text-slate-300" : "border-slate-200 bg-white text-slate-600")
   );
+}
+
+function summarizeHeadline(
+  group: HeadlessPreviewRenderGroup | undefined,
+  density: HeadlessLiveTraceDensity
+): { eyebrow: string; title: string } {
+  if (!group) {
+    return { eyebrow: "Live trace", title: "" };
+  }
+  if (group.kind === "message") {
+    const label = getTracePhaseLabel(group.entry.streamPhase) || "Update";
+    return {
+      eyebrow: label,
+      title: truncateText(group.entry.text, density === "expanded" ? 120 : 84),
+    };
+  }
+  return {
+    eyebrow: group.live ? "Tool activity" : "Recent activity",
+    title: group.entries.length > 1 ? `${group.entries.length} 个工具调用` : "最近工具调用",
+  };
 }
 
 function ActivityRow({
@@ -262,6 +282,7 @@ export function HeadlessLiveTrace({
     ? previewSessions.length
     : (timelineEntries.length > 0 ? 1 : 0);
   const latestTimelineGroup = timelineGroups[timelineGroups.length - 1];
+  const latestSummary = summarizeHeadline(latestTimelineGroup, density);
   const latestTimelineSignal = latestTimelineGroup
     ? `${latestTimelineGroup.id}:${latestTimelineGroup.ts}:${latestTimelineGroup.live ? "live" : "static"}`
     : "";
@@ -286,7 +307,37 @@ export function HeadlessLiveTrace({
   }, [latestTimelineSignal, timelineEntries.length]);
 
   if (timelineGroups.length <= 0) {
-    return <div className={classNames("text-sm", isDark ? "text-slate-500" : "text-slate-400", className)}>{emptyLabel}</div>;
+    return (
+      <div
+        className={classNames(
+          "flex min-h-[240px] items-center justify-center rounded-[26px] border px-5 py-5",
+          isDark
+            ? "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))]"
+            : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.94))]",
+          className
+        )}
+      >
+        <div
+          className={classNames(
+            "w-full max-w-md rounded-[24px] border px-6 py-6 text-center shadow-sm",
+            isDark
+              ? "border-white/10 bg-white/[0.04]"
+              : "border-black/8 bg-white/88"
+          )}
+        >
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-tertiary)]">
+            <SparklesIcon size={18} />
+          </div>
+          <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            Live trace
+          </div>
+          <div className="mt-2 text-lg font-semibold text-[var(--color-text-primary)]">等待下一段输出</div>
+          <div className={classNames("mx-auto mt-3 max-w-sm text-sm leading-6", isDark ? "text-slate-400" : "text-slate-500")}>
+            {emptyLabel}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -297,9 +348,47 @@ export function HeadlessLiveTrace({
         if (!node) return;
         shouldStickToBottomRef.current = node.scrollTop + node.clientHeight >= node.scrollHeight - 24;
       }}
-      className={className}
+      className={classNames(
+        "rounded-[26px] border backdrop-blur-xl",
+        isDark
+          ? "border-white/10 bg-[linear-gradient(180deg,rgba(15,16,20,0.94),rgba(9,10,14,0.98))] shadow-[0_28px_80px_rgba(0,0,0,0.26)]"
+          : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.95))] shadow-[0_24px_70px_rgba(15,23,42,0.08)]",
+        className
+      )}
     >
-      <div className={classNames(density === "expanded" ? "space-y-3 pb-3" : "space-y-2.5 pb-3")}>
+      <div className={classNames(
+        "sticky top-0 z-[1] border-b px-4 py-3 backdrop-blur-xl sm:px-5",
+        isDark ? "border-white/8 bg-[rgba(10,11,14,0.78)]" : "border-black/6 bg-[rgba(255,255,255,0.78)]"
+      )}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+              <SparklesIcon size={14} />
+              {latestSummary.eyebrow}
+            </div>
+            <div className="mt-1 min-w-0 text-sm font-semibold leading-6 text-[var(--color-text-primary)]">
+              {latestSummary.title}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {latestTimelineGroup?.live ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse motion-reduce:animate-none" />
+                Live
+              </span>
+            ) : null}
+            <span className={classNames(
+              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-medium",
+              isDark ? "border-white/10 bg-white/[0.04] text-slate-300" : "border-black/8 bg-black/[0.03] text-slate-600"
+            )}>
+              <ClockIcon size={12} />
+              {latestTimelineGroup?.ts ? formatTime(latestTimelineGroup.ts) : recentLabel}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className={classNames(density === "expanded" ? "space-y-4 px-4 py-4 sm:px-5 sm:py-5" : "space-y-3 px-4 py-4")}>
         {timelineGroups.map((group, index) => {
           const previousGroup = index > 0 ? timelineGroups[index - 1] : null;
           const showSessionDivider = sessionCount > 1 && previousGroup?.pendingEventId !== group.pendingEventId;
@@ -308,7 +397,7 @@ export function HeadlessLiveTrace({
               {showSessionDivider ? (
                 <div className="flex items-center gap-3 py-1">
                   <span className={classNames("h-px flex-1", isDark ? "bg-white/8" : "bg-slate-200")} />
-                  <span className={classNames("shrink-0 text-[10px] font-medium uppercase tracking-[0.14em]", isDark ? "text-slate-500" : "text-slate-500")}>
+                  <span className={classNames("shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em]", isDark ? "border-white/10 bg-white/[0.04] text-slate-400" : "border-black/8 bg-black/[0.03] text-slate-500")}>
                     {group.ts ? formatTime(group.ts) : recentLabel}
                   </span>
                   <span className={classNames("h-px flex-1", isDark ? "bg-white/8" : "bg-slate-200")} />
@@ -317,48 +406,54 @@ export function HeadlessLiveTrace({
 
               {group.kind === "message" ? (
                 <div className={classNames("grid gap-3", density === "expanded" ? "grid-cols-[12px_minmax(0,1fr)]" : "grid-cols-[10px_minmax(0,1fr)]")}>
-                  <div className={classNames(density === "expanded" ? "pt-[0.55rem]" : "pt-2")}>
+                  <div className={classNames(density === "expanded" ? "pt-[0.75rem]" : "pt-2.5")}>
                     <span
                       className={classNames(
                         "block rounded-full",
                         density === "expanded" ? "h-3 w-3" : "h-2.5 w-2.5",
                         group.entry.streamPhase === "final_answer"
-                          ? (group.entry.live ? (isDark ? "bg-sky-300" : "bg-sky-500") : (isDark ? "bg-sky-300/50" : "bg-sky-500/45"))
-                          : (group.entry.live ? (isDark ? "bg-cyan-300" : "bg-cyan-500") : (isDark ? "bg-white/30" : "bg-slate-400"))
+                          ? (group.entry.live ? (isDark ? "bg-white" : "bg-[rgb(35,36,37)]") : (isDark ? "bg-white/55" : "bg-[rgb(35,36,37)]/55"))
+                          : (group.entry.live ? (isDark ? "bg-white" : "bg-[rgb(35,36,37)]") : (isDark ? "bg-white/30" : "bg-slate-400"))
                       )}
                     />
                   </div>
                   <div className={classNames(
-                    "min-w-0 border-l pl-3",
-                    density === "expanded" ? "pb-1" : "",
+                    "min-w-0 rounded-[22px] border px-4 py-3 sm:px-4.5",
                     group.entry.streamPhase === "final_answer"
-                      ? (isDark ? "border-sky-300/30" : "border-sky-500/26")
-                      : (isDark ? "border-white/10" : "border-slate-200")
+                      ? (isDark ? "border-white/12 bg-white/[0.05]" : "border-black/10 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.06)]")
+                      : (isDark ? "border-white/10 bg-white/[0.03]" : "border-slate-200/90 bg-slate-50/88")
                   )}>
                     {getTracePhaseLabel(group.entry.streamPhase) ? (
-                      <div className={classNames(
-                        "mb-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                        isDark ? "text-sky-200" : "text-sky-700"
-                      )}>
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className={classNames(
+                          "inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                          isDark ? "border-white/10 bg-white/[0.05] text-white/85" : "border-black/8 bg-black/[0.03] text-[rgb(35,36,37)]/80"
+                        )}>
                         {getTracePhaseLabel(group.entry.streamPhase)}
+                        </span>
+                        {group.live ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-300">
+                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse motion-reduce:animate-none" />
+                            streaming
+                          </span>
+                        ) : null}
                       </div>
                     ) : null}
                     {shouldRenderPreviewMarkdown(group.entry.streamPhase) ? (
-                      <Suspense fallback={<div className={getMessageTextClassName(density, isDark)}>{group.entry.text}</div>}>
-                        <LazyMarkdownRenderer
-                          content={group.entry.text}
-                          isDark={isDark}
-                          invertText={isDark}
-                          className={classNames(
-                            density === "expanded"
-                              ? "text-[13.5px] leading-[1.6] [&_p]:mb-2.5 [&_pre]:border [&_pre]:p-3 [&_.code-block-header]:rounded-t-2xl [&_.code-block-header]:border [&_.code-block-header]:px-3 [&_.code-block-header]:py-2"
-                              : "text-[13px] leading-[1.55] [&_p]:mb-2 [&_pre]:border [&_pre]:p-3 [&_.code-block-header]:rounded-t-2xl [&_.code-block-header]:border [&_.code-block-header]:px-3 [&_.code-block-header]:py-2",
-                            isDark
-                              ? "[&_pre]:border-white/10 [&_pre]:bg-white/[0.03] [&_.code-block-header]:border-white/10 [&_.code-block-header]:bg-white/[0.04] [&_.code-block-header]:text-slate-300"
-                              : "[&_pre]:border-slate-200 [&_pre]:bg-white [&_.code-block-header]:border-slate-200 [&_.code-block-header]:bg-slate-100 [&_.code-block-header]:text-slate-600"
-                          )}
-                        />
-                      </Suspense>
+                      <LazyMarkdownRenderer
+                        content={group.entry.text}
+                        isDark={isDark}
+                        invertText={isDark}
+                        className={classNames(
+                          density === "expanded"
+                            ? "text-[13.5px] leading-[1.65] [&_p]:mb-2.5 [&_pre]:border [&_pre]:p-3.5 [&_.code-block-header]:rounded-t-2xl [&_.code-block-header]:border [&_.code-block-header]:px-3.5 [&_.code-block-header]:py-2.5"
+                            : "text-[13px] leading-[1.58] [&_p]:mb-2 [&_pre]:border [&_pre]:p-3 [&_.code-block-header]:rounded-t-2xl [&_.code-block-header]:border [&_.code-block-header]:px-3 [&_.code-block-header]:py-2",
+                          isDark
+                            ? "[&_pre]:border-white/10 [&_pre]:bg-white/[0.03] [&_.code-block-header]:border-white/10 [&_.code-block-header]:bg-white/[0.04] [&_.code-block-header]:text-slate-300"
+                            : "[&_pre]:border-slate-200 [&_pre]:bg-white [&_.code-block-header]:border-slate-200 [&_.code-block-header]:bg-slate-100 [&_.code-block-header]:text-slate-600"
+                        )}
+                        fallback={<div className={getMessageTextClassName(density, isDark)}>{group.entry.text}</div>}
+                      />
                     ) : (
                       <div className={getMessageTextClassName(density, isDark)}>{group.entry.text}</div>
                     )}
@@ -370,7 +465,7 @@ export function HeadlessLiveTrace({
                     <span className={classNames(
                       "block rounded-full",
                       density === "expanded" ? "h-3 w-3" : "h-2.5 w-2.5",
-                      group.live ? (isDark ? "bg-cyan-300" : "bg-cyan-500") : (isDark ? "bg-white/20" : "bg-slate-400")
+                      group.live ? (isDark ? "bg-white" : "bg-[rgb(35,36,37)]") : (isDark ? "bg-white/20" : "bg-slate-400")
                     )} />
                   </div>
                   <div className={getActivityBandClassName(density)}>

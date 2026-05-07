@@ -966,6 +966,30 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
             )
 
         qualification = str(rec.get("qualification_status") or _QUAL_QUALIFIED).strip().lower()
+        unsupported_reason = _pkg()._record_enable_unsupported_reason(rec, capability_id=capability_id)
+        if enabled and unsupported_reason == "legacy_agent_self_proposed_namespace":
+            diagnostics = _pkg()._enable_unsupported_diagnostics(
+                capability_id=capability_id,
+                reason_code=unsupported_reason,
+            )
+            _audit("failed", state="failed", error_code=unsupported_reason)
+            return DaemonResponse(
+                ok=True,
+                result={
+                    "action_id": action_id,
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "capability_id": capability_id,
+                    "scope": scope,
+                    "enabled": False,
+                    "state": "blocked",
+                    "refresh_required": False,
+                    "reason": unsupported_reason,
+                    "policy_level": policy_level,
+                    "qualification_status": qualification or _QUAL_UNAVAILABLE,
+                    "diagnostics": diagnostics,
+                },
+            )
         if qualification == _QUAL_BLOCKED:
             _audit("denied", state="denied", error_code="qualification_blocked")
             return _error(
@@ -977,7 +1001,11 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 },
             )
         if enabled and (not _pkg()._record_enable_supported(rec, capability_id=capability_id)):
-            reason_code = "capability_unavailable"
+            reason_code = unsupported_reason or "capability_unavailable"
+            diagnostics = _pkg()._enable_unsupported_diagnostics(
+                capability_id=capability_id,
+                reason_code=reason_code,
+            )
             _audit("failed", state="failed", error_code=reason_code)
             return DaemonResponse(
                 ok=True,
@@ -993,6 +1021,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     "reason": reason_code,
                     "policy_level": policy_level,
                     "qualification_status": qualification or _QUAL_UNAVAILABLE,
+                    "diagnostics": diagnostics,
                 },
             )
 

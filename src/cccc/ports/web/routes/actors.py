@@ -531,6 +531,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         gid = str(group_id or "").strip()
 
         async def _fetch() -> Dict[str, Any]:
+            async def _fallback_local() -> Dict[str, Any]:
+                return await run_in_threadpool(_read_actor_list_local, gid, include_unread=include_unread)
+
             try:
                 return await ctx.daemon(
                     {
@@ -542,8 +545,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                         },
                     }
                 )
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                if int(exc.status_code or 0) == 503 and str(detail.get("code") or "") == "daemon_unavailable":
+                    return await _fallback_local()
+                raise
             except Exception:
-                return await run_in_threadpool(_read_actor_list_local, gid, include_unread=include_unread)
+                return await _fallback_local()
 
         cache_suffix = "unread_internal" if include_internal and include_unread else (
             "readonly_internal" if include_internal else ("unread" if include_unread else "readonly")

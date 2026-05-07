@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dedupeStreamingActivities, mergeStreamingActivity } from "../../src/stores/chatStreamingSessions";
+import { dedupeStreamingActivities, mergeStreamingActivity, upsertReplySession } from "../../src/stores/chatStreamingSessions";
 import type { StreamingActivity } from "../../src/types";
 
 describe("chatStreamingSessions", () => {
@@ -86,5 +86,33 @@ describe("chatStreamingSessions", () => {
         query: "src/**/*.ts",
       },
     ]);
+  });
+
+  it("keeps terminal reply sessions closed when late stream updates replay", () => {
+    const completedAt = Date.parse("2026-04-09T10:00:10Z");
+    const result = upsertReplySession({
+      "evt-codex": {
+        pendingEventId: "evt-codex",
+        actorId: "coder",
+        currentStreamId: "stream-final",
+        phase: "completed",
+        updatedAt: completedAt,
+      },
+    }, {
+      "stream-final": "evt-codex",
+    }, {
+      pendingEventId: "evt-codex",
+      actorId: "coder",
+      streamId: "stream-late-delta",
+      phase: "streaming",
+      updatedAt: Date.parse("2026-04-09T10:00:20Z"),
+    });
+
+    expect(result.replySessionsByPendingEventId["evt-codex"]).toMatchObject({
+      currentStreamId: "stream-final",
+      phase: "completed",
+      updatedAt: completedAt,
+    });
+    expect(result.pendingEventIdByStreamId["stream-late-delta"]).toBe("evt-codex");
   });
 });

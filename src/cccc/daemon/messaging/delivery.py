@@ -42,6 +42,7 @@ from ...runners import headless as headless_runner
 from ...util.fs import atomic_write_text, read_json
 from ...util.time import parse_utc_iso, utc_now_iso
 from ...util.conv import coerce_bool
+from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 
 
 _ASYNC_FLUSH_LOCK = threading.Lock()
@@ -555,34 +556,55 @@ def render_single_message(msg: PendingMessage) -> str:
     if msg.kind == "system.notify":
         # System notification format
         return f"[cccc] SYSTEM ({msg.notify_kind}): {msg.notify_title}\n{msg.notify_message}".strip()
-    
-    # Chat message format
-    who = str(msg.by or "user").strip() or "user"
-    targets = ", ".join([str(x).strip() for x in (msg.to or []) if str(x).strip()]) or "@all"
-    body = (msg.text or "").rstrip("\n")
-    source_bits: List[str] = []
-    if msg.source_platform:
-        source_bits.append(str(msg.source_platform).strip())
-    if msg.source_user_name:
-        source_bits.append(str(msg.source_user_name).strip())
-    if msg.source_user_id:
-        source_bits.append(str(msg.source_user_id).strip())
-    if source_bits:
-        who = f"{who}[{' / '.join([bit for bit in source_bits if bit])}]"
+    return render_actor_inbound_message(
+        ActorInboundEnvelope(
+            event_id=str(msg.event_id or ""),
+            kind=str(msg.kind or "chat.message"),
+            by=str(msg.by or "user"),
+            to=[str(x or "") for x in (msg.to or [])],
+            text=str(msg.text or ""),
+            reply_to=str(msg.reply_to or ""),
+            quote_text=str(msg.quote_text or ""),
+            source_platform=str(msg.source_platform or ""),
+            source_user_name=str(msg.source_user_name or ""),
+            source_user_id=str(msg.source_user_id or ""),
+        )
+    )
 
-    # Build header
-    head = f"[cccc] {who} → {targets}"
-    if msg.reply_to:
-        head += f" (reply:{msg.reply_to[:8]})"
 
-    # Add quote if present
-    if msg.quote_text:
-        quote_preview = msg.quote_text[:80].replace("\n", " ")
-        if len(msg.quote_text) > 80:
-            quote_preview += "..."
-        head += f'\n> "{quote_preview}"'
-
-    return f"{head}:\n{body}" if "\n" in body else f"{head}: {body}"
+def _render_system_notify_message_for_delivery(*, notify: SystemNotifyData, group: Optional[Group] = None) -> str:
+    message = str(notify.message or "").strip()
+    context = notify.context if isinstance(notify.context, dict) else {}
+    context_kind = str(context.get("kind") or "").strip()
+    if context_kind == "voice_secretary_action_request":
+        request_id = str(context.get("request_id") or "").strip()
+        document_path = str(context.get("document_path") or "").strip()
+        summary = str(context.get("summary") or "").strip()
+        request_text = str(context.get("request_text") or message).strip()
+        blocks = ["Voice Secretary handed you an action request."]
+        meta = ["kind=voice_secretary_action_request"]
+        if request_id:
+            meta.append(f"request_id={request_id}")
+        if document_path:
+            meta.append(f"document_path={document_path}")
+        blocks.append("; ".join(meta))
+        if summary:
+            blocks.append(f"Context: {summary}")
+        if request_text:
+            blocks.append(f"Request:\n{request_text}")
+        blocks.append("Action: handle the request from your inbox; acknowledge or reply according to the requested work.")
+        return "\n\n".join(blocks).strip()
+    if context_kind == "voice_secretary_input":
+        reason = str(context.get("reason") or "").strip()
+        blocks = [
+            "Secretary input ready.",
+            "First action: cccc_voice_secretary_document(action=\"read_new_input\").",
+            "Pointer only; fetch the input text through read_new_input.",
+        ]
+        if reason:
+            blocks.append(f"reason={reason}")
+        return "\n".join(blocks).strip()
+    return message
 
 
 def render_headless_control_text(*, control_kind: str, body: str) -> str:
@@ -610,7 +632,7 @@ def render_headless_control_text(*, control_kind: str, body: str) -> str:
     return f"{intro}\n\n{content}".strip()
 
 
-def render_system_notify_delivery_text(*, notify: SystemNotifyData) -> str:
+def render_system_notify_delivery_text(*, notify: SystemNotifyData, group: Optional[Group] = None) -> str:
     return render_single_message(
         PendingMessage(
             event_id="",
@@ -620,7 +642,7 @@ def render_system_notify_delivery_text(*, notify: SystemNotifyData) -> str:
             kind="system.notify",
             notify_kind=str(notify.kind or "info"),
             notify_title=str(notify.title or ""),
-            notify_message=str(notify.message or ""),
+            notify_message=_render_system_notify_message_for_delivery(notify=notify, group=group),
         )
     )
 
@@ -916,7 +938,7 @@ def emit_system_notify(
 
     headless_control_text = render_headless_control_text(
         control_kind="system_notify",
-        body=render_system_notify_delivery_text(notify=notify),
+        body=render_system_notify_delivery_text(notify=notify, group=group),
     )
 
     for aid in target_actor_ids:
@@ -970,7 +992,7 @@ def emit_system_notify(
             event_id=event_id,
             notify_kind=str(notify.kind),
             title=str(notify.title),
-            message=str(notify.message),
+            message=_render_system_notify_message_for_delivery(notify=notify, group=group),
             ts=event_ts,
         )
         flush_pending_messages(group, actor_id=aid)

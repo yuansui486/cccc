@@ -171,7 +171,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_group_start_ignores_stale_pet_actor_when_no_foreman_exists_yet(self) -> None:
+    def test_group_start_uses_disabled_foreman_as_pet_config_source(self) -> None:
         from cccc.kernel.group import load_group
 
         _, cleanup = self._with_home()
@@ -216,6 +216,52 @@ class TestGroupLifecycleOps(unittest.TestCase):
                 if isinstance(actor, dict)
             ]
             self.assertIn("lead", actor_ids)
+            self.assertIn("pet-peer", actor_ids)
+        finally:
+            cleanup()
+
+    def test_group_start_removes_stale_pet_actor_when_no_foreman_exists(self) -> None:
+        from cccc.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "group-start-stale-pet-no-foreman", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            group = load_group(group_id)
+            assert group is not None
+            group.doc["features"] = {"desktop_pet_enabled": True}
+            actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
+            actors.append(
+                {
+                    "id": "pet-peer",
+                    "title": "Pet Peer",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "command": [],
+                    "env": {},
+                    "enabled": True,
+                    "internal_kind": "pet",
+                }
+            )
+            group.save()
+
+            with self._fake_codex_headless_start():
+                start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
+            self.assertTrue(start.ok, getattr(start, "error", None))
+
+            reloaded = load_group(group_id)
+            assert reloaded is not None
+            actor_ids = [
+                str(actor.get("id") or "").strip()
+                for actor in (reloaded.doc.get("actors") if isinstance(reloaded.doc.get("actors"), list) else [])
+                if isinstance(actor, dict)
+            ]
             self.assertNotIn("pet-peer", actor_ids)
         finally:
             cleanup()

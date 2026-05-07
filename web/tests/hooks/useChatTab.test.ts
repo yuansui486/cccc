@@ -29,6 +29,10 @@ import {
   buildReplySlotTsMap,
   collapseActorStreamingPlaceholders,
   dedupeStreamingEvents,
+  formatSendMessageError,
+  getGroupSendBlockedMessage,
+  getGroupSendBlockedReason,
+  isFormalChatMessageEvent,
   mergeVisibleChatMessages,
   sortChatMessages,
   shouldRestoreDetachedScrollSnapshot,
@@ -37,6 +41,8 @@ import {
 import type { LedgerEvent } from "../../src/types";
 
 void localStorageMock;
+
+const t = (key: string, options?: Record<string, unknown>) => String(options?.defaultValue || key);
 
 function makeStreamingEvent({
   id,
@@ -168,6 +174,70 @@ describe("dedupeStreamingEvents", () => {
       "pending:evt-2:claude-1",
       "stream:commentary-2",
     ]);
+  });
+});
+
+describe("isFormalChatMessageEvent", () => {
+  it("keeps headless streaming events out of the standard chat message list", () => {
+    expect(isFormalChatMessageEvent({
+      id: "stream:commentary-1",
+      kind: "chat.message",
+      by: "coder",
+      _streaming: true,
+      data: {
+        text: "正在排查",
+        stream_id: "commentary-1",
+        to: ["user"],
+      },
+    })).toBe(false);
+
+    expect(isFormalChatMessageEvent({
+      id: "evt-formal-1",
+      kind: "chat.message",
+      by: "coder",
+      data: {
+        text: "正式回复",
+        to: ["user"],
+      },
+    })).toBe(true);
+  });
+});
+
+describe("group send blocked state", () => {
+  it("blocks paused and stopped groups before optimistic send feedback", () => {
+    expect(getGroupSendBlockedReason({
+      lifecycleState: "paused",
+      runtimeRunning: true,
+      actorCount: 2,
+    })).toBe("paused");
+    expect(getGroupSendBlockedReason({
+      lifecycleState: "active",
+      runtimeRunning: false,
+      actorCount: 2,
+    })).toBe("stopped");
+    expect(getGroupSendBlockedReason({
+      lifecycleState: "idle",
+      runtimeRunning: true,
+      actorCount: 2,
+    })).toBeNull();
+  });
+
+  it("maps recipient-resolution failures to group-state recovery copy", () => {
+    expect(getGroupSendBlockedMessage("stopped", t)).toBe(
+      "This group is not running. Start the group before sending a message to agents.",
+    );
+    expect(formatSendMessageError({
+      code: "no_enabled_recipients",
+      message: "No enabled recipients after excluding sender.",
+      groupSendBlockedReason: "paused",
+      t,
+    })).toBe("This group is paused. Resume the group before sending a message to agents.");
+    expect(formatSendMessageError({
+      code: "invalid_recipient",
+      message: "unknown recipient",
+      groupSendBlockedReason: "paused",
+      t,
+    })).toBe("invalid_recipient: unknown recipient");
   });
 });
 

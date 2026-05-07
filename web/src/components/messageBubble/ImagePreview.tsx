@@ -6,6 +6,24 @@ import { CloseIcon, ImageIcon } from "../Icons";
 
 const IMAGE_ASPECT_RATIO_CACHE = new Map<string, number>();
 const IMAGE_LOAD_ERROR_CACHE = new Set<string>();
+const LIGHT_THEME_IMAGE_ENHANCEMENT_STYLE = {
+  filter: "contrast(1.16) brightness(0.97) saturate(1.01)",
+  boxShadow: "0 1px 0 rgba(15,23,42,0.03), 0 0 0 1px rgba(15,23,42,0.04)",
+} as const;
+const LIGHT_IMAGE_CANVAS_STYLE = {
+  backgroundColor: "rgb(245, 245, 245)",
+  backgroundImage:
+    "linear-gradient(45deg, rgba(15,23,42,0.035) 25%, transparent 25%, transparent 75%, rgba(15,23,42,0.035) 75%), linear-gradient(45deg, rgba(15,23,42,0.035) 25%, transparent 25%, transparent 75%, rgba(15,23,42,0.035) 75%)",
+  backgroundPosition: "0 0, 8px 8px",
+  backgroundSize: "16px 16px",
+} as const;
+const DARK_IMAGE_CANVAS_STYLE = {
+  backgroundColor: "rgb(22, 24, 29)",
+  backgroundImage:
+    "linear-gradient(45deg, rgba(255,255,255,0.035) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.035) 75%), linear-gradient(45deg, rgba(255,255,255,0.035) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.035) 75%)",
+  backgroundPosition: "0 0, 8px 8px",
+  backgroundSize: "16px 16px",
+} as const;
 
 export function ImagePreview({
   href,
@@ -13,12 +31,14 @@ export function ImagePreview({
   isSvg,
   isUserMessage,
   isDark,
+  layout = "hero",
 }: {
   href: string;
   alt: string;
   isSvg: boolean;
   isUserMessage: boolean;
   isDark: boolean;
+  layout?: "hero" | "grid";
 }) {
   const [loadError, setLoadError] = useState(() => IMAGE_LOAD_ERROR_CACHE.has(href));
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
@@ -27,6 +47,8 @@ export function ImagePreview({
   const [aspectRatio, setAspectRatio] = useState<number | null>(() => IMAGE_ASPECT_RATIO_CACHE.get(href) ?? null);
   const [displaySrc, setDisplaySrc] = useState<string>(isSvg ? "" : href);
   const { t } = useTranslation("chat");
+  const isGridLayout = layout === "grid";
+  const rasterCanvasStyle = isDark ? DARK_IMAGE_CANVAS_STYLE : LIGHT_IMAGE_CANVAS_STYLE;
 
   useEffect(() => {
     let cancelled = false;
@@ -165,7 +187,7 @@ export function ImagePreview({
         className={classNames(
           "inline-flex max-w-full items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors",
           isUserMessage
-            ? "bg-blue-700/50 text-white border border-blue-500 hover:bg-blue-700"
+            ? "bg-[rgb(35,36,37)]/92 text-white border border-[rgb(35,36,37)] hover:bg-black"
             : isDark
               ? "bg-slate-900/50 text-slate-300 border border-slate-700 hover:bg-slate-900"
               : "bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100",
@@ -184,21 +206,28 @@ export function ImagePreview({
       <button
         type="button"
         className={classNames(
-          "group overflow-hidden rounded-lg",
-          isSvg ? "block" : "inline-flex max-w-[min(22rem,70vw)] sm:max-w-[min(30rem,60vw)]",
+          "group overflow-hidden rounded-xl border transition-colors",
+          isSvg ? "block" : "inline-flex w-full",
+          isGridLayout ? "p-1.5" : "p-2",
+          isUserMessage
+            ? "border-[rgb(35,36,37)]/14 bg-white/10 hover:bg-white/14"
+            : isDark
+              ? "border-white/10 bg-slate-900/45 hover:bg-slate-900/55"
+              : "border-black/8 bg-[rgb(245,247,250)] hover:bg-[rgb(241,244,248)]",
         )}
         onClick={() => setIsLightboxOpen(true)}
         aria-label={t("openImagePreview", { name: alt })}
         title={t("openImagePreview", { name: alt })}
         disabled={isResolvingSvg}
-        style={isSvg ? { width: "12rem", maxWidth: "100%" } : undefined}
+        style={isSvg ? { width: isGridLayout ? "10rem" : "12rem", maxWidth: "100%" } : undefined}
       >
         {isResolvingSvg ? (
           <div
             className={classNames(
-              "flex min-h-28 min-w-28 items-center justify-center rounded-lg border px-4 py-6 text-xs",
+              "flex items-center justify-center rounded-lg border px-4 py-6 text-xs",
+              isGridLayout ? "min-h-32 min-w-32" : "min-h-28 min-w-28",
               isUserMessage
-                ? "border-blue-500/50 bg-blue-700/30 text-blue-50"
+                ? "border-[rgb(35,36,37)]/40 bg-[rgb(35,36,37)]/16 text-white"
                 : "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]",
             )}
           >
@@ -210,21 +239,27 @@ export function ImagePreview({
             alt={alt}
             className={classNames(
               "cursor-zoom-in rounded-lg object-contain transition-opacity group-hover:opacity-95",
-              isSvg ? "block h-auto w-full max-h-64 sm:max-h-80" : "block w-full",
+              isSvg
+                ? classNames("block h-auto w-full", isGridLayout ? "max-h-40" : "max-h-64 sm:max-h-80")
+                : "block h-full w-full",
               isSvg
                 ? null
                 : isUserMessage
-                  ? "bg-blue-700/20"
+                  ? "bg-white"
                   : isDark
-                    ? "bg-slate-900/40"
-                    : "bg-gray-100",
+                    ? "bg-slate-950/80"
+                    : "bg-white shadow-[inset_0_0_0_1px_rgba(15,23,42,0.06)]",
             )}
             style={
               isSvg
                 ? undefined
                 : {
-                    aspectRatio: aspectRatio ?? "4 / 3",
-                    maxHeight: "20rem",
+                    aspectRatio: isGridLayout ? "4 / 3" : (aspectRatio ?? "4 / 3"),
+                    maxHeight: isGridLayout ? "11rem" : "20rem",
+                    ...rasterCanvasStyle,
+                    ...(!isUserMessage && !isDark
+                      ? LIGHT_THEME_IMAGE_ENHANCEMENT_STYLE
+                      : null),
                   }
             }
             loading={isSvg ? "lazy" : "eager"}
@@ -306,6 +341,7 @@ export function ImagePreview({
                   src={displaySrc || resolvedHref || href}
                   alt={alt}
                   className="max-h-[75vh] w-auto max-w-full rounded-xl object-contain"
+                  style={isUserMessage || isDark ? undefined : LIGHT_THEME_IMAGE_ENHANCEMENT_STYLE}
                 />
               </div>
             </div>

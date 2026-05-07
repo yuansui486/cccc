@@ -172,7 +172,9 @@ export function AppModals({
     setPresentationPin,
     clearPresentationSlotAttention,
     setEditingActor,
+    clearContextTask,
   } = useModalStore();
+  const contextTaskId = useModalStore((state) => state.contextTaskId);
 
   const { inboxActorId, inboxMessages, setInboxMessages } = useInboxStore();
   const setQuotedPresentationRef = useComposerStore((state) => state.setQuotedPresentationRef);
@@ -498,7 +500,7 @@ export function AppModals({
     return { toLabel, entries, statusKind: "read" as const };
   }, [actors, messageMetaEvent]);
 
-  const loadActorProfiles = async () => {
+  const loadActorProfiles = useCallback(async () => {
     setActorProfilesBusy(true);
     try {
       const resp = await api.listActorProfiles();
@@ -510,13 +512,18 @@ export function AppModals({
     } finally {
       setActorProfilesBusy(false);
     }
-  };
+  }, [showError, t]);
 
   useEffect(() => {
-    if (!modals.addActor && !editingActor) return;
+    if (modals.addActor) {
+      void loadActorProfiles();
+      return;
+    }
+    const linkedProfileId = String(editingActor?.profile_id || "").trim();
+    if (!linkedProfileId) return;
     void loadActorProfiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modals.addActor, editingActor]);
+  }, [modals.addActor, editingActor?.profile_id, loadActorProfiles]);
 
   // Handlers
   const handleUpdateSettings = async (settings: Partial<GroupSettings>): Promise<boolean> => {
@@ -847,9 +854,11 @@ export function AppModals({
     if (!latest) return;
     const configChanged =
       String(editingActor.profile_id || "").trim() !== String(latest.profile_id || "").trim() ||
+      String(editingActor.profile_scope || "global").trim() !== String(latest.profile_scope || "global").trim() ||
+      String(editingActor.profile_owner || "").trim() !== String(latest.profile_owner || "").trim() ||
       Number(editingActor.profile_revision_applied || 0) !== Number(latest.profile_revision_applied || 0) ||
       String(editingActor.runtime || "").trim() !== String(latest.runtime || "").trim() ||
-      String(editingActor.runner || "").trim() !== String(latest.runner || "").trim() ||
+      getEffectiveActorRunner(editingActor) !== getEffectiveActorRunner(latest) ||
       String(editingActor.title || "") !== String(latest.title || "") ||
       String(Array.isArray(editingActor.command) ? editingActor.command.join("\u0000") : "") !==
         String(Array.isArray(latest.command) ? latest.command.join("\u0000") : "") ||
@@ -1596,11 +1605,11 @@ export function AppModals({
             onClose={() => closeModal("context")}
             groupId={selectedGroupId}
             context={groupContext}
+            initialTaskId={contextTaskId}
+            onInitialTaskHandled={clearContextTask}
             onOpenContext={() => openContextModalData(fetchContext, selectedGroupId)}
             onSyncContext={() => syncContextModalData(fetchContext, selectedGroupId)}
             isDark={isDark}
-            settings={groupSettings}
-            onUpdateSettings={handleUpdateSettings}
           />
         </Suspense>
       ) : null}
@@ -1693,6 +1702,7 @@ export function AppModals({
         linkedProfileOwner={String(editingActor?.profile_owner || "").trim() || undefined}
         actorProfiles={actorProfiles}
         actorProfilesBusy={actorProfilesBusy}
+        onRequestActorProfiles={loadActorProfiles}
         onSaveAsProfile={handleSaveEditActorAsProfile}
         onAvatarChanged={refreshActors}
         onCancel={handleCancelEditActor}

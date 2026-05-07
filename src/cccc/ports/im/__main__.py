@@ -24,7 +24,7 @@ def main() -> int:
         print("  Feishu/Lark: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_DOMAIN (optional: feishu|lark|https://...)")
         print("  DingTalk: DINGTALK_APP_KEY, DINGTALK_APP_SECRET, DINGTALK_ROBOT_CODE (optional)")
         print("  WeCom:    WECOM_BOT_ID, WECOM_SECRET")
-        print("  Weixin:   optional CCCC_IM_WEIXIN_ACCOUNT_ID")
+        print("  Weixin:   optional CCCC_IM_WEIXIN_ACCOUNT_ID (legacy only; login uses per-group cached credentials)")
         return 1
 
     group_id = sys.argv[1]

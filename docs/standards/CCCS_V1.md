@@ -101,7 +101,7 @@ interface CCCSEventV1 {
 
 ### 4.4 Event Kind Namespaces
 
-Standard kinds use the `chat.*`, `system.*`, `group.*`, `actor.*`, and `context.*` namespaces.
+Standard kinds use the `chat.*`, `system.*`, `group.*`, `actor.*`, `context.*`, and `assistant.*` namespaces.
 
 Extensions SHOULD use one of:
 - `x.<vendor>.*` (recommended for private/vendor-specific kinds)
@@ -326,6 +326,13 @@ type ReferenceV1 =
       }
       // extra fields MAY exist; clients MUST ignore unknown fields
     }
+  | {
+      kind: "task_ref"
+      task_id: string
+      title?: string
+      status?: "planned" | "active" | "done" | "archived" | string
+      // extra fields MAY exist; clients MUST ignore unknown fields
+    }
 ```
 
 **Rules**
@@ -338,6 +345,9 @@ type ReferenceV1 =
     - `snapshot.path` MUST be a stable group-scoped blob path.
     - Implementations SHOULD use `locator` for precise recovery when possible, and `snapshot` as a visual fallback when precise recovery is unavailable.
   - `status`, when present, is advisory metadata for the referenced discussion state; ledger-derived obligation status remains authoritative.
+- `kind="task_ref"` links a chat message to a durable shared task.
+  - `task_id` MUST identify a task in the same working group unless explicitly documented otherwise by a relay/bridge.
+  - `title` and `status`, when present, are UI hints; the task store remains authoritative.
 
 ### 8.3 Attachment Resolution (Non‑Normative Guidance)
 

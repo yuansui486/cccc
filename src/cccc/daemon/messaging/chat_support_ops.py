@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable, Dict
+import time
+from typing import Any, Callable, Dict, Optional
+
+
+_HEADLESS_POST_WAKE_LOCK = threading.Lock()
+_HEADLESS_POST_WAKE_IN_FLIGHT: set[tuple[str, str, str]] = set()
 
 
 def auto_wake_recipients(
@@ -27,9 +32,10 @@ def auto_wake_recipients(
 ) -> list[str]:
     """Best-effort background auto-start for recipients that are unavailable.
 
-    Returns the actor IDs accepted for wake-up scheduling. Actual startup and
-    enabling happen asynchronously so chat send/reply latency does not include
-    runtime boot cost.
+    Returns the actor IDs accepted for wake-up scheduling. If a wake for the
+    same actor is already in progress, return that actor ID again so callers can
+    still register post-wake delivery for the current message without starting a
+    duplicate runtime boot.
     """
     scheduled: list[str] = []
     candidate_ids: list[str] = []
@@ -57,6 +63,7 @@ def auto_wake_recipients(
             continue
         with auto_wake_lock:
             if key in auto_wake_in_progress:
+                scheduled.append(actor_id)
                 continue
             auto_wake_in_progress.add(key)
         actor = find_actor(group, actor_id)
@@ -140,6 +147,117 @@ def auto_wake_recipients(
         )
         thread.start()
     return scheduled
+
+
+def schedule_headless_post_wake_delivery(
+    *,
+    group_id: str,
+    actor_id: str,
+    runtime: str,
+    text: str,
+    event_id: str,
+    ts: str = "",
+    reply_to: Optional[str] = None,
+    attachments: Optional[list[dict[str, Any]]] = None,
+    codex_actor_running: Callable[[str, str], bool],
+    claude_actor_running: Callable[[str, str], bool],
+    codex_submit_user_message: Callable[..., bool],
+    claude_submit_user_message: Callable[..., bool],
+    logger: logging.Logger,
+    timeout_seconds: float = 30.0,
+    poll_seconds: float = 0.2,
+) -> bool:
+    """Best-effort post-wake replay for headless chat delivery.
+
+    The current send/reply flow appends the canonical chat event immediately,
+    but a stopped headless actor cannot accept `submit_user_message(...)` yet.
+    This helper waits for the freshly auto-started headless runtime to become
+    running, then re-submits the exact canonical message payload once.
+    """
+
+    normalized_group_id = str(group_id or "").strip()
+    normalized_actor_id = str(actor_id or "").strip()
+    normalized_event_id = str(event_id or "").strip()
+    normalized_runtime = str(runtime or "").strip().lower()
+    clean_text = str(text or "")
+    clean_ts = str(ts or "").strip()
+    clean_reply_to = str(reply_to or "").strip() or None
+    clean_attachments = [item for item in (attachments or []) if isinstance(item, dict)]
+    if not normalized_group_id or not normalized_actor_id or not normalized_event_id:
+        return False
+    if normalized_runtime not in {"codex", "claude"}:
+        return False
+    if not clean_text.strip():
+        return False
+
+    key = (normalized_group_id, normalized_actor_id, normalized_event_id)
+    with _HEADLESS_POST_WAKE_LOCK:
+        if key in _HEADLESS_POST_WAKE_IN_FLIGHT:
+            return False
+        _HEADLESS_POST_WAKE_IN_FLIGHT.add(key)
+
+    def _actor_running() -> bool:
+        if normalized_runtime == "claude":
+            return bool(claude_actor_running(normalized_group_id, normalized_actor_id))
+        return bool(codex_actor_running(normalized_group_id, normalized_actor_id))
+
+    def _submit() -> bool:
+        if normalized_runtime == "claude":
+            return bool(
+                claude_submit_user_message(
+                    group_id=normalized_group_id,
+                    actor_id=normalized_actor_id,
+                    text=clean_text,
+                    event_id=normalized_event_id,
+                    ts=clean_ts,
+                    reply_to=clean_reply_to,
+                    attachments=clean_attachments,
+                )
+            )
+        return bool(
+            codex_submit_user_message(
+                group_id=normalized_group_id,
+                actor_id=normalized_actor_id,
+                text=clean_text,
+                event_id=normalized_event_id,
+                ts=clean_ts,
+                reply_to=clean_reply_to,
+                attachments=clean_attachments,
+            )
+        )
+
+    def _worker() -> None:
+        deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+        try:
+            while time.monotonic() < deadline:
+                if _actor_running() and _submit():
+                    return
+                time.sleep(max(0.05, float(poll_seconds)))
+            logger.info(
+                "[headless-post-wake] timed out group=%s actor=%s event=%s runtime=%s",
+                normalized_group_id,
+                normalized_actor_id,
+                normalized_event_id,
+                normalized_runtime,
+            )
+        except Exception:
+            logger.exception(
+                "[headless-post-wake] failed group=%s actor=%s event=%s runtime=%s",
+                normalized_group_id,
+                normalized_actor_id,
+                normalized_event_id,
+                normalized_runtime,
+            )
+        finally:
+            with _HEADLESS_POST_WAKE_LOCK:
+                _HEADLESS_POST_WAKE_IN_FLIGHT.discard(key)
+
+    threading.Thread(
+        target=_worker,
+        name=f"cccc-headless-post-wake-{normalized_group_id}-{normalized_actor_id}-{normalized_event_id[:8]}",
+        daemon=True,
+    ).start()
+    return True
 
 
 def normalize_attachments(

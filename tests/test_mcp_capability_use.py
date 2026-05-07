@@ -230,12 +230,15 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="skill:anthropic:triage",
+                scope="actor",
                 tool_name="",
                 tool_arguments={},
             )
 
         self.assertTrue(bool(result.get("enabled")))
         self.assertFalse(bool(result.get("tool_called")))
+        self.assertEqual(str(result.get("scope") or ""), "actor")
+        self.assertEqual(str(result.get("requested_scope") or ""), "actor")
         skill_payload = result.get("skill") if isinstance(result.get("skill"), dict) else {}
         self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:anthropic:triage")
         self.assertEqual(str(result.get("skill_mode") or ""), "capsule_runtime")
@@ -248,6 +251,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertIn("Codex's skills directory", str(result.get("next_step_hint") or ""))
         self.assertIn("CODEX_HOME", str(result.get("next_step_hint") or ""))
         enable_mock.assert_called_once()
+        self.assertEqual(str(enable_mock.call_args.kwargs.get("scope") or ""), "actor")
         call_mock.assert_not_called()
 
     def test_capability_use_skill_failure_contains_runtime_contract_fields(self) -> None:
@@ -271,6 +275,8 @@ class TestMcpCapabilityUse(unittest.TestCase):
             )
 
         self.assertFalse(bool(result.get("enabled")))
+        self.assertEqual(str(result.get("scope") or ""), "session")
+        self.assertEqual(str(result.get("requested_scope") or ""), "session")
         self.assertEqual(str(result.get("skill_mode") or ""), "capsule_runtime")
         self.assertFalse(bool(result.get("full_local_skill_equivalent")))
         self.assertFalse(bool(result.get("dynamic_tools_expected")))
@@ -279,6 +285,46 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertIn("active_capsule_skills", str(result.get("runtime_activation_evidence") or ""))
         self.assertIn("Codex's skills directory", str(result.get("next_step_hint") or ""))
         self.assertIn("CODEX_HOME", str(result.get("next_step_hint") or ""))
+
+    def test_capability_use_legacy_self_proposed_skill_points_to_migration_path(self) -> None:
+        from cccc.ports.mcp.server import capability_use
+
+        with patch(
+            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            return_value={
+                "state": "blocked",
+                "enabled": False,
+                "reason": "legacy_agent_self_proposed_namespace",
+                "diagnostics": [
+                    {
+                        "code": "legacy_agent_self_proposed_namespace",
+                        "message": "legacy self-proposed skill id",
+                        "retryable": False,
+                        "action_hints": [
+                            "reimport_the_capsule_under_skill_agent_self_proposed_stable_slug",
+                            "call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration",
+                        ],
+                    }
+                ],
+            },
+        ):
+            result = capability_use(
+                group_id="g1",
+                by="peer-1",
+                actor_id="peer-1",
+                capability_id="skill:agent:legacy-self-proposed",
+                tool_name="",
+                tool_arguments={},
+            )
+
+        self.assertFalse(bool(result.get("enabled")))
+        diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), list) else []
+        self.assertTrue(diagnostics)
+        plan = result.get("resolution_plan") if isinstance(result.get("resolution_plan"), dict) else {}
+        self.assertEqual(str(plan.get("status") or ""), "needs_agent_action")
+        actions = plan.get("agent_actions") if isinstance(plan.get("agent_actions"), list) else []
+        self.assertIn("reimport_the_capsule_under_skill_agent_self_proposed_stable_slug", actions)
+        self.assertIn("call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration", actions)
 
     def test_capability_use_builtin_runtime_bootstrap_inproc_enables_skill_and_dependencies(self) -> None:
         from cccc.contracts.v1 import DaemonRequest
@@ -586,6 +632,8 @@ class TestMcpCapabilityUse(unittest.TestCase):
         enable_mock.assert_not_called()
         self.assertTrue(bool(result.get("tool_called")))
         self.assertTrue(bool(result.get("reused_existing_binding")))
+        self.assertEqual(str(result.get("scope") or ""), "session")
+        self.assertEqual(str(result.get("requested_scope") or ""), "session")
         self.assertFalse(bool(result.get("refresh_required")))
 
     def test_mcp_router_capability_use_accepts_actor_id_without_by(self) -> None:

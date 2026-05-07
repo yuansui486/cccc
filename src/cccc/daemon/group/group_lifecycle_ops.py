@@ -20,6 +20,11 @@ from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
 from ..actors.actor_profile_runtime import resolve_linked_actor_before_start
 from ..actors.actor_runtime_ops import resolve_actor_launch_spec
+from ..assistants.voice_secretary_runtime_ops import (
+    capture_voice_secretary_actor_state,
+    restore_voice_secretary_actor_state,
+    sync_voice_secretary_actor_from_foreman,
+)
 from ..pet.pet_runtime_ops import capture_pet_actor_state, restore_pet_actor_state, sync_pet_actor_from_foreman
 from ..pet.review_scheduler import cancel_pet_review, request_pet_review
 from ..pet.profile_refresh import maybe_request_pet_profile_refresh
@@ -96,7 +101,30 @@ def handle_group_start(
             try:
                 restore_pet_actor_state(
                     group,
-                    None if str(e).strip() == "desktop pet requires an enabled foreman actor" else pet_state_before,
+                    None if str(e).strip() == "desktop pet requires a foreman actor" else pet_state_before,
+                    update_actor_private_env=update_actor_private_env,
+                    delete_actor_private_env=delete_actor_private_env,
+                )
+            except Exception:
+                pass
+        voice_state_before = capture_voice_secretary_actor_state(group, load_actor_private_env=load_actor_private_env)
+        try:
+            sync_voice_secretary_actor_from_foreman(
+                group,
+                effective_runner_kind=effective_runner_kind,
+                load_actor_private_env=load_actor_private_env,
+                update_actor_private_env=update_actor_private_env,
+                delete_actor_private_env=delete_actor_private_env,
+                resolve_linked_actor_before_start=resolve_before_start,
+                caller_id=str(args.get("caller_id") or "").strip(),
+                is_admin=coerce_bool(args.get("is_admin"), default=False),
+            )
+        except Exception as e:
+            logger.warning("Voice Secretary actor sync skipped for %s during group start: %s", group.group_id, e)
+            try:
+                restore_voice_secretary_actor_state(
+                    group,
+                    None if str(e).strip() == "voice secretary requires a foreman actor" else voice_state_before,
                     update_actor_private_env=update_actor_private_env,
                     delete_actor_private_env=delete_actor_private_env,
                 )

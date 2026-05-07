@@ -171,7 +171,7 @@ def sync_pet_actor_from_foreman(
     source = require_pet_foreman(group)
     source_id = str(source.get("id") or "").strip()
     if not source_id:
-        raise ValueError("desktop pet requires an enabled foreman actor")
+        raise ValueError("desktop pet requires a foreman actor")
 
     resolved_caller_id = str(caller_id or "").strip()
     if not resolved_caller_id:

@@ -1,14 +1,15 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from "@floating-ui/react";
 import { useTranslation } from "react-i18next";
-import { LedgerEvent, Actor, AgentState, getActorAccentColor, ChatMessageData, MessageAttachment, PresentationMessageRef, StreamingActivity } from "../types";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
+import { LedgerEvent, Actor, AgentState, Task, getActorAccentColor, ChatMessageData, MessageAttachment, PresentationMessageRef, TaskMessageRef } from "../types";
 import { formatFullTime, formatMessageTimestamp, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
 import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
-import { getAttachmentAwareMessageText, hasRenderableAttachmentSource, normalizeAttachmentPath } from "../utils/messageAttachments";
-import { selectStreamingReplySession, useGroupStore } from "../stores";
+import { getTaskMessageRefs, getTaskRefChipLabel, getTaskRefStateKey, type TaskRefStateKey } from "../utils/taskRefs";
+import { isRedundantWecomImagePlaceholder } from "../utils/messageAttachments";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
 import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
 import { withAuthToken } from "../services/api/base";
@@ -21,34 +22,38 @@ import {
 } from "./messageBubble/model";
 import { ActorAvatar } from "./ActorAvatar";
 import {
-    StreamingMessageBody,
-} from "./messageBubble/StreamingMessageBody";
-import {
     formatEventLine,
     getMessageBubbleMotionClass,
-    isQueuedOnlyStreamingPlaceholder,
     mayContainMarkdown,
-    normalizeStreamingActivities,
 } from "./messageBubble/helpers";
+import { LazyMarkdownRenderer } from "./LazyMarkdownRenderer";
 
-const LazyMarkdownRenderer = lazy(() =>
-    import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer }))
-);
+const ANIMATED_MESSAGE_BUBBLE_KEYS = new Set<string>();
+const NEW_MESSAGE_ANIMATION_WINDOW_MS = 12000;
 
-const TYPING_DOT_STYLE_ID = "cccc-message-bubble-typing-dot-style";
-function ensureTypingDotStyle(): void {
-    if (typeof document === "undefined") return;
-    if (document.getElementById(TYPING_DOT_STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = TYPING_DOT_STYLE_ID;
-    style.textContent = `
-      @keyframes ccccMessageTypingDot {
-        0%, 70%, 100% { transform: translateY(0) scale(0.92); opacity: 0.28; }
-        35% { transform: translateY(-3px) scale(1); opacity: 0.95; }
-      }
-    `;
-    document.head.appendChild(style);
-}
+const TASK_REF_STATE_TONE_CLASS: Record<TaskRefStateKey, string> = {
+    planned: "border-slate-300/70 bg-slate-100/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-300",
+    active: "border-emerald-300/70 bg-emerald-100/90 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/12 dark:text-emerald-300",
+    handoff: "border-sky-300/70 bg-sky-100/90 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/12 dark:text-sky-300",
+    waiting_user: "border-amber-300/70 bg-amber-100/90 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/12 dark:text-amber-300",
+    blocked: "border-rose-300/70 bg-rose-100/90 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/12 dark:text-rose-300",
+    done: "border-emerald-300/60 bg-emerald-50/95 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300",
+    archived: "border-slate-300/70 bg-slate-100/90 text-slate-600 dark:border-white/10 dark:bg-white/[0.07] dark:text-slate-400",
+    linked: "border-slate-300/70 bg-slate-100/90 text-slate-700 dark:border-white/10 dark:bg-white/[0.08] dark:text-slate-300",
+};
+
+const TASK_REF_STATE_DOT_CLASS: Record<TaskRefStateKey, string> = {
+    planned: "bg-slate-400/90 dark:bg-slate-400",
+    active: "bg-emerald-500 dark:bg-emerald-400",
+    handoff: "bg-sky-500 dark:bg-sky-400",
+    waiting_user: "bg-amber-500 dark:bg-amber-400",
+    blocked: "bg-rose-500 dark:bg-rose-400",
+    done: "bg-emerald-500 dark:bg-emerald-400",
+    archived: "bg-slate-400/90 dark:bg-slate-500",
+    linked: "bg-slate-400/90 dark:bg-slate-400",
+};
+
+const EMPTY_TASK_BY_ID = new Map<string, Task>();
 
 function buildSenderAvatarUrl(groupId: string, senderAvatarPath?: string): string {
     const gid = String(groupId || "").trim();
@@ -57,6 +62,25 @@ function buildSenderAvatarUrl(groupId: string, senderAvatarPath?: string): strin
     const blobName = relPath.split("/").pop() || "";
     if (!blobName) return "";
     return withAuthToken(`/api/v1/groups/${encodeURIComponent(gid)}/blobs/${encodeURIComponent(blobName)}`);
+}
+
+function shouldAnimateIncomingBubble(messageKey: string, eventTs?: string): boolean {
+    const stableKey = String(messageKey || "").trim();
+    if (!stableKey || ANIMATED_MESSAGE_BUBBLE_KEYS.has(stableKey)) return false;
+
+    const parsedTs = Date.parse(String(eventTs || "").trim());
+    if (!Number.isFinite(parsedTs)) {
+        ANIMATED_MESSAGE_BUBBLE_KEYS.add(stableKey);
+        return false;
+    }
+
+    if (Math.abs(Date.now() - parsedTs) > NEW_MESSAGE_ANIMATION_WINDOW_MS) {
+        ANIMATED_MESSAGE_BUBBLE_KEYS.add(stableKey);
+        return false;
+    }
+
+    ANIMATED_MESSAGE_BUBBLE_KEYS.add(stableKey);
+    return true;
 }
 
 function PlainMessageText({
@@ -69,7 +93,7 @@ function PlainMessageText({
     return (
         <div
             className={classNames(
-                "break-words whitespace-pre-wrap [overflow-wrap:anywhere]",
+                "break-words whitespace-pre-wrap text-[var(--color-text-primary)] [overflow-wrap:anywhere]",
                 className
             )}
         >
@@ -78,33 +102,17 @@ function PlainMessageText({
     );
 }
 
-async function copyText(value: string): Promise<boolean> {
-    const text = String(value || "");
-    if (!text.trim()) return false;
-    try {
-        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-        }
-    } catch {
-        // Fall through to the prompt fallback below.
-    }
-    if (typeof window !== "undefined" && typeof window.prompt === "function") {
-        window.prompt("Copy to clipboard:", text);
-        return true;
-    }
-    return false;
-}
-
 function buildMessageCopyText({
     quoteText,
     messageText,
     presentationRefs,
+    taskRefs,
     attachments,
 }: {
     quoteText?: string;
     messageText: string;
     presentationRefs: PresentationMessageRef[];
+    taskRefs: TaskMessageRef[];
     attachments: { title: string; path: string }[];
 }): string {
     const sections: string[] = [];
@@ -121,6 +129,12 @@ function buildMessageCopyText({
         sections.push([
             "Presentation refs:",
             ...presentationRefs.map((ref) => `- ${getPresentationRefChipLabel(ref)}`),
+        ].join("\n"));
+    }
+    if (taskRefs.length > 0) {
+        sections.push([
+            "Tasks:",
+            ...taskRefs.map((ref) => `- ${getTaskRefChipLabel(ref)}`),
         ].join("\n"));
     }
     if (attachments.length > 0) {
@@ -142,8 +156,8 @@ function MessageBubbleBody({
     event,
     isUserMessage,
     isDark,
-    groupId,
     groupLabelById,
+    toLabel,
     hasSource,
     srcGroupId,
     srcEventId,
@@ -152,27 +166,25 @@ function MessageBubbleBody({
     dstTo,
     relayChipClass,
     quoteText,
+    replyToEventId,
     presentationRefs,
-    isStreaming,
-    streamingActivities,
-    streamId,
-    actorId,
-    pendingEventId,
+    taskRefs,
+    taskById = EMPTY_TASK_BY_ID,
     messageText,
-    isQueuedOnlyPlaceholder,
-    streamingPlaceholderLabel,
     shouldRenderMarkdown,
-    renderableAttachments,
+    blobAttachments,
     blobGroupId,
     stableMessageAttachmentKey,
     onOpenSource,
     onOpenPresentationRef,
+    onOpenTaskRef,
+    onOpenReplyTarget,
 }: {
     event: LedgerEvent;
     isUserMessage: boolean;
     isDark: boolean;
-    groupId: string;
     groupLabelById: Record<string, string>;
+    toLabel: string;
     hasSource: boolean;
     srcGroupId: string;
     srcEventId: string;
@@ -181,82 +193,136 @@ function MessageBubbleBody({
     dstTo: string[];
     relayChipClass: string;
     quoteText?: string;
+    replyToEventId?: string;
     presentationRefs: PresentationMessageRef[];
-    isStreaming: boolean;
-    streamingActivities: StreamingActivity[];
-    streamId: string;
-    actorId: string;
-    pendingEventId: string;
+    taskRefs: TaskMessageRef[];
+    taskById?: Map<string, Task>;
     messageText: string;
-    isQueuedOnlyPlaceholder: boolean;
-    streamingPlaceholderLabel: string;
     shouldRenderMarkdown: boolean;
-    renderableAttachments: Array<{
+    blobAttachments: Array<{
         kind: string;
         path: string;
         title: string;
         bytes: number;
         mime_type: string;
         local_preview_url: string;
-        download_url: string;
     }>;
     blobGroupId: string;
     stableMessageAttachmentKey: string;
     onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
     onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
+    onOpenTaskRef?: (ref: TaskMessageRef, event: LedgerEvent) => void;
+    onOpenReplyTarget?: (replyToEventId: string) => void;
 }) {
     const { t } = useTranslation("chat");
+    const effectiveTaskById = taskById ?? EMPTY_TASK_BY_ID;
+    const canJumpToReplyTarget = !!(replyToEventId && onOpenReplyTarget);
+    const quoteClassName = classNames(
+        "rounded-2xl border px-3 py-2 text-[12px] leading-5",
+        "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]"
+    );
+    const metaChipClass = classNames(
+        "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+        "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]"
+    );
+    const normalizedToLabel = String(toLabel || "").trim();
+    const supportingSectionClass = classNames(
+        "mt-3 border-t pt-3",
+        "border-[var(--glass-border-subtle)]"
+    );
+    const taskStateLabels: Record<TaskRefStateKey, string> = {
+        planned: t("taskRefStatePlanned", { defaultValue: "Planned" }),
+        active: t("taskRefStateActive", { defaultValue: "Active" }),
+        handoff: t("taskRefStateHandoff", { defaultValue: "Handoff" }),
+        waiting_user: t("taskRefStateWaitingUser", { defaultValue: "Waiting user" }),
+        blocked: t("taskRefStateBlocked", { defaultValue: "Blocked" }),
+        done: t("taskRefStateDone", { defaultValue: "Done" }),
+        archived: t("taskRefStateArchived", { defaultValue: "Archived" }),
+        linked: t("taskRefStateLinked", { defaultValue: "Linked" }),
+    };
 
     return (
         <>
-            {hasSource ? (
-                <button
-                    type="button"
-                    className={classNames(
-                        "mb-2 inline-flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 border",
-                        relayChipClass,
-                        onOpenSource ? "cursor-pointer" : "cursor-default"
-                    )}
-                    onClick={() => onOpenSource?.(srcGroupId, srcEventId)}
-                    disabled={!onOpenSource}
-                    title={t("openOriginalMessage")}
-                >
-                    <span className="opacity-70">↗</span>
-                    <span className="truncate">
-                        {t("relayedFrom", { groupId: srcGroupId, eventId: srcEventId.slice(0, 8) })}
-                    </span>
-                </button>
-            ) : null}
-
-            {hasDestination ? (() => {
-                const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
-                const dstToLabel = dstTo.length > 0 ? dstTo.join(", ") : "@all";
-                return (
-                    <div
-                        className={classNames(
-                            "mb-2 inline-flex items-center gap-2 text-xs font-medium rounded-lg px-2 py-1 border",
-                            relayChipClass
-                        )}
-                        title={t("sentTo", { label: dstGroupId, to: dstToLabel })}
-                    >
-                        <span className="opacity-70">↗</span>
-                        <span className="truncate">
-                            {t("sentTo", { label: dstLabel, to: dstToLabel })}
+            {(normalizedToLabel || hasSource || hasDestination) ? (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                    {normalizedToLabel ? (
+                        <span className={metaChipClass} title={normalizedToLabel}>
+                            <span className="opacity-55">{t("to")}</span>
+                            <span className="truncate">{normalizedToLabel}</span>
                         </span>
-                    </div>
-                );
-            })() : null}
-
-            {quoteText ? (
-                <div
-                    className={`mb-2 text-xs border-l-2 pl-2 italic truncate opacity-80 ${isUserMessage ? "border-blue-400" : "border-[var(--glass-border-subtle)]"}`}
-                >
-                    "{quoteText}"
+                    ) : null}
+                    {hasSource ? (
+                        <button
+                            type="button"
+                            className={classNames(
+                                metaChipClass,
+                                relayChipClass,
+                                onOpenSource ? "cursor-pointer transition-colors hover:opacity-100" : "cursor-default"
+                            )}
+                            onClick={() => onOpenSource?.(srcGroupId, srcEventId)}
+                            disabled={!onOpenSource}
+                            title={t("openOriginalMessage")}
+                        >
+                            <span className="opacity-65">↗</span>
+                            <span className="truncate">
+                                {t("relayedFrom", { groupId: srcGroupId, eventId: srcEventId.slice(0, 8) })}
+                            </span>
+                        </button>
+                    ) : null}
+                    {hasDestination ? (() => {
+                        const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
+                        const dstToLabel = dstTo.length > 0 ? dstTo.join(", ") : "@all";
+                        return (
+                            <div
+                                className={classNames(metaChipClass, relayChipClass)}
+                                title={t("sentTo", { label: dstGroupId, to: dstToLabel })}
+                            >
+                                <span className="opacity-65">↗</span>
+                                <span className="truncate">
+                                    {t("sentTo", { label: dstLabel, to: dstToLabel })}
+                                </span>
+                            </div>
+                        );
+                    })() : null}
                 </div>
             ) : null}
 
+            {quoteText ? (
+                canJumpToReplyTarget ? (
+                    <button
+                        type="button"
+                        className={classNames(
+                            quoteClassName,
+                            "mb-3 block w-full cursor-pointer appearance-none bg-transparent text-left text-inherit transition-opacity hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(35,36,37)]/20 dark:focus-visible:ring-white/25"
+                        )}
+                        onClick={(mouseEvent) => {
+                            mouseEvent.stopPropagation();
+                            onOpenReplyTarget?.(String(replyToEventId || ""));
+                        }}
+                        title={t("jumpToRepliedMessage")}
+                        aria-label={t("jumpToRepliedMessage")}
+                    >
+                        <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] opacity-55">
+                            {t("reply")}
+                        </span>
+                        <span className="block">"{quoteText}"</span>
+                    </button>
+                ) : (
+                    <div className={classNames(quoteClassName, "mb-3")}>
+                        <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] opacity-55">
+                            {t("reply")}
+                        </span>
+                        <span className="block">"{quoteText}"</span>
+                    </div>
+                )
+            ) : null}
+
             {presentationRefs.length > 0 ? (
-                <div className="mb-2 flex flex-wrap gap-1.5">
+                <div className={supportingSectionClass}>
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] opacity-50">
+                        {t("presentation")}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
                     {presentationRefs.map((ref, index) => (
                         <button
                             key={`${String(event.id || "message")}:presentation-ref:${index}:${String(ref.slot_id || "")}`}
@@ -264,104 +330,99 @@ function MessageBubbleBody({
                             onClick={() => onOpenPresentationRef?.(ref, event)}
                             className={classNames(
                                 "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                                isUserMessage
-                                    ? "border-white/15 bg-white/10 text-white hover:bg-white/15"
-                                    : "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                                "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
                             )}
                             title={getPresentationRefChipLabel(ref)}
                         >
                             <span className="truncate">{getPresentationRefChipLabel(ref)}</span>
                         </button>
                     ))}
+                    </div>
+                </div>
+            ) : null}
+
+            {taskRefs.length > 0 ? (
+                <div className={supportingSectionClass}>
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] opacity-50">
+                        {t("task", { defaultValue: "Task" })}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {taskRefs.map((ref, index) => {
+                            const taskId = String(ref.task_id || "").trim();
+                            const liveTask = taskId ? (effectiveTaskById.get(taskId) || null) : null;
+                            const stateKey = getTaskRefStateKey(ref, liveTask);
+                            const stateLabel = taskStateLabels[stateKey];
+                            const chipLabel = getTaskRefChipLabel(ref, liveTask);
+                            return (
+                                <button
+                                    key={`${String(event.id || "message")}:task-ref:${index}:${taskId}`}
+                                    type="button"
+                                    onClick={() => onOpenTaskRef?.(ref, event)}
+                                    className={classNames(
+                                        "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                                        "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                                    )}
+                                    title={`${chipLabel} · ${stateLabel}`}
+                                >
+                                    <span className={classNames("h-1.5 w-1.5 rounded-full", TASK_REF_STATE_DOT_CLASS[stateKey])} aria-hidden="true" />
+                                    <span className="truncate">{chipLabel}</span>
+                                    <span
+                                        className={classNames(
+                                            "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                                            TASK_REF_STATE_TONE_CLASS[stateKey]
+                                        )}
+                                    >
+                                        {stateLabel}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             ) : null}
 
             <MessageContent
-                isStreaming={isStreaming}
-                groupId={groupId}
-                streamId={streamId}
-                actorId={actorId}
-                pendingEventId={pendingEventId}
                 fallbackText={messageText}
-                streamingActivities={streamingActivities}
-                isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
-                streamingPlaceholderLabel={streamingPlaceholderLabel}
                 shouldRenderMarkdown={shouldRenderMarkdown}
                 isDark={isDark}
-                isUserMessage={isUserMessage}
             />
 
             <MessageAttachments
-                attachments={renderableAttachments}
+                attachments={blobAttachments}
                 blobGroupId={blobGroupId}
                 isUserMessage={isUserMessage}
                 isDark={isDark}
                 attachmentKeyPrefix={stableMessageAttachmentKey}
                 downloadTitle={(name) => t("download", { name })}
+                sectionClassName={supportingSectionClass}
             />
         </>
     );
 }
 
 function MessageContent({
-    isStreaming,
-    groupId,
-    streamId,
-    actorId,
-    pendingEventId,
     fallbackText,
-    streamingActivities,
-    isQueuedOnlyPlaceholder,
-    streamingPlaceholderLabel,
     shouldRenderMarkdown,
     isDark,
-    isUserMessage,
 }: {
-    isStreaming: boolean;
-    groupId: string;
-    streamId: string;
-    actorId: string;
-    pendingEventId: string;
     fallbackText: string;
-    streamingActivities: StreamingActivity[];
-    isQueuedOnlyPlaceholder: boolean;
-    streamingPlaceholderLabel: string;
     shouldRenderMarkdown: boolean;
     isDark: boolean;
-    isUserMessage: boolean;
 }) {
-    if (isStreaming) {
-        return (
-            <StreamingMessageBody
-                groupId={groupId}
-                streamId={streamId}
-                actorId={actorId}
-                pendingEventId={pendingEventId}
-                fallbackText={fallbackText}
-                streamingActivities={streamingActivities}
-                isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
-                streamingPlaceholderLabel={streamingPlaceholderLabel}
-            />
-        );
-    }
-
     if (shouldRenderMarkdown) {
         return (
-            <Suspense
+            <LazyMarkdownRenderer
+                content={fallbackText}
+                isDark={isDark}
+                invertText={false}
+                className="max-w-full break-words text-[var(--color-text-primary)] [overflow-wrap:anywhere]"
                 fallback={
                     <PlainMessageText
                         text={fallbackText}
                         className="max-w-full"
                     />
                 }
-            >
-                <LazyMarkdownRenderer
-                    content={fallbackText}
-                    isDark={isDark}
-                    invertText={isUserMessage}
-                    className="break-words [overflow-wrap:anywhere] max-w-full"
-                />
-            </Suspense>
+            />
         );
     }
 
@@ -470,6 +531,7 @@ export interface MessageBubbleProps {
     actors: Actor[];
     displayNameMap: Map<string, string>;
     agentState: AgentState | null;
+    taskById?: Map<string, Task>;
     isDark: boolean;
     readOnly?: boolean;
     groupId: string;
@@ -483,6 +545,8 @@ export interface MessageBubbleProps {
     onRelay?: (ev: LedgerEvent) => void;
     onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
     onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
+    onOpenTaskRef?: (ref: TaskMessageRef, event: LedgerEvent) => void;
+    onOpenReplyTarget?: (replyToEventId: string) => void;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -491,6 +555,7 @@ export const MessageBubble = memo(function MessageBubble({
     actors,
     displayNameMap,
     agentState,
+    taskById = EMPTY_TASK_BY_ID,
     isDark,
     readOnly,
     groupId,
@@ -504,14 +569,13 @@ export const MessageBubble = memo(function MessageBubble({
     onRelay,
     onOpenSource,
     onOpenPresentationRef,
+    onOpenTaskRef,
+    onOpenReplyTarget,
 }: MessageBubbleProps) {
     const isUserMessage = ev.by === "user";
     const isOptimistic = !!(ev.data as Record<string, unknown> | undefined)?._optimistic;
     const senderAccent = !isUserMessage ? getActorAccentColor(String(ev.by || ""), isDark) : null;
     const isStreaming = !!ev._streaming;
-    const streamId = ev.data && typeof ev.data === "object"
-        ? String((ev.data as { stream_id?: unknown }).stream_id || "").trim()
-        : "";
     const canReply = !!getReplyEventId(ev);
     const messageText = useMemo(() => formatEventLine(ev), [ev]);
 
@@ -542,10 +606,8 @@ export const MessageBubble = memo(function MessageBubble({
     }, [ev.by, isUserMessage]);
 
     const { t } = useTranslation('chat');
+    const copyWithFeedback = useCopyFeedback();
 
-    useEffect(() => {
-        ensureTypingDotStyle();
-    }, []);
     const agentStateText = String(agentState?.hot?.focus || "").trim();
     const agentStateDisplay = agentStateText || t('noAgentStateYet');
     const stateTask = String(agentState?.hot?.active_task_id || "").trim();
@@ -557,6 +619,7 @@ export const MessageBubble = memo(function MessageBubble({
     // Treat data as ChatMessageData.
     const msgData = ev.data as ChatMessageData | undefined;
     const quoteText = msgData?.quote_text;
+    const replyToEventId = typeof msgData?.reply_to === "string" ? String(msgData.reply_to || "").trim() : "";
     const senderSnapshotTitle = typeof msgData?.sender_title === "string" ? String(msgData.sender_title || "").trim() : "";
     const senderSnapshotRuntime = typeof msgData?.sender_runtime === "string" ? String(msgData.sender_runtime || "").trim() : "";
     const senderSnapshotAvatarPath = typeof msgData?.sender_avatar_path === "string" ? String(msgData.sender_avatar_path || "").trim() : "";
@@ -574,86 +637,56 @@ export const MessageBubble = memo(function MessageBubble({
     const hasDestination = !!dstGroupId;
     const rawAttachments: MessageAttachment[] = Array.isArray(msgData?.attachments) ? msgData.attachments : [];
     const sourcePlatform = typeof msgData?.source_platform === "string" ? String(msgData.source_platform || "").trim() : "";
-    const renderableAttachments = rawAttachments
+    const blobAttachments = rawAttachments
         .filter((a): a is MessageAttachment => a != null && typeof a === "object")
         .map((a) => ({
             kind: String(a.kind || "file"),
-            path: normalizeAttachmentPath(String(a.path || "")),
+            path: String(a.path || ""),
             title: String(a.title || ""),
             bytes: Number(a.bytes || 0),
             mime_type: String(a.mime_type || ""),
             local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
-            download_url: "download_url" in a ? String(a.download_url || "") : "",
         }))
-        .filter((a) => hasRenderableAttachmentSource(a));
+        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
     const displayMessageText = useMemo(() => {
-        return getAttachmentAwareMessageText(messageText, rawAttachments, sourcePlatform);
-    }, [messageText, rawAttachments, sourcePlatform]);
+        if (isRedundantWecomImagePlaceholder(messageText, blobAttachments, sourcePlatform)) {
+            return "";
+        }
+        return messageText;
+    }, [blobAttachments, messageText, sourcePlatform]);
     const presentationRefs = useMemo(() => getPresentationMessageRefs(msgData?.refs), [msgData?.refs]);
+    const taskRefs = useMemo(() => getTaskMessageRefs(msgData?.refs), [msgData?.refs]);
     const shouldRenderMarkdown = useMemo(() => !isStreaming && mayContainMarkdown(displayMessageText), [displayMessageText, isStreaming]);
-    const streamingActivities = useMemo(() => {
-        return normalizeStreamingActivities((msgData as { activities?: unknown } | undefined)?.activities);
-    }, [msgData]);
-    const pendingEventId = String(
-        (msgData as { pending_event_id?: unknown; reply_to?: unknown } | undefined)?.pending_event_id
-        || (msgData as { pending_event_id?: unknown; reply_to?: unknown } | undefined)?.reply_to
-        || ""
-    ).trim();
-    const actorId = String(ev.by || "").trim();
-    const hasLiveReplySession = useGroupStore(useCallback((state) => {
-        if (isUserMessage || !actorId || !pendingEventId) return false;
-        const session = selectStreamingReplySession(state, groupId, {
-            pendingEventId,
-            streamId,
-            actorId,
-        });
-        return !!session && (session.phase === "pending" || session.phase === "streaming");
-    }, [actorId, groupId, isUserMessage, pendingEventId, streamId]));
-    const shouldRenderStreamingBody = isStreaming || hasLiveReplySession;
-    const isQueuedOnlyPlaceholder = useMemo(() => {
-        return isQueuedOnlyStreamingPlaceholder({
-            isStreaming: shouldRenderStreamingBody,
-            messageText: displayMessageText,
-            liveStreamingText: "",
-            blobAttachmentCount: renderableAttachments.length,
-            presentationRefCount: presentationRefs.length,
-            activities: streamingActivities,
-        });
-    }, [displayMessageText, presentationRefs.length, renderableAttachments.length, shouldRenderStreamingBody, streamingActivities]);
     const streamPhase = String((msgData as { stream_phase?: unknown } | undefined)?.stream_phase || "").trim().toLowerCase();
-    const bubbleMotionClass = useMemo(() => getMessageBubbleMotionClass({
-        isStreaming,
-        isOptimistic,
-        streamPhase,
-    }), [isOptimistic, isStreaming, streamPhase]);
-    const streamingPlaceholderLabel = useMemo(() => {
-        if (!isStreaming) return "";
-        if (streamPhase === "commentary") {
-            return t("streamCommentaryPending");
-        }
-        if (streamPhase === "final_answer") {
-            return t("streamFinalAnswerPending");
-        }
-        return t("streamWorkingPending");
-    }, [isStreaming, streamPhase, t]);
     const stableMessageAttachmentKey = useMemo(() => {
         const clientId = typeof msgData?.client_id === "string" ? String(msgData.client_id || "").trim() : "";
         if (clientId) return `client:${clientId}`;
         const eventId = typeof ev.id === "string" ? String(ev.id || "").trim() : "";
         return eventId || `row:${String(ev.ts || "")}:${String(ev.by || "")}`;
     }, [ev.id, ev.ts, ev.by, msgData]);
+    const shouldAnimateBubbleOnEnter = useMemo(() => {
+        return shouldAnimateIncomingBubble(stableMessageAttachmentKey, String(ev.ts || ""));
+    }, [ev.ts, stableMessageAttachmentKey]);
+    const bubbleMotionClass = useMemo(() => getMessageBubbleMotionClass({
+        isStreaming,
+        isOptimistic,
+        isNewlyArrived: shouldAnimateBubbleOnEnter,
+        isUserMessage,
+        streamPhase,
+    }), [isOptimistic, isStreaming, isUserMessage, shouldAnimateBubbleOnEnter, streamPhase]);
     const copyableMessageText = useMemo(
         () =>
             buildMessageCopyText({
                 quoteText,
                 messageText: displayMessageText,
                 presentationRefs,
-                attachments: renderableAttachments.map((attachment) => ({
+                taskRefs,
+                attachments: blobAttachments.map((attachment) => ({
                     title: attachment.title,
-                    path: attachment.path || attachment.local_preview_url || attachment.download_url,
+                    path: attachment.path || attachment.local_preview_url,
                 })),
             }),
-        [displayMessageText, presentationRefs, quoteText, renderableAttachments]
+        [blobAttachments, displayMessageText, presentationRefs, quoteText, taskRefs]
     );
     const messageTimestamp = formatMessageTimestamp(ev.ts);
     const fullMessageTimestamp = formatFullTime(ev.ts);
@@ -741,9 +774,7 @@ export const MessageBubble = memo(function MessageBubble({
 
     const readPreviewEntries = visibleReadStatusEntries.slice(0, 3);
     const readPreviewOverflow = Math.max(0, visibleReadStatusEntries.length - readPreviewEntries.length);
-    const relayChipClass = isUserMessage
-        ? "border-white/14 bg-white/8 text-blue-100 shadow-none hover:bg-white/12"
-        : "glass-btn border border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)]";
+    const relayChipClass = "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] shadow-none hover:bg-[var(--glass-tab-bg-hover)]";
 
     useEffect(() => {
         if (!copiedMessageText) return undefined;
@@ -754,11 +785,13 @@ export const MessageBubble = memo(function MessageBubble({
     }, [copiedMessageText]);
 
     const handleCopyMessageText = useCallback(async () => {
-        const ok = await copyText(copyableMessageText);
+        const ok = await copyWithFeedback(copyableMessageText, {
+            errorMessage: t("common:copyFailed", { defaultValue: "Copy failed" }),
+        });
         if (ok) {
             setCopiedMessageText(true);
         }
-    }, [copyableMessageText]);
+    }, [copyWithFeedback, copyableMessageText, t]);
 
     return (
         <div
@@ -816,7 +849,8 @@ export const MessageBubble = memo(function MessageBubble({
             {/* Message Content */}
             <div
                 className={classNames(
-                    "flex min-w-0 flex-col w-full md:w-auto md:max-w-[82%] xl:max-w-[75%]",
+                    "flex min-w-0 flex-col w-full md:w-auto",
+                    isUserMessage ? "md:max-w-[min(42rem,78%)] xl:max-w-[min(44rem,72%)]" : "md:max-w-[min(48rem,86%)] xl:max-w-[min(52rem,80%)]",
                     isUserMessage ? "items-end" : "items-start"
                 )}
             >
@@ -830,7 +864,6 @@ export const MessageBubble = memo(function MessageBubble({
                             senderDisplayName={senderDisplayName}
                             messageTimestamp={messageTimestamp}
                             fullMessageTimestamp={fullMessageTimestamp}
-                            toLabel={toLabel}
                             senderAvatarUrl={senderAvatarUrl || undefined}
                             senderRuntime={senderRuntime || undefined}
                             avatarRingClassName={senderAccent?.ring}
@@ -843,7 +876,6 @@ export const MessageBubble = memo(function MessageBubble({
                             senderDisplayName={senderDisplayName}
                             messageTimestamp={messageTimestamp}
                             fullMessageTimestamp={fullMessageTimestamp}
-                            toLabel={toLabel}
                         />
                     </>
                 ) : null}
@@ -869,17 +901,16 @@ export const MessageBubble = memo(function MessageBubble({
                     )}
                 <div
                     className={classNames(
-                        "inline-flex max-w-full flex-col px-4 py-2.5 text-sm leading-relaxed transition-[opacity,transform,box-shadow,background-color] duration-200 ease-out",
-                        isQueuedOnlyPlaceholder ? "min-h-0 px-3 py-2" : "",
+                        "inline-flex max-w-full flex-col px-4 py-3 text-sm leading-relaxed transition-[opacity,transform,box-shadow,background-color,border-color] duration-200 ease-out",
                         isStreaming ? "opacity-95 translate-y-0" : "opacity-100 translate-y-0",
                         bubbleMotionClass,
                         isUserMessage
-                            ? "bg-blue-600 text-white rounded-2xl rounded-tr-none shadow-sm"
-                            : "glass-bubble rounded-2xl rounded-tl-none text-[var(--color-text-primary)]"
+                            ? "glass-bubble w-auto min-w-[min(18rem,70vw)] rounded-[22px] rounded-tr-md"
+                            : "w-full rounded-[22px] rounded-tl-md border border-[var(--glass-border-subtle)] text-[var(--color-text-primary)] shadow-[0_10px_28px_rgba(15,23,42,0.06)]"
                         ,
                         isAttention ? "ring-1 ring-amber-400/40 dark:ring-amber-500/40" : ""
                         ,
-                        isHighlighted ? "outline outline-2 outline-sky-500/30 outline-offset-2" : ""
+                        isHighlighted ? "outline outline-2 outline-[rgb(35,36,37)]/16 outline-offset-2 dark:outline-white/18" : ""
                     )}
                 >
 
@@ -887,8 +918,8 @@ export const MessageBubble = memo(function MessageBubble({
                         event={ev}
                         isUserMessage={isUserMessage}
                         isDark={isDark}
-                        groupId={groupId}
                         groupLabelById={groupLabelById}
+                        toLabel={toLabel}
                         hasSource={hasSource}
                         srcGroupId={srcGroupId}
                         srcEventId={srcEventId}
@@ -897,21 +928,19 @@ export const MessageBubble = memo(function MessageBubble({
                         dstTo={dstTo}
                         relayChipClass={relayChipClass}
                         quoteText={quoteText}
+                        replyToEventId={replyToEventId}
                         presentationRefs={presentationRefs}
-                        isStreaming={shouldRenderStreamingBody}
-                        streamingActivities={streamingActivities}
-                        streamId={streamId}
-                        actorId={actorId}
-                        pendingEventId={pendingEventId}
+                        taskRefs={taskRefs}
+                        taskById={taskById}
                         messageText={displayMessageText}
-                        isQueuedOnlyPlaceholder={isQueuedOnlyPlaceholder}
-                        streamingPlaceholderLabel={streamingPlaceholderLabel}
                         shouldRenderMarkdown={shouldRenderMarkdown}
-                        renderableAttachments={renderableAttachments}
+                        blobAttachments={blobAttachments}
                         blobGroupId={blobGroupId}
                         stableMessageAttachmentKey={stableMessageAttachmentKey}
                         onOpenSource={onOpenSource}
                         onOpenPresentationRef={onOpenPresentationRef}
+                        onOpenTaskRef={onOpenTaskRef}
+                        onOpenReplyTarget={onOpenReplyTarget}
                     />
                 </div>
                 </div>
@@ -946,6 +975,7 @@ export const MessageBubble = memo(function MessageBubble({
         prevProps.actors === nextProps.actors &&
         prevProps.displayNameMap === nextProps.displayNameMap &&
         prevProps.agentState === nextProps.agentState &&
+        prevProps.taskById === nextProps.taskById &&
         prevProps.isDark === nextProps.isDark &&
         prevProps.groupId === nextProps.groupId &&
         prevProps.groupLabelById === nextProps.groupLabelById &&
@@ -953,6 +983,8 @@ export const MessageBubble = memo(function MessageBubble({
         prevProps.collapseHeader === nextProps.collapseHeader &&
         prevProps.onRelay === nextProps.onRelay &&
         prevProps.onOpenSource === nextProps.onOpenSource &&
-        prevProps.onOpenPresentationRef === nextProps.onOpenPresentationRef
+        prevProps.onOpenPresentationRef === nextProps.onOpenPresentationRef &&
+        prevProps.onOpenTaskRef === nextProps.onOpenTaskRef &&
+        prevProps.onOpenReplyTarget === nextProps.onOpenReplyTarget
     );
 });

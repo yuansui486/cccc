@@ -150,6 +150,74 @@ class _FakeWecomFileImageAdapter(IMAdapter):
         return b"\x89PNG\r\n\x1a\nfake-png"
 
 
+class _FakeWecomUnknownTextFileAdapter(IMAdapter):
+    platform = "wecom"
+
+    def __init__(self) -> None:
+        self._connected = False
+        self._messages = [
+            {
+                "chat_id": "cid_wecom_text",
+                "chat_title": "ops",
+                "chat_type": "p2p",
+                "routed": True,
+                "thread_id": 0,
+                "text": "[file]",
+                "from_user": "Alice",
+                "from_user_id": "staff_001",
+                "attachments": [
+                    {
+                        "kind": "file",
+                        "media_id": "media_unknown_text",
+                        "file_name": "file",
+                        "mime_type": "",
+                    }
+                ],
+                "message_id": "msg_unknown_text",
+                "timestamp": time.time(),
+            }
+        ]
+
+    def connect(self) -> bool:
+        self._connected = True
+        return True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def poll(self) -> List[Dict[str, Any]]:
+        if not self._connected:
+            return []
+        out = list(self._messages)
+        self._messages = []
+        return out
+
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        thread_id: Optional[int] = None,
+        *,
+        mention_user_ids: Optional[List[str]] = None,
+    ) -> bool:
+        _ = chat_id
+        _ = text
+        _ = thread_id
+        _ = mention_user_ids
+        return True
+
+    def get_chat_title(self, chat_id: str) -> str:
+        return str(chat_id)
+
+    def download_attachment(self, attachment: Dict[str, Any]) -> bytes:
+        _ = attachment
+        return (
+            b"[GLOBAL]\n"
+            b"GatewayAddress = office.truesightai.com\n"
+            b"GatewayPort = 9443\n"
+        )
+
+
 class TestImSenderIdentity(unittest.TestCase):
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
@@ -275,9 +343,48 @@ class TestImSenderIdentity(unittest.TestCase):
             data = event.get("data") if isinstance(event.get("data"), dict) else {}
             attachments = data.get("attachments") if isinstance(data.get("attachments"), list) else []
             self.assertEqual(len(attachments), 1)
+            self.assertEqual(str(data.get("text") or ""), "[file] file.png")
             self.assertEqual(str(attachments[0].get("kind") or ""), "image")
             self.assertEqual(str(attachments[0].get("mime_type") or ""), "image/png")
             self.assertTrue(str(attachments[0].get("title") or "").endswith(".png"))
+        finally:
+            if bridge is not None:
+                bridge.stop()
+            cleanup()
+
+    def test_bridge_inbound_wecom_unknown_text_file_gets_inferred_name(self) -> None:
+        _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeWecomUnknownTextFileAdapter()
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+
+            captured: List[Dict[str, Any]] = []
+
+            def _daemon(req: Dict[str, Any]) -> Dict[str, Any]:
+                resp, _ = handle_request(DaemonRequest.model_validate(req))
+                payload: Dict[str, Any] = {"ok": bool(resp.ok)}
+                if resp.ok:
+                    payload["result"] = resp.result
+                else:
+                    payload["error"] = resp.error.model_dump() if resp.error else {}
+                captured.append(payload)
+                return payload
+
+            bridge._daemon = _daemon  # type: ignore[method-assign]
+            bridge._process_inbound()
+
+            self.assertEqual(len(captured), 1)
+            event = ((captured[0].get("result") or {}).get("event") or {})
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            attachments = data.get("attachments") if isinstance(data.get("attachments"), list) else []
+            self.assertEqual(len(attachments), 1)
+            self.assertEqual(str(data.get("text") or ""), "[file] file.ini")
+            self.assertEqual(str(attachments[0].get("title") or ""), "file.ini")
+            self.assertEqual(str(attachments[0].get("mime_type") or ""), "text/plain")
         finally:
             if bridge is not None:
                 bridge.stop()

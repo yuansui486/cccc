@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ActorAvatar } from "./ActorAvatar";
+import { CameraIcon } from "./Icons";
 
 type ActorAvatarFieldProps = {
   label?: string | null;
@@ -46,7 +47,7 @@ export function ActorAvatarField({
       <div className="flex flex-col items-center">
         <button
           type="button"
-          className="group relative inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] disabled:cursor-not-allowed"
+          className="group relative inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(35,36,37)]/35 dark:focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] disabled:cursor-not-allowed"
           onClick={() => inputRef.current?.click()}
           disabled={disabled}
           aria-label={t("uploadAvatar")}
@@ -62,19 +63,11 @@ export function ActorAvatarField({
             textClassName="text-sm"
           />
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/0 text-white opacity-0 transition-all duration-150 group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100">
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+            <CameraIcon
               aria-hidden="true"
-            >
-              <path d="M4.5 8.5h3l1.4-2h6.2l1.4 2h3a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 19.5 18.5h-15A1.5 1.5 0 0 1 3 17v-7A1.5 1.5 0 0 1 4.5 8.5Z" />
-              <circle cx="12" cy="13" r="3.2" />
-            </svg>
+              className="h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
+              strokeWidth={1.9}
+            />
           </span>
         </button>
 

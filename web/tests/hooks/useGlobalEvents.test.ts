@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getGlobalEventGroupId,
+  shouldKeepGlobalEventsConnected,
   shouldRefreshActorsAfterGlobalEvent,
   shouldRefreshGroupsAfterGlobalEventsOpen,
 } from "../../src/hooks/useGlobalEvents";
@@ -12,6 +13,11 @@ describe("useGlobalEvents open refresh policy", () => {
 
   it("requires catch-up refresh on reconnects too", () => {
     expect(shouldRefreshGroupsAfterGlobalEventsOpen(true)).toBe(true);
+  });
+
+  it("releases the global SSE connection while the tab is hidden", () => {
+    expect(shouldKeepGlobalEventsConnected(false)).toBe(true);
+    expect(shouldKeepGlobalEventsConnected(true)).toBe(false);
   });
 
   it("extracts group id from top-level global events", () => {

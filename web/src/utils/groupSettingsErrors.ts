@@ -19,8 +19,8 @@ function asRecord(value: unknown): UnknownRecord | null {
 function deriveReasonFromMessage(message: string): string {
   const normalized = String(message || "").trim();
   if (!normalized) return "";
-  if (normalized === "desktop pet requires an enabled foreman actor") {
-    return "desktop_pet_requires_enabled_foreman";
+  if (normalized === "desktop pet requires a foreman actor") {
+    return "desktop_pet_requires_foreman";
   }
   if (normalized === "failed to start pet actor" || normalized.startsWith("failed to start pet actor:")) {
     return "pet_actor_start_failed";
@@ -67,8 +67,8 @@ export function formatGroupSettingsUpdateError(
   }
 
   if (code === "group_settings_update_failed") {
-    if (reason === "desktop_pet_requires_enabled_foreman") {
-      return t("modals:context.desktopPetRequiresForeman", "Enable a foreman actor before turning on Web Pet.");
+    if (reason === "desktop_pet_requires_foreman") {
+      return t("modals:context.desktopPetRequiresForeman", "Add a foreman actor before turning on Web Pet.");
     }
     if (reason === "pet_actor_start_failed") {
       return cause

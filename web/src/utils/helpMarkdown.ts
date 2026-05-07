@@ -1,17 +1,18 @@
-export type HelpChangedBlock = "common" | "role:foreman" | "role:peer" | "pet" | `actor:${string}`;
+export type HelpChangedBlock = "common" | "role:foreman" | "role:peer" | "pet" | "voice_secretary" | `actor:${string}`;
 
 export type ParsedHelpMarkdown = {
   common: string;
   foreman: string;
   peer: string;
   pet: string;
+  voiceSecretary: string;
   actorNotes: Record<string, string>;
   extraTaggedBlocks: string[];
   usedLegacyRoleNotes: boolean;
 };
 
 type TaggedSection = {
-  kind: "role" | "actor" | "pet" | "extra";
+  kind: "role" | "actor" | "pet" | "voice_secretary" | "extra";
   key: string;
   raw: string;
   body: string;
@@ -21,6 +22,7 @@ const H2_RE = /^##(?!#)\s+.*$/;
 const ROLE_TAG_RE = /^##\s*@role:\s*(\w+)\s*$/i;
 const ACTOR_TAG_RE = /^##\s*@actor:\s*(\S+)(?:\s+(.*\S))?\s*$/i;
 const PET_TAG_RE = /^##\s*@pet\s*:?\s*$/i;
+const VOICE_SECRETARY_TAG_RE = /^##\s*@voice_secretary\s*:?\s*$/i;
 const LEGACY_ROLE_SECTION_RE = /^##\s+Role Notes\s*$/i;
 const H3_RE = /^###\s+(.+?)\s*$/;
 
@@ -76,6 +78,14 @@ function parseTaggedSection(section: string): TaggedSection | null {
     return {
       kind: "pet",
       key: "pet",
+      raw: trimBlock(normalized),
+      body: trimBlock(lines.slice(1).join("\n")),
+    };
+  }
+  if (VOICE_SECRETARY_TAG_RE.test(header)) {
+    return {
+      kind: "voice_secretary",
+      key: "voice_secretary",
       raw: trimBlock(normalized),
       body: trimBlock(lines.slice(1).join("\n")),
     };
@@ -171,6 +181,7 @@ export function parseHelpMarkdown(markdown: string): ParsedHelpMarkdown {
   let foreman = "";
   let peer = "";
   let pet = "";
+  let voiceSecretary = "";
 
   for (const section of sections) {
     const raw = trimBlock(section);
@@ -196,6 +207,10 @@ export function parseHelpMarkdown(markdown: string): ParsedHelpMarkdown {
       pet = tagged.body;
       continue;
     }
+    if (tagged.kind === "voice_secretary") {
+      voiceSecretary = tagged.body;
+      continue;
+    }
     extraTaggedBlocks.push(tagged.raw);
   }
 
@@ -209,7 +224,7 @@ export function parseHelpMarkdown(markdown: string): ParsedHelpMarkdown {
     usedLegacyRoleNotes = legacy.used;
   }
 
-  return { common, foreman, peer, pet, actorNotes, extraTaggedBlocks, usedLegacyRoleNotes };
+  return { common, foreman, peer, pet, voiceSecretary, actorNotes, extraTaggedBlocks, usedLegacyRoleNotes };
 }
 
 export function buildHelpMarkdown(input: {
@@ -217,6 +232,7 @@ export function buildHelpMarkdown(input: {
   foreman: string;
   peer: string;
   pet: string;
+  voiceSecretary?: string;
   actorNotes: Record<string, string>;
   actorOrder?: string[];
   extraTaggedBlocks?: string[];
@@ -226,6 +242,7 @@ export function buildHelpMarkdown(input: {
   const foreman = trimBlock(input.foreman);
   const peer = trimBlock(input.peer);
   const pet = trimBlock(input.pet);
+  const voiceSecretary = trimBlock(input.voiceSecretary || "");
   const actorNotes = input.actorNotes || {};
   const extraTaggedBlocks = Array.isArray(input.extraTaggedBlocks) ? input.extraTaggedBlocks.map(trimBlock).filter(Boolean) : [];
 
@@ -233,6 +250,7 @@ export function buildHelpMarkdown(input: {
   if (foreman) parts.push(`## @role: foreman\n\n${foreman}`);
   if (peer) parts.push(`## @role: peer\n\n${peer}`);
   if (pet) parts.push(`## @pet\n\n${pet}`);
+  if (voiceSecretary) parts.push(`## @voice_secretary\n\n${voiceSecretary}`);
 
   const seen = new Set<string>();
   const orderedActorIds: string[] = [];
@@ -268,6 +286,7 @@ export function updateActorHelpNote(markdown: string, actorId: string, note: str
     foreman: parsed.foreman,
     peer: parsed.peer,
     pet: parsed.pet,
+    voiceSecretary: parsed.voiceSecretary,
     actorNotes: nextActorNotes,
     actorOrder,
     extraTaggedBlocks: parsed.extraTaggedBlocks,
@@ -281,6 +300,21 @@ export function updatePetHelpNote(markdown: string, note: string, actorOrder?: s
     foreman: parsed.foreman,
     peer: parsed.peer,
     pet: trimBlock(note),
+    voiceSecretary: parsed.voiceSecretary,
+    actorNotes: parsed.actorNotes,
+    actorOrder,
+    extraTaggedBlocks: parsed.extraTaggedBlocks,
+  });
+}
+
+export function updateVoiceSecretaryHelpNote(markdown: string, note: string, actorOrder?: string[]): string {
+  const parsed = parseHelpMarkdown(markdown);
+  return buildHelpMarkdown({
+    common: parsed.common,
+    foreman: parsed.foreman,
+    peer: parsed.peer,
+    pet: parsed.pet,
+    voiceSecretary: trimBlock(note),
     actorNotes: parsed.actorNotes,
     actorOrder,
     extraTaggedBlocks: parsed.extraTaggedBlocks,

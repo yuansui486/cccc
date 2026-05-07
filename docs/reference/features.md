@@ -16,11 +16,14 @@ Detailed feature documentation for CCCC.
 ```bash
 # CLI
 cccc send "Hello"                 # No --to: default recipient policy applies (default foreman)
-cccc send "Hello" --to @all
+cccc send "Hello" --to @foreman
+cccc send "Announcement" --to @all # Explicit broadcast
+cccc tracked-send "Delegated work" --to assistant --title "Task title" --outcome "Done criterion"
 cccc reply <event_id> "Reply text"
 
 # MCP
-cccc_message_send(text="Hello", to=["@all"])
+cccc_message_send(text="Hello", to=["@foreman"])
+cccc_tracked_send(title="Task title", text="Delegated work", to=["assistant"], outcome="Done criterion")
 cccc_message_reply(reply_to="evt_xxx", text="Reply")
 ```
 
@@ -97,7 +100,7 @@ im:
 |---------|-------------|
 | `/send <message>` | Send using group default (default: foreman) |
 | `/send @<agent> <message>` | Send to a specific agent |
-| `/send @all <message>` | Send to all agents |
+| `/send @all <message>` | Broadcast to all agents |
 | `/send @peers <message>` | Send to non-foreman agents |
 | `/subscribe` | Subscribe, start receiving messages |
 | `/unsubscribe` | Unsubscribe |

@@ -4,8 +4,12 @@ import { apiJson } from "../services/api";
 import { Actor, LedgerEvent } from "../types";
 import { formatFullTime, formatTime } from "../utils/time";
 import { classNames } from "../utils/classNames";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 import { useModalA11y } from "../hooks/useModalA11y";
-import { getRecipientDisplayLabel } from "../utils/displayText";
+import { CloseIcon, SearchIcon } from "./Icons";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Surface } from "./ui/surface";
 
 type KindFilter = "all" | "chat" | "notify";
 
@@ -67,24 +71,8 @@ function highlightText(text: string, query: string, _isDark?: boolean): ReactNod
   return out;
 }
 
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    window.prompt("Copy to clipboard:", text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply, onJumpToMessage }: SearchModalProps) {
+  const copyWithFeedback = useCopyFeedback();
   const { modalRef } = useModalA11y(isOpen, onClose);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -111,7 +99,8 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
       if (id) map.set(id, actor.title || id);
     }
     return (id: string) => {
-      return getRecipientDisplayLabel(id, map);
+      if (!id || id === "user") return id;
+      return map.get(id) || id;
     };
   }, [actors]);
 
@@ -197,22 +186,24 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
         <div className={classNames("flex items-center justify-between px-4 pt-4 pb-3 border-b safe-area-inset-top", "border-[var(--glass-border-subtle)]")}>
           <div className="min-w-0">
             <h2 id="search-modal-title" className={classNames("text-lg font-semibold truncate", "text-[var(--color-text-primary)]")}>
-              {"🔍 "}{t('searchMessages')}
+              <span className="inline-flex items-center gap-2">
+                <SearchIcon size={18} />
+                <span>{t('searchMessages')}</span>
+              </span>
             </h2>
             <div className={classNames("text-xs mt-0.5 truncate", "text-[var(--color-text-muted)]")}>
               {groupId}
             </div>
           </div>
-          <button
+          <Button
             onClick={onClose}
-            className={classNames(
-              "text-xl leading-none min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors",
-              "glass-btn text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-            )}
+            variant="ghost"
+            size="icon"
+            className="text-xl text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
             aria-label={t('closeSearchModal')}
           >
-            ×
-          </button>
+            <CloseIcon size={18} />
+          </Button>
         </div>
 
         {/* Controls */}
@@ -222,29 +213,23 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
               {t('query')}
             </label>
             <div className="flex gap-2">
-              <input
+              <Input
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void doSearch({ mode: "replace" });
                 }}
-                className={classNames(
-                  "flex-1 px-3 py-2 border rounded-lg text-sm min-h-[44px]",
-                  "glass-input text-[var(--color-text-primary)]"
-                )}
+                className="flex-1 rounded-lg px-3 py-2"
                 placeholder={t('searchPlaceholder')}
               />
-              <button
+              <Button
                 onClick={() => void doSearch({ mode: "replace" })}
                 disabled={busy}
-                className={classNames(
-                  "px-4 py-2 rounded-lg text-sm font-medium min-h-[44px] disabled:opacity-50",
-                  "bg-sky-600 hover:bg-sky-500 text-white"
-                )}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-500"
               >
                 {busy ? "…" : t('common:search')}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -259,11 +244,14 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
                   ["chat", t('kindChat')],
                   ["notify", t('kindNotify')],
                 ] as Array<[KindFilter, string]>).map(([id, label]) => (
-                  <button
+                  <Button
                     key={id}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setKind(id)}
                     className={classNames(
-                      "px-2.5 py-1.5 rounded-md text-xs font-medium min-h-[36px] transition-colors",
+                      "min-h-[36px] rounded-md",
                       kind === id
                         ? "glass-card text-[var(--color-text-primary)]"
                         : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -271,7 +259,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
                     aria-pressed={kind === id}
                   >
                     {label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -289,7 +277,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
                 )}
               >
                 <option value="">{t('any')}</option>
-                <option value="user">{getRecipientDisplayLabel("user")}</option>
+                <option value="user">user</option>
                 <option value="system">system</option>
                 {actorIds.map((id) => (
                   <option key={id} value={id}>
@@ -311,16 +299,15 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
         {/* Results */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {hasMore && results.length > 0 && (
-            <button
-              className={classNames(
-                "w-full px-4 py-2 rounded-lg text-sm font-medium min-h-[44px] transition-colors",
-                "glass-btn text-[var(--color-text-secondary)]"
-              )}
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full rounded-lg"
               onClick={() => void loadOlder()}
               disabled={busy}
             >
               {t('loadOlderResults')}
-            </button>
+            </Button>
           )}
 
           {results.map((ev, idx) => {
@@ -328,12 +315,15 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
             const evId = ev.id ? String(ev.id) : "";
             const isChat = ev.kind === "chat.message";
             return (
-              <div
+              <Surface
                 key={evId || `r${idx}`}
                 className={classNames(
-                  "rounded-lg border px-4 py-3",
+                  "rounded-lg px-4 py-3",
                   "glass-card"
                 )}
+                variant="subtle"
+                radius="md"
+                padding="none"
               >
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -348,7 +338,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
                         className={classNames(
                           "text-[10px] px-2 py-0.5 rounded-full font-medium",
                           ev.kind === "system.notify"
-                            ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"
+                            ? "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white"
                             : "bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] border border-[var(--glass-border-subtle)]"
                         )}
                       >
@@ -367,47 +357,52 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
 
                   <div className="flex items-center gap-2 justify-end sm:flex-col sm:items-end">
                     {isChat && (
-                      <button
-                        className={classNames(
-                          "text-[10px] px-2 py-1 rounded border border-[var(--glass-border-subtle)] min-h-[36px] transition-colors",
-                          "glass-btn text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                        )}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="text-[10px]"
                         onClick={() => onReply(ev)}
                         aria-label={`Reply to ${getDisplayName(ev.by || "") || "message"}`}
                         title={t('reply')}
                       >
                         {t('replyTo')}
-                      </button>
+                      </Button>
                     )}
                     {isChat && evId && onJumpToMessage ? (
-                      <button
-                        className={classNames(
-                          "text-[10px] px-2 py-1 rounded border border-[var(--glass-border-subtle)] min-h-[36px] transition-colors",
-                          "glass-btn text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                        )}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="text-[10px]"
                         onClick={() => onJumpToMessage(evId)}
                         aria-label={t('openMessageContext')}
                         title={t('openMessage').replace('↗ ', '')}
                       >
                         {t('openMessage')}
-                      </button>
+                      </Button>
                     ) : null}
                     {evId && (
-                      <button
-                        className={classNames(
-                          "text-[10px] px-2 py-1 rounded border border-[var(--glass-border-subtle)] min-h-[36px] transition-colors",
-                          "glass-btn text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                        )}
-                        onClick={() => void copyToClipboard(evId)}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="text-[10px]"
+                        onClick={() => {
+                          void copyWithFeedback(evId, {
+                            successMessage: t("common:copied"),
+                            errorMessage: t("common:copyFailed"),
+                          });
+                        }}
                         aria-label={t('copyEventId')}
                         title={t('copyEventId')}
                       >
                         {t('copyId')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
-              </div>
+              </Surface>
             );
           })}
 

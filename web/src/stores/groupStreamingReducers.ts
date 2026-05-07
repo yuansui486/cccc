@@ -56,6 +56,16 @@ function isQueuedOnlyActivityList(value: unknown): boolean {
   });
 }
 
+function isBindablePendingStream(data: {
+  pending_placeholder?: unknown;
+  stream_id?: unknown;
+  text?: unknown;
+} | undefined): boolean {
+  const streamId = String(data?.stream_id || "").trim();
+  const text = String(data?.text || "").trim();
+  return Boolean(data?.pending_placeholder) || (streamId.startsWith("pending:") && !text);
+}
+
 function findLatestBindableLocalPlaceholderIndex(
   streamingEvents: LedgerEvent[],
   actorId: string,
@@ -498,10 +508,11 @@ export function promoteStreamingEventToStreamPatch(
   const matchedIndex = bucket.streamingEvents.findIndex((item) => {
     if (String(item.by || "").trim() !== targetActorId) return false;
     const data = item.data && typeof item.data === "object"
-      ? item.data as { pending_event_id?: unknown; stream_id?: unknown }
+      ? item.data as { pending_event_id?: unknown; pending_placeholder?: unknown; stream_id?: unknown; text?: unknown }
       : {};
     if (String(data.stream_id || "").trim() === targetStreamId) return true;
-    return String(data.pending_event_id || "").trim() === targetPendingEventId;
+    if (String(data.pending_event_id || "").trim() !== targetPendingEventId) return false;
+    return isBindablePendingStream(data);
   });
   const targetIndex = matchedIndex >= 0
     ? matchedIndex
@@ -604,10 +615,11 @@ export function reconcileStreamingMessagePatch(
   const matchedIndex = nextStreamingEvents.findIndex((item) => {
     if (String(item.by || "").trim() !== targetActorId) return false;
     const data = item.data && typeof item.data === "object"
-      ? item.data as { pending_event_id?: unknown; stream_id?: unknown }
+      ? item.data as { pending_event_id?: unknown; pending_placeholder?: unknown; stream_id?: unknown; text?: unknown }
       : {};
     if (String(data.stream_id || "").trim() === targetStreamId) return true;
-    return !!targetPendingEventId && String(data.pending_event_id || "").trim() === targetPendingEventId;
+    if (!targetPendingEventId || String(data.pending_event_id || "").trim() !== targetPendingEventId) return false;
+    return isBindablePendingStream(data);
   });
   const targetIndex = matchedIndex >= 0
     ? matchedIndex
@@ -776,7 +788,7 @@ export function reconcileStreamingMessagePatch(
         pendingEventId: targetPendingEventId,
         actorId: targetActorId,
         streamId: targetStreamId,
-        phase: args.completed ? "completed" : (resolvedPlaceholderState ? "pending" : "streaming"),
+        phase: resolvedPlaceholderState ? "pending" : "streaming",
         updatedAt: normalizeReplySessionTimestamp(args.ts),
       },
     )
@@ -805,7 +817,6 @@ export function completeStreamingEventsForActorPatch(
   let nextPendingEventIdByStreamId = bucket.pendingEventIdByStreamId;
   const nextStreamingEvents = bucket.streamingEvents.map((item) => {
     if (String(item.by || "").trim() !== targetActorId) return item;
-    if (!item._streaming) return item;
     const data = item.data && typeof item.data === "object"
       ? item.data as { pending_placeholder?: unknown; pending_event_id?: unknown; stream_id?: unknown; text?: unknown; activities?: unknown }
       : {};
@@ -820,8 +831,8 @@ export function completeStreamingEventsForActorPatch(
       !text &&
       queuedOnly;
     if (isFreshLocalPlaceholder) return item;
-    changed = true;
     if (pendingEventId) {
+      changed = true;
       ({
         replySessionsByPendingEventId: nextReplySessionsByPendingEventId,
         pendingEventIdByStreamId: nextPendingEventIdByStreamId,
@@ -832,6 +843,8 @@ export function completeStreamingEventsForActorPatch(
         phase: "completed",
       }));
     }
+    if (!item._streaming) return item;
+    changed = true;
     return {
       ...item,
       _streaming: false,

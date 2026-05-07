@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow SemVer/PEP 440.
 
+## [0.4.12] — 2026-04-23
+
+### Added
+- **Voice Secretary workspace** with repository-backed markdown documents, Document/Ask/Prompt modes, request history, transcript feedback, document archive/download actions, and dedicated assistant reporting paths.
+- **Built-in assistant controls** in the chat composer for PET and Voice Secretary, plus a dedicated assistant settings surface with larger prompt editors.
+- **Daemon-owned tracked delegation** with task/message linkage, idempotency hardening, and task chip projection in chat messages.
+- **`cccc update` command** with install-source detection.
+
+### Changed
+- **Voice Secretary input handling** now routes stable transcript/request data through dedicated assistant surfaces instead of noisy chat-style JSON notifications.
+- **Headless delivery and inbound rendering** were tightened for Codex and Claude, including clearer sender/recipient context and safer reply routing.
+- **Runtime Dock state projection** was polished so PTY/headless actors and built-in assistants expose clearer idle, active, and stopped states.
+- **Web workspace and settings UI** received broad composer, modal, assistant, capability, automation, copy, and markdown rendering polish.
+- **Collaboration follow-up settings** were renamed and regrouped around operator-facing behavior instead of internal automation terminology.
+
+### Fixed
+- Fixed partial-failure retry handling for tracked delegation so retries do not duplicate tasks after message-send failures.
+- Fixed Voice Secretary prompt-refine, Ask reply, idle-review, and document routing edge cases.
+- Fixed headless reply recipient routing for ambiguous sender/source contexts.
+- Fixed user message bubble background regression after text-color unification.
+- Fixed actor secret placeholder examples for Codex and Claude Code so the UI no longer suggests ineffective OpenAI environment variables for Codex.
+- Fixed WeCom response URL fallback behavior for streaming and media replies.
+
+## [0.4.11] — 2026-04-11
+
+### Added
+- **Weixin bridge now uses the Python `wechatbot-sdk` integration** instead of the previous packaged Node.js sidecar, reducing bundled bridge assets and keeping Weixin login, inbound, media, and outbound behavior inside the Python adapter stack.
+- **Weixin subscription guidance in Web settings**: after Weixin login, the IM Bridge panel now explicitly explains the `/subscribe` and Pending Requests flow, including separate guidance for unconfigured, stopped, already-bound, and ready-to-subscribe states.
+- **Runtime Dock ring tone coverage** extracted into a dedicated helper so PTY and headless actors share clearer `stopped`, `ready`, `queued`, `active`, and `attention` state mapping.
+- **Mention suggestion labels in chat composer** now show actor display labels with secondary IDs where useful, and the mention preview can be closed with Escape.
+
+### Changed
+- **Weixin packaging was simplified** by removing the Node sidecar packages and packaged `.mjs` resources; `wechatbot-sdk>=0.2.0` is now the Python dependency for the Weixin path.
+- **Headless streaming reconciliation** was tightened so pending placeholders, canonical reply sessions, stream-id promotion, and terminal reply phases are less likely to reset or regress after final replies.
+- **Runtime state projection** now writes stopped actor entries to the ledger when actors disappear from runtime snapshots, helping the Web clear stale working halos and live indicators.
+- **Actor edit modal synchronization** was cleaned up so profile-backed actors and custom actors open with settings that better match their current stored configuration.
+- **Web group runtime updates** now use SSE/runtime projections more consistently, reducing sidebar state drift after refreshes or lifecycle changes.
+
+### Fixed
+- Fixed CLI daemon fallback behavior so daemon rejections are not incorrectly treated as permission to fall back to local mutations.
+- Fixed Weixin outbound/context-token handling so cached SDK context can be rehydrated into the running bot and outbound readiness survives bridge restarts more reliably.
+- Fixed Weixin IM configuration canonicalization for empty and legacy account fields, with additional route and adapter coverage.
+- Fixed missing visibility for `actor.activity` ledger append failures by logging append errors instead of silently swallowing them.
+- Fixed EventKind documentation parity gaps by adding internal contract coverage.
+- Fixed a bare Chinese placeholder in the Weixin settings panel by moving it into the English, Chinese, and Japanese locale files.
+
 ## [0.4.10] — 2026-04-10
 
 ### Added

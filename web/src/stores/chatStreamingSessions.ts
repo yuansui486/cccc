@@ -14,6 +14,11 @@ export type StreamingReplySession = {
   updatedAt: number;
 };
 
+function isTerminalReplySessionPhase(phase: unknown): boolean {
+  const value = String(phase || "").trim();
+  return value === "completed" || value === "failed";
+}
+
 function normalizeActivityText(value: unknown): string {
   return String(value || "").trim();
 }
@@ -174,14 +179,21 @@ export function upsertReplySession(
   }
 
   const existing = replySessionsByPendingEventId[pendingEventId];
-  const nextPhase = args.phase || existing?.phase || "pending";
+  const requestedPhase = args.phase || existing?.phase || "pending";
+  const keepTerminalSession =
+    Boolean(existing)
+    && isTerminalReplySessionPhase(existing?.phase)
+    && !isTerminalReplySessionPhase(requestedPhase);
+  const nextPhase = keepTerminalSession ? existing?.phase || "completed" : requestedPhase;
   const nextSession: StreamingReplySession = {
     pendingEventId,
     actorId,
-    currentStreamId: streamId || existing?.currentStreamId,
+    currentStreamId: keepTerminalSession ? existing?.currentStreamId || streamId : streamId || existing?.currentStreamId,
     canonicalEventId: args.canonicalEventId || existing?.canonicalEventId,
     phase: nextPhase,
-    updatedAt: Number.isFinite(Number(args.updatedAt)) ? Number(args.updatedAt) : Date.now(),
+    updatedAt: keepTerminalSession
+      ? Number(existing?.updatedAt || 0)
+      : Number.isFinite(Number(args.updatedAt)) ? Number(args.updatedAt) : Date.now(),
   };
 
   const nextReplySessionsByPendingEventId = {

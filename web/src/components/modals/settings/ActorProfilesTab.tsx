@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ActorProfile, ActorProfileUsage, RUNTIME_INFO, SUPPORTED_RUNTIMES } from "../../../types";
 import * as api from "../../../services/api";
@@ -8,7 +7,6 @@ import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../../utils/
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../../utils/headlessRuntimeSupport";
 import { useGroupStore } from "../../../stores";
 import {
-  cardClass,
   inputClass,
   labelClass,
   primaryButtonClass,
@@ -16,8 +14,14 @@ import {
   settingsDialogBodyClass,
   settingsDialogFooterClass,
   settingsDialogHeaderClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
 } from "./types";
 import { CapabilityPicker } from "../../CapabilityPicker";
+import { BodyPortal } from "../../ui/BodyPortal";
 
 interface ActorProfilesTabProps {
   isDark: boolean;
@@ -69,7 +73,7 @@ function modeButtonClass(selected: boolean): string {
   return [
     "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
     selected
-      ? "bg-blue-600 text-white border-blue-600"
+      ? "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white dark:border-white dark:bg-white dark:text-[rgb(35,36,37)]"
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
@@ -341,7 +345,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
             </select>
           </div>
 
-          <div className={cardClass()}>
+          <div className={settingsWorkspacePanelClass(isDark)}>
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">
               {t("actorProfiles.capabilityDefaults")}
             </div>
@@ -399,7 +403,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
             </div>
           </div>
 
-          <div className={cardClass()}>
+          <div className={settingsWorkspacePanelClass(isDark)}>
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("actorProfiles.env")}</div>
             <div className="text-xs mt-1 text-[var(--color-text-muted)]">{t("actorProfiles.envHint")}</div>
             {duplicateSourceProfileId ? (
@@ -799,83 +803,128 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("actorProfiles.searchPlaceholder")}
-          className={`${inputClass()} max-w-sm`}
-        />
-        <button className={primaryButtonClass(false)} onClick={openNew}>
-          {t("actorProfiles.newProfile")}
-        </button>
-        <button
-          className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors"
-          onClick={() => void loadProfiles()}
-          disabled={busy}
-        >
-          {busy ? t("common:loading") : t("actorProfiles.refresh")}
-        </button>
-      </div>
-
-      {err ? (
-        <div className="rounded-lg border px-3 py-2 text-sm border-rose-500/30 bg-rose-500/10 text-rose-400">
-          {err}
+    <div className="space-y-5">
+      <section className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+              {isMyScope ? t("settings:tabs.myProfiles") : t("settings:tabs.actorProfiles")}
+            </h3>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {isMyScope ? t("actorProfiles.myProfilesLoginRequired") : t("actorProfiles.searchPlaceholder")}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className={primaryButtonClass(false)} onClick={openNew}>
+              {t("actorProfiles.newProfile")}
+            </button>
+            <button
+              className={secondaryButtonClass("sm")}
+              onClick={() => void loadProfiles()}
+              disabled={busy}
+            >
+              {busy ? t("common:loading") : t("actorProfiles.refresh")}
+            </button>
+          </div>
         </div>
-      ) : null}
 
-      <div className="space-y-2">
-        {filtered.map((profile) => (
-          <div key={profile.id} className={cardClass()}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-              <div className="text-sm font-semibold truncate text-[var(--color-text-primary)]">
-                  {profile.name || profile.id}
-                </div>
-                <div className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">
-                  <code>{profile.id}</code> · {RUNTIME_INFO[String(profile.runtime)]?.label || profile.runtime}
-                </div>
-                <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                  {t("actorProfiles.usageCount", { count: Number(profile.usage_count || 0) })} · {t("actorProfiles.revision", { revision: Number(profile.revision || 0) })}
-                </div>
+        <div className={settingsWorkspaceBodyClass}>
+          {err ? (
+            <div className="rounded-lg border px-3 py-2 text-sm border-rose-500/30 bg-rose-500/10 text-rose-400">
+              {err}
+            </div>
+          ) : null}
+
+          <div className={settingsWorkspacePanelClass(isDark)}>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,320px)_1fr] lg:items-end">
+              <div>
+                <label className={labelClass()}>{t("actorProfiles.searchPlaceholder")}</label>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t("actorProfiles.searchPlaceholder")}
+                  className={inputClass()}
+                />
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => void openEdit(profile)}
-                  className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[40px]"
-                >
-                  {t("common:edit")}
-                </button>
-                <button
-                  onClick={() => void openDuplicate(profile)}
-                  className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[40px]"
-                >
-                  {t("actorProfiles.duplicate")}
-                </button>
-                <button
-                  onClick={() => void handleShowUsage(profile)}
-                  disabled={usageBusyProfileId === String(profile.id || "")}
-                  className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[40px] disabled:opacity-60"
-                >
-                  {usageBusyProfileId === String(profile.id || "") ? t("common:loading") : t("actorProfiles.viewUsage")}
-                </button>
-                <button
-                  onClick={() => void handleDelete(profile)}
-                  className="px-3 py-2 rounded-lg text-sm min-h-[40px] bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 transition-colors"
-                >
-                  {t("common:delete")}
-                </button>
+              <div className="text-xs leading-6 text-[var(--color-text-muted)] lg:text-right">
+                {busy ? t("common:loading") : t("actorProfiles.usageCount", { count: filtered.length })}
               </div>
             </div>
           </div>
-        ))}
-        {!busy && filtered.length === 0 ? (
-          <div className="text-sm text-[var(--color-text-muted)]">{t("actorProfiles.empty")}</div>
-        ) : null}
-      </div>
 
-      {editorModal && typeof document !== "undefined" ? createPortal(editorModal, document.body) : editorModal}
+          <div className="space-y-3">
+            {filtered.map((profile) => (
+              <div key={profile.id} className={settingsWorkspacePanelClass(isDark)}>
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                        {profile.name || profile.id}
+                      </div>
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${
+                        isDark
+                          ? "border-white/10 bg-white/[0.04] text-[var(--color-text-secondary)]"
+                          : "border-black/8 bg-black/[0.03] text-[var(--color-text-secondary)]"
+                      }`}>
+                        {RUNTIME_INFO[String(profile.runtime)]?.label || profile.runtime}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+                      <code>{profile.id}</code>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <div className={settingsWorkspaceSoftPanelClass(isDark)}>
+                        <div className="text-[11px] text-[var(--color-text-muted)]">
+                          {t("actorProfiles.usageCount", { count: Number(profile.usage_count || 0) })}
+                        </div>
+                      </div>
+                      <div className={settingsWorkspaceSoftPanelClass(isDark)}>
+                        <div className="text-[11px] text-[var(--color-text-muted)]">
+                          {t("actorProfiles.revision", { revision: Number(profile.revision || 0) })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => void openEdit(profile)}
+                      className={secondaryButtonClass("sm")}
+                    >
+                      {t("common:edit")}
+                    </button>
+                    <button
+                      onClick={() => void openDuplicate(profile)}
+                      className={secondaryButtonClass("sm")}
+                    >
+                      {t("actorProfiles.duplicate")}
+                    </button>
+                    <button
+                      onClick={() => void handleShowUsage(profile)}
+                      disabled={usageBusyProfileId === String(profile.id || "")}
+                      className={secondaryButtonClass("sm")}
+                    >
+                      {usageBusyProfileId === String(profile.id || "") ? t("common:loading") : t("actorProfiles.viewUsage")}
+                    </button>
+                    <button
+                      onClick={() => void handleDelete(profile)}
+                      className="inline-flex min-h-[36px] items-center justify-center rounded-xl border border-rose-500/30 bg-rose-500/12 px-3 py-1.5 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-500/18 dark:text-rose-300"
+                    >
+                      {t("common:delete")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {!busy && filtered.length === 0 ? (
+              <div className={settingsWorkspacePanelClass(isDark)}>
+                <div className="text-sm text-[var(--color-text-muted)]">{t("actorProfiles.empty")}</div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {editorModal ? <BodyPortal>{editorModal}</BodyPortal> : null}
     </div>
   );
 }

@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ....contracts.v1 import DaemonResponse
 from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, BUILTIN_CAPSULE_SKILLS
+from ....kernel.actors import list_actors, update_actor
+from ....kernel.group import load_group
+from ....kernel.registry import load_registry
+from ....paths import ensure_home
 from ....util.time import parse_utc_iso, utc_now_iso
 
 from ._common import (
@@ -43,6 +47,7 @@ from ._runtime import (
     _record_runtime_recent_success,
     _set_runtime_actor_binding,
     _remove_runtime_group_capability_bindings,
+    _remove_runtime_capability_bindings_all_groups,
     _remove_runtime_capability_artifact,
     _remove_runtime_artifact_if_unreferenced,
     _append_audit_event,
@@ -64,6 +69,7 @@ from ._state import (
     _collect_enabled_capabilities,
     _collect_blocked_capabilities,
     _remove_capability_bindings,
+    _remove_capability_bindings_all_groups,
     _has_any_binding_for_capability,
     handle_capability_enable,
 )
@@ -129,6 +135,7 @@ def _build_import_readiness_preview(
     enable_block_reason: str,
     diagnostics: List[Dict[str, Any]],
     probe_result: Dict[str, Any],
+    already_active: bool = False,
 ) -> Dict[str, Any]:
     qualification_status = str(rec.get("qualification_status") or _QUAL_QUALIFIED).strip().lower()
     preview = _pkg()._build_readiness_preview(
@@ -140,6 +147,7 @@ def _build_import_readiness_preview(
         qualification_status=qualification_status,
         enable_supported=bool(_pkg()._record_enable_supported(rec, capability_id=capability_id)),
         recent_success=None,
+        already_active=bool(already_active),
     )
     if str(probe_result.get("state") or "").strip().lower() == "failed":
         code = str(probe_result.get("install_error_code") or "probe_failed").strip() or "probe_failed"
@@ -153,7 +161,7 @@ def _build_import_readiness_preview(
             preview["enable_block_reason"] = code
             preview["next_step"] = "inspect"
         preview["probe_state"] = "failed"
-    elif str(probe_result.get("state") or "").strip().lower() in {"ready", "runnable"}:
+    elif not already_active and str(probe_result.get("state") or "").strip().lower() in {"ready", "runnable"}:
         preview["probe_state"] = "runnable"
     elif str(probe_result.get("state") or "").strip().lower() == "skipped":
         preview["probe_state"] = "skipped"
@@ -596,6 +604,10 @@ def _normalize_profile_capability_defaults(raw: Any) -> Dict[str, Any]:
     return {"autoload_capabilities": autoload, "default_scope": scope, "session_ttl_seconds": ttl}
 
 
+def _autoload_enable_state_applied(state: str, enabled: Any) -> bool:
+    return str(state or "").strip().lower() in {"ready", "runnable", "verified", "activation_pending"} and bool(enabled)
+
+
 def apply_actor_profile_capability_defaults(
     *,
     group_id: str,
@@ -637,7 +649,7 @@ def apply_actor_profile_capability_defaults(
             continue
         result = resp.result if isinstance(resp.result, dict) else {}
         state = str(result.get("state") or "").strip().lower()
-        if state == "ready" and bool(result.get("enabled", True)):
+        if _autoload_enable_state_applied(state, result.get("enabled", True)):
             applied.append(cap_id)
             continue
         reason = str(result.get("reason") or state or "not_ready")
@@ -699,7 +711,7 @@ def apply_actor_capability_autoload(
             continue
         result = resp.result if isinstance(resp.result, dict) else {}
         state = str(result.get("state") or "").strip().lower()
-        if state == "ready" and bool(result.get("enabled", True)):
+        if _autoload_enable_state_applied(state, result.get("enabled", True)):
             applied.append(cap_id)
             continue
         reason_code = str(result.get("reason") or state or "not_ready")
@@ -766,6 +778,43 @@ def _normalize_import_requires(raw: Any) -> List[str]:
     return out[:32]
 
 
+_SELF_PROPOSED_SKILL_SECTIONS = (
+    "when to use",
+    "avoid when",
+    "procedure",
+    "pitfalls",
+    "verification",
+)
+_SELF_PROPOSED_SKILL_PREFIX = "skill:agent_self_proposed:"
+
+
+def _missing_self_proposed_skill_sections(capsule_text: str) -> List[str]:
+    body = str(capsule_text or "").lower()
+    return [section for section in _SELF_PROPOSED_SKILL_SECTIONS if section not in body]
+
+
+def _self_proposed_missing_sections_reason(rec: Dict[str, Any]) -> str:
+    if not (
+        str(rec.get("kind") or "").strip().lower() == "skill"
+        and str(rec.get("source_id") or "").strip() == "agent_self_proposed"
+    ):
+        return ""
+    reasons = rec.get("qualification_reasons") if isinstance(rec.get("qualification_reasons"), list) else []
+    for reason in reasons:
+        reason_text = str(reason or "").strip()
+        if reason_text.startswith("missing_agent_self_proposed_sections:"):
+            return reason_text
+    return ""
+
+
+def _validate_self_proposed_skill_capability_id(capability_id: str) -> None:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id.startswith(_SELF_PROPOSED_SKILL_PREFIX):
+        raise ValueError(
+            "agent_self_proposed skill capability_id must start with skill:agent_self_proposed:"
+        )
+
+
 def _has_import_command_tokens(raw: Any) -> bool:
     if isinstance(raw, str):
         return bool(raw.strip())
@@ -792,6 +841,8 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
         raise ValueError("skill capability_id must start with skill:")
 
     source_id = _coerce_import_source_id(kind, raw_record.get("source_id"))
+    if kind == "skill" and source_id == "agent_self_proposed":
+        _validate_self_proposed_skill_capability_id(cap_id)
     source_uri = str(raw_record.get("source_uri") or "").strip()
     source_tier = str(raw_record.get("source_tier") or "").strip() or "tier2"
     trust_tier = str(raw_record.get("trust_tier") or "").strip() or "tier2"
@@ -879,6 +930,13 @@ def _normalize_import_record(raw_record: Any) -> Dict[str, Any]:
     capsule_text = str(raw_record.get("capsule_text") or "").strip()
     if not capsule_text:
         raise ValueError("skill import requires record.capsule_text")
+    if source_id == "agent_self_proposed":
+        missing_sections = _missing_self_proposed_skill_sections(capsule_text)
+        if missing_sections:
+            qualification = _QUAL_BLOCKED
+            reason = f"missing_agent_self_proposed_sections:{','.join(missing_sections)}"
+            if reason not in qualification_reasons:
+                qualification_reasons.append(reason)
     requires_capabilities = _normalize_import_requires(raw_record.get("requires_capabilities"))
     if not qualification:
         qualification = _QUAL_QUALIFIED
@@ -962,6 +1020,132 @@ def _probe_import_record(rec: Dict[str, Any], *, capability_id: str, enabled: bo
         return probe, diagnostics
 
 
+def _capability_enabled_for_actor(*, group_id: str, actor_id: str, capability_id: str) -> bool:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id:
+        return False
+    with _STATE_LOCK:
+        state_path, state_doc = _load_state_doc()
+        enabled_caps, mutated = _collect_enabled_capabilities(
+            state_doc,
+            group_id=group_id,
+            actor_id=actor_id,
+        )
+        if mutated:
+            _save_state_doc(state_path, state_doc)
+    return cap_id in set(enabled_caps)
+
+
+def _is_self_proposed_skill_record(rec: Dict[str, Any]) -> bool:
+    return bool(
+        str(rec.get("kind") or "").strip().lower() == "skill"
+        and str(rec.get("source_id") or "").strip() == "agent_self_proposed"
+    )
+
+
+def _self_proposed_origin_group_id(
+    *,
+    group_id: str,
+    existing: Optional[Dict[str, Any]] = None,
+) -> str:
+    existing_origin = (
+        str(existing.get("origin_group_id") or "").strip()
+        if isinstance(existing, dict)
+        else ""
+    )
+    return existing_origin or str(group_id or "").strip()
+
+
+def _remove_actor_autoload_references(group: Any, capability_id: str) -> int:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id or group is None:
+        return 0
+    removed = 0
+    for actor in list_actors(group):
+        aid = str(actor.get("id") or "").strip()
+        if not aid:
+            continue
+        current = _pkg()._normalize_capability_id_list(actor.get("capability_autoload"))
+        if cap_id not in current:
+            continue
+        next_autoload = [item for item in current if item != cap_id]
+        update_actor(group, aid, {"capability_autoload": next_autoload})
+        removed += 1
+    return removed
+
+
+def _group_ids_for_actor_autoload_cleanup() -> List[str]:
+    group_ids: set[str] = set()
+    try:
+        reg = load_registry()
+        group_ids.update(str(gid or "").strip() for gid in reg.groups.keys() if str(gid or "").strip())
+    except Exception:
+        pass
+    try:
+        groups_dir = ensure_home() / "groups"
+        if groups_dir.exists():
+            for child in groups_dir.iterdir():
+                if child.is_dir() and str(child.name or "").strip():
+                    group_ids.add(str(child.name).strip())
+    except Exception:
+        pass
+    return sorted(group_ids)
+
+
+def _remove_actor_autoload_references_all_groups(capability_id: str) -> int:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id:
+        return 0
+    removed = 0
+    for gid in _group_ids_for_actor_autoload_cleanup():
+        group = load_group(gid)
+        if group is None:
+            continue
+        removed += _remove_actor_autoload_references(group, cap_id)
+    return removed
+
+
+def _remove_profile_autoload_references(capability_id: str) -> int:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id:
+        return 0
+    try:
+        from ...actors.actor_profile_store import ProfileResolver
+    except Exception:
+        return 0
+    resolver = ProfileResolver()
+    removed = 0
+    try:
+        profiles = resolver.list_profiles("all", caller_id="user", is_admin=True)
+    except Exception:
+        return 0
+    for profile in profiles:
+        payload = profile.model_dump(exclude_none=True) if hasattr(profile, "model_dump") else dict(profile or {})
+        defaults = payload.get("capability_defaults") if isinstance(payload.get("capability_defaults"), dict) else None
+        if not isinstance(defaults, dict):
+            continue
+        current = _pkg()._normalize_capability_id_list(defaults.get("autoload_capabilities"))
+        if cap_id not in current:
+            continue
+        defaults = dict(defaults)
+        defaults["autoload_capabilities"] = [item for item in current if item != cap_id]
+        payload["capability_defaults"] = defaults
+        try:
+            if resolver.save_profile(payload, caller_id="user", is_admin=True):
+                removed += 1
+        except Exception:
+            continue
+    return removed
+
+
+def _semantic_import_record(rec: Dict[str, Any], *, ignore_updated_at_source: bool) -> Dict[str, Any]:
+    out = dict(rec)
+    out.pop("last_synced_at", None)
+    if ignore_updated_at_source:
+        out.pop("updated_at_source", None)
+    return out
+
+
 def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
@@ -1027,7 +1211,16 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                     "actor can only import capabilities as self",
                     details={"action_id": action_id},
                 )
-        rec = _normalize_import_record(args.get("record"))
+        raw_record_arg = args.get("record")
+        raw_has_updated_at_source = (
+            isinstance(raw_record_arg, dict)
+            and bool(str(raw_record_arg.get("updated_at_source") or "").strip())
+        )
+        rec = _normalize_import_record(raw_record_arg)
+        if _is_self_proposed_skill_record(rec):
+            origin_group_id = _self_proposed_origin_group_id(group_id=group_id)
+            if origin_group_id:
+                rec["origin_group_id"] = origin_group_id
         cap_id = str(rec.get("capability_id") or "").strip()
         policy = _pkg()._allowlist_policy()
         actor_role = _pkg()._resolve_actor_role(group, actor_id)
@@ -1050,6 +1243,11 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
             enable_block_reason = "capability_unavailable"
         enableable_now = not bool(enable_block_reason)
         probe_result, diagnostics = _probe_import_record(rec, capability_id=cap_id, enabled=probe)
+        already_active = _capability_enabled_for_actor(
+            group_id=group_id,
+            actor_id=actor_id,
+            capability_id=cap_id,
+        )
 
         readiness_preview = _build_import_readiness_preview(
             rec=rec,
@@ -1059,10 +1257,12 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
             enable_block_reason=enable_block_reason,
             diagnostics=diagnostics,
             probe_result=probe_result,
+            already_active=already_active,
         )
 
         if dry_run:
-            dry_state = str(readiness_preview.get("preview_status") or "needs_inspect")
+            dry_preview_status = str(readiness_preview.get("preview_status") or "needs_inspect")
+            dry_state = "runnable" if dry_preview_status == "active" else dry_preview_status
             _audit(
                 "ready",
                 state=dry_state,
@@ -1072,7 +1272,8 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                     "effective_policy_level": effective_policy_level,
                     "enableable_now": bool(enableable_now),
                     "enable_block_reason": enable_block_reason,
-                    "preview_status": dry_state,
+                    "preview_status": dry_preview_status,
+                    "already_active": bool(already_active),
                 },
                 capability_id=cap_id,
             )
@@ -1086,6 +1287,8 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                     "kind": str(rec.get("kind") or ""),
                     "dry_run": True,
                     "imported": False,
+                    "scope": scope,
+                    "already_active": bool(already_active),
                     "record": rec,
                     "probe": probe_result,
                     "diagnostics": diagnostics,
@@ -1099,12 +1302,52 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                 },
             )
 
+        missing_self_proposed_sections_reason = _self_proposed_missing_sections_reason(rec)
+        if missing_self_proposed_sections_reason:
+            missing_sections = [
+                section.strip()
+                for section in missing_self_proposed_sections_reason.split(":", 1)[1].split(",")
+                if section.strip()
+            ]
+            message = "agent_self_proposed skill capsule_text is missing required sections"
+            if missing_sections:
+                message = f"{message}: {', '.join(missing_sections)}"
+            details = {
+                "action_id": action_id,
+                "capability_id": cap_id,
+                "reason": missing_self_proposed_sections_reason,
+                "missing_sections": missing_sections,
+                "already_active": bool(already_active),
+                "active_record_preserved": True,
+            }
+            _audit(
+                "failed",
+                state="blocked",
+                error_code="missing_agent_self_proposed_sections",
+                details=details,
+                capability_id=cap_id,
+            )
+            return _error("capability_import_invalid", message, details=details)
+
         with _CATALOG_LOCK:
             catalog_path, catalog_doc = _pkg()._load_catalog_doc()
             rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
             existing = rows.get(cap_id) if isinstance(rows.get(cap_id), dict) else None
-            deduped = bool(existing == rec)
-            rows[cap_id] = rec
+            if _is_self_proposed_skill_record(rec):
+                origin_group_id = _self_proposed_origin_group_id(group_id=group_id, existing=existing)
+                if origin_group_id:
+                    rec["origin_group_id"] = origin_group_id
+            record_existed = isinstance(existing, dict)
+            record_unchanged = bool(
+                record_existed
+                and _semantic_import_record(existing, ignore_updated_at_source=not raw_has_updated_at_source)
+                == _semantic_import_record(rec, ignore_updated_at_source=not raw_has_updated_at_source)
+            )
+            record_changed = bool(record_existed and not record_unchanged)
+            import_action = "unchanged" if record_unchanged else ("updated" if record_existed else "created")
+            stored_rec = dict(existing) if record_unchanged and isinstance(existing, dict) else rec
+            if not record_unchanged:
+                rows[cap_id] = rec
             catalog_doc["records"] = rows
 
             source_id = str(rec.get("source_id") or "").strip()
@@ -1151,17 +1394,37 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                 result_reason = str((enable_resp.error.message if enable_resp.error else "enable_failed") or "enable_failed")
 
         final_state = str(state or readiness_preview.get("preview_status") or "needs_inspect").strip().lower() or "needs_inspect"
+        if (
+            already_active
+            and str(rec.get("kind") or "").strip().lower() == "skill"
+            and enableable_now
+            and str(probe_result.get("state") or "").strip().lower() != "failed"
+        ):
+            final_state = "runnable"
         if str(probe_result.get("state") or "").strip().lower() == "failed" and final_state not in {"blocked", "needs_inspect"}:
             final_state = "needs_inspect"
         if final_state == "blocked" and not result_reason:
             result_reason = str(enable_block_reason or probe_result.get("reason") or "").strip()
+
+        active_after_import = bool(
+            _capability_enabled_for_actor(
+                group_id=group_id,
+                actor_id=actor_id,
+                capability_id=cap_id,
+            )
+            and enableable_now
+            and str(probe_result.get("state") or "").strip().lower() != "failed"
+        )
 
         _audit(
             "ready" if final_state in {"enableable", "activation_pending", "runnable", "verified"} else "failed",
             state=final_state,
             error_code=result_reason if final_state in {"blocked", "needs_inspect"} else "",
             details={
-                "deduped": bool(deduped),
+                "import_action": import_action,
+                "record_changed": bool(record_changed),
+                "already_active": bool(already_active),
+                "active_after_import": bool(active_after_import),
                 "enable_after_import": bool(enable_after_import),
                 "probe_state": str(probe_result.get("state") or ""),
             },
@@ -1175,8 +1438,12 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
             "kind": str(rec.get("kind") or ""),
             "dry_run": False,
             "imported": True,
-            "deduped": bool(deduped),
-            "record": rec,
+            "scope": scope,
+            "import_action": import_action,
+            "record_changed": bool(record_changed),
+            "already_active": bool(already_active),
+            "active_after_import": bool(active_after_import),
+            "record": stored_rec,
             "probe": probe_result,
             "diagnostics": diagnostics,
             "effective_policy_level": effective_policy_level,
@@ -1259,15 +1526,35 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
                 details={"action_id": action_id},
             )
 
+        removed_record = False
+        remove_generated_record = False
+        with _CATALOG_LOCK:
+            catalog_path, catalog_doc = _pkg()._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            rec = rows.get(capability_id) if isinstance(rows.get(capability_id), dict) else None
+            remove_generated_record = bool(isinstance(rec, dict) and _is_self_proposed_skill_record(rec))
+            if remove_generated_record:
+                rows.pop(capability_id, None)
+                catalog_doc["records"] = rows
+                _pkg()._refresh_source_record_counts(catalog_doc)
+                _pkg()._save_catalog_doc(catalog_path, catalog_doc)
+                removed_record = True
+
         removed_bindings = 0
         has_remaining_binding = False
         with _STATE_LOCK:
             state_path, state_doc = _load_state_doc()
-            removed_bindings = _remove_capability_bindings(
-                state_doc,
-                group_id=group_id,
-                capability_id=capability_id,
-            )
+            if remove_generated_record:
+                removed_bindings = _remove_capability_bindings_all_groups(
+                    state_doc,
+                    capability_id=capability_id,
+                )
+            else:
+                removed_bindings = _remove_capability_bindings(
+                    state_doc,
+                    group_id=group_id,
+                    capability_id=capability_id,
+                )
             has_remaining_binding = _has_any_binding_for_capability(state_doc, capability_id=capability_id)
             if removed_bindings > 0:
                 _save_state_doc(state_path, state_doc)
@@ -1277,11 +1564,17 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
         cleanup_skipped_reason = ""
         with _RUNTIME_LOCK:
             runtime_path, runtime_doc = _load_runtime_doc()
-            removed_runtime_bindings = _remove_runtime_group_capability_bindings(
-                runtime_doc,
-                group_id=group_id,
-                capability_id=capability_id,
-            )
+            if remove_generated_record:
+                removed_runtime_bindings = _remove_runtime_capability_bindings_all_groups(
+                    runtime_doc,
+                    capability_id=capability_id,
+                )
+            else:
+                removed_runtime_bindings = _remove_runtime_group_capability_bindings(
+                    runtime_doc,
+                    group_id=group_id,
+                    capability_id=capability_id,
+                )
             runtime_changed = bool(removed_runtime_bindings > 0)
             if has_remaining_binding:
                 cleanup_skipped_reason = "cleanup_skipped_capability_still_bound"
@@ -1299,14 +1592,35 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
             if runtime_changed:
                 _save_runtime_doc(runtime_path, runtime_doc)
 
-        refresh_required = bool(removed_bindings > 0 or removed_installation or removed_runtime_bindings > 0)
+        removed_actor_autoload = (
+            _remove_actor_autoload_references_all_groups(capability_id)
+            if remove_generated_record
+            else _remove_actor_autoload_references(group, capability_id)
+        )
+        removed_profile_autoload = (
+            _remove_profile_autoload_references(capability_id)
+            if remove_generated_record
+            else 0
+        )
+
+        refresh_required = bool(
+            removed_record
+            or removed_bindings > 0
+            or removed_installation
+            or removed_runtime_bindings > 0
+            or removed_actor_autoload > 0
+            or removed_profile_autoload > 0
+        )
         _audit(
             "ready",
             state="ready",
             details={
+                "removed_record": bool(removed_record),
                 "removed_bindings": int(removed_bindings),
                 "removed_installation": bool(removed_installation),
                 "removed_runtime_bindings": int(removed_runtime_bindings),
+                "removed_actor_autoload": int(removed_actor_autoload),
+                "removed_profile_autoload": int(removed_profile_autoload),
                 "cleanup_skipped_reason": cleanup_skipped_reason,
             },
         )
@@ -1316,9 +1630,12 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
             "actor_id": actor_id,
             "capability_id": capability_id,
             "state": "ready",
+            "removed_record": bool(removed_record),
             "removed_bindings": int(removed_bindings),
             "removed_installation": bool(removed_installation),
             "removed_runtime_bindings": int(removed_runtime_bindings),
+            "removed_actor_autoload": int(removed_actor_autoload),
+            "removed_profile_autoload": int(removed_profile_autoload),
             "refresh_required": refresh_required,
         }
         if cleanup_skipped_reason:

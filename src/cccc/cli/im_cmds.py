@@ -44,7 +44,6 @@ def cmd_im_set(args: argparse.Namespace) -> int:
     wecom_bot_id = str(getattr(args, "wecom_bot_id", "") or "").strip()
     wecom_secret = str(getattr(args, "wecom_secret", "") or "").strip()
     weixin_account_id = str(getattr(args, "weixin_account_id", "") or "").strip()
-    weixin_command = str(getattr(args, "weixin_command", "") or "").strip()
 
     # Backward compat: if only token_env provided, use as bot_token_env
     if token_env and not bot_token_env:
@@ -85,7 +84,7 @@ def cmd_im_set(args: argparse.Namespace) -> int:
                 print()
                 return 1
     elif platform == "weixin":
-        # Weixin uses a local Node sidecar. Both fields are optional.
+        # Weixin uses wechatbot-sdk with per-group cached credentials.
         pass
     elif not bot_token_env and not token:
         try:
@@ -167,8 +166,6 @@ def cmd_im_set(args: argparse.Namespace) -> int:
     elif platform == "weixin":
         if weixin_account_id:
             im_config["weixin_account_id"] = weixin_account_id
-        if weixin_command:
-            im_config["weixin_command"] = weixin_command
 
     im_config = canonicalize_im_config(im_config)
 

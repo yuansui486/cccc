@@ -147,6 +147,9 @@ class TestCodexAppFlow(unittest.TestCase):
 
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             submit_user_message.assert_called_once()
+            submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
+            self.assertIn("[cccc] user → peer1:", submitted_text)
+            self.assertIn("hello codex", submitted_text)
             queue_chat_message.assert_not_called()
             request_flush_pending_messages.assert_not_called()
             group = load_group(group_id)
@@ -216,7 +219,10 @@ class TestCodexAppFlow(unittest.TestCase):
 
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             submit_user_message.assert_called_once()
-            self.assertIn(MCP_REMINDER_LINE, str(submit_user_message.call_args.kwargs.get("text") or ""))
+            submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
+            self.assertIn("[cccc] user → peer1", submitted_text)
+            self.assertIn("hello codex", submitted_text)
+            self.assertIn(MCP_REMINDER_LINE, submitted_text)
             queue_chat_message.assert_not_called()
             request_flush_pending_messages.assert_not_called()
 
@@ -254,6 +260,90 @@ class TestCodexAppFlow(unittest.TestCase):
 
             ledger_events = self._ledger_events(group)
             self.assertEqual(str(ledger_events[-1].get("kind") or ""), "chat.read")
+        finally:
+            cleanup()
+
+    def test_reply_headless_codex_does_not_leak_original_external_source_into_sender_header(self) -> None:
+        from cccc.daemon.messaging.chat_ops import handle_reply
+        from cccc.kernel.group import load_group
+        from cccc.kernel.ledger import append_event
+        from cccc.contracts.v1 import ChatMessageData
+
+        _, cleanup = self._with_home()
+        try:
+            create_resp, _ = self._call("group_create", {"title": "codex-reply-source-header", "topic": "", "by": "user"})
+            self.assertTrue(create_resp.ok, getattr(create_resp, "error", None))
+            group_id = str((create_resp.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add_resp, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            original_event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key=str(group.doc.get("active_scope_key") or ""),
+                by="user",
+                data=ChatMessageData(
+                    text="外部用户原话",
+                    to=["peer1"],
+                    source_platform="dingtalk",
+                    source_user_name="Alice",
+                    source_user_id="1729",
+                ).model_dump(),
+            )
+            reply_to = str(original_event.get("id") or "").strip()
+            self.assertTrue(reply_to)
+
+            with (
+                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
+                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+            ):
+                resp = handle_reply(
+                    {
+                        "group_id": group_id,
+                        "by": "peer2",
+                        "text": "收到，我来处理。",
+                        "reply_to": reply_to,
+                        "to": ["peer1"],
+                    },
+                    coerce_bool=lambda value: bool(value),
+                    normalize_attachments=lambda _group, _attachments: [],
+                    effective_runner_kind=lambda runner: str(runner or "pty"),
+                    auto_wake_recipients=lambda _group, _to, _by: [],
+                    automation_on_resume=lambda _group: None,
+                    automation_on_new_message=lambda _group: None,
+                    clear_pending_system_notifies=lambda _group_id, _reasons: None,
+                )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            submit_user_message.assert_called_once()
+            submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
+            self.assertIn("[cccc] peer2 → peer1", submitted_text)
+            self.assertIn('> "外部用户原话"', submitted_text)
+            self.assertIn("收到，我来处理。", submitted_text)
+            self.assertNotIn("Alice", submitted_text)
+            self.assertNotIn("dingtalk", submitted_text)
+            self.assertNotIn("1729", submitted_text)
+            queue_chat_message.assert_not_called()
+            request_flush_pending_messages.assert_not_called()
         finally:
             cleanup()
 
@@ -685,6 +775,55 @@ class TestCodexAppFlow(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_codex_turn_start_timeout_stops_session_without_idle_overwrite(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+
+        home, cleanup = self._with_home()
+        try:
+            session = CodexAppSession(
+                group_id="g_test",
+                actor_id="peer1",
+                cwd=Path(home),
+                env={},
+            )
+
+            class _Proc:
+                pid = os.getpid()
+
+                @staticmethod
+                def poll():
+                    return None
+
+                @staticmethod
+                def terminate():
+                    return None
+
+                @staticmethod
+                def wait(timeout: float | None = None):
+                    _ = timeout
+                    return 0
+
+            session._proc = _Proc()
+            session._running = True
+            session._session_state.thread_id = "thread-1"
+            session._session_state.status = "idle"
+            session._turn_queue.put_nowait(_PendingTurn(text="hello", event_id="evt-1", ts="2026-04-08T00:00:00Z"))
+
+            with (
+                patch.object(session, "_request", side_effect=RuntimeError("codex request timed out: turn/start")),
+                patch.object(session, "_emit") as emit,
+            ):
+                session._turn_loop()
+
+            state = session.state()
+            self.assertEqual(str(state.get("status") or ""), "stopped")
+            self.assertFalse(session.is_running())
+            event_types = [str(call.args[0]) for call in emit.call_args_list if call.args]
+            self.assertIn("headless.turn.failed", event_types)
+            self.assertIn("headless.session.stopped", event_types)
+        finally:
+            cleanup()
+
     def test_claude_turn_loop_auto_marks_only_after_runtime_accepts_turn(self) -> None:
         from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
@@ -715,6 +854,87 @@ class TestCodexAppFlow(unittest.TestCase):
                 event_id="evt-1",
                 ts="2026-04-08T00:00:00Z",
             )
+        finally:
+            cleanup()
+
+    def test_claude_voice_secretary_control_turn_requeues_when_input_not_consumed(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+
+        home, cleanup = self._with_home()
+        try:
+            session = ClaudeAppSession(
+                group_id="g_test",
+                actor_id="voice-secretary",
+                cwd=Path(home),
+                env={},
+            )
+            session._active_turn_id = "turn-voice"
+            session._active_event_id = "event-voice"
+            session._active_control_kind = "system_notify"
+            session._active_payload = _PendingTurn(
+                text="read secretary input",
+                event_id="event-voice",
+                control_kind="system_notify",
+                validation_snapshot={"kind": "voice_secretary_input", "before_latest_seq": 8, "before_secretary_read_cursor": 5},
+            )
+
+            with (
+                patch("cccc.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_emit") as emit,
+                patch.object(session._turn_done, "set") as done_set,
+            ):
+                session._handle_result_event({"type": "result", "subtype": "success"})
+
+            done_set.assert_called_once()
+            queued = session._turn_queue.get_nowait()
+            self.assertIsInstance(queued, _PendingTurn)
+            assert isinstance(queued, _PendingTurn)
+            self.assertEqual(queued.retry_count, 1)
+            self.assertEqual(queued.control_kind, "system_notify")
+            event_types = [str(call.args[0]) for call in emit.call_args_list if call.args]
+            self.assertIn("headless.control.requeued", event_types)
+            self.assertNotIn("headless.control.completed", event_types)
+            self.assertNotIn("headless.control.failed", event_types)
+        finally:
+            cleanup()
+
+    def test_claude_voice_secretary_control_turn_fails_after_retry_when_input_not_consumed(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+
+        home, cleanup = self._with_home()
+        try:
+            session = ClaudeAppSession(
+                group_id="g_test",
+                actor_id="voice-secretary",
+                cwd=Path(home),
+                env={},
+            )
+            session._active_turn_id = "turn-voice"
+            session._active_event_id = "event-voice"
+            session._active_control_kind = "system_notify"
+            session._active_payload = _PendingTurn(
+                text="read secretary input",
+                event_id="event-voice",
+                control_kind="system_notify",
+                retry_count=1,
+                validation_snapshot={"kind": "voice_secretary_input", "before_latest_seq": 8, "before_secretary_read_cursor": 5},
+            )
+
+            with (
+                patch("cccc.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_emit") as emit,
+                patch.object(session._turn_done, "set") as done_set,
+            ):
+                session._handle_result_event({"type": "result", "subtype": "success"})
+
+            done_set.assert_called_once()
+            self.assertTrue(session._turn_queue.empty())
+            event_types = [str(call.args[0]) for call in emit.call_args_list if call.args]
+            self.assertIn("headless.control.failed", event_types)
+            self.assertNotIn("headless.control.completed", event_types)
+            self.assertNotIn("headless.control.requeued", event_types)
         finally:
             cleanup()
 
@@ -791,6 +1011,339 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertIn("headless.control.completed", event_types)
             self.assertNotIn("headless.message.started", event_types)
             self.assertNotIn("headless.message.completed", event_types)
+        finally:
+            cleanup()
+
+    def test_voice_secretary_control_turn_requeues_when_input_not_consumed(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+
+        home, cleanup = self._with_home()
+        try:
+            session = CodexAppSession(
+                group_id="g_test",
+                actor_id="voice-secretary",
+                cwd=Path(home),
+                env={},
+            )
+            session._active_turn_id = "turn-voice"
+            session._active_event_id = "event-voice"
+            session._active_control_kind = "system_notify"
+            session._active_payload = _PendingTurn(
+                text="read secretary input",
+                event_id="event-voice",
+                control_kind="system_notify",
+                validation_snapshot={"kind": "voice_secretary_input", "before_latest_seq": 8, "before_secretary_read_cursor": 5},
+            )
+
+            with (
+                patch("cccc.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_emit") as emit,
+                patch.object(session._turn_done, "set") as done_set,
+            ):
+                session._handle_notification(
+                    "turn/completed",
+                    {"turn": {"id": "turn-voice", "status": "completed"}},
+                )
+
+            done_set.assert_called_once()
+            queued = session._turn_queue.get_nowait()
+            self.assertIsInstance(queued, _PendingTurn)
+            assert isinstance(queued, _PendingTurn)
+            self.assertEqual(queued.retry_count, 1)
+            self.assertEqual(queued.control_kind, "system_notify")
+            event_types = [str(call.args[0]) for call in emit.call_args_list if call.args]
+            self.assertIn("headless.control.requeued", event_types)
+            self.assertNotIn("headless.control.completed", event_types)
+            self.assertNotIn("headless.control.failed", event_types)
+        finally:
+            cleanup()
+
+    def test_voice_secretary_control_turn_fails_after_retry_when_input_not_consumed(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+
+        home, cleanup = self._with_home()
+        try:
+            session = CodexAppSession(
+                group_id="g_test",
+                actor_id="voice-secretary",
+                cwd=Path(home),
+                env={},
+            )
+            session._active_turn_id = "turn-voice"
+            session._active_event_id = "event-voice"
+            session._active_control_kind = "system_notify"
+            session._active_payload = _PendingTurn(
+                text="read secretary input",
+                event_id="event-voice",
+                control_kind="system_notify",
+                retry_count=1,
+                validation_snapshot={"kind": "voice_secretary_input", "before_latest_seq": 8, "before_secretary_read_cursor": 5},
+            )
+
+            with (
+                patch("cccc.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_emit") as emit,
+                patch.object(session._turn_done, "set") as done_set,
+            ):
+                session._handle_notification(
+                    "turn/completed",
+                    {"turn": {"id": "turn-voice", "status": "completed"}},
+                )
+
+            done_set.assert_called_once()
+            self.assertTrue(session._turn_queue.empty())
+            event_types = [str(call.args[0]) for call in emit.call_args_list if call.args]
+            self.assertIn("headless.control.failed", event_types)
+            self.assertNotIn("headless.control.completed", event_types)
+            self.assertNotIn("headless.control.requeued", event_types)
+        finally:
+            cleanup()
+
+    def test_voice_secretary_control_turn_requires_read_new_input_for_prompt_draft(self) -> None:
+        from cccc.daemon.codex_app_sessions import (
+            _voice_secretary_control_consumed_input,
+            _voice_secretary_control_consumption_diagnostics,
+        )
+
+        home, cleanup = self._with_home()
+        try:
+            create_resp, _ = self._call("group_create", {"title": "voice-secretary-inline-success", "topic": "", "by": "user"})
+            self.assertTrue(create_resp.ok, getattr(create_resp, "error", None))
+            group_id = str((create_resp.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+            state_dir = Path(home) / "groups" / group_id / "state"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            assistants_path = state_dir / "assistants.json"
+            assistants_path.write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "group_id": group_id,
+                        "assistants": {},
+                        "voice_sessions": {},
+                        "voice_ask_requests": {},
+                        "voice_prompt_requests": {},
+                        "voice_prompt_drafts": {
+                            "voice-prompt-1": {
+                                "request_id": "voice-prompt-1",
+                                "updated_at": "2026-04-20T10:00:01Z",
+                                "draft_text": "refined prompt",
+                                "status": "pending",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            voice_state_dir = Path(home) / "voice-secretary" / group_id
+            voice_state_dir.mkdir(parents=True, exist_ok=True)
+            (voice_state_dir / "input_state.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "group_id": group_id,
+                        "latest_seq": 8,
+                        "secretary_read_cursor": 5,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            draft_without_read_consumed = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 8,
+                    "before_secretary_read_cursor": 5,
+                    "composer_request_ids": ["voice-prompt-1"],
+                    "input_target_kinds": ["composer"],
+                    "before_prompt_drafts": {
+                        "voice-prompt-1": {
+                            "updated_at": "",
+                            "draft_text": "",
+                            "status": "",
+                        }
+                    },
+                },
+            )
+
+            self.assertFalse(draft_without_read_consumed)
+            diagnostics = _voice_secretary_control_consumption_diagnostics(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 8,
+                    "before_secretary_read_cursor": 5,
+                    "composer_request_ids": ["voice-prompt-1"],
+                    "input_target_kinds": ["composer"],
+                    "before_prompt_drafts": {
+                        "voice-prompt-1": {
+                            "updated_at": "",
+                            "draft_text": "",
+                            "status": "",
+                        }
+                    },
+                },
+            )
+            self.assertIn("read_new_input", diagnostics.get("missing") or [])
+
+            (voice_state_dir / "input_state.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "group_id": group_id,
+                        "latest_seq": 8,
+                        "secretary_read_cursor": 8,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            consumed_after_read = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 8,
+                    "before_secretary_read_cursor": 5,
+                    "composer_request_ids": ["voice-prompt-1"],
+                    "input_target_kinds": ["composer"],
+                    "before_prompt_drafts": {
+                        "voice-prompt-1": {
+                            "updated_at": "",
+                            "draft_text": "",
+                            "status": "",
+                        }
+                    },
+                },
+            )
+            self.assertTrue(consumed_after_read)
+
+            missing_draft_consumed = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 8,
+                    "before_secretary_read_cursor": 5,
+                    "composer_request_ids": ["voice-prompt-missing"],
+                    "input_target_kinds": ["composer"],
+                    "before_prompt_drafts": {},
+                },
+            )
+            self.assertFalse(missing_draft_consumed)
+
+            (voice_state_dir / "input_state.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "group_id": group_id,
+                        "latest_seq": 8,
+                        "secretary_read_cursor": 5,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mixed_batch_consumed = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 8,
+                    "before_secretary_read_cursor": 5,
+                    "composer_request_ids": ["voice-prompt-1"],
+                    "input_target_kinds": ["document", "composer"],
+                    "before_prompt_drafts": {
+                        "voice-prompt-1": {
+                            "updated_at": "",
+                            "draft_text": "",
+                            "status": "",
+                        }
+                    },
+                },
+            )
+            self.assertFalse(mixed_batch_consumed)
+
+            (voice_state_dir / "input_state.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "group_id": group_id,
+                        "latest_seq": 9,
+                        "secretary_read_cursor": 9,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            missing_ask_report_consumed = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 9,
+                    "before_secretary_read_cursor": 5,
+                    "secretary_request_ids": ["voice-ask-1"],
+                    "input_target_kinds": ["secretary"],
+                    "before_ask_requests": {},
+                },
+            )
+            self.assertFalse(missing_ask_report_consumed)
+
+            assistants_path.write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "group_id": group_id,
+                        "assistants": {},
+                        "voice_sessions": {},
+                        "voice_prompt_requests": {},
+                        "voice_prompt_drafts": {},
+                        "voice_ask_requests": {
+                            "voice-ask-1": {
+                                "request_id": "voice-ask-1",
+                                "updated_at": "2026-04-20T10:00:03Z",
+                                "reply_text": "已检查，没有明显遗漏。",
+                                "status": "done",
+                            },
+                            "voice-ask-empty": {
+                                "request_id": "voice-ask-empty",
+                                "updated_at": "2026-04-20T10:00:04Z",
+                                "reply_text": "",
+                                "status": "done",
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ask_report_consumed = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 9,
+                    "before_secretary_read_cursor": 5,
+                    "secretary_request_ids": ["voice-ask-1"],
+                    "input_target_kinds": ["secretary"],
+                    "before_ask_requests": {
+                        "voice-ask-1": {
+                            "updated_at": "2026-04-20T10:00:01Z",
+                            "reply_text": "",
+                            "status": "working",
+                        }
+                    },
+                },
+            )
+            self.assertTrue(ask_report_consumed)
+
+            ask_report_without_reply_consumed = _voice_secretary_control_consumed_input(
+                group_id=group_id,
+                snapshot={
+                    "kind": "voice_secretary_input",
+                    "before_latest_seq": 9,
+                    "before_secretary_read_cursor": 5,
+                    "secretary_request_ids": ["voice-ask-empty"],
+                    "input_target_kinds": ["secretary"],
+                    "before_ask_requests": {},
+                },
+            )
+            self.assertFalse(ask_report_without_reply_consumed)
         finally:
             cleanup()
 
@@ -1039,6 +1592,8 @@ class TestCodexAppFlow(unittest.TestCase):
                 for line in loaded_group.ledger_path.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
+            stream_events = [event for event in ledger_events if str(event.get("kind") or "") == "chat.stream"]
+            self.assertEqual(stream_events, [])
             chat_messages = [event for event in ledger_events if str(event.get("kind") or "") == "chat.message"]
             self.assertEqual(chat_messages, [])
         finally:
@@ -1198,12 +1753,14 @@ class TestCodexAppFlow(unittest.TestCase):
                 for line in loaded_group.ledger_path.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
+            stream_events = [event for event in ledger_events if str(event.get("kind") or "") == "chat.stream"]
+            self.assertEqual(stream_events, [])
             chat_messages = [event for event in ledger_events if str(event.get("kind") or "") == "chat.message"]
             self.assertEqual(chat_messages, [])
         finally:
             cleanup()
 
-    def test_claude_stream_completion_does_not_auto_materialize_chat_message(self) -> None:
+    def test_claude_stream_completion_emits_headless_events_without_auto_chat_message(self) -> None:
         from cccc.daemon.claude_app_sessions import ClaudeAppSession
         from cccc.kernel.headless_events import headless_events_path
         from cccc.kernel.group import create_group, load_group
@@ -1249,6 +1806,8 @@ class TestCodexAppFlow(unittest.TestCase):
                 for line in loaded_group.ledger_path.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
+            stream_events = [event for event in ledger_events if str(event.get("kind") or "") == "chat.stream"]
+            self.assertEqual(stream_events, [])
             chat_messages = [event for event in ledger_events if str(event.get("kind") or "") == "chat.message"]
             self.assertEqual(chat_messages, [])
         finally:
@@ -1536,6 +2095,168 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertEqual(str(actors[0].get("id") or ""), "peer1")
             self.assertTrue(bool(actors[0].get("running")))
             self.assertEqual(str(actors[0].get("effective_working_state") or ""), "working")
+        finally:
+            cleanup()
+
+    def test_actor_activity_thread_writes_ledger_on_state_change(self) -> None:
+        """actor.activity should be written to ledger on working-state transitions."""
+        from cccc.daemon.serve_ops import start_actor_activity_thread
+        from cccc.kernel.actors import add_actor
+        from cccc.kernel.group import create_group, load_group
+        from cccc.kernel.registry import load_registry
+
+        home, cleanup = self._with_home()
+        try:
+            reg = load_registry()
+            created = create_group(reg, title="codex-ledger-activity", topic="")
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="headless")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            # Re-load to get fresh ledger_path
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            ledger_path = group.ledger_path  # type: ignore[union-attr]
+
+            class _Broadcaster:
+                def publish(self, event: dict) -> None:
+                    pass
+
+            status_holder = {"status": "working", "running": True}
+
+            class _CodexSupervisor:
+                @staticmethod
+                def get_state(group_id: str, actor_id: str) -> dict:
+                    return {
+                        "group_id": group_id,
+                        "actor_id": actor_id,
+                        "status": status_holder["status"],
+                        "current_task_id": "turn-1",
+                        "updated_at": "2026-04-02T10:00:00Z",
+                    }
+
+                @staticmethod
+                def actor_running(_group_id: str, _actor_id: str) -> bool:
+                    return bool(status_holder.get("running", True))
+
+            stop_event = threading.Event()
+            thread = start_actor_activity_thread(
+                stop_event=stop_event,
+                home=Path(home),
+                pty_supervisor=object(),
+                headless_supervisor=object(),
+                codex_supervisor=_CodexSupervisor(),
+                event_broadcaster=_Broadcaster(),
+                load_group=load_group,
+                interval_seconds=1.0,
+            )
+            try:
+                # First tick runs immediately: new actor → state_changed → writes to ledger
+                time.sleep(0.25)
+                # Verify ledger has actor.activity
+                import json
+                lines = ledger_path.read_text(encoding="utf-8").strip().split("\n")
+                activity_lines = [json.loads(line) for line in lines if '"actor.activity"' in line]
+                self.assertTrue(activity_lines, "First tick should write actor.activity to ledger")
+                self.assertEqual(activity_lines[-1]["data"]["actors"][0]["effective_working_state"], "working")
+
+                initial_count = len(activity_lines)
+                # Wait another tick (>1s interval) — no state change → no new ledger write
+                time.sleep(1.3)
+                lines2 = ledger_path.read_text(encoding="utf-8").strip().split("\n")
+                activity_lines2 = [json.loads(line) for line in lines2 if '"actor.activity"' in line]
+                self.assertEqual(len(activity_lines2), initial_count, "No state change should not add ledger entries")
+
+                # Change state: working → idle → should write to ledger on next tick
+                status_holder["status"] = "idle"
+                time.sleep(1.3)
+                lines3 = ledger_path.read_text(encoding="utf-8").strip().split("\n")
+                activity_lines3 = [json.loads(line) for line in lines3 if '"actor.activity"' in line]
+                self.assertGreater(len(activity_lines3), initial_count, "State change should add ledger entry")
+                self.assertEqual(activity_lines3[-1]["data"]["actors"][0]["effective_working_state"], "idle")
+
+                # Simulate actor stopping (actor_running returns False)
+                idle_count = len(activity_lines3)
+                status_holder["running"] = False
+                time.sleep(1.3)
+                lines4 = ledger_path.read_text(encoding="utf-8").strip().split("\n")
+                activity_lines4 = [json.loads(line) for line in lines4 if '"actor.activity"' in line]
+                self.assertGreater(len(activity_lines4), idle_count, "Actor stop should add ledger entry")
+                last_event = activity_lines4[-1]
+                stopped_actors = [a for a in last_event["data"]["actors"] if a["id"] == "peer1"]
+                self.assertEqual(len(stopped_actors), 1, "Stopped actor should appear in event")
+                self.assertEqual(stopped_actors[0]["effective_working_state"], "stopped")
+                self.assertFalse(stopped_actors[0]["running"])
+            finally:
+                stop_event.set()
+                thread.join(timeout=1.0)
+        finally:
+            cleanup()
+
+    def test_actor_activity_thread_preserves_runner_on_stopped_entry(self) -> None:
+        from cccc.daemon.serve_ops import start_actor_activity_thread
+        from cccc.kernel.actors import add_actor
+        from cccc.kernel.group import create_group, load_group
+        from cccc.kernel.registry import load_registry
+
+        home, cleanup = self._with_home()
+        try:
+            reg = load_registry()
+            created = create_group(reg, title="pty-ledger-activity", topic="")
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            ledger_path = group.ledger_path  # type: ignore[union-attr]
+            status_holder = {"running": True}
+
+            class _PtySupervisor:
+                @staticmethod
+                def actor_running(_group_id: str, _actor_id: str) -> bool:
+                    return bool(status_holder.get("running", True))
+
+                @staticmethod
+                def idle_seconds(*, group_id: str, actor_id: str) -> float:
+                    return 0.0
+
+                @staticmethod
+                def terminal_override(*, group_id: str, actor_id: str):
+                    return None
+
+            class _Broadcaster:
+                def publish(self, event: dict) -> None:
+                    pass
+
+            stop_event = threading.Event()
+            thread = start_actor_activity_thread(
+                stop_event=stop_event,
+                home=Path(home),
+                pty_supervisor=_PtySupervisor(),
+                headless_supervisor=object(),
+                codex_supervisor=object(),
+                event_broadcaster=_Broadcaster(),
+                load_group=load_group,
+                interval_seconds=1.0,
+            )
+            try:
+                time.sleep(0.25)
+                status_holder["running"] = False
+                time.sleep(1.3)
+
+                lines = ledger_path.read_text(encoding="utf-8").strip().split("\n")
+                activity_lines = [json.loads(line) for line in lines if '"actor.activity"' in line]
+                self.assertTrue(activity_lines, "Actor stop should write actor.activity to ledger")
+                stopped_actors = [a for a in activity_lines[-1]["data"]["actors"] if a["id"] == "peer1"]
+                self.assertEqual(len(stopped_actors), 1)
+                self.assertEqual(stopped_actors[0]["effective_working_state"], "stopped")
+                self.assertEqual(stopped_actors[0]["runner_effective"], "pty")
+            finally:
+                stop_event.set()
+                thread.join(timeout=1.0)
         finally:
             cleanup()
 

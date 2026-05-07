@@ -1,7 +1,19 @@
 // TranscriptTab configures terminal transcript visibility and viewing.
 import { useTranslation } from "react-i18next";
 import { Actor } from "../../../types";
-import { inputClass, primaryButtonClass, cardClass, preClass } from "./types";
+import {
+  dangerButtonClass,
+  inputClass,
+  preClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsWorkspaceActionBarClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
+} from "./types";
 
 interface TranscriptTabProps {
   isDark: boolean;
@@ -67,62 +79,72 @@ export function TranscriptTab({
   const { t } = useTranslation("settings");
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t("transcript.title")}</h3>
-        <p className="text-xs mt-1 text-[var(--color-text-muted)]">
-          {t("transcript.description")}
-        </p>
-      </div>
+    <div className="space-y-5">
+      <div className={settingsWorkspaceShellClass(_isDark)}>
+        <div className={settingsWorkspaceHeaderClass(_isDark)}>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("transcript.title")}</h3>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {t("transcript.description")}
+            </p>
+          </div>
+        </div>
 
-      {/* Policy */}
-      <div className={cardClass()}>
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("transcript.policy")}</div>
+        <div className={settingsWorkspaceBodyClass}>
+          <div className={settingsWorkspacePanelClass(_isDark)}>
+            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("transcript.policy")}</div>
 
-        <div className="mt-3 space-y-3">
-          <div>
-            <label className="block text-xs mb-1 text-[var(--color-text-tertiary)]">{t("transcript.visibilityLabel")}</label>
-            <select
-              value={terminalVisibility}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "off" || v === "foreman" || v === "all") setTerminalVisibility(v);
-              }}
-              className={inputClass()}
-            >
-              <option value="off">{t("transcript.visibilityOff")}</option>
-              <option value="foreman">{t("transcript.visibilityForeman")}</option>
-              <option value="all">{t("transcript.visibilityAll")}</option>
-            </select>
-            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-              {t("transcript.visibilityTip")}
+            <div className="mt-4 space-y-4">
+              <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                <label className="block text-xs mb-1 text-[var(--color-text-tertiary)]">{t("transcript.visibilityLabel")}</label>
+                <select
+                  value={terminalVisibility}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "off" || v === "foreman" || v === "all") setTerminalVisibility(v);
+                  }}
+                  className={inputClass()}
+                >
+                  <option value="off">{t("transcript.visibilityOff")}</option>
+                  <option value="foreman">{t("transcript.visibilityForeman")}</option>
+                  <option value="all">{t("transcript.visibilityAll")}</option>
+                </select>
+                <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                  {t("transcript.visibilityTip")}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+                <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                  <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={terminalNotifyTail}
+                      onChange={(e) => setTerminalNotifyTail(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    {t("transcript.includeTail")}
+                  </label>
+                </div>
+
+                <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                  <label className="block text-xs mb-1 text-[var(--color-text-tertiary)]">{t("transcript.notificationLines")}</label>
+                  <input
+                    type="number"
+                    value={terminalNotifyLines}
+                    min={1}
+                    max={80}
+                    onChange={(e) => setTerminalNotifyLines(Number(e.target.value || 20))}
+                    disabled={!terminalNotifyTail}
+                    className={`${inputClass()} disabled:opacity-60`}
+                  />
+                </div>
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-              <input
-                type="checkbox"
-                checked={terminalNotifyTail}
-                onChange={(e) => setTerminalNotifyTail(e.target.checked)}
-                className="h-4 w-4"
-              />
-              {t("transcript.includeTail")}
-            </label>
-            <div>
-              <label className="block text-xs mb-1 text-[var(--color-text-tertiary)]">{t("transcript.notificationLines")}</label>
-              <input
-                type="number"
-                value={terminalNotifyLines}
-                min={1}
-                max={80}
-                onChange={(e) => setTerminalNotifyLines(Number(e.target.value || 20))}
-                disabled={!terminalNotifyTail}
-                className={`${inputClass()} disabled:opacity-60`}
-              />
-            </div>
-          </div>
-
+        <div className={settingsWorkspaceActionBarClass(_isDark)}>
           <button
             onClick={onSaveTranscriptSettings}
             disabled={busy}
@@ -133,12 +155,11 @@ export function TranscriptTab({
         </div>
       </div>
 
-      {/* Tail Viewer */}
-      <div className={cardClass()}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
+      <div className={settingsWorkspaceShellClass(_isDark)}>
+        <div className={settingsWorkspaceHeaderClass(_isDark)}>
+          <div className="min-w-0">
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("transcript.tailViewer")}</div>
-            <div className="text-xs mt-0.5 text-[var(--color-text-muted)]">
+            <div className="mt-1 text-xs text-[var(--color-text-muted)]">
               {t("transcript.tailViewerHint")}
             </div>
           </div>
@@ -146,94 +167,109 @@ export function TranscriptTab({
             <button
               onClick={onLoadTail}
               disabled={!groupId || !tailActorId || tailBusy}
-              className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors disabled:opacity-50"
+              className={secondaryButtonClass()}
             >
               {tailBusy ? t("common:loading") : t("transcript.refresh")}
             </button>
             <button
               onClick={() => onCopyTail(50)}
               disabled={!tailText.trim()}
-              className="glass-btn text-[var(--color-text-secondary)] px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors disabled:opacity-50"
+              className={secondaryButtonClass()}
             >
               {t("transcript.copyLast50")}
             </button>
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-2">
-          <label className="block text-xs text-[var(--color-text-tertiary)]">{t("transcript.actor")}</label>
-          <select
-            value={tailActorId}
-            onChange={(e) => setTailActorId(e.target.value)}
-            className={inputClass()}
-          >
-            {devActors.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.id}{a.role ? ` (${a.role})` : ""}
-              </option>
-            ))}
-            {!devActors.length && <option value="">{t("transcript.noActors")}</option>}
-          </select>
+        <div className={settingsWorkspaceBodyClass}>
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className={settingsWorkspacePanelClass(_isDark)}>
+              <div className="space-y-4">
+                <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                  <label className="block text-xs text-[var(--color-text-tertiary)]">{t("transcript.actor")}</label>
+                  <select
+                    value={tailActorId}
+                    onChange={(e) => setTailActorId(e.target.value)}
+                    className={`${inputClass()} mt-2`}
+                  >
+                    {devActors.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.id}{a.role ? ` (${a.role})` : ""}
+                      </option>
+                    ))}
+                    {!devActors.length && <option value="">{t("transcript.noActors")}</option>}
+                  </select>
+                </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs mb-1 text-[var(--color-text-tertiary)]">{t("transcript.maxChars")}</label>
-              <input
-                type="number"
-                value={tailMaxChars}
-                min={1000}
-                max={200000}
-                onChange={(e) => setTailMaxChars(Number(e.target.value || 8000))}
-                className={inputClass()}
-              />
-            </div>
-            <div className="flex items-end justify-end">
-              <button
-                onClick={onClearTail}
-                disabled={!groupId || !tailActorId || tailBusy}
-                className="px-3 py-2 rounded-lg text-sm min-h-[44px] font-medium transition-colors bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 disabled:opacity-50"
-              >
-                {t("transcript.clearTruncate")}
-              </button>
-            </div>
-          </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                    <label className="block text-xs mb-1 text-[var(--color-text-tertiary)]">{t("transcript.maxChars")}</label>
+                    <input
+                      type="number"
+                      value={tailMaxChars}
+                      min={1000}
+                      max={200000}
+                      onChange={(e) => setTailMaxChars(Number(e.target.value || 8000))}
+                      className={inputClass()}
+                    />
+                  </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-              <input
-                type="checkbox"
-                checked={tailStripAnsi}
-                onChange={(e) => setTailStripAnsi(e.target.checked)}
-                className="h-4 w-4"
-              />
-              {t("transcript.stripAnsi")}
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-              <input
-                type="checkbox"
-                checked={tailCompact}
-                disabled={!tailStripAnsi}
-                onChange={(e) => setTailCompact(e.target.checked)}
-                className="h-4 w-4"
-              />
-              {t("transcript.compactFrames")}
-            </label>
+                  <div className="flex items-end">
+                    <button
+                      onClick={onClearTail}
+                      disabled={!groupId || !tailActorId || tailBusy}
+                      className={dangerButtonClass()}
+                    >
+                      {t("transcript.clearTruncate")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                    <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                      <input
+                        type="checkbox"
+                        checked={tailStripAnsi}
+                        onChange={(e) => setTailStripAnsi(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      {t("transcript.stripAnsi")}
+                    </label>
+                  </div>
+                  <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                    <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                      <input
+                        type="checkbox"
+                        checked={tailCompact}
+                        disabled={!tailStripAnsi}
+                        onChange={(e) => setTailCompact(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      {t("transcript.compactFrames")}
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={settingsWorkspacePanelClass(_isDark)}>
+              {!!tailCopyInfo && (
+                <div className="mb-3 text-xs text-emerald-600 dark:text-emerald-400">{tailCopyInfo}</div>
+              )}
+              {tailErr && (
+                <div className="mb-3 text-xs text-rose-600 dark:text-rose-400">{tailErr}</div>
+              )}
+              {tailHint && !tailErr && (
+                <div className="mb-3 text-xs text-[var(--color-text-muted)]">{tailHint}</div>
+              )}
+
+              <pre className={`${preClass()} mt-0 max-h-[420px] overflow-y-auto`}>
+                <code>{tailText || "\u2014"}</code>
+              </pre>
+            </div>
           </div>
         </div>
-
-        {!!tailCopyInfo && (
-          <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">{tailCopyInfo}</div>
-        )}
-        {tailErr && (
-          <div className="mt-2 text-xs text-rose-600 dark:text-rose-400">{tailErr}</div>
-        )}
-        {tailHint && !tailErr && (
-          <div className="mt-2 text-xs text-[var(--color-text-muted)]">{tailHint}</div>
-        )}
-
-        <pre className={`${preClass()} max-h-[300px] overflow-y-auto`}>
-          <code>{tailText || "\u2014"}</code>
-        </pre>
       </div>
     </div>
   );

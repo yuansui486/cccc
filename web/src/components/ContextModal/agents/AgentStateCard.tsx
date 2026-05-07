@@ -60,7 +60,10 @@ function ExpandableTextBlock({
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
-          className={classNames("mt-2 text-xs font-medium transition-colors", "text-[var(--color-accent-primary)] hover:opacity-80")}
+          className={classNames(
+            "mt-2 text-xs font-medium transition-colors",
+            "text-[rgb(35,36,37)] hover:opacity-75 dark:text-white"
+          )}
         >
           {expanded ? tr("context.showLess", "Show less") : tr("context.showMore", "Show more")}
         </button>
@@ -109,7 +112,7 @@ export function AgentStateCard({ agent, tr, mutedTextClass, subtleTextClass }: A
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {hot.activeTaskId ? (
-            <span className={classNames("rounded-full px-2 py-0.5 text-[11px]", "bg-blue-500/15 text-blue-600 dark:text-blue-400")}>
+            <span className={classNames("rounded-full px-2 py-0.5 text-[11px]", "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white")}>
               {hot.activeTaskId}
             </span>
           ) : null}

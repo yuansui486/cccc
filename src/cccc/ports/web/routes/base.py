@@ -374,13 +374,21 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def capability_overview(
         query: str = "",
         limit: int = 400,
+        offset: int = 0,
         include_indexed: bool = True,
+        kind: str = "",
+        policy: str = "",
+        source_id: str = "",
     ) -> Dict[str, Any]:
         """Get global capability overview (policy + blocked + recent-success + source states)."""
         args = {
             "query": str(query or ""),
             "limit": int(limit or 400),
+            "offset": max(0, int(offset or 0)),
             "include_indexed": bool(include_indexed),
+            "kind": str(kind or ""),
+            "policy": str(policy or ""),
+            "source_id": str(source_id or ""),
         }
         return await ctx.daemon({"op": "capability_overview", "args": args})
 
@@ -879,7 +887,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
 
     @group_router.get("/capabilities/state")
-    async def capability_state(group_id: str, actor_id: str = "user") -> Dict[str, Any]:
+    async def capability_state(group_id: str, actor_id: str = "user", capability_id: str = "") -> Dict[str, Any]:
         """Get caller-effective capability state and visible/dynamic tools for a group."""
         return await ctx.daemon(
             {
@@ -888,6 +896,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "group_id": group_id,
                     "by": "user",
                     "actor_id": str(actor_id or "user").strip() or "user",
+                    "capability_id": str(capability_id or "").strip(),
                 },
             }
         )
@@ -960,6 +969,36 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if "record" in payload:
             args["record"] = payload["record"]
         return await ctx.daemon({"op": "capability_import", "args": args})
+
+    @group_router.post("/capabilities/uninstall")
+    async def capability_uninstall(group_id: str, request: Request) -> Dict[str, Any]:
+        """Uninstall a capability and clean local runtime/autoload references."""
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "Capability uninstall endpoints are disabled in read-only (exhibit) mode.",
+                },
+            )
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail={"code": "invalid_request", "message": "request body must be an object"})
+        return await ctx.daemon(
+            {
+                "op": "capability_uninstall",
+                "args": {
+                    "group_id": group_id,
+                    "by": "user",
+                    "actor_id": str(payload.get("actor_id") or "user").strip() or "user",
+                    "capability_id": str(payload.get("capability_id") or "").strip(),
+                    "reason": str(payload.get("reason") or "").strip(),
+                },
+            }
+        )
 
     return [global_router, group_router]
 

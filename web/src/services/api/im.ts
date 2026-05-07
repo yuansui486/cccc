@@ -43,7 +43,6 @@ export async function setIMConfig(
     wecom_bot_id?: string;
     wecom_secret?: string;
     weixin_account_id?: string;
-    weixin_command?: string;
   },
 ) {
   const body: Record<string, unknown> = {
@@ -77,7 +76,6 @@ export async function setIMConfig(
 
   if (platform === "weixin" && extra) {
     body.weixin_account_id = extra.weixin_account_id;
-    body.weixin_command = extra.weixin_command;
   }
 
   return apiJson("/api/im/set", {

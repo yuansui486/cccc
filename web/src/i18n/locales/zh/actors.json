@@ -16,7 +16,7 @@
   "nextShort": "下一步：{{value}}",
   "headlessAgent": "无终端智能体",
   "headlessDescription": "该智能体以无终端模式运行。它通过 MCP 工具和收件箱系统进行通信。",
-  "headlessStreamDescription": "该智能体以无终端模式运行。过程输出会显示在 Chat 里，正式回复需要通过消息工具发送。",
+  "headlessStreamDescription": "该智能体以无终端模式运行。过程输出会显示在 runtime dock ticker 和 inspect 面板里；正式回复必须通过 message 工具发送。",
   "streamingOutput": "流式输出",
   "noStreamingOutputYet": "当前还没有可显示的流式输出。",
   "statusRunning": "状态：运行中",
@@ -189,6 +189,43 @@
   "rolePresetSelectPlaceholder": "选择一个内置预置",
   "rolePresetSelectPrompt": "先选一个预置，再把它写入下面的草稿。",
   "applyPreset": "应用",
+  "rolePresetCatalog": {
+    "coordinator": {
+      "name": "协调者",
+      "summary": "通过明确 owner、低噪声路由和干净 handoff 推动多 actor 协作前进，但不要表现成第二个 foreman。",
+      "useWhen": "适用于工作开始漂移、owner 不清、handoff 混乱，但核心需求仍然是协调而不是最终验收的时候。"
+    },
+    "planner": {
+      "name": "规划者",
+      "summary": "把模糊请求收束成可执行范围，明确边界、验收标准和未决决策。",
+      "useWhen": "适用于需求含糊、风险较高，或规模已经大到现在直接动手很可能返工的时候。"
+    },
+    "implementer": {
+      "name": "实现者",
+      "summary": "按已批准范围交付最小且正确的改动，贴合现有模式，并用真实验证收口。",
+      "useWhen": "适用于范围已经确定，当前真正要做的是把代码或脚本干净落地的时候。"
+    },
+    "reviewer": {
+      "name": "审查者",
+      "summary": "对照真实需求审查实际改动，只指出会造成真实问题的缺陷。",
+      "useWhen": "适用于实现已经完成，需要一次真正的 review，而不是口头背书的时候。"
+    },
+    "debugger": {
+      "name": "调试者",
+      "summary": "先复现问题，再用证据缩小真实原因，只修正与故障路径对应的那一刀。",
+      "useWhen": "适用于行为异常、偶发失败或原因不明，且拍脑袋修补已经不可靠或风险过高的时候。"
+    },
+    "explorer": {
+      "name": "探索者",
+      "summary": "把本地仓库收束成一小组锚点文件和行为路径，不漂移到修改代码或外部调研。",
+      "useWhen": "适用于真正的问题是“代码在仓库哪里”或“这条链路怎么走”的时候。"
+    },
+    "researcher": {
+      "name": "研究者",
+      "summary": "基于一手资料回答外部技术问题，并明确来源依据与版本/时效边界。",
+      "useWhen": "适用于答案依赖外部文档、源码、发布记录、issue 或当前上游行为的时候。"
+    }
+  },
   "rolePresetAppliedNotice": "已将预置“{{name}}”复制到 role notes 草稿。",
   "rolePresetAlreadyMatchesDraft": "预置“{{name}}”与当前草稿已经一致。",
   "rolePresetReplaceConfirm": "要用内置预置“{{name}}”替换当前 role-notes 草稿吗？",

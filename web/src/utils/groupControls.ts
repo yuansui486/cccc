@@ -47,7 +47,6 @@ export function getGroupControlVisual(
   const active = Boolean(
     status && (
       CONTROL_ACTIVE_STATUS[control] === status
-      || (control === "launch" && status === "idle")
     )
   );
   const pending = CONTROL_BUSY_MAP[busy] === control;

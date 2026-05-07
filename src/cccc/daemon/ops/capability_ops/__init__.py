@@ -213,6 +213,8 @@ from ._install import (  # noqa: F401
     _remote_mcp_call,
     _supported_external_install_record,
     _record_enable_supported,
+    _record_enable_unsupported_reason,
+    _enable_unsupported_diagnostics,
     _external_artifact_cache_key,
     _external_artifact_id,
     _is_package_probe_degradable_error,

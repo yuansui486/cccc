@@ -5,7 +5,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Set
+from typing import Any, Callable, Dict, Iterable, Optional, Set
 
 from ...paths import ensure_home
 from ...util.fs import atomic_write_json, read_json
@@ -14,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 JOB_KIND_PET_REVIEW = "pet_review"
 JOB_KIND_PET_PROFILE_REFRESH = "pet_profile_refresh"
+JOB_KIND_VOICE_IDLE_REVIEW = "voice_idle_review"
 
 TRIGGER_STARTUP_RESUME = "startup_resume"
 TRIGGER_EVENT = "event"
@@ -22,8 +23,42 @@ TRIGGER_TIMER = "timer"
 
 _PERSIST_SCHEMA = 1
 _PERSIST_FILENAME = "assistive_jobs.json"
-_VALID_JOB_KINDS = {JOB_KIND_PET_REVIEW, JOB_KIND_PET_PROFILE_REFRESH}
 _VALID_TRIGGER_CLASSES = {TRIGGER_STARTUP_RESUME, TRIGGER_EVENT, TRIGGER_MANUAL, TRIGGER_TIMER}
+
+
+@dataclass(frozen=True)
+class AssistiveJobDefinition:
+    job_kind: str
+    debounce_seconds: Callable[[], float]
+    min_interval_seconds: Callable[[], float]
+    max_delay_seconds: Callable[[], float]
+    lease_seconds: Callable[[], float]
+    can_run: Callable[[str], bool]
+    unavailable_reason: Callable[[str], str]
+    dispatch: Callable[[str, Set[str], str, str], bool]
+
+
+_ASSISTIVE_JOB_REGISTRY: Dict[str, AssistiveJobDefinition] = {}
+
+
+def register_assistive_job(definition: AssistiveJobDefinition) -> None:
+    job_kind = str(definition.job_kind or "").strip().lower()
+    if not job_kind:
+        raise ValueError("assistive job kind cannot be empty")
+    _ASSISTIVE_JOB_REGISTRY[job_kind] = AssistiveJobDefinition(
+        job_kind=job_kind,
+        debounce_seconds=definition.debounce_seconds,
+        min_interval_seconds=definition.min_interval_seconds,
+        max_delay_seconds=definition.max_delay_seconds,
+        lease_seconds=definition.lease_seconds,
+        can_run=definition.can_run,
+        unavailable_reason=definition.unavailable_reason,
+        dispatch=definition.dispatch,
+    )
+
+
+def registered_assistive_job_kinds() -> tuple[str, ...]:
+    return tuple(sorted(_ASSISTIVE_JOB_REGISTRY.keys()))
 
 
 @dataclass
@@ -48,9 +83,13 @@ _STATE_BY_GROUP: Dict[str, Dict[str, _AssistiveJobState]] = {}
 
 def _normalize_job_kind(value: str) -> str:
     job_kind = str(value or "").strip().lower()
-    if job_kind not in _VALID_JOB_KINDS:
+    if job_kind not in _ASSISTIVE_JOB_REGISTRY:
         raise ValueError(f"unsupported assistive job kind: {value}")
     return job_kind
+
+
+def _get_job_definition(job_kind: str) -> AssistiveJobDefinition:
+    return _ASSISTIVE_JOB_REGISTRY[_normalize_job_kind(job_kind)]
 
 
 def _normalize_trigger_class(value: str) -> str:
@@ -155,7 +194,7 @@ def _load_group_states_locked(group_id: str) -> Dict[str, _AssistiveJobState]:
     if isinstance(jobs_raw, dict):
         for job_kind, raw in jobs_raw.items():
             normalized_kind = str(job_kind or "").strip().lower()
-            if normalized_kind not in _VALID_JOB_KINDS or not isinstance(raw, dict):
+            if normalized_kind not in _ASSISTIVE_JOB_REGISTRY or not isinstance(raw, dict):
                 continue
             states[normalized_kind] = _normalize_job_state(raw)
     return states
@@ -199,82 +238,31 @@ def _cancel_timer(state: _AssistiveJobState) -> None:
 
 
 def _job_debounce_seconds(job_kind: str) -> float:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        return float(review_scheduler.PET_REVIEW_DEBOUNCE_SECONDS)
-    return 0.0
+    return float(_get_job_definition(job_kind).debounce_seconds())
 
 
 def _job_min_interval_seconds(job_kind: str) -> float:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        return float(review_scheduler.PET_REVIEW_MIN_INTERVAL_SECONDS)
-    return 0.0
+    return float(_get_job_definition(job_kind).min_interval_seconds())
 
 
 def _job_max_delay_seconds(job_kind: str) -> float:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        return float(review_scheduler.PET_REVIEW_MAX_DELAY_SECONDS)
-    return 0.0
+    return float(_get_job_definition(job_kind).max_delay_seconds())
 
 
 def _job_lease_seconds(job_kind: str) -> float:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        return float(getattr(review_scheduler, "PET_REVIEW_LEASE_SECONDS", 90.0))
-    from . import profile_refresh
-
-    return float(getattr(profile_refresh, "PET_PROFILE_REFRESH_LEASE_SECONDS", 300.0))
+    return float(_get_job_definition(job_kind).lease_seconds())
 
 
 def _job_can_run(job_kind: str, group_id: str) -> bool:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        return bool(review_scheduler._can_review_now(group_id))
-    from . import profile_refresh
-
-    return bool(profile_refresh._can_refresh_now(group_id))
+    return bool(_get_job_definition(job_kind).can_run(group_id))
 
 
 def _job_unavailable_reason(job_kind: str, group_id: str) -> str:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        return str(review_scheduler._review_unavailable_reason(group_id) or "job_unavailable")
-    from . import profile_refresh
-
-    return str(profile_refresh._profile_refresh_unavailable_reason(group_id) or "job_unavailable")
+    return str(_get_job_definition(job_kind).unavailable_reason(group_id) or "job_unavailable")
 
 
 def _job_dispatch(job_kind: str, group_id: str, reasons: Set[str], source_event_id: str, trigger_class: str) -> bool:
-    normalized = _normalize_job_kind(job_kind)
-    if normalized == JOB_KIND_PET_REVIEW:
-        from . import review_scheduler
-
-        review_scheduler._emit_pet_review(group_id, reasons, source_event_id)
-        return True
-    from . import profile_refresh
-
-    return bool(
-        profile_refresh._dispatch_profile_refresh(
-            group_id,
-            reasons=reasons,
-            source_event_id=source_event_id,
-            trigger_class=trigger_class,
-        )
-    )
+    return bool(_get_job_definition(job_kind).dispatch(group_id, reasons, source_event_id, trigger_class))
 
 
 def _compute_due_at(state: _AssistiveJobState, *, job_kind: str, immediate: bool, now: float) -> float:
@@ -510,7 +498,7 @@ def mark_job_completed(group_id: str, job_kind: str) -> bool:
 
 
 def recover_jobs(*, job_kinds: Optional[Iterable[str]] = None) -> None:
-    wanted = {_normalize_job_kind(item) for item in (job_kinds or _VALID_JOB_KINDS)}
+    wanted = {_normalize_job_kind(item) for item in (job_kinds or registered_assistive_job_kinds())}
     groups_root = ensure_home() / "groups"
     if not groups_root.exists():
         return
@@ -549,3 +537,169 @@ def recover_jobs(*, job_kinds: Optional[Iterable[str]] = None) -> None:
             continue
         for pair_gid, pair_kind in flush_pairs:
             _pump_job(pair_gid, pair_kind)
+
+
+def _dispatch_pet_review(group_id: str, reasons: Set[str], source_event_id: str, trigger_class: str) -> bool:
+    del trigger_class
+    from . import review_scheduler
+
+    review_scheduler._emit_pet_review(group_id, reasons, source_event_id)
+    return True
+
+
+def _dispatch_pet_profile_refresh(group_id: str, reasons: Set[str], source_event_id: str, trigger_class: str) -> bool:
+    from . import profile_refresh
+
+    return bool(
+        profile_refresh._dispatch_profile_refresh(
+            group_id,
+            reasons=reasons,
+            source_event_id=source_event_id,
+            trigger_class=trigger_class,
+        )
+    )
+
+
+def _dispatch_voice_idle_review(group_id: str, reasons: Set[str], source_event_id: str, trigger_class: str) -> bool:
+    from ..assistants import voice_idle_review_scheduler
+
+    return bool(
+        voice_idle_review_scheduler._dispatch_idle_review(
+            group_id,
+            reasons=reasons,
+            source_event_id=source_event_id,
+            trigger_class=trigger_class,
+        )
+    )
+
+
+def _pet_review_debounce_seconds() -> float:
+    from . import review_scheduler
+
+    return float(review_scheduler.PET_REVIEW_DEBOUNCE_SECONDS)
+
+
+def _pet_review_min_interval_seconds() -> float:
+    from . import review_scheduler
+
+    return float(review_scheduler.PET_REVIEW_MIN_INTERVAL_SECONDS)
+
+
+def _pet_review_max_delay_seconds() -> float:
+    from . import review_scheduler
+
+    return float(review_scheduler.PET_REVIEW_MAX_DELAY_SECONDS)
+
+
+def _pet_review_lease_seconds() -> float:
+    from . import review_scheduler
+
+    return float(getattr(review_scheduler, "PET_REVIEW_LEASE_SECONDS", 90.0))
+
+
+def _pet_review_can_run(group_id: str) -> bool:
+    from . import review_scheduler
+
+    return bool(review_scheduler._can_review_now(group_id))
+
+
+def _pet_review_unavailable_reason(group_id: str) -> str:
+    from . import review_scheduler
+
+    return str(review_scheduler._review_unavailable_reason(group_id) or "job_unavailable")
+
+
+def _pet_profile_refresh_lease_seconds() -> float:
+    from . import profile_refresh
+
+    return float(getattr(profile_refresh, "PET_PROFILE_REFRESH_LEASE_SECONDS", 300.0))
+
+
+def _pet_profile_refresh_can_run(group_id: str) -> bool:
+    from . import profile_refresh
+
+    return bool(profile_refresh._can_refresh_now(group_id))
+
+
+def _pet_profile_refresh_unavailable_reason(group_id: str) -> str:
+    from . import profile_refresh
+
+    return str(profile_refresh._profile_refresh_unavailable_reason(group_id) or "job_unavailable")
+
+
+def _voice_idle_review_debounce_seconds() -> float:
+    from ..assistants import voice_idle_review_scheduler
+
+    return float(voice_idle_review_scheduler.VOICE_IDLE_REVIEW_DEBOUNCE_SECONDS)
+
+
+def _voice_idle_review_min_interval_seconds() -> float:
+    from ..assistants import voice_idle_review_scheduler
+
+    return float(voice_idle_review_scheduler.VOICE_IDLE_REVIEW_MIN_INTERVAL_SECONDS)
+
+
+def _voice_idle_review_max_delay_seconds() -> float:
+    from ..assistants import voice_idle_review_scheduler
+
+    return float(voice_idle_review_scheduler.VOICE_IDLE_REVIEW_MAX_DELAY_SECONDS)
+
+
+def _voice_idle_review_lease_seconds() -> float:
+    from ..assistants import voice_idle_review_scheduler
+
+    return float(voice_idle_review_scheduler.VOICE_IDLE_REVIEW_LEASE_SECONDS)
+
+
+def _voice_idle_review_can_run(group_id: str) -> bool:
+    from ..assistants import voice_idle_review_scheduler
+
+    return bool(voice_idle_review_scheduler._can_idle_review_now(group_id))
+
+
+def _voice_idle_review_unavailable_reason(group_id: str) -> str:
+    from ..assistants import voice_idle_review_scheduler
+
+    return str(voice_idle_review_scheduler._idle_review_unavailable_reason(group_id) or "job_unavailable")
+
+
+def _register_default_assistive_jobs() -> None:
+    register_assistive_job(
+        AssistiveJobDefinition(
+            job_kind=JOB_KIND_PET_REVIEW,
+            debounce_seconds=_pet_review_debounce_seconds,
+            min_interval_seconds=_pet_review_min_interval_seconds,
+            max_delay_seconds=_pet_review_max_delay_seconds,
+            lease_seconds=_pet_review_lease_seconds,
+            can_run=_pet_review_can_run,
+            unavailable_reason=_pet_review_unavailable_reason,
+            dispatch=_dispatch_pet_review,
+        )
+    )
+    register_assistive_job(
+        AssistiveJobDefinition(
+            job_kind=JOB_KIND_PET_PROFILE_REFRESH,
+            debounce_seconds=lambda: 0.0,
+            min_interval_seconds=lambda: 0.0,
+            max_delay_seconds=lambda: 0.0,
+            lease_seconds=_pet_profile_refresh_lease_seconds,
+            can_run=_pet_profile_refresh_can_run,
+            unavailable_reason=_pet_profile_refresh_unavailable_reason,
+            dispatch=_dispatch_pet_profile_refresh,
+        )
+    )
+    register_assistive_job(
+        AssistiveJobDefinition(
+            job_kind=JOB_KIND_VOICE_IDLE_REVIEW,
+            debounce_seconds=_voice_idle_review_debounce_seconds,
+            min_interval_seconds=_voice_idle_review_min_interval_seconds,
+            max_delay_seconds=_voice_idle_review_max_delay_seconds,
+            lease_seconds=_voice_idle_review_lease_seconds,
+            can_run=_voice_idle_review_can_run,
+            unavailable_reason=_voice_idle_review_unavailable_reason,
+            dispatch=_dispatch_voice_idle_review,
+        )
+    )
+
+
+_register_default_assistive_jobs()

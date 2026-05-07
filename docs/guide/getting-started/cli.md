@@ -78,7 +78,17 @@ Send to specific agents:
 ```bash
 cccc send "Please implement the feature" --to assistant
 cccc send "Please review the code" --to reviewer
-cccc send "Status update please" --to @all
+cccc send "Please coordinate the next step" --to @foreman
+cccc send "Team-wide constraint: pause deploys until CI is green" --to @all
+```
+
+Use task-backed delegation when the work should survive chat context switches and needs an owner, outcome, or completion evidence:
+
+```bash
+cccc tracked-send "Please implement the feature and reply with validation evidence." \
+  --to assistant \
+  --title "Implement feature" \
+  --outcome "Feature is implemented and validation evidence is reported"
 ```
 
 ## Reply to Messages
@@ -116,8 +126,10 @@ cccc actor remove <id>             # Remove actor
 
 ```bash
 cccc send "message"                # No --to: default recipient policy applies (default: foreman)
-cccc send "msg" --to @all          # Explicit broadcast
 cccc send "msg" --to assistant     # To specific actor
+cccc send "msg" --to @foreman      # Ask the coordinator
+cccc send "msg" --to @all          # Explicit broadcast, not default task dispatch
+cccc tracked-send "work" --to assistant --title "Task title" --outcome "Done criterion"
 cccc reply <event_id> "response"   # Reply to message
 cccc inbox --actor-id assistant    # View unread for one actor
 cccc tail -n 50                    # Recent events

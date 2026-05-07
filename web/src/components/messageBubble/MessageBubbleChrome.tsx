@@ -11,7 +11,6 @@ export function MessageMetadataHeader({
   senderDisplayName,
   messageTimestamp,
   fullMessageTimestamp,
-  toLabel,
   senderAvatarUrl,
   senderRuntime,
   avatarRingClassName,
@@ -23,7 +22,6 @@ export function MessageMetadataHeader({
   senderDisplayName: string;
   messageTimestamp: string;
   fullMessageTimestamp: string;
-  toLabel: string;
   senderAvatarUrl?: string;
   senderRuntime?: string;
   avatarRingClassName?: string;
@@ -62,12 +60,6 @@ export function MessageMetadataHeader({
         <span className="shrink-0 text-[10px] text-[var(--color-text-tertiary)]">
           <span title={fullMessageTimestamp}>{messageTimestamp}</span>
         </span>
-        <span
-          className={classNames("min-w-0 truncate text-[10px]", "text-[var(--color-text-tertiary)]")}
-          title={`to ${toLabel}`}
-        >
-          to {toLabel}
-        </span>
       </div>
     );
   }
@@ -76,7 +68,7 @@ export function MessageMetadataHeader({
     <div className="hidden min-w-0 items-center gap-2 px-1 sm:flex">
       <span
         className={classNames(
-          "shrink-0 text-[11px] font-medium",
+          "shrink-0 text-[11px] font-semibold tracking-[0.01em]",
           isUserMessage
             ? isDark
               ? "text-[var(--color-text-secondary)]"
@@ -92,12 +84,6 @@ export function MessageMetadataHeader({
       </span>
       <span className="shrink-0 text-[10px] text-[var(--color-text-tertiary)]">
         <span title={fullMessageTimestamp}>{messageTimestamp}</span>
-      </span>
-      <span
-        className={classNames("min-w-0 truncate text-[10px]", "text-[var(--color-text-tertiary)]")}
-        title={`to ${toLabel}`}
-      >
-        to {toLabel}
       </span>
     </div>
   );
@@ -175,117 +161,119 @@ export function MessageFooter({
   return (
     <div
       className={classNames(
-        "mt-1 flex items-center gap-3 px-1 text-[10px] transition-opacity",
+        "mt-2 flex flex-wrap items-center gap-2 px-1 text-[10px] transition-opacity",
         (obligationSummary || ackSummary || visibleReadStatusEntries.length > 0 || replyRequired) ? "justify-between" : "justify-end",
-        "opacity-85 group-hover:opacity-100",
+        "opacity-80 group-hover:opacity-100",
         "text-[var(--color-text-tertiary)]",
       )}
     >
-      {obligationSummary ? (
-        readOnly ? (
-          <div className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1">
-            <span
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {obligationSummary ? (
+          readOnly ? (
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-black/5 bg-black/[0.035] px-2.5 py-1 dark:border-white/8 dark:bg-white/[0.045]">
+              <span
+                className={classNames(
+                  "text-[10px] font-semibold tracking-tight",
+                  obligationSummary.done >= obligationSummary.total
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                {obligationSummary.kind === "reply" ? t("reply") : t("ack")} {obligationSummary.done}/{obligationSummary.total}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
               className={classNames(
-                "text-[10px] font-semibold tracking-tight",
-                obligationSummary.done >= obligationSummary.total
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-amber-600 dark:text-amber-400",
+                "touch-target-sm flex min-w-0 items-center gap-2 rounded-full border border-black/5 bg-black/[0.035] px-2.5 py-1 dark:border-white/8 dark:bg-white/[0.045]",
+                "hover:bg-black/[0.06] dark:hover:bg-white/[0.08]",
               )}
+              onClick={onShowRecipients}
+              aria-label={t("showObligationStatus")}
             >
-              {obligationSummary.kind === "reply" ? t("reply") : t("ack")} {obligationSummary.done}/{obligationSummary.total}
-            </span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className={classNames(
-              "touch-target-sm flex min-w-0 items-center gap-2 rounded-lg px-2 py-1",
-              "hover:bg-black/8 dark:hover:bg-white/12",
-            )}
-            onClick={onShowRecipients}
-            aria-label={t("showObligationStatus")}
-          >
-            <span
+              <span
+                className={classNames(
+                  "text-[10px] font-semibold tracking-tight",
+                  obligationSummary.done >= obligationSummary.total
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                {obligationSummary.kind === "reply" ? t("reply") : t("ack")} {obligationSummary.done}/{obligationSummary.total}
+              </span>
+            </button>
+          )
+        ) : ackSummary ? (
+          readOnly ? (
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-black/5 bg-black/[0.035] px-2.5 py-1 dark:border-white/8 dark:bg-white/[0.045]">
+              <span
+                className={classNames(
+                  "text-[10px] font-semibold tracking-tight",
+                  ackSummary.done >= ackSummary.total
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                {t("ack")} {ackSummary.done}/{ackSummary.total}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
               className={classNames(
-                "text-[10px] font-semibold tracking-tight",
-                obligationSummary.done >= obligationSummary.total
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-amber-600 dark:text-amber-400",
+                "touch-target-sm flex min-w-0 items-center gap-2 rounded-full border border-black/5 bg-black/[0.035] px-2.5 py-1 dark:border-white/8 dark:bg-white/[0.045]",
+                "hover:bg-black/[0.06] dark:hover:bg-white/[0.08]",
               )}
+              onClick={onShowRecipients}
+              aria-label={t("showAckStatus")}
             >
-              {obligationSummary.kind === "reply" ? t("reply") : t("ack")} {obligationSummary.done}/{obligationSummary.total}
-            </span>
-          </button>
-        )
-      ) : ackSummary ? (
-        readOnly ? (
-          <div className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1">
-            <span
+              <span
+                className={classNames(
+                  "text-[10px] font-semibold tracking-tight",
+                  ackSummary.done >= ackSummary.total
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                {t("ack")} {ackSummary.done}/{ackSummary.total}
+              </span>
+            </button>
+          )
+        ) : visibleReadStatusEntries.length > 0 ? (
+          readOnly ? (
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-black/5 bg-black/[0.035] px-2.5 py-1 dark:border-white/8 dark:bg-white/[0.045]">
+              {renderRecipientStatus()}
+            </div>
+          ) : (
+            <button
+              type="button"
               className={classNames(
-                "text-[10px] font-semibold tracking-tight",
-                ackSummary.done >= ackSummary.total
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-amber-600 dark:text-amber-400",
+                "touch-target-sm flex min-w-0 items-center gap-2 rounded-full border border-black/5 bg-black/[0.035] px-2.5 py-1 dark:border-white/8 dark:bg-white/[0.045]",
+                "hover:bg-black/[0.06] dark:hover:bg-white/[0.08]",
               )}
+              onClick={onShowRecipients}
+              aria-label={t("showRecipientStatus")}
             >
-              {t("ack")} {ackSummary.done}/{ackSummary.total}
-            </span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className={classNames(
-              "touch-target-sm flex min-w-0 items-center gap-2 rounded-lg px-2 py-1",
-              "hover:bg-black/8 dark:hover:bg-white/12",
-            )}
-            onClick={onShowRecipients}
-            aria-label={t("showAckStatus")}
-          >
-            <span
-              className={classNames(
-                "text-[10px] font-semibold tracking-tight",
-                ackSummary.done >= ackSummary.total
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-amber-600 dark:text-amber-400",
-              )}
-            >
-              {t("ack")} {ackSummary.done}/{ackSummary.total}
-            </span>
-          </button>
-        )
-      ) : visibleReadStatusEntries.length > 0 ? (
-        readOnly ? (
-          <div className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1">
-            {renderRecipientStatus()}
-          </div>
-        ) : (
-          <button
-            type="button"
-            className={classNames(
-              "touch-target-sm flex min-w-0 items-center gap-2 rounded-lg px-2 py-1",
-              "hover:bg-black/8 dark:hover:bg-white/12",
-            )}
-            onClick={onShowRecipients}
-            aria-label={t("showRecipientStatus")}
-          >
-            {renderRecipientStatus()}
-          </button>
-        )
-      ) : null}
+              {renderRecipientStatus()}
+            </button>
+          )
+        ) : null}
 
-      {!obligationSummary && !ackSummary && replyRequired ? (
-        <span className={classNames("text-[10px] font-semibold tracking-tight", "text-violet-700 dark:text-violet-300")}>
-          {t("needReply")}
-        </span>
-      ) : null}
+        {!obligationSummary && !ackSummary && replyRequired ? (
+          <span className={classNames("rounded-full border border-violet-500/20 bg-violet-500/8 px-2.5 py-1 text-[10px] font-semibold tracking-tight", "text-violet-700 dark:text-violet-300")}>
+            {t("needReply")}
+          </span>
+        ) : null}
+      </div>
 
       {!readOnly ? (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           {copyableMessageText ? (
             <button
               type="button"
               className={classNames(
-                "touch-target-sm rounded-lg px-2 py-1 text-[11px] font-medium transition-colors",
+                "touch-target-sm rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
                 "text-[var(--color-text-secondary)] hover:bg-black/8 hover:text-[var(--color-text-primary)] dark:hover:bg-white/12",
               )}
               onClick={() => void onCopyMessageText()}
@@ -298,7 +286,7 @@ export function MessageFooter({
             <button
               type="button"
               className={classNames(
-                "touch-target-sm rounded-lg px-2 py-1 text-[11px] font-medium transition-colors",
+                "touch-target-sm rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
                 "text-[var(--color-text-secondary)] hover:bg-black/8 hover:text-[var(--color-text-primary)] dark:hover:bg-white/12",
               )}
               onClick={() => onCopyLink(eventId)}
@@ -311,7 +299,7 @@ export function MessageFooter({
             <button
               type="button"
               className={classNames(
-                "touch-target-sm rounded-lg px-2 py-1 text-[11px] font-medium transition-colors",
+                "touch-target-sm rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
                 "text-[var(--color-text-secondary)] hover:bg-black/8 hover:text-[var(--color-text-primary)] dark:hover:bg-white/12",
               )}
               onClick={() => onRelay(event)}
@@ -324,7 +312,7 @@ export function MessageFooter({
             <button
               type="button"
               className={classNames(
-                "touch-target-sm rounded-lg px-2 py-1 text-[11px] font-medium transition-colors",
+                "touch-target-sm rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
                 "text-[var(--color-text-secondary)] hover:bg-black/8 hover:text-[var(--color-text-primary)] dark:hover:bg-white/12",
               )}
               onClick={onReply}

@@ -1,11 +1,13 @@
 import os
 import hashlib
+import json
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -179,15 +181,12 @@ class TestWebImStart(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_im_weixin_login_start_uses_resolved_sidecar_path(self) -> None:
+    def test_im_weixin_login_start_returns_qr_url_from_sdk(self) -> None:
         from cccc.ports.web.app import create_app
 
-        home, cleanup = self._with_home()
+        _, cleanup = self._with_home()
         try:
             gid = self._create_group("im-weixin-login-start")
-            sidecar_path = Path(home) / "cache" / "sidecars" / "weixin_sidecar.mjs"
-            sidecar_path.parent.mkdir(parents=True, exist_ok=True)
-            sidecar_path.write_text("// test sidecar\n", encoding="utf-8")
 
             with TestClient(create_app()) as client:
                 set_resp = client.post(
@@ -200,17 +199,154 @@ class TestWebImStart(unittest.TestCase):
                 self.assertEqual(set_resp.status_code, 200)
                 self.assertTrue(bool(set_resp.json().get("ok")))
 
-                with patch("cccc.ports.web.routes.im.resolve_weixin_sidecar_script_path", return_value=sidecar_path):
-                    with patch("subprocess.Popen", return_value=_AliveProc()) as popen:
-                        start_resp = client.post("/api/im/weixin/login/start", json={"group_id": gid})
+                class _FakeApi:
+                    async def get_qr_code(self, base_url: str):
+                        self.base_url = base_url
+                        return {
+                            "qrcode_img_content": "https://example.test/qr",
+                            "qrcode": "qr-token-1",
+                        }
 
+                async def _fake_load_credentials(path: Path | None = None):
+                    _ = path
+                    return None
+
+                fake_auth = types.ModuleType("wechatbot.auth")
+                fake_auth.FIXED_QR_BASE_URL = "https://ilinkai.weixin.qq.com"
+                fake_auth.load_credentials = _fake_load_credentials
+                fake_protocol = types.ModuleType("wechatbot.protocol")
+                fake_protocol.ILinkApi = _FakeApi
+                fake_pkg = types.ModuleType("wechatbot")
+                fake_pkg.__path__ = []  # mark as package
+
+                with patch.dict(sys.modules, {
+                    "wechatbot": fake_pkg,
+                    "wechatbot.auth": fake_auth,
+                    "wechatbot.protocol": fake_protocol,
+                }):
+                    start_resp = client.post("/api/im/weixin/login/start", json={"group_id": gid})
+
+                self.assertEqual(start_resp.status_code, 200)
+                payload = start_resp.json()
+                self.assertTrue(bool(payload.get("ok")))
+                result = payload.get("result") or {}
+                self.assertEqual(result.get("status"), "waiting_scan")
+                self.assertEqual(result.get("qrcode_url"), "https://example.test/qr")
+        finally:
+            cleanup()
+
+    def test_im_weixin_login_status_rejects_confirmed_without_credentials(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        home, cleanup = self._with_home()
+        try:
+            gid = self._create_group("im-weixin-login-missing-creds")
+
+            with TestClient(create_app()) as client:
+                set_resp = client.post(
+                    "/api/im/set",
+                    json={
+                        "group_id": gid,
+                        "platform": "weixin",
+                    },
+                )
+                self.assertEqual(set_resp.status_code, 200)
+                self.assertTrue(bool(set_resp.json().get("ok")))
+
+                state_dir = Path(home) / "groups" / gid / "state"
+                state_dir.mkdir(parents=True, exist_ok=True)
+                status_path = state_dir / "im_weixin_login.json"
+                status_path.write_text(
+                    json.dumps(
+                        {
+                            "status": "waiting_scan",
+                            "logged_in": False,
+                            "qrcode": "qr-token-1",
+                            "qrcode_url": "https://example.test/qr",
+                            "poll_base_url": "https://example.test",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                class _FakeApi:
+                    async def poll_qr_status(self, base_url: str, qrcode: str):
+                        _ = base_url
+                        _ = qrcode
+                        return {"status": "confirmed"}
+
+                async def _unexpected_save_credentials(*args, **kwargs):
+                    _ = args
+                    _ = kwargs
+                    raise AssertionError("credentials should not be saved when confirmed payload is incomplete")
+
+                class _Credentials:
+                    def __init__(self, **kwargs) -> None:
+                        self.kwargs = kwargs
+
+                fake_auth = types.ModuleType("wechatbot.auth")
+                fake_auth.FIXED_QR_BASE_URL = "https://ilinkai.weixin.qq.com"
+                fake_auth.save_credentials = _unexpected_save_credentials
+                fake_protocol = types.ModuleType("wechatbot.protocol")
+                fake_protocol.ILinkApi = _FakeApi
+                fake_types = types.ModuleType("wechatbot.types")
+                fake_types.Credentials = _Credentials
+                fake_pkg = types.ModuleType("wechatbot")
+                fake_pkg.__path__ = []  # mark as package
+
+                with patch.dict(sys.modules, {
+                    "wechatbot": fake_pkg,
+                    "wechatbot.auth": fake_auth,
+                    "wechatbot.protocol": fake_protocol,
+                    "wechatbot.types": fake_types,
+                }):
+                    status_resp = client.get(f"/api/im/weixin/login/status?group_id={gid}")
+
+                self.assertEqual(status_resp.status_code, 200)
+                payload = status_resp.json()
+                self.assertTrue(bool(payload.get("ok")))
+                result = payload.get("result") or {}
+                self.assertEqual(result.get("status"), "error")
+                self.assertFalse(bool(result.get("logged_in")))
+                self.assertIn("missing credentials", str(result.get("error") or ""))
+                self.assertFalse((state_dir / "im_weixin_credentials.json").exists())
+        finally:
+            cleanup()
+
+    def test_im_status_reports_disabled_after_stop(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group("im-status-disabled-after-stop")
+
+            with TestClient(create_app()) as client:
+                set_resp = client.post(
+                    "/api/im/set",
+                    json={
+                        "group_id": gid,
+                        "platform": "weixin",
+                    },
+                )
+                self.assertEqual(set_resp.status_code, 200)
+                self.assertTrue(bool(set_resp.json().get("ok")))
+
+                start_resp = client.post("/api/im/start", json={"group_id": gid})
                 self.assertEqual(start_resp.status_code, 200)
                 self.assertTrue(bool(start_resp.json().get("ok")))
 
-            self.assertIsNotNone(popen.call_args)
-            argv = list(popen.call_args.args[0])
-            self.assertEqual(argv[:2], ["node", str(sidecar_path)])
-            self.assertIn("--login", argv)
+                stop_resp = client.post("/api/im/stop", json={"group_id": gid})
+                self.assertEqual(stop_resp.status_code, 200)
+                self.assertTrue(bool(stop_resp.json().get("ok")))
+
+                status_resp = client.get(f"/api/im/status?group_id={gid}")
+                self.assertEqual(status_resp.status_code, 200)
+                payload = status_resp.json()
+                self.assertTrue(bool(payload.get("ok")))
+                result = payload.get("result") or {}
+                self.assertTrue(bool(result.get("configured")))
+                self.assertFalse(bool(result.get("enabled")))
+                self.assertFalse(bool(result.get("running")))
         finally:
             cleanup()
 

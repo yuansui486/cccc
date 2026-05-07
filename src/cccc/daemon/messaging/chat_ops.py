@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import re
 import uuid
 from pathlib import Path
@@ -12,7 +14,8 @@ from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, Daemon
 from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
 from ...kernel.inbox import find_event_with_chat_ack, get_quote_text_from_message_data, is_message_for_actor
-from ...kernel.ledger import append_event
+from ...kernel.context import ContextStorage
+from ...kernel.ledger import append_event, read_last_lines
 from ...kernel.messaging import (
     default_reply_recipients,
     enabled_recipient_actor_ids,
@@ -33,8 +36,18 @@ from .delivery import (
     queue_chat_message,
     request_flush_pending_messages,
 )
+from .actor_delivery_planner import (
+    TRANSPORT_CLAUDE_HEADLESS,
+    TRANSPORT_CODEX_HEADLESS,
+    TRANSPORT_PTY,
+    event_with_effective_to,
+    plan_actor_chat_delivery,
+)
+from .chat_support_ops import schedule_headless_post_wake_delivery
+from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 from ..pet.review_scheduler import request_pet_review
 from ..pet.profile_refresh import record_user_chat_message
+from ..context.context_ops import handle_context_sync
 
 logger = logging.getLogger("cccc.daemon.server")
 
@@ -122,6 +135,31 @@ def _build_delivery_text(
     return delivery_text
 
 
+def _build_headless_delivery_text(
+    *,
+    by: str,
+    to: list[str],
+    body: str,
+    reply_to: str = "",
+    quote_text: str = "",
+    source_platform: str = "",
+    source_user_name: str = "",
+    source_user_id: str = "",
+) -> str:
+    return render_actor_inbound_message(
+        ActorInboundEnvelope(
+            by=by,
+            to=to,
+            text=body,
+            reply_to=reply_to,
+            quote_text=quote_text,
+            source_platform=source_platform,
+            source_user_name=source_user_name,
+            source_user_id=source_user_id,
+        )
+    )
+
+
 def _compact_delivery_text(value: Any, *, limit: int) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     if not text:
@@ -154,6 +192,22 @@ def _render_delivery_refs(refs: list[dict[str, Any]]) -> list[str]:
         if not isinstance(ref, dict):
             continue
         kind = str(ref.get("kind") or "").strip()
+        if kind == "task_ref":
+            task_id = _compact_delivery_text(ref.get("task_id"), limit=40)
+            title = _compact_delivery_text(ref.get("title"), limit=72)
+            status = _compact_delivery_text(ref.get("status"), limit=24)
+            if task_id:
+                label = f"- Task {task_id}"
+                if status:
+                    label += f" [{status}]"
+                if title:
+                    label += f" — {title}"
+                lines.append(label)
+                rendered += 1
+                if rendered >= 4:
+                    break
+                continue
+
         if kind == "presentation_ref":
             slot_id = _compact_delivery_text(ref.get("slot_id"), limit=32)
             label = _presentation_slot_label(
@@ -235,6 +289,145 @@ def _normalize_refs(raw: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             refs.append(item)
     return refs
+
+
+def _normalize_to_tokens(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if isinstance(item, str) and str(item).strip()]
+    if isinstance(raw, str):
+        token = raw.strip()
+        return [token] if token else []
+    return []
+
+
+def _tracked_send_client_id(*, group_id: str, by: str, idempotency_key: str) -> str:
+    basis = "\0".join([str(group_id or ""), str(by or ""), str(idempotency_key or "")])
+    digest = hashlib.sha256(basis.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return f"tracked-send:{digest}"
+
+
+def _tracked_send_existing_result(group: Any, *, client_id: str) -> Optional[Dict[str, Any]]:
+    if not client_id:
+        return None
+    try:
+        lines = read_last_lines(group.ledger_path, 800)
+    except Exception:
+        return None
+    for raw_line in reversed(lines):
+        try:
+            event = json.loads(raw_line)
+        except Exception:
+            continue
+        if not isinstance(event, dict) or str(event.get("kind") or "") != "chat.message":
+            continue
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if str(data.get("client_id") or "").strip() != client_id:
+            continue
+        refs = data.get("refs") if isinstance(data.get("refs"), list) else []
+        task_ref = next(
+            (
+                ref
+                for ref in refs
+                if isinstance(ref, dict)
+                and str(ref.get("kind") or "").strip() == "task_ref"
+                and str(ref.get("task_id") or "").strip()
+            ),
+            None,
+        )
+        task_id = str((task_ref or {}).get("task_id") or "").strip()
+        return {
+            "event": event,
+            "event_id": str(event.get("id") or "").strip(),
+            "task_id": task_id,
+            "task_ref": task_ref,
+            "replayed": True,
+            "task_created": False,
+            "message_sent": True,
+            "partial_failure": False,
+        }
+    return None
+
+
+def _tracked_send_existing_task(group: Any, *, client_request_id: str) -> Optional[Any]:
+    if not client_request_id:
+        return None
+    try:
+        storage = ContextStorage(group)
+        tasks = storage.list_tasks()
+    except Exception:
+        return None
+    matches = [
+        task
+        for task in tasks
+        if str(getattr(task, "client_request_id", "") or "").strip() == client_request_id
+    ]
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda task: (
+            str(getattr(task, "updated_at", "") or getattr(task, "created_at", "") or ""),
+            str(getattr(task, "id", "") or ""),
+        ),
+        reverse=True,
+    )
+    return matches[0]
+
+
+def _derive_tracked_send_assignee(args: Dict[str, Any]) -> str:
+    explicit = str(args.get("assignee") or "").strip()
+    if explicit:
+        return explicit
+    to_tokens = _normalize_to_tokens(args.get("to"))
+    if len(to_tokens) != 1:
+        return ""
+    token = to_tokens[0].strip()
+    if not token or token.startswith("@") or token == "user":
+        return ""
+    return token
+
+
+def _normalize_tracked_checklist(raw: Any) -> Any:
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        out: list[Any] = []
+        for item in raw:
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+                if text:
+                    out.append({**item, "text": text})
+            else:
+                text = str(item or "").strip()
+                if text:
+                    out.append({"text": text})
+        return out
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    return [{"text": line.strip()} for line in text.splitlines() if line.strip()]
+
+
+def _task_ref(
+    *,
+    task_id: str,
+    title: str,
+    status: str = "planned",
+    waiting_on: str = "none",
+    handoff_to: str = "",
+) -> dict[str, Any]:
+    ref = {
+        "kind": "task_ref",
+        "task_id": task_id,
+        "title": str(title or "").strip(),
+        "status": str(status or "planned").strip() or "planned",
+    }
+    waiting_value = str(waiting_on or "").strip()
+    if waiting_value:
+        ref["waiting_on"] = waiting_value
+    handoff_value = str(handoff_to or "").strip()
+    if handoff_value:
+        ref["handoff_to"] = handoff_value
+    return ref
 
 
 def _quote_text_from_message_data(data: dict[str, Any], *, max_len: int = 100) -> Optional[str]:
@@ -371,6 +564,7 @@ def handle_send(
     if not to and not to_explicitly_set and get_default_send_to(group.doc) == "foreman":
         to = ["@foreman"]
 
+    woken: list[str] = []
     if targets_any_agent(to):
         matched_enabled = enabled_recipient_actor_ids(group, to)
         if by and by in matched_enabled:
@@ -457,30 +651,36 @@ def handle_send(
         src_group_id=src_group_id,
         src_event_id=src_event_id,
     )
-    headless_delivery_text = append_mcp_reply_reminder(delivery_text)
+    headless_delivery_text = append_mcp_reply_reminder(
+        _build_headless_delivery_text(
+            by=by,
+            to=effective_to,
+            body=delivery_text,
+            quote_text=quote_text,
+            source_platform=source_platform,
+            source_user_name=source_user_name,
+            source_user_id=source_user_id,
+        )
+    )
     actors = list_actors(group)
+    event_for_delivery = event_with_effective_to(event, effective_to)
     skip_headless_notify_actor_ids: set[str] = set()
     logger.debug(f"[SEND] group={group_id} text={text[:30]!r} actors={[a.get('id') for a in actors]} effective_to={effective_to}")
     for actor in actors:
         if not isinstance(actor, dict):
             continue
-        actor_id = str(actor.get("id") or "").strip()
-        if not actor_id or actor_id == "user" or actor_id == by:
-            logger.debug(f"[SEND] skip actor={actor_id} (user/by)")
-            continue
-        event_with_effective_to = dict(event)
-        event_with_effective_to["data"] = dict(event.get("data") or {})
-        event_with_effective_to["data"]["to"] = effective_to
-        if not is_message_for_actor(group, actor_id=actor_id, event=event_with_effective_to):
-            logger.debug(f"[SEND] skip actor={actor_id} (not for actor)")
-            continue
-        runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-        runner_kind = str(actor.get("runner") or "pty").strip()
-        if (
-            runtime == "codex"
-            and effective_runner_kind(runner_kind) == "headless"
-            and codex_app_supervisor.actor_running(group.group_id, actor_id)
-        ):
+        decision = plan_actor_chat_delivery(
+            group=group,
+            actor=actor,
+            event=event,
+            by=by,
+            effective_to=effective_to,
+            effective_runner_kind=effective_runner_kind,
+            codex_headless_running=codex_app_supervisor.actor_running,
+            claude_headless_running=claude_app_supervisor.actor_running,
+        )
+        actor_id = decision.actor_id
+        if decision.transport == TRANSPORT_CODEX_HEADLESS:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
@@ -491,11 +691,7 @@ def handle_send(
             ))
             if delivered:
                 skip_headless_notify_actor_ids.add(actor_id)
-        elif (
-            runtime == "claude"
-            and effective_runner_kind(runner_kind) == "headless"
-            and claude_app_supervisor.actor_running(group.group_id, actor_id)
-        ):
+        elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
@@ -506,7 +702,7 @@ def handle_send(
             ))
             if delivered:
                 skip_headless_notify_actor_ids.add(actor_id)
-        elif effective_runner_kind(runner_kind) == "pty":
+        elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
                 group,
                 actor_id=actor_id,
@@ -520,17 +716,32 @@ def handle_send(
                 ts=event_ts,
             )
             request_flush_pending_messages(group, actor_id=actor_id)
+        else:
+            if actor_id in woken and decision.reason in {"codex_headless_not_running", "claude_headless_not_running"}:
+                if schedule_headless_post_wake_delivery(
+                    group_id=group.group_id,
+                    actor_id=actor_id,
+                    runtime=decision.runtime,
+                    text=headless_delivery_text,
+                    event_id=event_id,
+                    ts=event_ts,
+                    attachments=attachments,
+                    codex_actor_running=codex_app_supervisor.actor_running,
+                    claude_actor_running=claude_app_supervisor.actor_running,
+                    codex_submit_user_message=codex_app_supervisor.submit_user_message,
+                    claude_submit_user_message=claude_app_supervisor.submit_user_message,
+                    logger=logger,
+                ):
+                    skip_headless_notify_actor_ids.add(actor_id)
+            logger.debug(f"[SEND] skip actor={actor_id} ({decision.reason})")
 
-    event_for_headless = dict(event)
-    event_for_headless["data"] = dict(event.get("data") or {})
-    event_for_headless["data"]["to"] = effective_to
     _notify_headless_targets(
         group=group,
         by=by,
         event_id=event_id,
         priority=priority,
         reply_required=reply_required,
-        event=event_for_headless,
+        event=event_for_delivery,
         skip_actor_ids=skip_headless_notify_actor_ids,
     )
 
@@ -559,6 +770,214 @@ def handle_send(
         pass
 
     return DaemonResponse(ok=True, result={"event": event})
+
+
+def handle_tracked_send(
+    args: Dict[str, Any],
+    *,
+    coerce_bool: Callable[[Any], bool],
+    normalize_attachments: Callable[[Any, Any], list[dict[str, Any]]],
+    effective_runner_kind: Callable[[str], str],
+    auto_wake_recipients: Callable[[Any, list[str], str], list[str]],
+    automation_on_resume: Callable[[Any], None],
+    automation_on_new_message: Callable[[Any], None],
+    clear_pending_system_notifies: Callable[[str, set[str]], None],
+) -> DaemonResponse:
+    """Create a task and send the linked chat message as one daemon-owned operation."""
+    group_id = str(args.get("group_id") or "").strip()
+    by = str(args.get("by") or "user").strip() or "user"
+    title = str(args.get("title") or "").strip()
+    text = str(args.get("text") or "").strip()
+    if not group_id:
+        return _error("missing_group_id", "missing group_id")
+    if not title:
+        title = _compact_delivery_text(text, limit=120)
+    if not title:
+        return _error("missing_title", "tracked_send requires a title or non-empty text")
+    if not text:
+        return _error("empty_message", "tracked_send message text cannot be empty")
+    message_priority = str(args.get("message_priority") or args.get("priority") or "normal").strip() or "normal"
+    if message_priority not in ("normal", "attention"):
+        return _error("invalid_priority", "priority must be 'normal' or 'attention'")
+
+    group = load_group(group_id)
+    if group is None:
+        return _error("group_not_found", f"group not found: {group_id}")
+
+    idempotency_key = str(args.get("idempotency_key") or args.get("client_request_id") or "").strip()
+    client_id = _tracked_send_client_id(group_id=group_id, by=by, idempotency_key=idempotency_key) if idempotency_key else ""
+    if client_id:
+        existing = _tracked_send_existing_result(group, client_id=client_id)
+        if existing is not None:
+            return DaemonResponse(ok=True, result=existing)
+        existing_task = _tracked_send_existing_task(group, client_request_id=client_id)
+    else:
+        existing_task = None
+
+    assignee = _derive_tracked_send_assignee(args)
+    outcome = str(args.get("outcome") or args.get("goal") or "").strip() or text
+    status = str(args.get("status") or "planned").strip() or "planned"
+    waiting_on = str(args.get("waiting_on") or ("actor" if assignee else "none")).strip() or "none"
+    priority = str(args.get("task_priority") or message_priority).strip() or "normal"
+    task_type = str(args.get("task_type") or "standard").strip() or "standard"
+    checklist = _normalize_tracked_checklist(args.get("checklist"))
+    notes = str(args.get("notes") or "").strip()
+    blocked_by = args.get("blocked_by")
+    handoff_to = str(args.get("handoff_to") or "").strip()
+    base_refs = _normalize_refs(args.get("refs"))
+    message_args = {
+        "group_id": group_id,
+        "text": text,
+        "by": by,
+        "to": _normalize_to_tokens(args.get("to")),
+        "path": str(args.get("path") or ""),
+        "priority": message_priority,
+        "reply_required": coerce_bool(args.get("reply_required"), default=True) if "reply_required" in args else True,
+        "refs": base_refs,
+    }
+    if client_id:
+        message_args["client_id"] = client_id
+
+    if existing_task is not None:
+        existing_task_id = str(getattr(existing_task, "id", "") or "").strip()
+        existing_title = str(getattr(existing_task, "title", "") or "").strip() or title
+        existing_status = str(getattr(getattr(existing_task, "status", ""), "value", getattr(existing_task, "status", "")) or "planned").strip() or "planned"
+        existing_waiting_on = str(getattr(getattr(existing_task, "waiting_on", ""), "value", getattr(existing_task, "waiting_on", "")) or "none").strip() or "none"
+        existing_handoff_to = str(getattr(existing_task, "handoff_to", "") or "").strip()
+        resumed_ref = _task_ref(
+            task_id=existing_task_id,
+            title=existing_title,
+            status=existing_status,
+            waiting_on=existing_waiting_on,
+            handoff_to=existing_handoff_to,
+        )
+        message_args["refs"] = [*base_refs, resumed_ref]
+        send_resp = handle_send(
+            message_args,
+            coerce_bool=coerce_bool,
+            normalize_attachments=normalize_attachments,
+            effective_runner_kind=effective_runner_kind,
+            auto_wake_recipients=auto_wake_recipients,
+            automation_on_resume=automation_on_resume,
+            automation_on_new_message=automation_on_new_message,
+            clear_pending_system_notifies=clear_pending_system_notifies,
+        )
+        if not send_resp.ok:
+            err = send_resp.error.model_dump() if send_resp.error is not None else None
+            return DaemonResponse(
+                ok=True,
+                result={
+                    "task_id": existing_task_id,
+                    "task_ref": resumed_ref,
+                    "task_created": False,
+                    "message_sent": False,
+                    "partial_failure": True,
+                    "message_error": err,
+                    "recovered_from_partial_failure": False,
+                },
+            )
+        send_result = send_resp.result if isinstance(send_resp.result, dict) else {}
+        event = send_result.get("event") if isinstance(send_result.get("event"), dict) else {}
+        return DaemonResponse(
+            ok=True,
+            result={
+                "task_id": existing_task_id,
+                "task_ref": resumed_ref,
+                "event": event,
+                "event_id": str(event.get("id") or "").strip(),
+                "task_created": False,
+                "message_sent": True,
+                "partial_failure": False,
+                "replayed": False,
+                "recovered_from_partial_failure": True,
+            },
+        )
+
+    task_op: dict[str, Any] = {
+        "op": "task.create",
+        "title": title,
+        "outcome": outcome,
+        "status": status,
+        "priority": priority,
+        "waiting_on": waiting_on,
+        "task_type": task_type,
+    }
+    if client_id:
+        task_op["client_request_id"] = client_id
+    if assignee:
+        task_op["assignee"] = assignee
+    if notes:
+        task_op["notes"] = notes
+    if blocked_by is not None:
+        task_op["blocked_by"] = blocked_by
+    if handoff_to:
+        task_op["handoff_to"] = handoff_to
+    if checklist is not None:
+        task_op["checklist"] = checklist
+
+    task_resp = handle_context_sync({"group_id": group_id, "by": by, "ops": [task_op]})
+    if not task_resp.ok:
+        return task_resp
+    task_result = task_resp.result if isinstance(task_resp.result, dict) else {}
+    changes = task_result.get("changes") if isinstance(task_result.get("changes"), list) else []
+    task_id = ""
+    for change in changes:
+        if isinstance(change, dict) and str(change.get("op") or "") == "task.create":
+            task_id = str(change.get("task_id") or "").strip()
+            if task_id:
+                break
+    if not task_id:
+        return _error("tracked_send_task_missing", "task.create succeeded but did not return a task_id")
+
+    ref = _task_ref(
+        task_id=task_id,
+        title=title,
+        status=status,
+        waiting_on=waiting_on,
+        handoff_to=handoff_to,
+    )
+    message_args["refs"] = [*base_refs, ref]
+
+    send_resp = handle_send(
+        message_args,
+        coerce_bool=coerce_bool,
+        normalize_attachments=normalize_attachments,
+        effective_runner_kind=effective_runner_kind,
+        auto_wake_recipients=auto_wake_recipients,
+        automation_on_resume=automation_on_resume,
+        automation_on_new_message=automation_on_new_message,
+        clear_pending_system_notifies=clear_pending_system_notifies,
+    )
+    if not send_resp.ok:
+        err = send_resp.error.model_dump() if send_resp.error is not None else None
+        return DaemonResponse(
+            ok=True,
+            result={
+                "task_id": task_id,
+                "task_ref": ref,
+                "context_result": task_result,
+                "task_created": True,
+                "message_sent": False,
+                "partial_failure": True,
+                "message_error": err,
+            },
+        )
+    send_result = send_resp.result if isinstance(send_resp.result, dict) else {}
+    event = send_result.get("event") if isinstance(send_result.get("event"), dict) else {}
+    return DaemonResponse(
+        ok=True,
+        result={
+            "task_id": task_id,
+            "task_ref": ref,
+            "context_result": task_result,
+            "event": event,
+            "event_id": str(event.get("id") or "").strip(),
+            "task_created": True,
+            "message_sent": True,
+            "partial_failure": False,
+            "replayed": False,
+        },
+    )
 
 
 def handle_reply(
@@ -631,6 +1050,7 @@ def handle_reply(
     except Exception as e:
         return _error("invalid_recipient", str(e))
 
+    woken: list[str] = []
     if targets_any_agent(to):
         matched_enabled = enabled_recipient_actor_ids(group, to)
         if by and by in matched_enabled:
@@ -704,9 +1124,7 @@ def handle_reply(
         ack_event = None
 
     effective_to = to if to else ["@all"]
-    event_with_effective_to = dict(event)
-    event_with_effective_to["data"] = dict(event.get("data") or {})
-    event_with_effective_to["data"]["to"] = effective_to
+    event_for_delivery = event_with_effective_to(event, effective_to)
 
     event_id = str(event.get("id") or "").strip()
     event_ts = str(event.get("ts") or "").strip()
@@ -718,23 +1136,31 @@ def handle_reply(
         refs=refs,
         attachments=attachments,
     )
-    headless_delivery_text = append_mcp_reply_reminder(delivery_text)
+    headless_delivery_text = append_mcp_reply_reminder(
+        _build_headless_delivery_text(
+            by=by,
+            to=effective_to,
+            body=delivery_text,
+            reply_to=target_event_id or reply_to,
+            quote_text=quote_text,
+        )
+    )
     skip_headless_notify_actor_ids: set[str] = set()
     for actor in list_actors(group):
         if not isinstance(actor, dict):
             continue
-        actor_id = str(actor.get("id") or "").strip()
-        if not actor_id or actor_id == "user" or actor_id == by:
-            continue
-        if not is_message_for_actor(group, actor_id=actor_id, event=event_with_effective_to):
-            continue
-        runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-        runner_kind = str(actor.get("runner") or "pty").strip()
-        if (
-            runtime == "codex"
-            and effective_runner_kind(runner_kind) == "headless"
-            and codex_app_supervisor.actor_running(group.group_id, actor_id)
-        ):
+        decision = plan_actor_chat_delivery(
+            group=group,
+            actor=actor,
+            event=event,
+            by=by,
+            effective_to=effective_to,
+            effective_runner_kind=effective_runner_kind,
+            codex_headless_running=codex_app_supervisor.actor_running,
+            claude_headless_running=claude_app_supervisor.actor_running,
+        )
+        actor_id = decision.actor_id
+        if decision.transport == TRANSPORT_CODEX_HEADLESS:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
@@ -746,11 +1172,7 @@ def handle_reply(
             ))
             if delivered:
                 skip_headless_notify_actor_ids.add(actor_id)
-        elif (
-            runtime == "claude"
-            and effective_runner_kind(runner_kind) == "headless"
-            and claude_app_supervisor.actor_running(group.group_id, actor_id)
-        ):
+        elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
@@ -762,7 +1184,7 @@ def handle_reply(
             ))
             if delivered:
                 skip_headless_notify_actor_ids.add(actor_id)
-        elif effective_runner_kind(runner_kind) == "pty":
+        elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
                 group,
                 actor_id=actor_id,
@@ -775,6 +1197,23 @@ def handle_reply(
                 ts=event_ts,
             )
             request_flush_pending_messages(group, actor_id=actor_id)
+        elif actor_id in woken and decision.reason in {"codex_headless_not_running", "claude_headless_not_running"}:
+            if schedule_headless_post_wake_delivery(
+                group_id=group.group_id,
+                actor_id=actor_id,
+                runtime=decision.runtime,
+                text=headless_delivery_text,
+                event_id=event_id,
+                ts=event_ts,
+                reply_to=target_event_id or reply_to,
+                attachments=attachments,
+                codex_actor_running=codex_app_supervisor.actor_running,
+                claude_actor_running=claude_app_supervisor.actor_running,
+                codex_submit_user_message=codex_app_supervisor.submit_user_message,
+                claude_submit_user_message=claude_app_supervisor.submit_user_message,
+                logger=logger,
+            ):
+                skip_headless_notify_actor_ids.add(actor_id)
 
     _notify_headless_targets(
         group=group,
@@ -782,7 +1221,7 @@ def handle_reply(
         event_id=event_id,
         priority=priority,
         reply_required=reply_required,
-        event=event_with_effective_to,
+        event=event_for_delivery,
         skip_actor_ids=skip_headless_notify_actor_ids,
     )
 
@@ -886,6 +1325,17 @@ def try_handle_chat_op(
         return handle_stream_emit(args)
     if op == "send":
         return handle_send(
+            args,
+            coerce_bool=coerce_bool,
+            normalize_attachments=normalize_attachments,
+            effective_runner_kind=effective_runner_kind,
+            auto_wake_recipients=auto_wake_recipients,
+            automation_on_resume=automation_on_resume,
+            automation_on_new_message=automation_on_new_message,
+            clear_pending_system_notifies=clear_pending_system_notifies,
+        )
+    if op == "tracked_send":
+        return handle_tracked_send(
             args,
             coerce_bool=coerce_bool,
             normalize_attachments=normalize_attachments,

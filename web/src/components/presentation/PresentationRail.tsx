@@ -98,12 +98,12 @@ function getSlotTone(cardType: string, isDark: boolean): {
     case "image":
       return isDark
         ? {
-            buttonClassName: "border-sky-400/28 bg-sky-400/[0.08] text-sky-100 hover:border-sky-300/45 hover:bg-sky-400/[0.12]",
-            indicatorClassName: "bg-sky-300 ring-sky-100/20",
+            buttonClassName: "border-[rgb(143,163,187)]/24 bg-[rgb(143,163,187)]/[0.08] text-slate-100 hover:border-[rgb(143,163,187)]/38 hover:bg-[rgb(143,163,187)]/[0.12]",
+            indicatorClassName: "bg-[rgb(143,163,187)] ring-white/10",
           }
         : {
-            buttonClassName: "border-sky-500/25 bg-sky-50/90 text-sky-900 hover:border-sky-500/40 hover:bg-sky-50",
-            indicatorClassName: "bg-sky-500 ring-sky-100",
+            buttonClassName: "border-[rgb(35,36,37)]/12 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:border-[rgb(35,36,37)]/22 hover:bg-[rgb(240,240,240)]",
+            indicatorClassName: "bg-[rgb(62,80,103)] ring-black/5",
           };
     case "pdf":
       return isDark
@@ -118,12 +118,12 @@ function getSlotTone(cardType: string, isDark: boolean): {
     case "web_preview":
       return isDark
         ? {
-            buttonClassName: "border-cyan-400/28 bg-cyan-400/[0.08] text-cyan-100 hover:border-cyan-300/45 hover:bg-cyan-400/[0.12]",
-            indicatorClassName: "bg-cyan-300 ring-cyan-100/20",
+            buttonClassName: "border-[rgb(143,163,187)]/24 bg-[rgb(143,163,187)]/[0.08] text-slate-100 hover:border-[rgb(143,163,187)]/38 hover:bg-[rgb(143,163,187)]/[0.12]",
+            indicatorClassName: "bg-[rgb(143,163,187)] ring-white/10",
           }
         : {
-            buttonClassName: "border-cyan-500/25 bg-cyan-50/90 text-cyan-900 hover:border-cyan-500/40 hover:bg-cyan-50",
-            indicatorClassName: "bg-cyan-500 ring-cyan-100",
+            buttonClassName: "border-[rgb(35,36,37)]/12 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:border-[rgb(35,36,37)]/22 hover:bg-[rgb(240,240,240)]",
+            indicatorClassName: "bg-[rgb(62,80,103)] ring-black/5",
           };
     default:
       return isDark
@@ -252,10 +252,10 @@ export function PresentationRail({
                     "relative rounded-3xl border p-4 text-left transition-all",
                     "min-h-[164px] shadow-sm hover:-translate-y-0.5",
                     isDark
-                      ? "border-white/10 bg-slate-900/70 hover:border-cyan-400/40"
-                      : "border-black/10 bg-white/85 hover:border-cyan-500/40",
+                      ? "border-white/10 bg-slate-900/70 hover:border-white/18"
+                      : "border-black/10 bg-white/85 hover:border-black/16",
                     !card && readOnly && (isDark ? "cursor-default opacity-80" : "cursor-default opacity-90"),
-                    isHighlighted && (isDark ? "ring-2 ring-cyan-400/50" : "ring-2 ring-cyan-500/40"),
+                    isHighlighted && (isDark ? "ring-2 ring-[rgb(143,163,187)]/38" : "ring-2 ring-[rgb(62,80,103)]/18"),
                     hasSlotAttention &&
                       (isDark
                         ? "ring-2 ring-cyan-300/70 presentation-slot-attention presentation-slot-attention-dark"
@@ -280,7 +280,7 @@ export function PresentationRail({
                       className={classNames(
                         "rounded-full px-2 py-1 text-[11px] font-medium",
                         card
-                          ? isDark ? "bg-cyan-500/10 text-cyan-200" : "bg-cyan-50 text-cyan-700"
+                          ? isDark ? "bg-white/[0.08] text-white" : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
                           : isDark ? "bg-slate-800 text-slate-300" : "bg-gray-100 text-gray-600"
                       )}
                     >
@@ -350,15 +350,15 @@ export function PresentationRail({
                   }
                 }}
                 className={classNames(
-                  "group relative flex h-10 w-10 items-center justify-center rounded-[14px] border text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50",
+                  "group relative flex h-10 w-10 items-center justify-center rounded-[14px] border text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(143,163,187)]/35",
                   card || !readOnly ? "cursor-pointer" : "cursor-default",
                   card
                     ? tone?.buttonClassName
                     : isDark
                       ? "border-dashed border-white/10 bg-white/[0.03] text-slate-100 hover:border-white/16 hover:bg-white/[0.05]"
                       : "border-dashed border-black/10 bg-white/78 text-gray-900 hover:border-black/16 hover:bg-white",
-                  !card && !readOnly && (isDark ? "hover:border-cyan-300/30" : "hover:border-cyan-500/25"),
-                  isHighlighted && (isDark ? "ring-1 ring-cyan-300/45" : "ring-1 ring-cyan-500/35"),
+                  !card && !readOnly && (isDark ? "hover:border-white/18" : "hover:border-black/14"),
+                  isHighlighted && (isDark ? "ring-1 ring-[rgb(143,163,187)]/32" : "ring-1 ring-[rgb(62,80,103)]/16"),
                   hasSlotAttention &&
                     (isDark
                       ? "ring-2 ring-cyan-300/70 presentation-slot-attention presentation-slot-attention-dark"
@@ -412,19 +412,19 @@ export function PresentationRail({
         type="button"
         onClick={() => onOpenChange?.(!isOpen)}
         className={classNames(
-          "pointer-events-auto group relative flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50",
+          "pointer-events-auto group relative flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-xl transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(143,163,187)]/35",
           isDark
             ? "border-white/10 bg-slate-950/62 text-slate-100 shadow-[0_20px_48px_-28px_rgba(2,6,23,0.72)]"
             : "border-black/10 bg-white/78 text-gray-900 shadow-[0_20px_48px_-28px_rgba(15,23,42,0.18)]",
           hasCards &&
             !hasAttention &&
             (isDark
-              ? "border-cyan-300/25 bg-cyan-400/[0.08] text-cyan-50"
-              : "border-cyan-500/18 bg-cyan-50/92 text-cyan-900"),
+              ? "border-white/12 bg-white/[0.07] text-white"
+              : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"),
           isOpen
             ? isDark
-              ? "border-cyan-300/45 bg-slate-950/84"
-              : "border-cyan-500/30 bg-white/92"
+              ? "border-white/18 bg-slate-950/84"
+              : "border-black/14 bg-white/92"
             : isDark
               ? "hover:border-white/16 hover:bg-slate-900/82"
               : "hover:border-black/14 hover:bg-white/92",
@@ -498,8 +498,8 @@ export function PresentationRail({
                             "rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em]",
                             card
                               ? isDark
-                                ? "bg-cyan-400/[0.12] text-cyan-100"
-                                : "bg-cyan-50 text-cyan-700"
+                                ? "bg-white/[0.08] text-white"
+                                : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
                               : isDark
                                 ? "bg-white/[0.06] text-slate-300"
                                 : "bg-black/[0.04] text-gray-600"
@@ -556,16 +556,16 @@ export function PresentationRail({
                       }
                     }}
                     className={classNames(
-                      "group relative flex h-12 w-12 items-center justify-center rounded-[16px] border text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50",
+                      "group relative flex h-12 w-12 items-center justify-center rounded-[16px] border text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(143,163,187)]/35",
                       card || !readOnly ? "cursor-pointer" : "cursor-default",
                       card
                         ? tone?.buttonClassName
                         : isDark
                           ? "border-dashed border-white/10 bg-white/[0.03] text-slate-100 hover:border-white/16 hover:bg-white/[0.05]"
                           : "border-dashed border-black/10 bg-white/78 text-gray-900 hover:border-black/16 hover:bg-white",
-                      !card && !readOnly && (isDark ? "hover:border-cyan-300/30" : "hover:border-cyan-500/25"),
+                      !card && !readOnly && (isDark ? "hover:border-white/18" : "hover:border-black/14"),
                       isHovered && (isDark ? "translate-x-[-1px]" : "translate-x-[-1px]"),
-                      isHighlighted && (isDark ? "ring-1 ring-cyan-300/45" : "ring-1 ring-cyan-500/35"),
+                      isHighlighted && (isDark ? "ring-1 ring-[rgb(143,163,187)]/32" : "ring-1 ring-[rgb(62,80,103)]/16"),
                       hasSlotAttention &&
                         (isDark
                           ? "ring-2 ring-cyan-300/70 presentation-slot-attention presentation-slot-attention-dark"

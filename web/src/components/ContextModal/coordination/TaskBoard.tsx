@@ -188,7 +188,7 @@ function TaskCard({
           blocked
             ? "border-rose-500/30 bg-rose-500/5"
             : selectedTaskId === task.id
-              ? "border-blue-500 bg-blue-500/10 shadow-[0_0_0_1px_rgba(59,130,246,0.3)]"
+              ? "border-black/10 bg-[rgb(245,245,245)] shadow-[0_0_0_1px_rgba(17,24,39,0.08)] dark:border-white/12 dark:bg-white/[0.08] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
               : "glass-panel hover:border-[var(--glass-border-subtle)]"
         )}
       >
@@ -227,8 +227,8 @@ function TaskCard({
           )}
           {task.priority ? <span className={classNames("rounded-full px-2 py-0.5", "glass-panel text-[var(--color-text-secondary)]")}>{task.priority}</span> : null}
           {blocked ? <span className={classNames("rounded-full px-2 py-0.5", "bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{tr("context.blocked", "Blocked")}</span> : null}
-          {waiting && waiting !== "none" ? <span className={classNames("rounded-full px-2 py-0.5", "bg-violet-500/15 text-violet-600 dark:text-violet-400")}>{waitingLabel(waiting, tr)}</span> : null}
-          {handoff ? <span className={classNames("rounded-full px-2 py-0.5", "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400")}>{tr("context.handoffTo", "Handoff →")} {handoff}</span> : null}
+          {waiting && waiting !== "none" ? <span className={classNames("rounded-full px-2 py-0.5", "bg-amber-500/15 text-amber-600 dark:text-amber-400")}>{waitingLabel(waiting, tr)}</span> : null}
+          {handoff ? <span className={classNames("rounded-full px-2 py-0.5", "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white")}>{tr("context.handoffTo", "Handoff →")} {handoff}</span> : null}
           {workflow.isOptimization && workflow.latestAttemptVerdict ? (
             <span className={classNames("rounded-full px-2 py-0.5", latestAttemptTone(workflow.latestAttemptVerdict))}>
               {latestAttemptLabel(workflow.latestAttemptVerdict, tr)}
@@ -279,7 +279,7 @@ function ColumnDropZone({
     <section ref={setNodeRef} className={classNames(
       "rounded-2xl border p-3 transition-all",
       isOver
-        ? "border-blue-500 bg-blue-500/5 shadow-[0_0_0_1px_rgba(59,130,246,0.25)]"
+        ? "border-black/10 bg-[rgb(245,245,245)] shadow-[0_0_0_1px_rgba(17,24,39,0.08)] dark:border-white/12 dark:bg-white/[0.08] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
         : "glass-panel"
     )}>
       <div className="flex items-center justify-between gap-2">
@@ -388,7 +388,12 @@ export function TaskBoard({
                 key={String(value)}
                 type="button"
                 onClick={() => onTaskFilterChange(value as TaskFilterValue)}
-                className={classNames(ui.chipBaseClass, taskFilter === value ? "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)]" : "")}
+                className={classNames(
+                  ui.chipBaseClass,
+                  taskFilter === value
+                    ? "border-black/10 bg-[rgb(35,36,37)] text-white shadow-[0_10px_24px_-20px_rgba(15,23,42,0.3)] dark:border-white/12 dark:bg-white dark:text-[rgb(20,20,22)]"
+                    : ""
+                )}
               >
                 {label} · {count}
               </button>

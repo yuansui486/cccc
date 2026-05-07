@@ -73,14 +73,16 @@ class TestEnabledFlagCoercion(unittest.TestCase):
 
                 foreman = find_foreman(reloaded)
                 self.assertIsNotNone(foreman)
-                self.assertEqual(str((foreman or {}).get("id") or ""), "peer2")
-                self.assertEqual(get_effective_role(reloaded, "peer1"), "peer")
-                self.assertEqual(get_effective_role(reloaded, "peer2"), "foreman")
+                self.assertEqual(str((foreman or {}).get("id") or ""), "peer1")
+                self.assertEqual(get_effective_role(reloaded, "peer1"), "foreman")
+                self.assertEqual(get_effective_role(reloaded, "peer2"), "peer")
 
                 enabled_ids = enabled_recipient_actor_ids(reloaded, ["@all"])
                 disabled_ids = disabled_recipient_actor_ids(reloaded, ["@all"])
                 self.assertEqual(enabled_ids, ["peer2"])
                 self.assertEqual(disabled_ids, ["peer1"])
+                self.assertEqual(enabled_recipient_actor_ids(reloaded, ["@foreman"]), [])
+                self.assertEqual(disabled_recipient_actor_ids(reloaded, ["@foreman"]), ["peer1"])
 
                 actor2_now = find_actor(reloaded, "peer2")
                 self.assertIsNotNone(actor2_now)

@@ -3,8 +3,8 @@ import { create } from "zustand";
 import { clampPresentationSplitWidth, PRESENTATION_SPLIT_DEFAULT_WIDTH } from "../utils/presentationSplitLayout";
 
 export const SIDEBAR_COLLAPSED_WIDTH = 60;
-export const SIDEBAR_DEFAULT_WIDTH = 280;
-export const SIDEBAR_MIN_WIDTH = 280;
+export const SIDEBAR_DEFAULT_WIDTH = 248;
+export const SIDEBAR_MIN_WIDTH = 248;
 export const SIDEBAR_MAX_WIDTH = 480;
 
 interface UINotice {

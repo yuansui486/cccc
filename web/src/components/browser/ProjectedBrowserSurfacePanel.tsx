@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { ApiResponse } from "../../services/api";
 import type { PresentationBrowserSurfaceState } from "../../types";
 import { classNames } from "../../utils/classNames";
+import { CollapseIcon, ExpandIcon } from "../Icons";
 
 export type ProjectedBrowserFrame = {
   seq: number;
@@ -103,20 +104,8 @@ function buttonFromMouseEvent(button: number): "left" | "middle" | "right" {
 }
 
 function ProjectedBrowserExpandIcon({ expanded }: { expanded: boolean }) {
-  if (expanded) {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-        <path d="M7 3.75H4.75v2.5M13 3.75h2.25v2.5M7 16.25H4.75v-2.5M13 16.25h2.25v-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M8 8l-3.25-3.25M12 8l3.25-3.25M8 12l-3.25 3.25M12 12l3.25 3.25" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-      <path d="M7 3.75H4.75v2.5M13 3.75h2.25v2.5M7 16.25H4.75v-2.5M13 16.25h2.25v-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8 4.75H4.75V8M12 4.75h3.25V8M8 15.25H4.75V12M12 15.25h3.25V12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  const Icon = expanded ? CollapseIcon : ExpandIcon;
+  return <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.6} />;
 }
 
 export function ProjectedBrowserSurfacePanel({
@@ -549,16 +538,16 @@ export function ProjectedBrowserSurfacePanel({
           className={classNames(
             "rounded-full px-2.5 py-1 font-medium",
             sessionState.state === "ready"
-              ? isDark
-                ? "bg-emerald-500/15 text-emerald-200"
-                : "bg-emerald-50 text-emerald-700"
+                ? isDark
+                  ? "bg-emerald-500/15 text-emerald-200"
+                  : "bg-emerald-50 text-emerald-700"
               : sessionState.state === "failed"
                 ? isDark
                   ? "bg-rose-500/15 text-rose-200"
                   : "bg-rose-50 text-rose-700"
                 : isDark
-                  ? "bg-cyan-500/15 text-cyan-200"
-                  : "bg-cyan-50 text-cyan-700",
+                  ? "bg-white/[0.08] text-white"
+                  : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]",
           )}
         >
           {sessionState.state === "ready"

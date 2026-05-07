@@ -34,6 +34,8 @@ def cmd_attach(args: argparse.Namespace) -> int:
                 pass
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     # Fallback: local execution (dev convenience)
     scope_path = Path(args.path)
@@ -82,6 +84,8 @@ def cmd_group_create(args: argparse.Namespace) -> int:
                 pass
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     reg = load_registry()
     group = create_group(reg, title=str(args.title or "working-group"), topic=str(args.topic or ""))
@@ -130,6 +134,8 @@ def cmd_group_update(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(group_id)
     if group is None:
@@ -162,6 +168,8 @@ def cmd_group_detach_scope(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(group_id)
     if group is None:
@@ -209,6 +217,8 @@ def cmd_group_use(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(args.group_id)
     if group is None:

@@ -1,9 +1,12 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from 'react-i18next';
 import { useTheme } from "../hooks/useTheme";
-import { getAppBrandName, getAppLogoPath } from "../utils/displayText";
 import * as api from "../services/api";
 import { useBrandingStore } from "../stores";
+import { resolveThemeAwareLogoUrl } from "../utils/branding";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Surface } from "./ui/surface";
 
 type AuthStatus = "checking" | "authenticated" | "login";
 
@@ -12,7 +15,7 @@ function needsTokenLogin(resp: api.ApiResponse<unknown>): boolean {
 }
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  useTheme();
+  const { isDark } = useTheme();
   const initialForceLogin = api.shouldForceTokenLogin();
   const forceLoginRef = useRef(initialForceLogin);
   const [status, setStatus] = useState<AuthStatus>(initialForceLogin ? "login" : "checking");
@@ -22,9 +25,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const { t } = useTranslation('layout');
-  const appBrandName = getAppBrandName();
   const branding = useBrandingStore((s) => s.branding);
-  const appLogoPath = getAppLogoPath();
+  const logoSrc = resolveThemeAwareLogoUrl(branding.logo_icon_url, isDark);
   const hostname = typeof window !== "undefined" ? String(window.location.hostname || "").trim().toLowerCase() : "";
   const isLocalAccess = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
   const localRecoveryPath = "~/.cccc/access_tokens.yaml";
@@ -107,13 +109,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         <div className="flex flex-col items-center gap-1 mb-6">
           <div className="mb-2 flex h-12 min-w-[48px] max-w-[220px] items-center justify-center overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 shadow-sm">
             <img
-              src={branding.logo_icon_url || appLogoPath}
-              alt={`${appBrandName} logo`}
+              src={logoSrc}
+              alt={`${branding.product_name} logo`}
               className="max-h-7 w-auto max-w-full object-contain"
             />
           </div>
           <h1 className="text-lg font-semibold gradient-text">
-            {appBrandName}
+            {branding.product_name}
           </h1>
           <p className="text-sm text-[var(--color-text-tertiary)]">
             {t('enterToken')}
@@ -123,13 +125,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </p>
         </div>
         <div className="relative">
-          <input
+          <Input
             type={showToken ? "text" : "password"}
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder={t('accessToken')}
             autoFocus
-            className="glass-input w-full px-4 py-2.5 pr-20 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+            className="pr-20"
           />
           <button
             type="button"
@@ -140,15 +142,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </button>
         </div>
         {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-        <button
+        <Button
           type="submit"
           disabled={submitting || !token.trim()}
-          className={`glass-btn-accent w-full mt-4 px-4 py-2.5 rounded-lg text-sm font-medium text-[var(--color-accent-primary)] ${
-            submitting || !token.trim() ? "opacity-50 cursor-not-allowed" : ""
-          }`}
+          className="mt-4 w-full disabled:opacity-70"
         >
           {submitting ? t('verifying') : t('signIn')}
-        </button>
+        </Button>
 
         <div className="mt-4 border-t pt-4 border-[var(--glass-border-subtle)]">
           <button
@@ -160,7 +160,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </button>
 
           {showRecovery ? (
-            <div className="glass-panel mt-3 rounded-xl p-4 text-left">
+            <Surface className="mt-3 text-left" radius="md">
               <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t('recoveryTitle')}</div>
               <p className="mt-2 text-xs leading-6 text-[var(--color-text-secondary)]">{t('recoveryIntro')}</p>
 
@@ -189,7 +189,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
               </div>
 
               <p className="mt-3 text-[11px] leading-5 text-[var(--color-text-muted)]">{t('recoverySecurityNote')}</p>
-            </div>
+            </Surface>
           ) : null}
         </div>
       </form>

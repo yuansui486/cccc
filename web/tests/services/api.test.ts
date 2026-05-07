@@ -724,6 +724,49 @@ describe("api.message refs", () => {
     );
   });
 
+  it("sends tracked delegation payloads through the daemon endpoint", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, result: { task_id: "T001" } }),
+    });
+
+    const api = await import("../../src/services/api");
+    const refs = [{ kind: "presentation_ref", slot_id: "slot-2" }];
+    await api.trackedSendMessage("g-demo", {
+      title: "Review routing",
+      text: "Please review routing.",
+      to: ["reviewer"],
+      outcome: "Review evidence reported.",
+      checklist: [{ text: "Inspect code" }],
+      idempotency_key: "req-1",
+      refs,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/groups/g-demo/tracked_send",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          title: "Review routing",
+          text: "Please review routing.",
+          by: "user",
+          to: ["reviewer"],
+          outcome: "Review evidence reported.",
+          checklist: [{ text: "Inspect code" }],
+          assignee: "",
+          waiting_on: "actor",
+          handoff_to: "",
+          notes: "",
+          priority: "normal",
+          reply_required: true,
+          idempotency_key: "req-1",
+          refs,
+        }),
+      }),
+    );
+  });
+
   it("sends structured refs on the upload reply path", async () => {
     fetchMock.mockResolvedValue({
       status: 200,

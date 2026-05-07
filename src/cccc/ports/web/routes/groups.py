@@ -52,6 +52,15 @@ from ....util.fs import atomic_write_text
 from ....util.process import pid_is_alive
 from ..schemas import (
     AttachRequest,
+    AssistantSettingsUpdateRequest,
+    AssistantStatusUpdateRequest,
+    AssistantVoiceAskRequestsClearRequest,
+    AssistantVoiceDocumentInstructionRequest,
+    AssistantVoiceDocumentSaveRequest,
+    AssistantVoiceInputRequest,
+    AssistantVoicePromptDraftAckRequest,
+    AssistantVoiceTranscriptSegmentRequest,
+    AssistantVoiceTranscriptionRequest,
     CreateGroupRequest,
     GroupAutomationManageRequest,
     GroupAutomationRequest,
@@ -1265,7 +1274,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 seen.add(value)
                 out.append(value)
                 continue
-            if value == "pet":
+            if value in {"pet", "voice_secretary"}:
                 seen.add(value)
                 out.append(value)
                 continue
@@ -1324,6 +1333,10 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             _add("peer notes")
         if f"actor:{aid}" in blocks:
             _add("your actor note")
+        if "voice_secretary" in blocks:
+            internal_kind = str(actor.get("internal_kind") or "").strip()
+            if internal_kind == "voice_secretary" or aid == "voice-secretary":
+                _add("Voice Secretary guidance")
         return labels
 
     def _help_update_notify_copy(*, labels: list[str]) -> tuple[str, str]:
@@ -1354,6 +1367,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     ) -> list[str]:
         if not content_changed:
             return []
+        normalized_blocks: set[str] = set()
         if str(editor_mode or "").strip().lower() == "structured":
             normalized_blocks = {str(item or "").strip() for item in list(changed_blocks or []) if str(item or "").strip()}
             if normalized_blocks and normalized_blocks.issubset({"pet"}):
@@ -1374,6 +1388,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             )
             if reasons:
                 target_reasons[aid] = reasons
+
+        if not target_reasons and normalized_blocks and normalized_blocks.issubset({"pet", "voice_secretary"}):
+            return []
 
         if not target_reasons:
             for actor in running:
@@ -1685,6 +1702,266 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 detail={"code": "permission_denied", "message": "authentication required", "details": {}},
             )
         return {"ok": True, "result": {"token": token}}
+
+    @group_router.get("/assistants")
+    async def group_assistants_get(group_id: str) -> Dict[str, Any]:
+        return await ctx.daemon({"op": "assistant_state", "args": {"group_id": group_id}})
+
+    @group_router.get("/assistants/{assistant_id}")
+    async def group_assistant_get(group_id: str, assistant_id: str, prompt_request_id: str = "") -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_state",
+                "args": {
+                    "group_id": group_id,
+                    "assistant_id": str(assistant_id or "").strip(),
+                    "prompt_request_id": str(prompt_request_id or "").strip(),
+                },
+            }
+        )
+
+    @group_router.put("/assistants/{assistant_id}/settings")
+    async def group_assistant_settings_update(
+        group_id: str,
+        assistant_id: str,
+        req: AssistantSettingsUpdateRequest,
+    ) -> Dict[str, Any]:
+        patch: Dict[str, Any] = {}
+        if req.enabled is not None:
+            patch["enabled"] = bool(req.enabled)
+        if req.config is not None:
+            patch["config"] = dict(req.config)
+        if not patch:
+            return {"ok": True, "result": {"message": "no changes"}}
+        return await ctx.daemon(
+            {
+                "op": "assistant_settings_update",
+                "args": {
+                    "group_id": group_id,
+                    "assistant_id": str(assistant_id or "").strip(),
+                    "patch": patch,
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/{assistant_id}/status")
+    async def group_assistant_status_update(
+        group_id: str,
+        assistant_id: str,
+        req: AssistantStatusUpdateRequest,
+    ) -> Dict[str, Any]:
+        requested_assistant_id = str(req.assistant_id or assistant_id or "").strip()
+        path_assistant_id = str(assistant_id or "").strip()
+        if requested_assistant_id and path_assistant_id and requested_assistant_id != path_assistant_id:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "assistant_id_mismatch",
+                    "message": "assistant_id in path and body must match",
+                    "details": {"path_assistant_id": path_assistant_id, "body_assistant_id": requested_assistant_id},
+                },
+            )
+        return await ctx.daemon(
+            {
+                "op": "assistant_status_update",
+                "args": {
+                    "group_id": group_id,
+                    "assistant_id": path_assistant_id,
+                    "lifecycle": req.lifecycle,
+                    "health": dict(req.health),
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/transcriptions")
+    async def group_voice_secretary_transcription_create(
+        group_id: str,
+        req: AssistantVoiceTranscriptionRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_transcribe",
+                "args": {
+                    "group_id": group_id,
+                    "audio_base64": req.audio_base64,
+                    "mime_type": req.mime_type,
+                    "language": req.language,
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/transcript_segments")
+    async def group_voice_secretary_transcript_segment_append(
+        group_id: str,
+        req: AssistantVoiceTranscriptSegmentRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_transcript_append",
+                "args": {
+                    "group_id": group_id,
+                    "session_id": req.session_id,
+                    "segment_id": req.segment_id,
+                    "document_path": req.document_path,
+                    "text": req.text,
+                    "language": req.language,
+                    "is_final": req.is_final,
+                    "flush": req.flush,
+                    "trigger": dict(req.trigger),
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.get("/assistants/voice_secretary/documents")
+    async def group_voice_secretary_documents_get(group_id: str, include_archived: bool = False) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_document_list",
+                "args": {
+                    "group_id": group_id,
+                    "include_archived": bool(include_archived),
+                },
+            }
+        )
+
+    @group_router.put("/assistants/voice_secretary/documents")
+    async def group_voice_secretary_document_save(
+        group_id: str,
+        req: AssistantVoiceDocumentSaveRequest,
+    ) -> Dict[str, Any]:
+        args = {
+            "group_id": group_id,
+            "document_path": req.document_path,
+            "workspace_path": req.workspace_path,
+            "title": req.title,
+            "status": req.status,
+            "create_new": req.create_new,
+            "by": req.by,
+        }
+        if req.content is not None:
+            args["content"] = req.content
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_document_save",
+                "args": args,
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/documents/select")
+    async def group_voice_secretary_document_select_by_path(
+        group_id: str,
+        req: AssistantVoiceDocumentSaveRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_document_select",
+                "args": {
+                    "group_id": group_id,
+                    "document_path": str(req.document_path or req.workspace_path or "").strip(),
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/documents/instructions")
+    async def group_voice_secretary_document_instruction_by_path(
+        group_id: str,
+        req: AssistantVoiceDocumentInstructionRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_document_instruction",
+                "args": {
+                    "group_id": group_id,
+                    "document_path": str(req.document_path or "").strip(),
+                    "instruction": req.instruction,
+                    "source_text": req.source_text,
+                    "trigger": dict(req.trigger),
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/inputs")
+    async def group_voice_secretary_input_append(
+        group_id: str,
+        req: AssistantVoiceInputRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_input_append",
+                "args": {
+                    "group_id": group_id,
+                    "kind": req.kind,
+                    "text": req.text,
+                    "instruction": req.instruction,
+                    "source_text": req.source_text,
+                    "document_path": req.document_path,
+                    "voice_transcript": req.voice_transcript,
+                    "composer_text": req.composer_text,
+                    "request_id": req.request_id,
+                    "operation": req.operation,
+                    "composer_context": dict(req.composer_context),
+                    "composer_snapshot_hash": req.composer_snapshot_hash,
+                    "language": req.language,
+                    "trigger": dict(req.trigger),
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/prompt_drafts/ack")
+    async def group_voice_secretary_prompt_draft_ack(
+        group_id: str,
+        req: AssistantVoicePromptDraftAckRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_prompt_draft_ack",
+                "args": {
+                    "group_id": group_id,
+                    "request_id": req.request_id,
+                    "status": req.status,
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/ask_requests/clear")
+    async def group_voice_secretary_ask_requests_clear(
+        group_id: str,
+        req: AssistantVoiceAskRequestsClearRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_ask_requests_clear",
+                "args": {
+                    "group_id": group_id,
+                    "keep_active": req.keep_active,
+                    "by": req.by,
+                },
+            }
+        )
+
+    @group_router.post("/assistants/voice_secretary/documents/archive")
+    async def group_voice_secretary_document_archive_by_path(
+        group_id: str,
+        req: AssistantVoiceDocumentSaveRequest,
+    ) -> Dict[str, Any]:
+        return await ctx.daemon(
+            {
+                "op": "assistant_voice_document_archive",
+                "args": {
+                    "group_id": group_id,
+                    "document_path": str(req.document_path or req.workspace_path or "").strip(),
+                    "by": req.by,
+                },
+            }
+        )
 
     @group_router.put("/settings")
     async def group_settings_update(group_id: str, req: GroupSettingsRequest) -> Dict[str, Any]:

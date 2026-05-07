@@ -42,9 +42,11 @@ uv.lock
 /docs/.vitepress/cache/
 /docs/.vitepress/dist/
 /docs/_archive_local/
+/docs/voice-secretary/**
 
 # Local iteration notes (not shipped)
 /docs/ITERATION_PLAN.md
+/docs/review/
 
 /docs/plan/
 /docs/superpowers/

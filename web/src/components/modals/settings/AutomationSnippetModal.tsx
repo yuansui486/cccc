@@ -1,6 +1,6 @@
 import React from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { BodyPortal } from "../../ui/BodyPortal";
 
 import { getAutomationVarHelp } from "./automationUtils";
 import {
@@ -205,5 +205,5 @@ export function AutomationSnippetModal(props: AutomationSnippetModalProps) {
     </div>
   );
 
-  return typeof document !== "undefined" ? createPortal(content, document.body) : content;
+  return <BodyPortal>{content}</BodyPortal>;
 }

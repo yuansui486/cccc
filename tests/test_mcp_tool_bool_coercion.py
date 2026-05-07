@@ -5,8 +5,7 @@ from unittest.mock import patch
 
 
 class TestMcpToolBoolCoercion(unittest.TestCase):
-    def test_headless_codex_message_send_is_blocked(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+    def test_headless_codex_message_send_is_allowed(self) -> None:
         from cccc.ports.mcp.handlers import cccc_messaging
 
         class _FakeGroup:
@@ -14,18 +13,17 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
 
         with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
             cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
-        ):
-            with self.assertRaises(mcp_server.MCPError) as cm:
-                mcp_server.message_send(
-                    group_id="g_test",
-                    actor_id="peer1",
-                    text="hello",
-                    to=["user"],
-                )
-        self.assertEqual(cm.exception.code, "tool_disabled_for_runtime")
+        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = cccc_messaging.message_send(
+                group_id="g_test",
+                actor_id="peer1",
+                text="hello",
+                to=["user"],
+            )
+        self.assertEqual(result.get("kind"), "chat.message")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "send")
 
-    def test_headless_codex_message_reply_is_blocked(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+    def test_headless_codex_message_reply_is_allowed(self) -> None:
         from cccc.ports.mcp.handlers import cccc_messaging
 
         class _FakeGroup:
@@ -33,16 +31,53 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
 
         with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
             cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
-        ):
-            with self.assertRaises(mcp_server.MCPError) as cm:
-                mcp_server.message_reply(
-                    group_id="g_test",
-                    actor_id="peer1",
-                    reply_to="ev_1",
-                    text="hello",
-                    to=["user"],
-                )
-        self.assertEqual(cm.exception.code, "tool_disabled_for_runtime")
+        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = cccc_messaging.message_reply(
+                group_id="g_test",
+                actor_id="peer1",
+                reply_to="ev_1",
+                text="hello",
+                to=["user"],
+            )
+        self.assertEqual(result.get("kind"), "chat.message")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "reply")
+
+    def test_headless_claude_message_send_is_allowed(self) -> None:
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
+        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = cccc_messaging.message_send(
+                group_id="g_test",
+                actor_id="peer1",
+                text="hello",
+                to=["user"],
+            )
+        self.assertEqual(result.get("kind"), "chat.message")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "send")
+
+    def test_headless_claude_message_reply_is_allowed(self) -> None:
+        from cccc.ports.mcp.handlers import cccc_messaging
+
+        class _FakeGroup:
+            pass
+
+        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
+        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = cccc_messaging.message_reply(
+                group_id="g_test",
+                actor_id="peer1",
+                reply_to="ev_1",
+                text="hello",
+                to=["user"],
+            )
+        self.assertEqual(result.get("kind"), "chat.message")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "reply")
 
     def test_file_send_blocks_path_outside_scope_root(self) -> None:
         from cccc.ports.mcp import server as mcp_server

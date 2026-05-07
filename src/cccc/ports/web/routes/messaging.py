@@ -13,6 +13,7 @@ from ..schemas import (
     RouteContext,
     SendCrossGroupRequest,
     SendRequest,
+    TrackedSendRequest,
     UserAckRequest,
     WEB_MAX_FILE_BYTES,
     WEB_MAX_FILE_MB,
@@ -125,6 +126,30 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 },
             }
         )
+
+    @group_router.post("/tracked_send")
+    async def tracked_send(group_id: str, req: TrackedSendRequest) -> Dict[str, Any]:
+        daemon_req = _build_message_request(
+            "tracked_send",
+            group_id=group_id,
+            args={
+                "title": req.title,
+                "text": req.text,
+                "by": req.by,
+                "to": list(req.to),
+                "outcome": req.outcome,
+                "checklist": list(req.checklist),
+                "assignee": req.assignee,
+                "waiting_on": req.waiting_on,
+                "handoff_to": req.handoff_to,
+                "notes": req.notes,
+                "priority": req.priority,
+                "reply_required": _normalize_reply_required(req.reply_required),
+                "idempotency_key": _normalize_client_id(req.idempotency_key),
+                "refs": list(req.refs),
+            },
+        )
+        return await _submit_message(daemon_req)
 
     @group_router.post("/reply")
     async def reply(group_id: str, req: ReplyRequest) -> Dict[str, Any]:

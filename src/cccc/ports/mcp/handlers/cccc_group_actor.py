@@ -65,19 +65,45 @@ def _is_headless_runner(value: Any) -> bool:
     return str(value or "").strip().lower() == "headless"
 
 
-def _require_standard_profile(profile_id: str) -> None:
+def _caller_runner(*, group_id: str, by: str) -> str:
+    gid = str(group_id or "").strip()
+    aid = str(by or "").strip()
+    if not gid or not aid or aid == "user":
+        return ""
+    try:
+        resp = _call_daemon_or_raise({"op": "actor_list", "args": {"group_id": gid, "include_unread": False}})
+    except Exception:
+        return ""
+    actors = resp.get("actors") if isinstance(resp, dict) else None
+    if not isinstance(actors, list):
+        return ""
+    for actor in actors:
+        if not isinstance(actor, dict):
+            continue
+        if str(actor.get("id") or "").strip() != aid:
+            continue
+        return str(actor.get("runner") or "").strip().lower()
+    return ""
+
+
+def _caller_allows_headless(*, group_id: str, by: str) -> bool:
+    return _is_headless_runner(_caller_runner(group_id=group_id, by=by))
+
+
+def _require_allowed_profile(profile_id: str, *, group_id: str, by: str) -> Dict[str, Any]:
     pid = str(profile_id or "").strip()
     if not pid:
-        return
+        return {}
     try:
         resp = _call_daemon_or_raise({"op": "actor_profile_get", "args": {"profile_id": pid, "by": "user"}})
     except Exception:
-        return
+        return {}
     profile = resp.get("profile") if isinstance(resp, dict) else None
     if not isinstance(profile, dict):
-        return
-    if _is_headless_runner(profile.get("runner")):
+        return {}
+    if _is_headless_runner(profile.get("runner")) and not _caller_allows_headless(group_id=group_id, by=by):
         raise ValueError("headless runner is internal-only; use a PTY actor/profile")
+    return profile
 
 
 def group_info(*, group_id: str) -> Dict[str, Any]:
@@ -121,13 +147,18 @@ def actor_list(*, group_id: str) -> Dict[str, Any]:
     return {"actors": _sanitize_actors_for_agent(actors)}
 
 
-def actor_profile_list(*, by: str) -> Dict[str, Any]:
-    """List reusable Actor Profiles (standard PTY profiles only)."""
+def actor_profile_list(*, group_id: str, by: str) -> Dict[str, Any]:
+    """List reusable Actor Profiles visible to the current caller."""
     resp = _call_daemon_or_raise({"op": "actor_profile_list", "args": {"by": by}})
     profiles = resp.get("profiles") if isinstance(resp, dict) else None
     if not isinstance(profiles, list):
         return {"profiles": []}
-    filtered = [item for item in profiles if isinstance(item, dict) and not _is_headless_runner(item.get("runner"))]
+    allow_headless = _caller_allows_headless(group_id=group_id, by=by)
+    filtered = [
+        item
+        for item in profiles
+        if isinstance(item, dict) and (allow_headless or not _is_headless_runner(item.get("runner")))
+    ]
     return {"profiles": filtered}
 
 
@@ -139,14 +170,16 @@ def actor_add(
     profile_id: str = "",
     capability_autoload: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Add a new actor (foreman only). Standard MCP uses PTY actors only."""
-    if _is_headless_runner(runner):
+    """Add a new actor (foreman only). Caller may only use allowed runner/profile types."""
+    allow_headless = _caller_allows_headless(group_id=group_id, by=by)
+    normalized_runner = str(runner or "pty").strip().lower() or "pty"
+    if _is_headless_runner(normalized_runner) and not allow_headless:
         raise ValueError("headless runner is internal-only; use a PTY actor/profile")
     req_args: Dict[str, Any] = {
         "group_id": group_id,
         "actor_id": actor_id,
         "runtime": runtime,
-        "runner": "pty",
+        "runner": "headless" if _is_headless_runner(normalized_runner) else "pty",
         "title": title,
         "command": command or [],
         "env": env or {},
@@ -154,7 +187,9 @@ def actor_add(
     }
     pid = str(profile_id or "").strip()
     if pid:
-        _require_standard_profile(pid)
+        profile = _require_allowed_profile(pid, group_id=group_id, by=by)
+        if _is_headless_runner(profile.get("runner")):
+            req_args["runner"] = "headless"
         req_args["profile_id"] = pid
     if isinstance(capability_autoload, list):
         req_args["capability_autoload"] = [str(x).strip() for x in capability_autoload if str(x or "").strip()]

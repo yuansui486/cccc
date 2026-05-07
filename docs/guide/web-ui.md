@@ -75,10 +75,12 @@ Click on an agent's tab to see its terminal output.
 
 Type `@` to trigger autocomplete:
 
-- `@all` - Send to all agents
-- `@foreman` - Send to the foreman
+- `@all` - Broadcast to all agents; use for announcements or urgent shared constraints, not default task dispatch
+- `@foreman` - Ask the coordinator to plan, route, or summarize work
 - `@peers` - Send to all peers
-- `@<actor_id>` - Send to specific agent
+- `@<actor_id>` - Send to a specific agent for targeted work
+
+For concrete delegated work that needs an owner, done criterion, evidence, handoff, or acceptance trail, use task-backed delegation. In chat it appears as a linked task chip; ordinary messages remain the right path for quick questions and discussion.
 
 ### Replying
 

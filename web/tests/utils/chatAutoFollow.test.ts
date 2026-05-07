@@ -50,4 +50,11 @@ describe("chatAutoFollow", () => {
 
     expect(shouldAutoFollowOnTailMutation(prev, next)).toBe(false);
   });
+
+  it("does not treat history prepend metadata as a tail mutation when the tail content is unchanged", () => {
+    const prev = getChatTailMutationSnapshot("m-9", "m-9|assistant|t9||24|1");
+    const next = getChatTailMutationSnapshot("m-9", "m-9|assistant|t9||24|1");
+
+    expect(shouldAutoFollowOnTailMutation(prev, next)).toBe(false);
+  });
 });

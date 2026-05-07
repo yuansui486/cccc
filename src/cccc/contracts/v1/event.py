@@ -7,6 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ...util.time import utc_now_iso
 from .actor import Actor, ActorRole, ActorSubmit, AgentRuntime, RunnerKind
+from .assistant import (
+    AssistantSettingsUpdateData,
+    AssistantStatusUpdateData,
+    AssistantVoiceDocumentData,
+    AssistantVoiceInputData,
+    AssistantVoicePromptDraftData,
+    AssistantVoiceRequestData,
+)
 from .message import ChatMessageData, ChatReactionData, ChatStreamData
 from .notify import NotifyAckData, SystemNotifyData
 from .presentation import PresentationCardType
@@ -30,6 +38,7 @@ EventKind = Literal[
     "actor.stop",
     "actor.restart",
     "actor.remove",
+    "actor.activity",
     "context.sync",
     "chat.message",
     "chat.stream",
@@ -38,6 +47,12 @@ EventKind = Literal[
     "chat.reaction",
     "system.notify",
     "system.notify_ack",
+    "assistant.settings_update",
+    "assistant.status_update",
+    "assistant.voice.document",
+    "assistant.voice.input",
+    "assistant.voice.prompt_draft",
+    "assistant.voice.request",
     "presentation.publish",
     "presentation.clear",
 ]
@@ -167,6 +182,13 @@ class ActorLifecycleData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ActorActivityData(BaseModel):
+    """Periodic runtime status snapshot for running actors."""
+    actors: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
 class ContextSyncData(BaseModel):
     version: str = ""
     changes: List[Dict[str, Any]] = Field(default_factory=list)
@@ -242,6 +264,7 @@ _KIND_TO_MODEL = {
     "actor.stop": ActorLifecycleData,
     "actor.restart": ActorLifecycleData,
     "actor.remove": ActorLifecycleData,
+    "actor.activity": ActorActivityData,
     "context.sync": ContextSyncData,
     "chat.message": ChatMessageData,
     "chat.stream": ChatStreamData,
@@ -250,6 +273,12 @@ _KIND_TO_MODEL = {
     "chat.reaction": ChatReactionData,
     "system.notify": SystemNotifyData,
     "system.notify_ack": NotifyAckData,
+    "assistant.settings_update": AssistantSettingsUpdateData,
+    "assistant.status_update": AssistantStatusUpdateData,
+    "assistant.voice.document": AssistantVoiceDocumentData,
+    "assistant.voice.input": AssistantVoiceInputData,
+    "assistant.voice.prompt_draft": AssistantVoicePromptDraftData,
+    "assistant.voice.request": AssistantVoiceRequestData,
     "presentation.publish": PresentationPublishData,
     "presentation.clear": PresentationClearData,
 }

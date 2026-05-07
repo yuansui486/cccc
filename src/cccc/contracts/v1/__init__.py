@@ -6,6 +6,18 @@ from .async_result import (
 )
 from .actor import Actor, ActorRole, ActorSubmit, AgentRuntime, HeadlessState, RunnerKind
 from .actor_profile import ActorProfile, ActorProfileRef
+from .assistant import (
+    AssistantKind,
+    AssistantLifecycle,
+    AssistantPolicy,
+    AssistantSettingsUpdateData,
+    AssistantStatusUpdateData,
+    AssistantVoiceDocumentData,
+    AssistantVoiceInputData,
+    AssistantVoicePromptDraftData,
+    AssistantVoiceRequestData,
+    BuiltinAssistant,
+)
 from .automation import AutomationAction, AutomationRule, AutomationRuleSet, AutomationSnippetCatalog, AutomationTrigger
 from .event import Event
 from .group_space import (
@@ -46,6 +58,15 @@ __all__ = [
     "ActorRole",
     "ActorSubmit",
     "AgentRuntime",
+    "AssistantKind",
+    "AssistantLifecycle",
+    "AssistantPolicy",
+    "AssistantSettingsUpdateData",
+    "AssistantStatusUpdateData",
+    "AssistantVoiceDocumentData",
+    "AssistantVoiceInputData",
+    "AssistantVoicePromptDraftData",
+    "AssistantVoiceRequestData",
     "build_async_result_fields",
     "AutomationAction",
     "AutomationRule",
@@ -53,6 +74,7 @@ __all__ = [
     "AutomationSnippetCatalog",
     "AutomationTrigger",
     "Attachment",
+    "BuiltinAssistant",
     "ChatMessageData",
     "ChatReactionData",
     "ChatStreamData",

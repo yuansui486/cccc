@@ -94,6 +94,15 @@ export type PresentationMessageRef = MessageRef & {
   snapshot?: PresentationRefSnapshot;
 };
 
+export type TaskMessageRef = MessageRef & {
+  kind: "task_ref";
+  task_id: string;
+  title?: string;
+  status?: string;
+  waiting_on?: TaskWaitingOn | null;
+  handoff_to?: string | null;
+};
+
 export type StreamingActivity = {
   id: string;
   kind: "queued" | "thinking" | "plan" | "search" | "command" | "patch" | "tool" | "reply" | string;
@@ -273,6 +282,7 @@ export type CapabilityReadinessPreview = {
   preview_basis?: string[];
   policy_level?: string;
   enable_supported?: boolean;
+  already_active?: boolean;
   install_mode?: string;
   required_env?: string[];
   missing_env?: string[];
@@ -294,14 +304,20 @@ export type CapabilityOverviewItem = {
   evidence_kind?: string;
   source_id?: string;
   source_uri?: string;
+  source_record_id?: string;
+  source_record_version?: string;
+  origin_group_id?: string;
   source_tier?: string;
   trust_tier?: string;
   license?: string;
   sync_state?: string;
+  updated_at_source?: string;
+  last_synced_at?: string;
   policy_level?: string;
   policy_visible?: boolean;
   enable_supported?: boolean;
   qualification_status?: string;
+  qualification_reasons?: string[];
   install_mode?: string;
   tags?: string[];
   blocked_global?: boolean;
@@ -312,6 +328,7 @@ export type CapabilityOverviewItem = {
   cached_install_state?: string;
   cached_install_error_code?: string;
   cached_install_error?: string;
+  capsule_text?: string;
   tool_count?: number;
   tool_names?: string[];
 };
@@ -386,27 +403,56 @@ export type CapabilityEnabledEntry = {
 export type CapabilityStateResult = {
   group_id: string;
   actor_id: string;
-  enabled_capabilities?: string[];
-  active_capsule_skills?: Array<{
-    capability_id: string;
-    name?: string;
-    description_short?: string;
-    source_id?: string;
-    source_uri?: string;
-    policy_level?: string;
-  }>;
   autoload_capabilities?: string[];
   group_autoload_capabilities?: string[];
   actor_autoload_capabilities?: string[];
   profile_autoload_capabilities?: string[];
   enabled: CapabilityEnabledEntry[];
+  enabled_capabilities?: string[];
   dynamic_tools?: Array<{ name: string; capability_id: string; description?: string }>;
+  active_capsule_skills?: Array<{
+    capability_id: string;
+    name?: string;
+    description_short?: string;
+    capsule_preview?: string;
+    capsule_text?: string;
+    source_id?: string;
+    source_uri?: string;
+    policy_level?: string;
+  }>;
+  capability_usage?: CapabilityUsageSummary;
+};
+
+export type CapabilityUsageActorEntry = {
+  actor_id: string;
+  actor_title?: string;
+  label?: string;
+  expires_at?: string;
+  ttl_seconds?: number;
+  profile_id?: string;
+  profile_name?: string;
+};
+
+export type CapabilityUsageSummary = {
+  capability_id: string;
+  used: boolean;
+  group_enabled?: boolean;
+  group_actor_count?: number;
+  active_actor_count?: number;
+  startup_autoload_actor_count?: number;
+  actor_enabled?: CapabilityUsageActorEntry[];
+  session_enabled?: CapabilityUsageActorEntry[];
+  actor_autoload?: CapabilityUsageActorEntry[];
+  profile_autoload?: CapabilityUsageActorEntry[];
+  blocked?: boolean;
+  blocked_scope?: string;
+  blocked_reason?: string;
 };
 
 export type CapabilityImportRecord = {
   capability_id: string;
   kind: "mcp_toolpack" | "skill";
-  install_mode: "command" | "package" | "remote_only";
+  install_mode?: "command" | "package" | "remote_only";
   install_spec?: { command?: string; package?: string; url?: string };
   name?: string;
   description_short?: string;
@@ -670,6 +716,163 @@ export type GroupSettings = {
   };
   panorama_enabled?: boolean;
   desktop_pet_enabled: boolean;
+};
+
+export type BuiltinAssistantPolicy = {
+  action_allowlist?: string[];
+  requires_user_confirmation?: string[];
+};
+
+export type BuiltinAssistant = {
+  assistant_id: string;
+  kind: "pet" | "voice_secretary" | string;
+  enabled: boolean;
+  principal?: string;
+  lifecycle: "disabled" | "idle" | "running" | "working" | "waiting" | "failed" | string;
+  health?: Record<string, unknown>;
+  policy?: BuiltinAssistantPolicy;
+  config?: Record<string, unknown>;
+  ui?: Record<string, unknown>;
+};
+
+export type AssistantStateResult = {
+  group_id: string;
+  assistants?: BuiltinAssistant[];
+  assistants_by_id?: Record<string, BuiltinAssistant>;
+  assistant?: BuiltinAssistant;
+  documents?: AssistantVoiceDocument[];
+  documents_by_id?: Record<string, AssistantVoiceDocument>;
+  active_document_id?: string;
+  capture_target_document_id?: string;
+  active_document_path?: string;
+  capture_target_document_path?: string;
+  documents_by_path?: Record<string, AssistantVoiceDocument>;
+  new_input_available?: boolean;
+  prompt_draft?: AssistantVoicePromptDraft;
+  ask_requests?: AssistantVoiceAskFeedback[];
+  latest_ask_request?: AssistantVoiceAskFeedback;
+};
+
+export type AssistantVoiceTrigger = {
+  schema?: number;
+  trigger_kind?: string;
+  mode?: string;
+  capture_mode?: string;
+  recognition_backend?: string;
+  client_session_id?: string;
+  input_device_label?: string;
+  document_path?: string;
+  language?: string;
+  intent_hint?: string;
+};
+
+export type AssistantVoiceDocument = {
+  document_id: string;
+  document_path?: string;
+  filename?: string;
+  assistant_id?: string;
+  title: string;
+  status: "active" | "archived" | "deleted" | string;
+  storage_kind?: "workspace" | "cccc_home" | string;
+  workspace_path?: string;
+  content?: string;
+  content_sha256?: string;
+  content_chars?: number;
+  revision_count?: number;
+  source_segment_count?: number;
+  last_source_segment_id?: string;
+  last_source_path?: string;
+  created_at?: string;
+  updated_at?: string;
+  created_by?: string;
+};
+
+export type AssistantVoiceTranscriptionResult = {
+  group_id: string;
+  assistant?: BuiltinAssistant;
+  transcript: string;
+  mime_type?: string;
+  language?: string;
+  bytes?: number;
+  backend?: string;
+  service?: Record<string, unknown>;
+  asr?: Record<string, unknown>;
+};
+
+export type AssistantVoiceTranscriptSegmentResult = {
+  group_id: string;
+  assistant?: BuiltinAssistant;
+  session_id: string;
+  segment?: Record<string, unknown>;
+  segment_path?: string;
+  document?: AssistantVoiceDocument;
+  document_updated?: boolean;
+  input_event?: Record<string, unknown>;
+  input_event_created?: boolean;
+  input_notify_emitted?: boolean;
+};
+
+export type AssistantVoiceDocumentMutationResult = {
+  group_id: string;
+  assistant?: BuiltinAssistant;
+  document?: AssistantVoiceDocument;
+  input_event?: Record<string, unknown>;
+  input_event_created?: boolean;
+  input_notify_emitted?: boolean;
+  event?: unknown;
+  request_id?: string;
+};
+
+export type AssistantVoicePromptDraft = {
+  request_id: string;
+  status: "pending" | "applied" | "dismissed" | "stale" | string;
+  operation?: string;
+  draft_text: string;
+  draft_preview?: string;
+  summary?: string;
+  composer_snapshot_hash?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AssistantVoiceAskFeedback = {
+  request_id: string;
+  status: "pending" | "working" | "done" | "needs_user" | "failed" | "handed_off" | string;
+  request_text?: string;
+  request_preview?: string;
+  reply_text?: string;
+  document_path?: string;
+  artifact_paths?: string[];
+  source_summary?: string;
+  checked_at?: string;
+  source_urls?: string[];
+  target_kind?: string;
+  intent_hint?: string;
+  language?: string;
+  handoff_target?: string;
+  handoff_request_id?: string;
+  target_actor_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  cleared_at?: string;
+};
+
+export type AssistantVoiceInputResult = {
+  group_id: string;
+  assistant?: BuiltinAssistant;
+  document?: AssistantVoiceDocument;
+  input_event?: Record<string, unknown>;
+  input_event_created?: boolean;
+  input_notify_emitted?: boolean;
+  event?: unknown;
+  request_id?: string;
+};
+
+export type AssistantVoicePromptDraftMutationResult = {
+  group_id: string;
+  assistant?: BuiltinAssistant;
+  prompt_draft?: AssistantVoicePromptDraft;
+  event?: unknown;
 };
 
 export type RemoteAccessState = {
@@ -1057,12 +1260,12 @@ export type IMConfig = {
   wecom_secret?: string;
   // Weixin fields
   weixin_account_id?: string;
-  weixin_command?: string;
 };
 
 export type IMStatus = {
   group_id: string;
   configured: boolean;
+  enabled: boolean;
   platform?: string;
   running: boolean;
   pid?: number;

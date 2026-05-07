@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Actor } from "../types";
 
+export function isChatViewportAtBottom(scrollHeight: number, scrollTop: number, clientHeight: number, threshold = 100): boolean {
+  return scrollHeight - scrollTop - clientHeight < threshold;
+}
+
 type UseAppTabStateOptions = {
   activeTab: string;
   actors: Actor[];
@@ -74,8 +78,7 @@ export function useAppTabState({
       return;
     }
 
-    const threshold = 100;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    const atBottom = isChatViewportAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
     chatAtBottomRef.current = atBottom;
     setShowScrollButton(selectedGroupId, !atBottom);
     if (atBottom) setChatUnreadCount(selectedGroupId, 0);

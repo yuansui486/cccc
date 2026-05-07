@@ -114,20 +114,23 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         from cccc.ports.mcp import common as mcp_common
         from cccc.ports.mcp import server as mcp_server
 
-        captured = {}
+        captured = []
 
         def _fake_call_daemon(req):
-            captured["req"] = req
-            return {"ok": True, "result": {"profiles": []}}
+            captured.append(req)
+            if req.get("op") == "actor_profile_list":
+                return {"ok": True, "result": {"profiles": []}}
+            if req.get("op") == "actor_list":
+                return {"ok": True, "result": {"actors": []}}
+            return {"ok": True, "result": {}}
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
                 out = mcp_server.handle_tool_call("cccc_actor", {"action": "profile_list"})
 
         self.assertIn("profiles", out)
-        req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
-        self.assertEqual(req.get("op"), "actor_profile_list")
-        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual([req.get("op") for req in captured], ["actor_profile_list", "actor_list"])
+        args = captured[0].get("args") if isinstance(captured[0].get("args"), dict) else {}
         self.assertEqual(args.get("by"), "foreman")
 
 

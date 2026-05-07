@@ -16,6 +16,10 @@ import { ActorAvatarField } from "../ActorAvatarField";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Surface } from "../ui/surface";
+import { Textarea } from "../ui/textarea";
 
 export interface AddActorModalProps {
   isOpen: boolean;
@@ -86,9 +90,22 @@ function modeButtonClass(selected: boolean): string {
   return [
     "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
     selected
-      ? "bg-blue-600 text-white border-blue-600"
+      ? "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white dark:border-white dark:bg-white dark:text-[rgb(35,36,37)]"
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
+}
+
+function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
+  if (runtime === "claude") {
+    return 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."';
+  }
+  if (runtime === "codex") {
+    return "# Configure OpenAI-compatible Codex providers with Codex config or command -c overrides.";
+  }
+  if (runtime === "gemini") {
+    return 'GOOGLE_API_KEY="..."';
+  }
+  return 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."';
 }
 
 export function AddActorModal({
@@ -149,6 +166,7 @@ export function AddActorModal({
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
   const runtimeAvailable = runtimeInfo?.available ?? false;
   const defaultCommand = runtimeInfo?.recommended_command || "";
+  const newActorSecretsPlaceholder = secretsPlaceholderForRuntime(newActorRuntime);
   const selectedProfile = actorProfiles.find((item) => actorProfileIdentityKey(item) === String(newActorProfileId || "").trim());
   const selectedProfileRuntime = String(selectedProfile?.runtime || "").trim() as SupportedRuntime;
   const selectedProfileCommand = commandPreview(selectedProfile?.command);
@@ -203,9 +221,9 @@ export function AddActorModal({
           <div className="text-sm mt-1 text-[var(--color-text-muted)]">{t("addActorSubtitle")}</div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 safe-area-bottom-compact">
+        <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
           <div className="mx-auto max-w-2xl space-y-4">
-            <section className={sectionCardClass}>
+            <Surface className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("sectionBasics")}</div>
               <div className={sectionHintClass}>{t("addSectionBasicsHint")}</div>
 
@@ -231,8 +249,7 @@ export function AddActorModal({
                     <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
                       {t("agentName")} <span className="text-[var(--color-text-muted)]">{t("unicodeSupport")}</span>
                     </label>
-                    <input
-                      className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                    <Input
                       value={newActorId}
                       onChange={(e) => setNewActorId(e.target.value)}
                       placeholder={suggestedActorId}
@@ -249,10 +266,10 @@ export function AddActorModal({
                 <div>
                   <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("role")}</label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
+                    <Button
                       type="button"
                       className={classNames(
-                        "px-4 py-2.5 rounded-xl border text-sm font-medium transition-all min-h-[44px]",
+                        "h-auto justify-start whitespace-normal border text-sm font-medium transition-all",
                         newActorRole === "foreman"
                           ? "bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-300"
                           : hasForeman
@@ -265,13 +282,13 @@ export function AddActorModal({
                       disabled={hasForeman}
                     >
                       {t("foremanRole")} {hasForeman && t("foremanExists")}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       className={classNames(
-                        "px-4 py-2.5 rounded-xl border text-sm font-medium transition-all min-h-[44px]",
+                        "h-auto justify-start whitespace-normal border text-sm font-medium transition-all",
                         newActorRole === "peer"
-                          ? "bg-blue-500/20 border-blue-500 text-blue-700 dark:text-blue-300"
+                          ? "border-[rgb(35,36,37)] bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white"
                           : !hasForeman
                             ? "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)] cursor-not-allowed"
                             : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
@@ -282,7 +299,7 @@ export function AddActorModal({
                       disabled={!hasForeman}
                     >
                       {t("peerRole")} {!hasForeman && t("needForemanFirst")}
-                    </button>
+                    </Button>
                   </div>
                   <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
                     {hasForeman ? t("foremanLeads") : t("firstAgentForeman")}
@@ -297,8 +314,8 @@ export function AddActorModal({
 
                 <div>
                   <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
-                  <textarea
-                    className="w-full rounded-xl border px-3 py-2 text-sm min-h-[144px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                  <Textarea
+                    className="min-h-[144px]"
                     value={newActorRoleNotes}
                     onChange={(e) => setNewActorRoleNotes(e.target.value)}
                     placeholder={t("roleNotesPlaceholder")}
@@ -307,21 +324,21 @@ export function AddActorModal({
                   <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("newActorRoleNotesHint")}</div>
                 </div>
               </div>
-            </section>
+            </Surface>
 
-            <section className={sectionCardClass}>
+            <Surface className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("sectionRuntime")}</div>
               <div className={sectionHintClass}>{t("sectionRuntimeHint")}</div>
 
               <div className="mt-4">
                 <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
+                  <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
                     {t("customAgent")}
-                  </button>
-                  <button type="button" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
+                  </Button>
+                  <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
                     {t("fromActorProfile")}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -346,7 +363,7 @@ export function AddActorModal({
                     </div>
 
                     {selectedProfile ? (
-                      <div className="rounded-xl border px-3 py-3 border-[var(--glass-border-subtle)] bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">
+                      <Surface className="px-3 py-3 text-[var(--color-text-secondary)]" variant="subtle" radius="md" padding="none">
                         <div className="text-sm font-medium text-[var(--color-text-primary)]">
                           {selectedProfile.name || selectedProfile.id}
                         </div>
@@ -361,7 +378,7 @@ export function AddActorModal({
                             {selectedProfileCommand}
                           </div>
                         ) : null}
-                      </div>
+                      </Surface>
                     ) : null}
                   </>
                 ) : (
@@ -420,21 +437,23 @@ export function AddActorModal({
                           {t("runnerMode", { defaultValue: "运行模式" })}
                         </label>
                         <div className="grid grid-cols-2 gap-2">
-                          <button
+                          <Button
                             type="button"
+                            variant="outline"
                             className={modeButtonClass(newActorRunner === "pty")}
                             onClick={() => setNewActorRunner("pty")}
                           >
                             {t("pty", { defaultValue: "PTY" })}
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            variant="outline"
                             className={modeButtonClass(newActorRunner === "headless")}
                             onClick={() => setNewActorRunner("headless")}
                             disabled={customRunnerLockedToPty}
                           >
                             {t("headless")}
-                          </button>
+                          </Button>
                         </div>
                         <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
                           {customRunnerLockedToPty
@@ -449,8 +468,8 @@ export function AddActorModal({
                         <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
                           {t("commandOverrideOptional")}
                         </label>
-                        <input
-                          className="w-full rounded-xl border px-4 py-2.5 text-sm font-mono min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                        <Input
+                          className="font-mono"
                           value={newActorCommand}
                           onChange={(e) => setNewActorCommand(e.target.value)}
                           placeholder={defaultCommand || t("enterCommand")}
@@ -478,7 +497,7 @@ export function AddActorModal({
                   </>
                 )}
               </div>
-            </section>
+            </Surface>
 
             {!newActorUseProfile ? (
               <details
@@ -573,11 +592,11 @@ export function AddActorModal({
                       <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
                         {t("secretsWriteOnly")}
                       </label>
-                      <textarea
-                        className="w-full rounded-xl border px-3 py-2 text-sm font-mono min-h-[112px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                      <Textarea
+                        className="min-h-[112px] font-mono"
                         value={newActorSecretsSetText}
                         onChange={(e) => setNewActorSecretsSetText(e.target.value)}
-                        placeholder={'OPENAI_API_KEY="..."\nANTHROPIC_API_KEY="..."'}
+                        placeholder={newActorSecretsPlaceholder}
                         spellCheck={false}
                       />
                       <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
@@ -601,14 +620,14 @@ export function AddActorModal({
                     </summary>
 
                     <div className="mt-4 flex flex-wrap gap-3">
-                      <button
+                      <Button
                         type="button"
-                        className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                        variant="secondary"
                         onClick={onSaveAsProfile}
                         disabled={busy === "actor-profile-save" || busy === "actor-add"}
                       >
                         {busy === "actor-profile-save" ? t("savingProfile") : t("addToActorProfiles")}
-                      </button>
+                      </Button>
                     </div>
                   </details>
                 </div>
@@ -638,25 +657,25 @@ export function AddActorModal({
           ) : null}
 
           <div className="flex flex-col-reverse sm:flex-row gap-3">
-              <button
+              <Button
                 type="button"
-                className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                variant="secondary"
                 onClick={handleCancel}
               >
                 {t("common:cancel")}
-              </button>
+              </Button>
 
             <div className="flex-1 min-w-0">
-              <button
+              <Button
                 type="button"
-                className="w-full rounded-xl bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 text-sm font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all min-h-[44px]"
+                className="w-full font-semibold"
                 onClick={() => {
                   void handleSubmit();
                 }}
                 disabled={!canAddActor}
               >
                 {busy === "actor-add" ? t("adding") : newActorUseProfile ? t("createFromProfile") : t("addAgent")}
-              </button>
+              </Button>
               {addActorDisabledReason ? (
                 <div className="text-[10px] text-amber-600 dark:text-amber-300 mt-1.5">{addActorDisabledReason}</div>
               ) : null}

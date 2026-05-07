@@ -512,6 +512,8 @@ Result:
     blocked_reason?: string
     enable_supported: boolean
     qualification_status: "qualified" | "unavailable" | "blocked"
+    qualification_reasons?: string[] // currently exposed for agent_self_proposed skill management
+    capsule_text?: string            // currently exposed for agent_self_proposed skill management
     install_mode?: string
     autoload_candidate: boolean
     tags?: string[]
@@ -595,8 +597,13 @@ Result:
     enable_supported: boolean
     install_mode?: string
     policy_level?: "indexed" | "mounted" | "enabled" | "pinned"
-    enable_hint?: "enable_now" | "blocked" | "unsupported"
+    enable_hint?: "enable_now" | "blocked" | "unsupported" | "active"
     blocked_reason?: string
+    readiness_preview?: {
+      preview_status: "blocked" | "enableable" | "active" | "needs_inspect"
+      next_step: string
+      already_active?: boolean
+    }
     tags?: string[]
     tool_count?: number
     tool_names?: string[]
@@ -767,7 +774,12 @@ Read effective capability exposure and visible MCP tool names for caller scope.
 
 Args:
 ```ts
-{ group_id: string; actor_id?: string; by?: string }
+{
+  group_id: string
+  actor_id?: string
+  by?: string
+  capability_id?: string // optional; returns capability_usage for this id
+}
 ```
 
 Result:
@@ -793,14 +805,24 @@ Result:
     capability_id: string
     name: string
     description_short?: string
+    capsule_preview?: string
+    capsule_text?: string
     source_id?: string
     source_uri?: string
     policy_level?: "indexed" | "mounted" | "enabled" | "pinned"
+    activation_sources?: Array<{
+      scope: "group" | "actor" | "session"
+      actor_id?: string
+      expires_at?: string
+      ttl_seconds?: number
+    }>
   }>
   autoload_skills?: Array<{
     capability_id: string
     name: string
     description_short?: string
+    capsule_preview?: string
+    capsule_text?: string
     source_id?: string
     policy_level?: "indexed" | "mounted" | "enabled" | "pinned"
   }>
@@ -810,7 +832,11 @@ Result:
   hidden_capabilities: Array<{
     capability_id: string
     reason: string
-    policy_level?: "indexed" | "mounted" | "enabled" | "pinned"
+    name?: string
+    description_short?: string
+    kind?: "mcp_toolpack" | "skill"
+    source_id?: string
+    policy_level?: "indexed" | "mounted" | "enabled" | "pinned" | "blocked"
     state?: string
     install_error_code?: string
     install_error?: string
@@ -838,6 +864,19 @@ Result:
     blocked_at?: string
     expires_at?: string
   }>
+  capability_usage?: {
+    capability_id: string
+    used: boolean
+    group_enabled: boolean
+    group_actor_count: number
+    actor_enabled: Array<{ actor_id: string; actor_title?: string; label?: string }>
+    session_enabled: Array<{ actor_id: string; actor_title?: string; label?: string; expires_at: string; ttl_seconds: number }>
+    actor_autoload: Array<{ actor_id: string; actor_title?: string; label?: string }>
+    profile_autoload: Array<{ actor_id: string; actor_title?: string; label?: string; profile_id?: string; profile_name?: string }>
+    blocked: boolean
+    blocked_scope?: "group" | "global"
+    blocked_reason?: string
+  }
   is_foreman: boolean
 }
 ```
@@ -850,6 +889,8 @@ Operational notes:
    - `CCCC_CAPABILITY_SOURCE_MCP_REGISTRY_ENABLED` (default `1`)
    - `CCCC_CAPABILITY_SOURCE_ANTHROPIC_SKILLS_ENABLED` (default `1`)
    - `github_skills_curated` is allowlist-curated (no periodic source crawler).
+   - `agent_self_proposed` is for agent-generated procedural skill candidates; default policy keeps MCP
+     toolpacks indexed while allowing capsule skills to be validated and enabled at narrow scope.
    - `skillsmp_remote` is on-demand SkillsMP remote search (API key mode + proxy fallback).
    - `clawhub_remote` is on-demand ClawHub remote search (official API).
    - `openclaw_skills_remote` is on-demand OpenClaw GitHub corpus search.
@@ -894,6 +935,28 @@ Notes:
 5. `command*` and `fallback_command*` may be provided as top-level shortcuts; daemon copies them into
    `install_spec` when missing.
 6. `record.source_id` is optional; empty or unknown source ids are normalized to `manual_import`.
+7. `record.source_id=agent_self_proposed` preserves autonomous skill-proposal provenance. Default policy treats
+   `kind=skill` capsule records from this source as mounted, while non-skill toolpacks remain indexed unless
+   policy explicitly promotes them.
+8. `agent_self_proposed` skill capsule text must include required proposal sections: `When to use`, `Avoid when`,
+   `Procedure`, `Pitfalls`, and `Verification`; non-dry-run imports missing sections are rejected before catalog
+   persistence so the last valid active record is preserved.
+9. `agent_self_proposed` skill capability ids must use `skill:agent_self_proposed:<stable-slug>` to avoid
+   colliding with curated namespaces such as `skill:anthropic:*` or `skill:github:*`.
+10. For low-risk, syntax-valid `agent_self_proposed` capsule skills, direct import is allowed. Use `dry_run=true`
+   first when enabling immediately, scope/risk is unclear, or probe diagnostics are useful; high-risk candidates
+   should be recorded as `qualification_status=blocked` with explicit `qualification_reasons`.
+11. Re-importing the same `capability_id` updates the catalog record. Agents should use that path for stale,
+    incomplete, wrong, or duplicative `agent_self_proposed` skills instead of creating near-duplicates or silently
+    deleting records.
+12. Import results use `import_action`, `record_changed`, `already_active`, and `active_after_import` to distinguish
+    create/update/no-op and whether the target actor had an effective binding before and after import. Local sync
+    timestamps do not count as semantic changes, while an explicitly supplied `updated_at_source` still participates
+    in the comparison. `import_action` is the primary create/update/unchanged signal; `record_changed` only compares
+    existing records. `already_active` is pre-import state; `active_after_import` is the post-import runnable binding.
+13. If `readiness_preview.preview_status=active` or `active_after_import=true`, agents must not re-enable the same skill
+    just to refresh its capsule text. Use `capability_state.active_capsule_skills[].capsule_text` for full post-import
+    verification; `capsule_preview` is only a compact display summary.
 
 Args:
 ```ts
@@ -906,7 +969,7 @@ Args:
     kind: "mcp_toolpack" | "skill"
     name?: string
     description_short?: string
-    source_id?: string // optional; unknown/empty -> manual_import
+    source_id?: string // optional; unknown/empty -> manual_import; agent_self_proposed preserves skill-proposal provenance
     source_uri?: string
     source_record_id?: string
     source_record_version?: string
@@ -945,7 +1008,11 @@ Result:
   kind: "mcp_toolpack" | "skill"
   dry_run: boolean
   imported: boolean
-  deduped?: boolean
+  scope: "group" | "actor" | "session"
+  import_action?: "created" | "updated" | "unchanged"
+  record_changed?: boolean
+  already_active?: boolean           // target actor had an effective binding before optional enable_after_import
+  active_after_import?: boolean      // target actor has a runnable binding after import/optional enablement
   record: Record<string, unknown>
   probe: {
     state: "runnable" | "failed" | "skipped"
@@ -967,8 +1034,9 @@ Result:
   enableable_now: boolean
   enable_block_reason?: "policy_level_indexed" | "qualification_blocked" | "capability_unavailable"
   readiness_preview?: {
-    preview_status: "blocked" | "enableable" | "needs_inspect"
+    preview_status: "blocked" | "enableable" | "active" | "needs_inspect"
     next_step: string
+    already_active?: boolean
     preview_basis?: string[]
     required_env?: string[]
     missing_env?: string[]
@@ -1099,7 +1167,10 @@ Result:
 
 #### `capability_uninstall`
 
-Revoke capability bindings for the target group. Installation cache is removed only when no other group/actor bindings remain.
+Revoke capability bindings for the target group, remove current-group actor autoload references, and remove runtime cache
+when no other group/actor bindings remain. For `source_id=agent_self_proposed` skill records, uninstall also removes the
+generated local catalog record plus all actor/profile autoload references for that capability id. External registry catalog
+records are not deleted.
 
 Args:
 ```ts
@@ -1120,9 +1191,12 @@ Result:
   actor_id: string
   capability_id: string
   state: "ready"
+  removed_record: boolean
   removed_bindings: number
   removed_installation: boolean
   removed_runtime_bindings?: number
+  removed_actor_autoload: number
+  removed_profile_autoload: number
   cleanup_skipped_reason?: "cleanup_skipped_capability_still_bound"
   refresh_required: boolean
   refresh_mode?: "relist_or_reconnect"
@@ -1262,6 +1336,411 @@ Patch keys used by CCCC v0.4.x include:
 Result:
 ```ts
 { group_id: string; settings: Record<string, unknown>; event: CCCSEventV1 }
+```
+
+#### `assistant_state`
+
+Read the group-scoped state for first-party built-in assistants. Voice
+Secretary service-local ASR runs in a daemon-managed first-party service
+process; heavy ASR runtimes remain behind an explicit local command adapter.
+
+Args:
+```ts
+{ group_id: string; assistant_id?: "pet" | "voice_secretary" }
+```
+
+Result:
+```ts
+{
+  group_id: string
+  assistants?: Array<Record<string, unknown>>
+  assistants_by_id?: Record<string, unknown>
+  assistant?: Record<string, unknown>
+  proposals?: Array<Record<string, unknown>>
+  proposals_by_id?: Record<string, unknown>
+  documents?: Array<Record<string, unknown>>
+  documents_by_path?: Record<string, unknown>
+  active_document_path?: string
+  capture_target_document_path?: string
+  documents_by_id?: Record<string, unknown>      // daemon sidecar/internal compatibility only
+  active_document_id?: string                    // daemon sidecar/internal compatibility only
+  capture_target_document_id?: string            // daemon sidecar/internal compatibility only
+  new_input_available?: boolean
+}
+```
+
+#### `assistant_settings_update`
+
+Update group-scoped built-in assistant settings. `pet` is read-only in M0 and
+mirrors `group_settings_update.patch.desktop_pet_enabled`.
+
+When `voice_secretary.enabled=true`, the daemon also materializes a hidden
+internal actor with `internal_kind="voice_secretary"` and `actor_id="voice-secretary"`.
+That actor is a distinct assistant identity, not the foreman and not a normal
+peer. Its startup runtime config (`runtime`, `runner`, `command`, env/secrets,
+scope, submit behavior) is copied from the current stable foreman actor so the user
+does not configure a second runtime profile. The foreman's enabled/running state
+does not affect assistant config inheritance. If no foreman actor exists,
+enabling Voice Secretary fails. If the group is already running, the daemon
+starts or restarts this assistant actor as needed; disabling Voice Secretary
+stops/removes the actor and its private env.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  assistant_id: "voice_secretary"
+  patch: {
+    enabled?: boolean
+    config?: {
+      capture_mode?: "browser" | "service"
+      recognition_backend?: "mock" | "assistant_service_local_asr" | "browser_asr" | "external_provider_asr"
+      recognition_language?: "auto" | string
+      retention_ttl_seconds?: number
+      auto_document_enabled?: boolean
+      document_default_dir?: string
+      auto_document_quiet_ms?: number
+      auto_document_min_chars?: number
+      auto_document_max_window_seconds?: number
+      tts_enabled?: boolean
+    }
+  }
+}
+```
+
+`browser_asr` means browser-managed speech recognition and does not guarantee
+browser-device-local model execution. `assistant_service_local_asr` means ASR
+runs on the daemon host through the first-party Voice Secretary service and
+requires `CCCC_VOICE_SECRETARY_ASR_COMMAND` unless an explicit test/mock env is
+configured. The returned assistant health may include `health.service` with
+`status`, `alive`, `asr_command_configured`, `asr_mock_configured`, and
+`last_error` so Web can show whether service-local ASR is actually usable.
+`recognition_language="auto"` means the browser/client chooses the best language
+hint; otherwise callers should pass a BCP-47-like tag such as `zh-CN`, `en-US`,
+or `ja-JP`. `auto_document_enabled=true` is the default path: stable transcript
+segments are compacted into the Voice Secretary input stream, then the
+`voice-secretary` runtime actor pulls unread input and edits the working markdown
+document directly in the repository. `auto_document_quiet_ms` is the client
+silence window before flushing speech into that semantic lane;
+`auto_document_min_chars` and `auto_document_max_window_seconds` are daemon-side
+guardrails that keep long continuous speech from waiting forever for a pause.
+The runtime actor should treat transcript as source material for
+evidence-bounded reconstruction: it may use transcript, group context, existing
+documents, common knowledge, and verified lightweight research to produce a
+coherent artifact, but must not fabricate facts and should compactly mark
+low-confidence entities, numbers, quotations, or dates.
+The document loop should be incremental and non-lossy: each unread input batch
+should be organized into the best current document structure while preserving
+useful concrete details, and idle review should refine/reorganize/enrich rather
+than replace detail-rich material with a short executive summary.
+The daemon does not track per-job completion: it stores an input cursor, nudges
+the actor when unread input exists, and sends idle-review nudges only on
+recording stop or after enough new transcript input plus the group cooldown
+(default: stop flush immediately, otherwise 8 new transcript input flushes and
+at least 5 minutes since the previous idle review).
+If the group has an active workspace scope,
+`document_default_dir` (default `docs/voice-secretary`) is
+resolved under that workspace; otherwise the daemon falls back to CCCC_HOME.
+Raw transcript/source/input sidecars stay in CCCC_HOME.
+`external_provider_asr` must remain explicit opt-in.
+
+Result:
+```ts
+{ group_id: string; assistant: Record<string, unknown>; event: CCCSEventV1 }
+```
+
+#### `assistant_voice_transcribe`
+
+Transcribe a push-to-talk audio payload through the daemon-managed first-party
+Voice Secretary service. This endpoint only returns transcript text and service
+health; it does not create a chat message, proposal, or working document by
+itself. Call `assistant_voice_transcript_append` after transcription so the
+daemon can append stable transcript source material and update the current
+working document.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  audio_base64: string
+  mime_type?: string
+  language?: string
+}
+```
+
+Preconditions:
+- `voice_secretary` is enabled for the group.
+- `recognition_backend` is `assistant_service_local_asr`.
+- The daemon host has `CCCC_VOICE_SECRETARY_ASR_COMMAND` configured. The command
+  receives the audio path as the final argument unless it includes
+  `{audio_path}` / `{input_path}` / `{input}`. It may also use
+  `CCCC_VOICE_AUDIO_PATH`, `CCCC_VOICE_MIME_TYPE`, and
+  `CCCC_VOICE_LANGUAGE`.
+
+Result:
+```ts
+{
+  group_id: string
+  assistant: Record<string, unknown>
+  transcript: string
+  mime_type: string
+  language?: string
+  bytes?: number
+  backend: "assistant_service_local_asr"
+  service: Record<string, unknown>
+  asr?: Record<string, unknown>
+}
+```
+
+#### `assistant_voice_transcript_append`
+
+Append a stable transcript segment for Voice Secretary. Web/browser ASR and
+service-local ASR converge here. The daemon writes stable segments to
+`$CCCC_HOME/voice-secretary/<group_id>/<session_id>/transcripts/segments.jsonl`,
+keeps a short in-memory/session window in group assistant runtime state, and
+by default appends a semantic input event for the current Voice Secretary
+markdown working document. The working document is a user-facing repo artifact;
+raw transcript/source/revision sidecars remain in CCCC_HOME. When new input is
+available, the daemon emits a targeted `system.notify` to `voice-secretary` with
+`context.kind="voice_secretary_input"`. The notify is only a lightweight pointer;
+the runtime actor pulls unread text through
+`assistant_voice_document_input_read` /
+`cccc_voice_secretary_document(action="read_new_input")`.
+
+The public document identity for Voice Secretary APIs is `document_path`, a
+repository-relative markdown path. `document_id` may exist in daemon sidecar
+state as an implementation detail, but runtime actors and Web clients should
+route by `document_path`.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  session_id: string
+  segment_id?: string
+  text?: string
+  language?: string
+  document_path?: string
+  is_final?: boolean
+  flush?: boolean
+  trigger?: {
+    trigger_kind?: "push_to_talk_stop" | "service_transcript" | "meeting_window"
+    mode?: "dictation" | "meeting"
+    capture_mode?: "browser" | "service" | string
+    recognition_backend?: string
+    client_session_id?: string
+    input_device_label?: string
+    language?: string
+  }
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  assistant: Record<string, unknown>
+  session_id: string
+  segment?: Record<string, unknown>
+  segment_path?: string
+  document?: Record<string, unknown>
+  document_updated: boolean
+  input_event?: Record<string, unknown>
+  input_event_created: boolean
+  input_notify_emitted: boolean
+}
+```
+
+#### `assistant_voice_document_list`
+
+List active Voice Secretary working documents for the group. Archived documents
+are excluded unless `include_archived=true`.
+
+Args:
+```ts
+{ group_id: string; include_archived?: boolean }
+```
+
+Result:
+```ts
+{
+  group_id: string
+  documents: Array<Record<string, unknown>>
+  documents_by_id: Record<string, unknown>
+  documents_by_path: Record<string, unknown>
+  active_document_id?: string
+  capture_target_document_id?: string
+  active_document_path?: string
+  capture_target_document_path?: string
+}
+```
+
+#### `assistant_voice_document_input_read`
+
+Read all unread Voice Secretary input events since the actor's last successful
+read. Reading advances the daemon-managed cursor immediately; the actor does not
+see or manage cursor/sequence values. This intentionally avoids a separate
+job-completion protocol. If the actor crashes after reading, the raw input log
+remains in CCCC_HOME for debugging/replay, but the normal live cursor has moved.
+
+Args:
+```ts
+{ group_id: string; by?: "voice-secretary" | "assistant:voice_secretary" }
+```
+
+Result:
+```ts
+{
+  group_id: string
+  item_count: number
+  document_count: number
+  input_text: string
+  input_batches: Array<{
+    document_path: string
+    filename?: string
+    title?: string
+    item_count: number
+    kinds?: string[]
+    intent_hints?: string[]
+    languages?: string[]
+    sources?: string[]
+  }>
+  documents: Array<Record<string, unknown>>
+  has_new_input: boolean
+}
+```
+
+#### `assistant_voice_document_save`
+
+Save or create a Voice Secretary working markdown document. This is the daemon
+path used by Web when the user edits the document surface. The `voice-secretary`
+actor should normally edit repository-backed markdown directly at
+`document_path`; the MCP document tool intentionally has no save action.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  document_path?: string
+  workspace_path?: string
+  title?: string
+  content?: string
+  status?: "active" | "archived"
+  create_new?: boolean
+}
+```
+
+Result:
+```ts
+{ group_id: string; document: Record<string, unknown>; event: CCCSEventV1 }
+```
+
+#### `assistant_voice_document_instruction`
+
+Append a user instruction into the same Voice Secretary input stream used for
+ASR transcript. The daemon emits a targeted `voice_secretary_input` notify; the
+runtime actor pulls it with `read_new_input` and saves the full revised markdown.
+The daemon does not directly append the instruction to the document. Cross-peer
+handoff is intentionally handled only by `assistant_voice_request`, and only when
+the Voice Secretary decides the work belongs to foreman or one concrete peer.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  document_path: string
+  instruction?: string
+  source_text?: string
+  trigger?: Record<string, unknown>
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  assistant?: Record<string, unknown>
+  document: Record<string, unknown>
+  input_event?: Record<string, unknown>
+  input_event_created?: boolean
+  input_notify_emitted?: boolean
+  event?: CCCSEventV1
+}
+```
+
+#### `assistant_voice_request`
+
+Send a structured Voice Secretary action request to `@foreman` or one concrete
+actor without exposing normal `chat.message` send tools to the
+`voice-secretary` runtime actor. The daemon records an `assistant.voice.request`
+event and delivers a targeted `system.notify` with
+`context.kind="voice_secretary_action_request"`. This is the default path for
+spoken "please do X / ask Y to do X" content; ordinary memo/document updates
+MUST stay in the Voice Secretary document surface.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: "voice-secretary" | "assistant:voice_secretary"
+  target?: "@foreman" | string   // one concrete actor id; no @all/user broadcast
+  request_text: string           // concise actionable handoff, not raw transcript
+  summary?: string
+  document_path?: string
+  artifact_paths?: string[]      // repo-relative produced docs/artifacts for user-visible links
+  source_event_id?: string
+  priority?: "low" | "normal" | "high" | "urgent"
+  requires_ack?: boolean
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  assistant: Record<string, unknown>
+  request: Record<string, unknown>
+  notify_event: CCCSEventV1
+  event: CCCSEventV1
+}
+```
+
+#### `assistant_voice_document_archive`
+
+Archive a Voice Secretary working document. The markdown file is left in place;
+the assistant index hides it from the active document list, and later transcript
+ingress without an explicit `document_path` creates or selects another active
+document instead of appending to the archived one.
+
+Args:
+```ts
+{ group_id: string; by?: string; document_path: string }
+```
+
+Result:
+```ts
+{ group_id: string; document: Record<string, unknown>; event: CCCSEventV1 }
+```
+
+#### `assistant_status_update`
+
+Update lifecycle/health for a built-in assistant service. The assistant principal
+(`assistant:<assistant_id>`) may update its own status; users/foremen may also
+update it for control-plane repair.
+
+Args:
+```ts
+{ group_id: string; by?: string; assistant_id: "voice_secretary" | "pet"; lifecycle: "disabled" | "idle" | "running" | "working" | "waiting" | "failed"; health?: Record<string, unknown> }
+```
+
+Result:
+```ts
+{ group_id: string; assistant: Record<string, unknown>; event: CCCSEventV1 }
 ```
 
 #### `group_automation_update`
@@ -1745,6 +2224,7 @@ Args (core):
   priority?: "normal" | "attention"
   path?: string                 // optional filesystem path to attribute scope_key
   attachments?: unknown[]       // attachment refs (implementation-defined)
+  refs?: ReferenceV1[]          // structured message refs, e.g. presentation_ref/task_ref
   src_group_id?: string         // relay provenance (both required if either is set)
   src_event_id?: string
   dst_group_id?: string         // optional "send record" metadata (source messages)
@@ -1771,6 +2251,7 @@ Args:
   to?: string[]                 // defaults to original sender if omitted
   priority?: "normal" | "attention"
   attachments?: unknown[]
+  refs?: ReferenceV1[]
 }
 ```
 
@@ -1778,6 +2259,52 @@ Result:
 ```ts
 { event: CCCSEventV1 } // kind="chat.message"
 ```
+
+#### `tracked_send`
+
+Create a durable task and send one linked visible delegation message. This is an
+explicit composite write; the daemon MUST NOT infer it from arbitrary chat text.
+
+Args:
+```ts
+{
+  group_id: string
+  title: string
+  text: string
+  by?: string
+  to?: string[]
+  outcome?: string
+  checklist?: { text: string; status?: "pending" | "in_progress" | "done" | string }[]
+  assignee?: string             // defaults from one concrete to actor when possible
+  waiting_on?: "none" | "user" | "actor" | "external"
+  handoff_to?: string
+  notes?: string
+  priority?: "normal" | "attention"
+  reply_required?: boolean      // default true
+  idempotency_key?: string
+  refs?: ReferenceV1[]
+}
+```
+
+Result:
+```ts
+{
+  task_id: string
+  task_ref: ReferenceV1          // kind="task_ref"
+  event?: CCCSEventV1            // present when message_sent=true
+  event_id?: string
+  task_created: boolean
+  message_sent: boolean
+  partial_failure: boolean
+  replayed?: boolean
+}
+```
+
+Notes:
+- `task_ref` in the emitted `chat.message.data.refs` is the canonical message-task link.
+- If task creation fails, no message is sent.
+- If message delivery fails after task creation, the response MUST report `partial_failure=true`.
+- Successful retries SHOULD use `idempotency_key` / `client_request_id` to avoid duplicate task/message pairs.
 
 #### `send_cross_group`
 

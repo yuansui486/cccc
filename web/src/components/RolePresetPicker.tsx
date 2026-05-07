@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { classNames } from "../utils/classNames";
 import { BUILTIN_ROLE_PRESETS, getRolePresetApplyState, getRolePresetById } from "../utils/rolePresets";
+import { Button } from "./ui/button";
+import { GroupCombobox } from "./GroupCombobox";
 
 type RolePresetPickerProps = {
   draftValue: string;
@@ -18,13 +20,24 @@ export function RolePresetPicker({ draftValue, disabled = false, onChangeDraft }
     draftValue: string;
   } | null>(null);
 
-  const selectedPreset = getRolePresetById(selectedPresetId);
+  const localizedPreset = (presetId: string) => {
+    const preset = getRolePresetById(presetId);
+    if (!preset) return null;
+    return {
+      ...preset,
+      name: t(`rolePresetCatalog.${preset.id}.name`, { defaultValue: preset.name }),
+      summary: t(`rolePresetCatalog.${preset.id}.summary`, { defaultValue: preset.summary }),
+      useWhen: t(`rolePresetCatalog.${preset.id}.useWhen`, { defaultValue: preset.useWhen }),
+    };
+  };
+
+  const selectedPreset = localizedPreset(selectedPresetId);
   const normalizedDraftValue = String(draftValue || "").trim();
   const visibleNotice =
     notice && notice.presetId === selectedPresetId && notice.draftValue === normalizedDraftValue
       ? t(
           notice.kind === "applied" ? "rolePresetAppliedNotice" : "rolePresetAlreadyMatchesDraft",
-          { name: getRolePresetById(notice.presetId)?.name || "" }
+          { name: localizedPreset(notice.presetId)?.name || "" }
         )
       : "";
 
@@ -54,36 +67,41 @@ export function RolePresetPicker({ draftValue, disabled = false, onChangeDraft }
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <select
-          className="w-full flex-1 rounded-xl border px-3 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
+        <GroupCombobox
+          items={BUILTIN_ROLE_PRESETS.map((preset) => {
+            const localized = localizedPreset(preset.id) || preset;
+            return {
+              value: preset.id,
+              label: localized.name,
+              description: localized.summary,
+              keywords: [localized.name, localized.summary, localized.useWhen],
+            };
+          })}
           value={selectedPresetId}
-          onChange={(e) => {
-            setSelectedPresetId(e.target.value);
+          onChange={(nextValue) => {
+            setSelectedPresetId(nextValue);
             setNotice(null);
           }}
+          placeholder={t("rolePresetSelectPlaceholder")}
+          searchPlaceholder={t("rolePresetSelectPlaceholder")}
+          emptyText={t("common:noResults", { defaultValue: "没有匹配结果" })}
+          ariaLabel={t("rolePreset")}
+          triggerClassName="glass-input w-full flex-1 min-h-[44px] px-3 py-2.5 text-sm"
+          contentClassName="p-0"
           disabled={disabled}
-        >
-          <option value="">{t("rolePresetSelectPlaceholder")}</option>
-          {BUILTIN_ROLE_PRESETS.map((preset) => (
-            <option key={preset.id} value={preset.id}>
-              {preset.name}
-            </option>
-          ))}
-        </select>
+          searchable={false}
+          matchTriggerWidth
+        />
 
-        <button
+        <Button
           type="button"
-          className={classNames(
-            "rounded-xl px-4 py-2.5 text-sm font-medium transition-colors min-h-[44px] sm:shrink-0",
-            selectedPreset && !disabled
-              ? "bg-blue-600 text-white hover:bg-blue-500"
-              : "border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)]"
-          )}
+          className={classNames("sm:shrink-0", !selectedPreset && "text-[var(--color-text-muted)]")}
+          variant={selectedPreset && !disabled ? "default" : "secondary"}
           onClick={applyPreset}
           disabled={!selectedPreset || disabled}
         >
           {t("applyPreset")}
-        </button>
+        </Button>
       </div>
 
       <div className="text-[10px] leading-5 text-[var(--color-text-muted)]">
@@ -91,7 +109,7 @@ export function RolePresetPicker({ draftValue, disabled = false, onChangeDraft }
       </div>
 
       {visibleNotice ? (
-        <div className="rounded-xl border px-3 py-2 text-xs border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200">
+        <div className="rounded-xl border border-black/10 bg-[rgb(245,245,245)] px-3 py-2 text-xs text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white">
           {visibleNotice}
         </div>
       ) : null}

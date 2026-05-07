@@ -56,7 +56,7 @@ export const ActorAvatar = memo(function ActorAvatar({
         sizeClassName,
         textClassName,
         isUser
-          ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white"
+          ? "bg-[linear-gradient(135deg,rgb(245,245,245)_0%,rgb(232,234,236)_100%)] text-[rgb(35,36,37)] border border-black/6"
           : isDark
             ? "bg-slate-700 text-slate-200"
             : "border border-gray-200 bg-white text-gray-700",

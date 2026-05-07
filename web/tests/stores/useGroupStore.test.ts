@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LedgerEvent } from "../../src/types";
 
 vi.mock("../../src/services/api", () => ({
   fetchActors: vi.fn(),
@@ -229,6 +230,111 @@ describe("useGroupStore selection and archive persistence", () => {
       },
     });
   });
+
+  it("does not let a stale cached groupDoc override refreshed non-selected group meta", async () => {
+    const mod = await importFreshStore();
+    mod.useGroupStore.setState({
+      groups: [
+        { group_id: "g-1", title: "One", state: "active", running: true, topic: "" },
+        {
+          group_id: "g-2",
+          title: "Two",
+          state: "idle",
+          running: false,
+          topic: "",
+          runtime_status: {
+            lifecycle_state: "idle",
+            runtime_running: false,
+            running_actor_count: 0,
+            has_running_foreman: false,
+          },
+        },
+      ],
+      groupOrder: ["g-1", "g-2"],
+      selectedGroupId: "g-1",
+      groupDoc: { group_id: "g-1", state: "active", running: true },
+      actors: [],
+    });
+    groupStoreCore.saveGroupView("g-2", {
+      groupDoc: {
+        group_id: "g-2",
+        state: "active",
+        running: true,
+        runtime_status: {
+          lifecycle_state: "active",
+          runtime_running: true,
+          running_actor_count: 1,
+          has_running_foreman: true,
+        },
+      },
+      actors: [],
+    });
+
+    const ordered = mod.useGroupStore.getState().getOrderedGroups();
+    expect(ordered[1]).toMatchObject({
+      group_id: "g-2",
+      running: false,
+      state: "idle",
+      runtime_status: {
+        lifecycle_state: "idle",
+        runtime_running: false,
+      },
+    });
+  });
+
+  it("primes selected groupDoc with refreshed meta runtime over stale cached runtime", async () => {
+    const mod = await importFreshStore();
+    mod.useGroupStore.setState({
+      groups: [
+        { group_id: "g-1", title: "One", state: "active", running: true, topic: "" },
+        {
+          group_id: "g-2",
+          title: "Two",
+          state: "idle",
+          running: false,
+          topic: "",
+          runtime_status: {
+            lifecycle_state: "idle",
+            runtime_running: false,
+            running_actor_count: 0,
+            has_running_foreman: false,
+          },
+        },
+      ],
+      groupOrder: ["g-1", "g-2"],
+      selectedGroupId: "g-1",
+      groupDoc: { group_id: "g-1", state: "active", running: true },
+      actors: [],
+    });
+    groupStoreCore.saveGroupView("g-2", {
+      groupDoc: {
+        group_id: "g-2",
+        title: "Cached Two",
+        state: "active",
+        running: true,
+        runtime_status: {
+          lifecycle_state: "active",
+          runtime_running: true,
+          running_actor_count: 1,
+          has_running_foreman: true,
+        },
+      },
+      actors: [],
+    });
+
+    mod.useGroupStore.getState().setSelectedGroupId("g-2");
+
+    expect(mod.useGroupStore.getState().groupDoc).toMatchObject({
+      group_id: "g-2",
+      title: "Two",
+      running: false,
+      state: "idle",
+      runtime_status: {
+        lifecycle_state: "idle",
+        runtime_running: false,
+      },
+    });
+  });
 });
 
 describe("useGroupStore actors fetch policy", () => {
@@ -330,6 +436,16 @@ describe("useGroupStore actors fetch policy", () => {
 
     expect(api.fetchActors).toHaveBeenCalledWith("g-demo", false);
     expect(useGroupStore.getState().actors).toEqual([{ id: "peer-1", running: false, unread_count: 4 }]);
+  });
+
+  it("filterUiEvents drops runtime-only ledger events from chat tail", () => {
+    const chatEvent: LedgerEvent = { id: "msg-1", kind: "chat.message", by: "user", data: { text: "hello" } };
+
+    expect(groupStoreCore.filterUiEvents([
+      { id: "ctx-1", kind: "context.sync", by: "system", data: {} },
+      { id: "runtime-1", kind: "actor.activity", by: "system", data: { actors: [] } },
+      chatEvent,
+    ])).toEqual([chatEvent]);
   });
 
   it("updateActorActivity merges effective working state fields", () => {
@@ -1477,6 +1593,78 @@ describe("useGroupStore streaming placeholder cleanup", () => {
       currentStreamId: "stream-4",
       phase: "streaming",
     });
+  });
+
+  it("promoteStreamingEventToStream does not rebind an existing real transcript stream", async () => {
+    const mod = await importFreshStore();
+    mod.useGroupStore.getState().reconcileStreamingMessage({
+      actorId: "peer-1",
+      pendingEventId: "evt-phase",
+      streamId: "stream-commentary-phase",
+      ts: "2026-04-09T10:00:00Z",
+      fullText: "Inspecting the implementation",
+      eventText: "Inspecting the implementation",
+      activities: [],
+      completed: true,
+      transientStream: true,
+      phase: "commentary",
+      groupId: "g-demo",
+    });
+
+    mod.useGroupStore.getState().promoteStreamingEventToStream("peer-1", "evt-phase", "stream-final-phase", "g-demo");
+
+    const bucket = mod.useGroupStore.getState().chatByGroup["g-demo"];
+    expect(bucket.streamingEvents).toHaveLength(1);
+    expect(bucket.streamingEvents[0]?.data?.stream_id).toBe("stream-commentary-phase");
+    expect(bucket.streamingTextByStreamId["stream-commentary-phase"]).toBe("Inspecting the implementation");
+    expect(bucket.streamingTextByStreamId["stream-final-phase"]).toBeUndefined();
+  });
+
+  it("reconcileStreamingMessage keeps separate real transcript streams for the same pending event", async () => {
+    const mod = await importFreshStore();
+    mod.useGroupStore.getState().reconcileStreamingMessage({
+      actorId: "peer-1",
+      pendingEventId: "evt-multi-stream",
+      streamId: "stream-commentary-multi",
+      ts: "2026-04-09T10:00:00Z",
+      fullText: "Reviewing the store path",
+      eventText: "Reviewing the store path",
+      activities: [],
+      completed: true,
+      transientStream: true,
+      phase: "commentary",
+      groupId: "g-demo",
+    });
+
+    mod.useGroupStore.getState().reconcileStreamingMessage({
+      actorId: "peer-1",
+      pendingEventId: "evt-multi-stream",
+      streamId: "stream-final-multi",
+      ts: "2026-04-09T10:00:02Z",
+      fullText: "Final answer body",
+      eventText: "Final answer body",
+      activities: [],
+      completed: false,
+      transientStream: false,
+      phase: "final_answer",
+      groupId: "g-demo",
+    });
+
+    const bucket = mod.useGroupStore.getState().chatByGroup["g-demo"];
+    expect(bucket.streamingEvents.map((event) => event.data?.stream_id)).toEqual([
+      "stream-commentary-multi",
+      "stream-final-multi",
+    ]);
+    expect(bucket.streamingTextByStreamId["stream-commentary-multi"]).toBe("Reviewing the store path");
+    expect(bucket.streamingTextByStreamId["stream-final-multi"]).toBe("Final answer body");
+    expect(bucket.latestActorPreviewByActorId["peer-1"]?.transcriptBlocks.map((block) => block.streamPhase)).toEqual([
+      "commentary",
+      "final_answer",
+    ]);
+    expect(bucket.latestActorPreviewByActorId["peer-1"]?.transcriptBlocks.map((block) => block.text)).toEqual([
+      "Reviewing the store path",
+      "Final answer body",
+    ]);
   });
 
   it("promoteStreamingEventToStream binds the latest local queued placeholder when server pending ids differ", async () => {

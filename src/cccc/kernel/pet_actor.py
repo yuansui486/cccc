@@ -28,7 +28,7 @@ def get_pet_actor(group: Group) -> Optional[Dict[str, Any]]:
 def require_pet_foreman(group: Group) -> Dict[str, Any]:
     foreman = find_foreman(group)
     if not isinstance(foreman, dict):
-        raise ValueError("desktop pet requires an enabled foreman actor")
+        raise ValueError("desktop pet requires a foreman actor")
     return foreman
 
 

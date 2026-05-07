@@ -7,6 +7,7 @@ from typing import Any, Optional
 _HELP_ROLE_HEADER_RE = re.compile(r"^##\s*@role:\s*(\w+)\s*$", re.IGNORECASE)
 _HELP_ACTOR_HEADER_RE = re.compile(r"^##\s*@actor:\s*(\S+)(?:\s+(.*\S))?\s*$", re.IGNORECASE)
 _HELP_PET_HEADER_RE = re.compile(r"^##\s*@pet\s*:?\s*$", re.IGNORECASE)
+_HELP_VOICE_SECRETARY_HEADER_RE = re.compile(r"^##\s*@voice_secretary\s*:?\s*$", re.IGNORECASE)
 _HELP_H2_RE = re.compile(r"^##(?!#)\s+.*$")
 _HELP_LEGACY_ROLE_SECTION_RE = re.compile(r"^##\s+Role Notes\s*$", re.IGNORECASE)
 _HELP_H3_RE = re.compile(r"^###\s+(.+?)\s*$")
@@ -60,6 +61,13 @@ def _parse_tagged_section(section: str) -> Optional[dict[str, str]]:
         return {
             "kind": "pet",
             "key": "pet",
+            "raw": _trim_block(normalized),
+            "body": _trim_block("\n".join(lines[1:])),
+        }
+    if _HELP_VOICE_SECRETARY_HEADER_RE.match(header):
+        return {
+            "kind": "voice_secretary",
+            "key": "voice_secretary",
             "raw": _trim_block(normalized),
             "body": _trim_block("\n".join(lines[1:])),
         }
@@ -140,6 +148,7 @@ def parse_help_markdown(markdown: str) -> dict[str, Any]:
     foreman = ""
     peer = ""
     pet = ""
+    voice_secretary = ""
 
     for section in sections:
         raw = _trim_block(section)
@@ -170,6 +179,9 @@ def parse_help_markdown(markdown: str) -> dict[str, Any]:
         if kind == "pet":
             pet = body
             continue
+        if kind == "voice_secretary":
+            voice_secretary = body
+            continue
         extra_tagged_blocks.append(str(tagged.get("raw") or ""))
 
     common = "\n\n".join(common_sections).strip()
@@ -186,6 +198,7 @@ def parse_help_markdown(markdown: str) -> dict[str, Any]:
         "foreman": foreman,
         "peer": peer,
         "pet": pet,
+        "voice_secretary": voice_secretary,
         "actor_notes": actor_notes,
         "extra_tagged_blocks": extra_tagged_blocks,
         "used_legacy_role_notes": used_legacy_role_notes,
@@ -199,6 +212,7 @@ def build_help_markdown(
     peer: str,
     pet: str,
     actor_notes: dict[str, str],
+    voice_secretary: str = "",
     actor_order: Optional[list[str]] = None,
     extra_tagged_blocks: Optional[list[str]] = None,
 ) -> str:
@@ -207,6 +221,7 @@ def build_help_markdown(
     foreman_text = _trim_block(foreman)
     peer_text = _trim_block(peer)
     pet_text = _trim_block(pet)
+    voice_secretary_text = _trim_block(voice_secretary)
     actor_notes_map = dict(actor_notes or {})
     extra_blocks = [_trim_block(item) for item in list(extra_tagged_blocks or []) if _trim_block(item)]
 
@@ -218,6 +233,8 @@ def build_help_markdown(
         parts.append(f"## @role: peer\n\n{peer_text}")
     if pet_text:
         parts.append(f"## @pet\n\n{pet_text}")
+    if voice_secretary_text:
+        parts.append(f"## @voice_secretary\n\n{voice_secretary_text}")
 
     seen: set[str] = set()
     ordered_actor_ids: list[str] = []
@@ -256,19 +273,28 @@ def update_actor_help_note(markdown: str, actor_id: str, note: str, actor_order:
         foreman=str(parsed.get("foreman") or ""),
         peer=str(parsed.get("peer") or ""),
         pet=str(parsed.get("pet") or ""),
+        voice_secretary=str(parsed.get("voice_secretary") or ""),
         actor_notes=next_actor_notes,
         actor_order=actor_order,
         extra_tagged_blocks=list(parsed.get("extra_tagged_blocks") or []),
     )
 
 
-def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optional[str], include_pet: bool = False) -> str:
+def _select_help_markdown(
+    markdown: str,
+    *,
+    role: Optional[str],
+    actor_id: Optional[str],
+    include_pet: bool = False,
+    include_voice_secretary: bool = False,
+) -> str:
     """Filter CCCC_HELP markdown by optional conditional blocks.
 
     Supported markers (level-2 headings):
     - "## @role: foreman|peer"
     - "## @actor: <actor_id>"
     - "## @pet"
+    - "## @voice_secretary"
 
     Untagged content is always included. Tagged blocks are filtered only when the selector is known.
 
@@ -302,6 +328,8 @@ def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optio
             return actor_norm == str(tag_value or "").strip()
         if tag_kind == "pet":
             return bool(include_pet)
+        if tag_kind == "voice_secretary":
+            return bool(include_voice_secretary)
         return True
 
     def _flush() -> None:
@@ -314,9 +342,10 @@ def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optio
         m_role = _HELP_ROLE_HEADER_RE.match(ln)
         m_actor = _HELP_ACTOR_HEADER_RE.match(ln)
         m_pet = _HELP_PET_HEADER_RE.match(ln)
+        m_voice_secretary = _HELP_VOICE_SECRETARY_HEADER_RE.match(ln)
         is_h2 = bool(_HELP_H2_RE.match(ln))
 
-        if m_role or m_actor or m_pet:
+        if m_role or m_actor or m_pet or m_voice_secretary:
             _flush()
             if m_role:
                 tag_kind = "role"
@@ -333,10 +362,14 @@ def _select_help_markdown(markdown: str, *, role: Optional[str], actor_id: Optio
                     tag_kind = "actor"
                     tag_value = str(m_actor.group(1) or "").strip()
                     ln = "## Notes for you"
-                else:
+                elif m_pet:
                     tag_kind = "pet"
                     tag_value = ""
                     ln = "## Pet Persona"
+                else:
+                    tag_kind = "voice_secretary"
+                    tag_value = ""
+                    ln = "## Voice Secretary Operating Contract"
             buf.append(ln)
             continue
 

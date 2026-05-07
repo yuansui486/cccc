@@ -34,6 +34,7 @@ _LEGACY_KEYS: Set[str] = {
     "wecom_bot_id_env",
     "wecom_secret",
     "wecom_secret_env",
+    "weixin_command",
 }
 
 
@@ -156,7 +157,6 @@ def canonicalize_im_config(raw: Any) -> Dict[str, Any]:
             value_key="wecom_secret",
             raw_value=_first_nonempty(raw, "wecom_secret_env", "wecom_secret"),
         )
-
     # Preserve non-credential extension fields (forward-compatible).
     for key, value in raw.items():
         if key in out:

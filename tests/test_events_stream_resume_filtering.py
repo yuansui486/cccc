@@ -23,7 +23,7 @@ class TestEventsStreamResumeFiltering(unittest.TestCase):
                 reg = load_registry()
                 group = create_group(reg, title="test")
 
-                # First enabled actor is foreman; peer1 is a peer.
+                # First visible actor is foreman; peer1 is a peer.
                 add_actor(group, actor_id="judge", enabled=True, runtime="codex", runner="pty")
                 add_actor(group, actor_id="peer1", enabled=True, runtime="codex", runner="pty")
 

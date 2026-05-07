@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { formatGroupSettingsUpdateError } from "../../src/utils/groupSettingsErrors";
 
 const translations: Record<string, string> = {
-  "modals:context.desktopPetRequiresForeman": "Enable a foreman actor before turning on Web Pet.",
+  "modals:context.desktopPetRequiresForeman": "Add a foreman actor before turning on Web Pet.",
   "modals:context.desktopPetStartFailedWithCause": "Failed to start the Web Pet runtime: {{cause}}",
   "modals:context.failedToUpdateSettingsWithCause": "Failed to update group settings: {{cause}}",
   "modals:context.settingsPermissionDenied": "You do not have permission to update these settings.",
@@ -28,11 +28,11 @@ describe("formatGroupSettingsUpdateError", () => {
   it("maps the desktop pet foreman requirement to a localized message", () => {
     const result = formatGroupSettingsUpdateError(t as never, {
       code: "group_settings_update_failed",
-      message: "desktop pet requires an enabled foreman actor",
-      details: { reason: "desktop_pet_requires_enabled_foreman" },
+      message: "desktop pet requires a foreman actor",
+      details: { reason: "desktop_pet_requires_foreman" },
     });
 
-    expect(result).toBe("Enable a foreman actor before turning on Web Pet.");
+    expect(result).toBe("Add a foreman actor before turning on Web Pet.");
   });
 
   it("derives legacy pet start failures from the raw message when details are missing", () => {

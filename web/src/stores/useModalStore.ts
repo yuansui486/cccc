@@ -39,6 +39,7 @@ interface ModalState {
   recipientsEventId: string | null;
   relayEventId: string | null;
   relaySource: RelaySource | null;
+  contextTaskId: string | null;
   presentationViewer: PresentationViewerState | null;
   presentationPin: PresentationPinState | null;
   presentationAttention: PresentationAttentionState;
@@ -49,6 +50,8 @@ interface ModalState {
   closeModal: (name: keyof ModalState["modals"]) => void;
   setRecipientsModal: (eventId: string | null) => void;
   setRelayModal: (eventId: string | null, groupId?: string, event?: LedgerEvent | null) => void;
+  openContextTask: (taskId: string) => void;
+  clearContextTask: () => void;
   setPresentationViewer: (viewer: PresentationViewerState | null) => void;
   setPresentationPin: (pin: PresentationPinState | null) => void;
   markPresentationSlotAttention: (groupId: string, slotId: string) => void;
@@ -72,6 +75,7 @@ export const useModalStore = create<ModalState>((set) => ({
   recipientsEventId: null,
   relayEventId: null,
   relaySource: null,
+  contextTaskId: null,
   presentationViewer: null,
   presentationPin: null,
   presentationAttention: {},
@@ -85,6 +89,7 @@ export const useModalStore = create<ModalState>((set) => ({
   closeModal: (name) =>
     set((state) => ({
       modals: { ...state.modals, [name]: false },
+      ...(name === "context" ? { contextTaskId: null } : {}),
     })),
 
   setRecipientsModal: (eventId) => set({ recipientsEventId: eventId }),
@@ -94,6 +99,12 @@ export const useModalStore = create<ModalState>((set) => ({
       relaySource: eventId && groupId && event ? { groupId, event } : null,
       modals: { ...state.modals, relay: !!eventId },
     })),
+  openContextTask: (taskId) =>
+    set((state) => ({
+      contextTaskId: String(taskId || "").trim() || null,
+      modals: { ...state.modals, context: true },
+    })),
+  clearContextTask: () => set({ contextTaskId: null }),
   setPresentationViewer: (viewer) =>
     set((state) => {
       if (!viewer) {

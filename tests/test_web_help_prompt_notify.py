@@ -210,6 +210,61 @@ class TestWebHelpPromptNotify(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_structured_voice_secretary_update_notifies_only_voice_secretary(self) -> None:
+        from cccc.ports.web.app import create_app
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._seed_group()
+            notify_calls: list[dict] = []
+
+            def fake_daemon(req: dict):
+                op = str(req.get("op") or "")
+                if op == "actor_list":
+                    return {
+                        "ok": True,
+                        "result": {
+                            "actors": [
+                                {"id": "fm1", "role": "foreman", "running": True},
+                                {"id": "peer1", "role": "peer", "running": True},
+                                {
+                                    "id": "voice-secretary",
+                                    "role": "voice_secretary",
+                                    "internal_kind": "voice_secretary",
+                                    "running": True,
+                                },
+                            ]
+                        },
+                    }
+                if op == "system_notify":
+                    notify_calls.append(req)
+                return self._local_call_daemon(req)
+
+            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon):
+                client = TestClient(create_app())
+                resp = client.put(
+                    f"/api/v1/groups/{group_id}/prompts/help",
+                    json={
+                        "by": "user",
+                        "content": "## @voice_secretary\n\nKeep Secretary guidance concise.\n",
+                        "editor_mode": "structured",
+                        "changed_blocks": ["voice_secretary"],
+                    },
+                )
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(body.get("ok"))
+            result = body.get("result") or {}
+            self.assertEqual(result.get("notified_actor_ids"), ["voice-secretary"])
+            self.assertEqual(len(notify_calls), 1)
+            notify_args = notify_calls[0].get("args") or {}
+            self.assertEqual(str(notify_args.get("target_actor_id") or ""), "voice-secretary")
+            self.assertEqual(str(notify_args.get("title") or ""), "Help updated: Voice Secretary guidance")
+            self.assertIn("Updated: Voice Secretary guidance.", str(notify_args.get("message") or ""))
+        finally:
+            cleanup()
+
     def test_raw_help_update_notifies_all_running_actors(self) -> None:
         from cccc.ports.web.app import create_app
 

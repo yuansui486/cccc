@@ -89,6 +89,7 @@ const GROUP_VIEW_CACHE_TTL_MS = 300_000;
 const GROUP_ORDER_KEY = "cccc-group-order";
 const ARCHIVED_GROUP_IDS_KEY = "cccc-archived-group-ids";
 const SELECTED_GROUP_ID_KEY = "cccc-selected-group-id";
+const RUNTIME_ONLY_UI_EVENT_KINDS = new Set(["actor.activity", "context.sync"]);
 
 export let refreshGroupsInFlight = false;
 export let refreshGroupsQueued = false;
@@ -450,23 +451,6 @@ export function selectChatBucketState(
   const gid = String(groupId || "").trim();
   if (!gid) return EMPTY_CHAT_BUCKET;
   return state.chatByGroup[gid] || EMPTY_CHAT_BUCKET;
-}
-
-export function selectStreamingReplySession(
-  state: Pick<GroupStateSnapshot, "chatByGroup">,
-  groupId: string,
-  match: { pendingEventId?: string; streamId?: string; actorId?: string },
-): StreamingReplySession | null {
-  const bucket = selectChatBucketState(state, groupId);
-  const pendingEventId = String(match.pendingEventId || "").trim();
-  const streamId = String(match.streamId || "").trim();
-  const actorId = String(match.actorId || "").trim();
-  const resolvedPendingEventId = pendingEventId || (streamId ? String(bucket.pendingEventIdByStreamId[streamId] || "").trim() : "");
-  if (!resolvedPendingEventId) return null;
-  const session = bucket.replySessionsByPendingEventId[resolvedPendingEventId] || null;
-  if (!session) return null;
-  if (actorId && String(session.actorId || "").trim() !== actorId) return null;
-  return session;
 }
 
 const HEADLESS_PREVIEW_SESSION_LIMIT = 6;
@@ -912,11 +896,22 @@ export function updateReplyAtIndex(messages: LedgerEvent[], index: number, actor
 export function buildShellGroupDoc(groupId: string, groups: GroupMeta[], cached: GroupViewSnapshot | null): GroupDoc | null {
   const gid = String(groupId || "").trim();
   if (!gid) return null;
+  const meta = groups.find((group) => String(group.group_id || "") === gid) || null;
   if (cached?.groupDoc && String(cached.groupDoc.group_id || "") === gid) {
-    return cloneGroupDoc(cached.groupDoc);
+    const cachedDoc = cloneGroupDoc(cached.groupDoc);
+    if (!cachedDoc) return null;
+    if (!meta) return cachedDoc;
+    return {
+      ...cachedDoc,
+      group_id: gid,
+      title: meta.title ?? cachedDoc.title,
+      topic: meta.topic ?? cachedDoc.topic,
+      running: typeof meta.running === "boolean" ? meta.running : cachedDoc.running,
+      state: meta.state ?? cachedDoc.state,
+      runtime_status: meta.runtime_status || cachedDoc.runtime_status,
+    };
   }
 
-  const meta = groups.find((group) => String(group.group_id || "") === gid) || null;
   if (!meta) return null;
   return {
     group_id: gid,
@@ -983,5 +978,5 @@ export function buildPrimedGroupState(groupId: string, groups: GroupMeta[]) {
 }
 
 export function filterUiEvents(events: LedgerEvent[] | undefined): LedgerEvent[] {
-  return Array.isArray(events) ? events.filter((ev) => ev && ev.kind !== "context.sync") : [];
+  return Array.isArray(events) ? events.filter((ev) => ev && !RUNTIME_ONLY_UI_EVENT_KINDS.has(String(ev.kind || ""))) : [];
 }

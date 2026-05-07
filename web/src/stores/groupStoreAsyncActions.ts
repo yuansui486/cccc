@@ -214,7 +214,7 @@ export function createGroupStoreAsyncActions(
         if (!isLatestGroupRequestEpoch(internalActorsRequestEpochByGroup, gid, epoch)) return;
         const nextActors = (resp.result.actors || []).filter((actor) => {
           const internalKind = String(actor.internal_kind || "").trim().toLowerCase();
-          return internalKind === "pet";
+          return internalKind === "pet" || internalKind === "voice_secretary";
         });
         set((state) => ({
           internalRuntimeActorsByGroup: {
@@ -529,12 +529,19 @@ export function createGroupStoreAsyncActions(
           const uniqueNew = olderChatEvents.filter((event) => event.id && !existingIds.has(event.id));
           const exhaustedHistory = olderChatEvents.length === 0 || uniqueNew.length === 0;
           const merged = [...uniqueNew, ...currentBucket.events];
+          // Atomic update: merge events + clear isLoadingHistory in a single set()
+          // to avoid an intermediate rerender where events changed but isLoadingHistory
+          // is still true, which would cause useLayoutEffect to skip scroll compensation
+          // while the virtualizer already re-measured with the new (prepended) messages.
           set((state) => buildChatBucketPatch(state, gid, {
             events: merged.length > MAX_UI_EVENTS ? merged.slice(0, MAX_UI_EVENTS) : merged,
             hasMoreHistory: exhaustedHistory ? false : !!resp.result.has_more,
+            isLoadingHistory: false,
           }) ?? state);
+        } else {
+          set((state) => buildChatBucketPatch(state, gid, { isLoadingHistory: false }) ?? state);
         }
-      } finally {
+      } catch {
         set((state) => buildChatBucketPatch(state, gid, { isLoadingHistory: false }) ?? state);
       }
     },

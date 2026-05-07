@@ -234,6 +234,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_send.add_argument("--path", default="", help="Send message under this scope (path inside repo/scope)")
     p_send.set_defaults(func=cmd_send)
 
+    p_tracked_send = sub.add_parser("tracked-send", help="Create a task and send one linked delegation message")
+    p_tracked_send.add_argument("text", help="Visible message text")
+    p_tracked_send.add_argument("--title", required=True, help="Task title")
+    p_tracked_send.add_argument("--group", default="", help="Target group_id (default: active group)")
+    p_tracked_send.add_argument("--by", default="user", help="Sender label (default: user)")
+    p_tracked_send.add_argument(
+        "--to",
+        action="append",
+        default=[],
+        help="Recipients/selectors (repeatable, supports comma-separated)",
+    )
+    p_tracked_send.add_argument("--outcome", default="", help="Done criterion (defaults to message text)")
+    p_tracked_send.add_argument("--checklist", default="", help="Newline-separated checklist items")
+    p_tracked_send.add_argument("--assignee", default="", help="Explicit task owner (defaults from a single concrete --to actor)")
+    p_tracked_send.add_argument("--waiting-on", choices=["none", "user", "actor", "external"], default="", help="Task waiting_on value")
+    p_tracked_send.add_argument("--handoff-to", default="", help="Optional next owner")
+    p_tracked_send.add_argument("--notes", default="", help="Task notes")
+    p_tracked_send.add_argument("--priority", choices=["normal", "attention"], default="normal", help="Message/task priority")
+    p_tracked_send.add_argument("--no-reply-required", action="store_true", help="Do not require an assignee reply")
+    p_tracked_send.add_argument("--idempotency-key", default="", help="Stable retry key")
+    p_tracked_send.set_defaults(func=cmd_tracked_send)
+
     p_reply = sub.add_parser("reply", help="Reply to a message (IM-style, with quote)")
     p_reply.add_argument("event_id", help="Event ID of the message to reply to")
     p_reply.add_argument("text", help="Reply text")
@@ -292,7 +314,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_im_set.add_argument("--wecom-bot-id", default="", help="WeCom Bot ID (or env var name)")
     p_im_set.add_argument("--wecom-secret", default="", help="WeCom Secret (or env var name)")
     p_im_set.add_argument("--weixin-account-id", default="", help="Weixin account id (optional)")
-    p_im_set.add_argument("--weixin-command", default="", help="Weixin sidecar command line (optional)")
     p_im_set.add_argument("--token", default="", help="Token value directly (not recommended, use env vars)")
     p_im_set.add_argument("--group", default="", help="Target group_id (default: active group)")
     p_im_set.set_defaults(func=cmd_im_set)
@@ -364,6 +385,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_setup.add_argument("--path", default=".", help="Project path (default: current directory)")
     p_setup.set_defaults(func=cmd_setup)
+
+    p_update = sub.add_parser("update", help="Update CCCC in the current Python environment")
+    p_update.add_argument(
+        "--channel",
+        choices=["stable", "rc"],
+        default="",
+        help="Release channel override (default: detect current channel, fallback to stable)",
+    )
+    p_update.add_argument("--check", action="store_true", help="Show detected install info and planned command without executing it")
+    p_update.set_defaults(func=cmd_update)
 
     p_doctor = sub.add_parser("doctor", help="Check environment and show available agent runtimes")
     p_doctor.add_argument("--all", action="store_true", help="Show all known runtimes (not just primary ones)")

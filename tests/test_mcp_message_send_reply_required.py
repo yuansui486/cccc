@@ -98,6 +98,42 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("refs"), refs)
 
+    def test_tracked_send_passes_task_contract_args(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp import common as mcp_common
+
+        captured = {}
+
+        def _fake_call_daemon(req):
+            captured["req"] = req
+            return {"ok": True, "result": {"task_id": "T001", "message_sent": True}}
+
+        checklist = [{"text": "Check"}, {"text": "Report", "status": "pending"}]
+        with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
+             patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
+            out = mcp_server.handle_tool_call(
+                "cccc_tracked_send",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "foreman",
+                    "title": "Review PR",
+                    "text": "Please review this PR and report evidence.",
+                    "to": "reviewer",
+                    "outcome": "Review findings reported.",
+                    "checklist": checklist,
+                    "idempotency_key": "req-1",
+                },
+            )
+
+        self.assertEqual(out.get("task_id"), "T001")
+        req = captured.get("req") or {}
+        self.assertEqual(req.get("op"), "tracked_send")
+        args = req.get("args") if isinstance(req.get("args"), dict) else {}
+        self.assertEqual(args.get("to"), ["reviewer"])
+        self.assertEqual(args.get("title"), "Review PR")
+        self.assertEqual(args.get("checklist"), checklist)
+        self.assertTrue(args.get("reply_required"))
+
     def test_message_send_allows_codex_headless_actor(self) -> None:
         from cccc.contracts.v1 import DaemonRequest
         from cccc.daemon.server import handle_request

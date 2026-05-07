@@ -62,6 +62,7 @@ interface AutomationTabProps {
   helpNudgeMinMessages: number;
   setHelpNudgeMinMessages: (v: number) => void;
   onSavePolicies: () => void;
+  onResetPolicies: () => void;
 }
 
 type PersistCopy = {
@@ -581,6 +582,7 @@ export function AutomationTab(props: AutomationTabProps) {
         silenceSeconds={props.silenceSeconds}
         setSilenceSeconds={props.setSilenceSeconds}
         onSavePolicies={props.onSavePolicies}
+        onResetPolicies={props.onResetPolicies}
       />
 
       <Section
@@ -664,6 +666,7 @@ export function AutomationTab(props: AutomationTabProps) {
         errorMessage={rulesErr}
         saveBusy={rulesBusy}
         snippetIds={snippetIds}
+        snippets={{ ...builtinSnippetDefaults, ...(draft.snippets || {}) }}
         actorTargetOptions={actorTargetOptions}
         oneShotMode={editingOneShotMode}
         oneShotAfterMinutes={editingOneShotAfterMinutes}

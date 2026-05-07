@@ -1256,6 +1256,7 @@ def handle_context_sync(args: Dict[str, Any]) -> DaemonResponse:
                     waiting_on=_parse_waiting_on(raw.get("waiting_on")),
                     handoff_to=str(raw.get("handoff_to") or "").strip() or None,
                     task_type=task_type,
+                    client_request_id=str(raw.get("client_request_id") or "").strip() or None,
                     notes=_normalize_text(raw.get("notes"), max_len=4000),
                     checklist=_normalize_checklist(raw.get("checklist")),
                 )

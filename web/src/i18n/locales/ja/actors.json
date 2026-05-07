@@ -16,7 +16,7 @@
   "nextShort": "次: {{value}}",
   "headlessAgent": "ヘッドレスエージェント",
   "headlessDescription": "このエージェントはターミナルなしで動作します。MCP ツールと受信トレイを介して通信します。",
-  "headlessStreamDescription": "このエージェントは headless で動作します。作業中の出力は Chat に表示され、正式な返信はメッセージツールで送信します。",
+  "headlessStreamDescription": "このエージェントは headless で動作します。作業中の出力は runtime dock ticker と inspect パネルに表示され、正式な返信は message ツールで送信する必要があります。",
   "streamingOutput": "ストリーミング出力",
   "noStreamingOutputYet": "表示できるストリーミング出力はまだありません。",
   "statusRunning": "ステータス： 実行中",
@@ -189,6 +189,43 @@
   "rolePresetSelectPlaceholder": "内蔵プリセットを選択",
   "rolePresetSelectPrompt": "プリセットを選んでから、下の草稿へ適用します。",
   "applyPreset": "適用",
+  "rolePresetCatalog": {
+    "coordinator": {
+      "name": "コーディネーター",
+      "summary": "明確な owner、低ノイズなルーティング、きれいな handoff で複数 actor の作業を前に進めるが、第二の foreman のようには振る舞わない。",
+      "useWhen": "作業が漂い始め、owner が曖昧で handoff が乱れているが、主なニーズが最終判断ではなく調整であるときに使います。"
+    },
+    "planner": {
+      "name": "プランナー",
+      "summary": "曖昧な依頼を、境界・受け入れ条件・未決事項が明確な実行可能スコープへ落とし込みます。",
+      "useWhen": "依頼が曖昧・高リスク、または今すぐ実装すると手戻りが起きやすい規模のときに使います。"
+    },
+    "implementer": {
+      "name": "実装者",
+      "summary": "承認済みスコープに一致し、既存パターンに沿い、実際に検証された最小の正しい変更を出します。",
+      "useWhen": "スコープがすでに確定しており、今やるべきことがコードやスクリプトをきれいに着地させることのときに使います。"
+    },
+    "reviewer": {
+      "name": "レビュアー",
+      "summary": "実際の要件に照らして変更を精査し、本当に問題になる点だけを指摘します。",
+      "useWhen": "実装が完了しており、要約の承認ではなく本物の review が必要なときに使います。"
+    },
+    "debugger": {
+      "name": "デバッガー",
+      "summary": "まず障害を再現し、証拠で真因を絞り込み、その障害経路に対応する修正だけを入れます。",
+      "useWhen": "挙動が壊れている・不安定・原因不明で、安易な修正がすでに危険または失敗しやすいときに使います。"
+    },
+    "explorer": {
+      "name": "エクスプローラー",
+      "summary": "ローカル repo を少数のアンカーファイルと振る舞いの流れへ圧縮し、編集や外部調査へ脱線しません。",
+      "useWhen": "本当に知りたいことが、この repo 内で何がどこにあり、どう流れているかであるときに使います。"
+    },
+    "researcher": {
+      "name": "リサーチャー",
+      "summary": "一次情報に基づいて外部技術質問へ答え、ソース根拠とバージョン/鮮度の境界を明確にします。",
+      "useWhen": "答えが外部ドキュメント、ソースコード、リリース、issue、または現在の upstream 挙動に依存するときに使います。"
+    }
+  },
   "rolePresetAppliedNotice": "プリセット「{{name}}」を role notes 草稿へコピーしました。",
   "rolePresetAlreadyMatchesDraft": "プリセット「{{name}}」は現在の草稿とすでに一致しています。",
   "rolePresetReplaceConfirm": "現在の role-notes 草稿を、内蔵プリセット「{{name}}」で置き換えますか？",

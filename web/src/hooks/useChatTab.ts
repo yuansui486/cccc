@@ -14,15 +14,66 @@ import {
 import { getEffectiveComposerDestGroupId } from "../stores/useComposerStore";
 import { getChatSession } from "../stores/useUIStore";
 import { useChatOutboxStore, selectOutboxEntries } from "../stores/chatOutboxStore";
-import type { Actor, LedgerEvent, ChatMessageData, MessageRef, OptimisticAttachment } from "../types";
+import type { Actor, LedgerEvent, ChatMessageData, MessageRef, OptimisticAttachment, Task } from "../types";
 import * as api from "../services/api";
 import { buildReplyComposerState } from "../utils/chatReply";
+import { copyTextToClipboard } from "../utils/copy";
 import { hasRenderableChatMessageContent } from "../utils/ledgerEventHandlers";
+
+type ChatTFunction = (key: string, options?: Record<string, unknown>) => string;
+export type GroupSendBlockedReason = "paused" | "stopped";
 
 export function supportsChatStreamingPlaceholder(actor: Pick<Actor, "runtime" | "runner" | "runner_effective">): boolean {
   const runtime = String(actor.runtime || "").trim();
   if (!runtime) return false;
   return runtime !== "custom";
+}
+
+export function isFormalChatMessageEvent(event: LedgerEvent): boolean {
+  return String(event.kind || "").trim() === "chat.message" && !event._streaming;
+}
+
+export function getGroupSendBlockedReason({
+  lifecycleState,
+  runtimeRunning,
+  actorCount,
+}: {
+  lifecycleState?: unknown;
+  runtimeRunning: boolean;
+  actorCount: number;
+}): GroupSendBlockedReason | null {
+  const state = String(lifecycleState || "").trim().toLowerCase();
+  if (state === "paused") return "paused";
+  if (state === "stopped") return "stopped";
+  if (actorCount > 0 && !runtimeRunning) return "stopped";
+  return null;
+}
+
+export function getGroupSendBlockedMessage(reason: GroupSendBlockedReason, t: ChatTFunction): string {
+  if (reason === "paused") {
+    return t("sendBlockedGroupPaused", {
+      defaultValue: "This group is paused. Resume the group before sending a message to agents.",
+    });
+  }
+  return t("sendBlockedGroupStopped", {
+    defaultValue: "This group is not running. Start the group before sending a message to agents.",
+  });
+}
+
+export function formatSendMessageError(args: {
+  code?: unknown;
+  message?: unknown;
+  groupSendBlockedReason?: GroupSendBlockedReason | null;
+  t: ChatTFunction;
+}): string {
+  const code = String(args.code || "").trim();
+  if (code === "no_enabled_recipients" && args.groupSendBlockedReason) {
+    return getGroupSendBlockedMessage(args.groupSendBlockedReason, args.t);
+  }
+  const message = String(args.message || "").trim();
+  if (!code) return message || args.t("sendFailed", { defaultValue: "Failed to send message." });
+  if (!message) return code;
+  return `${code}: ${message}`;
 }
 
 export const CHAT_SCROLL_SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
@@ -815,6 +866,18 @@ export function useChatTab({
   const needsActors = !!selectedGroupId && actors.length === 0;
   const needsStart = !!selectedGroupId && actors.length > 0 && !selectedGroupRunning;
   const showSetupCard = needsScope || needsActors || needsStart;
+  const selectedGroupLifecycleState = useMemo(() => {
+    if (!groupDoc || String(groupDoc.group_id || "") !== String(selectedGroupId || "")) return "";
+    return String(groupDoc.runtime_status?.lifecycle_state || groupDoc.state || "").trim().toLowerCase();
+  }, [groupDoc, selectedGroupId]);
+  const groupSendBlockedReason = useMemo(
+    () => getGroupSendBlockedReason({
+      lifecycleState: selectedGroupLifecycleState,
+      runtimeRunning: selectedGroupRunning,
+      actorCount: actors.length,
+    }),
+    [actors.length, selectedGroupLifecycleState, selectedGroupRunning]
+  );
 
   // In chat window mode
   const inChatWindow = useMemo(() => {
@@ -852,7 +915,7 @@ export function useChatTab({
 
   // Filtered live chat messages (canonical + optimistic pending merged)
   const liveChatMessages = useMemo(() => {
-    const all = events.filter((ev: LedgerEvent) => ev.kind === "chat.message");
+    const all = events.filter(isFormalChatMessageEvent);
     const renderableCanonicalClientIds = new Set(
       all
         .filter((ev: LedgerEvent) => hasRenderableChatMessageContent(ev))
@@ -897,12 +960,12 @@ export function useChatTab({
 
   // Chat messages (window or live)
   const chatMessages = useMemo(() => {
-    if (inChatWindow && chatWindow) return chatWindow.events || [];
+    if (inChatWindow && chatWindow) return (chatWindow.events || []).filter(isFormalChatMessageEvent);
     return liveChatMessages;
   }, [chatWindow, inChatWindow, liveChatMessages]);
 
   const hasAnyChatMessages = useMemo(
-    () => events.some((ev: LedgerEvent) => ev.kind === "chat.message") || outboxEntries.length > 0,
+    () => events.some(isFormalChatMessageEvent) || outboxEntries.length > 0,
     [events, outboxEntries]
   );
 
@@ -984,6 +1047,18 @@ export function useChatTab({
     () => groupContext?.agent_states || [],
     [groupContext]
   );
+  const tasks = useMemo(
+    () => (Array.isArray(groupContext?.coordination?.tasks) ? groupContext.coordination.tasks : []),
+    [groupContext]
+  );
+  const taskById = useMemo(() => {
+    const map = new Map<string, Task>();
+    for (const task of tasks) {
+      const taskId = String(task?.id || "").trim();
+      if (taskId) map.set(taskId, task);
+    }
+    return map;
+  }, [tasks]);
 
   // ============ Actions ============
 
@@ -1024,6 +1099,10 @@ export function useChatTab({
     const txt = String(rawText || "").trim();
     if (!selectedGroupId) return;
     if (!txt && composerFiles.length === 0) return;
+    if (groupSendBlockedReason) {
+      showError(getGroupSendBlockedMessage(groupSendBlockedReason, t));
+      return;
+    }
 
     const dstGroup = String(sendGroupId || "").trim();
     const isCrossGroup = !!dstGroup && dstGroup !== selectedGroupId;
@@ -1186,7 +1265,12 @@ export function useChatTab({
         removeOutbox(selectedGroupId, localId);
         clearLocalAssistantPlaceholders();
         restoreComposerState();
-        showError(`${resp.error.code}: ${resp.error.message}`);
+        showError(formatSendMessageError({
+          code: resp.error.code,
+          message: resp.error.message,
+          groupSendBlockedReason,
+          t,
+        }));
         return;
       }
       const canonicalEvent =
@@ -1246,6 +1330,7 @@ export function useChatTab({
   }, [
     composerFiles,
     selectedGroupId,
+    groupSendBlockedReason,
     sendGroupId,
     priority,
     replyRequired,
@@ -1280,6 +1365,7 @@ export function useChatTab({
     removeStreamingEventsByPrefix,
     resolveAssistantTargets,
     upsertStreamingEvent,
+    t,
   ]);
 
   const sendMessage = useCallback(async () => {
@@ -1297,25 +1383,7 @@ export function useChatTab({
       url.searchParams.set("tab", "chat");
 
       const text = url.toString();
-      let ok = false;
-      try {
-        await navigator.clipboard.writeText(text);
-        ok = true;
-      } catch {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.left = "-9999px";
-          ta.style.top = "0";
-          document.body.appendChild(ta);
-          ta.select();
-          ok = document.execCommand("copy");
-          document.body.removeChild(ta);
-        } catch {
-          ok = false;
-        }
-      }
+      const ok = await copyTextToClipboard(text);
       if (ok) {
         showNotice({ message: "Link copied" });
       } else {
@@ -1332,25 +1400,7 @@ export function useChatTab({
       const text = String(data?.text || "");
       if (!text.trim()) return;
 
-      let ok = false;
-      try {
-        await navigator.clipboard.writeText(text);
-        ok = true;
-      } catch {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.left = "-9999px";
-          ta.style.top = "0";
-          document.body.appendChild(ta);
-          ta.select();
-          ok = document.execCommand("copy");
-          document.body.removeChild(ta);
-        } catch {
-          ok = false;
-        }
-      }
+      const ok = await copyTextToClipboard(text);
 
       if (ok) {
         showNotice({ message: t("chat:contentCopied", { defaultValue: "Content copied" }) });
@@ -1531,6 +1581,7 @@ export function useChatTab({
 
     // Agent state
     agentStates,
+    taskById,
 
     // Actions
     sendMessage,

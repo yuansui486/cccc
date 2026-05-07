@@ -120,6 +120,7 @@ class Task:
         waiting_on: WaitingOn = WaitingOn.NONE,
         handoff_to: Optional[str] = None,
         task_type: Optional[str] = None,
+        client_request_id: Optional[str] = None,
         notes: str = "",
         created_at: Optional[str] = None,
         updated_at: Optional[str] = None,
@@ -137,6 +138,7 @@ class Task:
         self.waiting_on = waiting_on
         self.handoff_to = handoff_to
         self.task_type = resolve_task_type_id(task_type, parent_id)
+        self.client_request_id = client_request_id
         self.notes = notes
         self.created_at = created_at or _utc_now_iso()
         self.updated_at = updated_at
@@ -550,6 +552,7 @@ class ContextStorage:
                 waiting_on=_coerce_waiting_on(data.get("waiting_on")),
                 handoff_to=str(data.get("handoff_to") or "") or None,
                 task_type=normalize_task_type(data.get("task_type")),
+                client_request_id=str(data.get("client_request_id") or "") or None,
                 notes=str(data.get("notes") or ""),
                 created_at=str(data.get("created_at") or "") or _utc_now_iso(),
                 updated_at=str(data.get("updated_at") or "") or None,
@@ -573,6 +576,7 @@ class ContextStorage:
             "waiting_on": task.waiting_on.value if isinstance(task.waiting_on, WaitingOn) else str(task.waiting_on),
             "handoff_to": task.handoff_to,
             "task_type": normalize_task_type(task.task_type),
+            "client_request_id": task.client_request_id,
             "notes": task.notes,
             "created_at": task.created_at,
             "updated_at": task.updated_at,

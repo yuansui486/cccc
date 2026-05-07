@@ -39,6 +39,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                         "name": "triage",
                         "description_short": "Issue triage checklist",
                         "capsule_preview": "Restate the symptom first.\nGather evidence before changing anything.",
+                        "activation_sources": [{"scope": "actor", "actor_id": "peer-1"}],
                     }
                 ],
                 "autoload_skills": [
@@ -70,6 +71,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertIn("### Planning and Scope Gates", markdown)
         self.assertIn("For non-trivial plans, run a 6D check", markdown)
         self.assertIn("triage", markdown)
+        self.assertIn("[scope: actor]", markdown)
         self.assertIn("review", markdown)
         self.assertIn("working_rules:", markdown)
         self.assertIn("Restate the symptom first.", markdown)

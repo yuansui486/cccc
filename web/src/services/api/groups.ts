@@ -1,4 +1,14 @@
 import type {
+  AssistantStateResult,
+  AssistantVoiceDocument,
+  AssistantVoiceDocumentMutationResult,
+  AssistantVoiceAskFeedback,
+  AssistantVoiceInputResult,
+  AssistantVoicePromptDraft,
+  AssistantVoicePromptDraftMutationResult,
+  AssistantVoiceTranscriptSegmentResult,
+  AssistantVoiceTranscriptionResult,
+  BuiltinAssistant,
   GroupDoc,
   GroupMeta,
   GroupPresentation,
@@ -14,6 +24,7 @@ import {
   asOptionalString,
   asRecord,
   asString,
+  asStringArray,
   ApiResponse,
   clearActorsReadOnlyRequest,
   clearGroupsReadRequest,
@@ -41,6 +52,633 @@ export async function fetchGroups() {
 
 export async function fetchGroup(groupId: string, init?: RequestInit & { noCache?: boolean }) {
   return apiJson<{ group: GroupDoc }>(`/api/v1/groups/${encodeURIComponent(groupId)}`, init);
+}
+
+export function assistantStateRequestKey(groupId: string): string {
+  return `assistants:${String(groupId || "").trim()}`;
+}
+
+function normalizeBuiltinAssistant(value: unknown): BuiltinAssistant | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const assistantId = asString(record.assistant_id).trim();
+  if (!assistantId) return null;
+  const policyRecord = asRecord(record.policy);
+  return {
+    assistant_id: assistantId,
+    kind: asString(record.kind).trim() || assistantId,
+    enabled: !!record.enabled,
+    principal: asOptionalString(record.principal) || undefined,
+    lifecycle: asString(record.lifecycle).trim() || "disabled",
+    health: asRecord(record.health) ?? {},
+    policy: policyRecord
+      ? {
+          action_allowlist: asStringArray(policyRecord.action_allowlist),
+          requires_user_confirmation: asStringArray(policyRecord.requires_user_confirmation),
+        }
+      : undefined,
+    config: asRecord(record.config) ?? {},
+    ui: asRecord(record.ui) ?? {},
+  };
+}
+
+function normalizeAssistantVoiceDocument(value: unknown): AssistantVoiceDocument | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const documentId = asString(record.document_id).trim();
+  const documentPath = asOptionalString(record.document_path) || asOptionalString(record.workspace_path) || documentId;
+  if (!documentId && !documentPath) return null;
+  return {
+    document_id: documentId || documentPath,
+    document_path: documentPath,
+    filename: asOptionalString(record.filename) || undefined,
+    assistant_id: asOptionalString(record.assistant_id) || undefined,
+    title: asOptionalString(record.title) || "Untitled document",
+    status: asOptionalString(record.status) || "active",
+    storage_kind: asOptionalString(record.storage_kind) || undefined,
+    workspace_path: asOptionalString(record.workspace_path) || undefined,
+    content: asOptionalString(record.content) || undefined,
+    content_sha256: asOptionalString(record.content_sha256) || undefined,
+    content_chars: Number.isFinite(Number(record.content_chars)) ? Number(record.content_chars) : undefined,
+    revision_count: Number.isFinite(Number(record.revision_count)) ? Number(record.revision_count) : undefined,
+    source_segment_count: Number.isFinite(Number(record.source_segment_count)) ? Number(record.source_segment_count) : undefined,
+    last_source_segment_id: asOptionalString(record.last_source_segment_id) || undefined,
+    last_source_path: asOptionalString(record.last_source_path) || undefined,
+    created_at: asOptionalString(record.created_at) || undefined,
+    updated_at: asOptionalString(record.updated_at) || undefined,
+    created_by: asOptionalString(record.created_by) || undefined,
+  };
+}
+
+function normalizeAssistantVoicePromptDraft(value: unknown): AssistantVoicePromptDraft | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const requestId = asString(record.request_id).trim();
+  const draftText = asString(record.draft_text).trim();
+  if (!requestId || !draftText) return undefined;
+  return {
+    request_id: requestId,
+    status: asOptionalString(record.status) || "pending",
+    operation: asOptionalString(record.operation) || undefined,
+    draft_text: draftText,
+    draft_preview: asOptionalString(record.draft_preview) || undefined,
+    summary: asOptionalString(record.summary) || undefined,
+    composer_snapshot_hash: asOptionalString(record.composer_snapshot_hash) || undefined,
+    created_at: asOptionalString(record.created_at) || undefined,
+    updated_at: asOptionalString(record.updated_at) || undefined,
+  };
+}
+
+function normalizeAssistantVoiceAskFeedback(value: unknown): AssistantVoiceAskFeedback | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const requestId = asString(record.request_id).trim();
+  if (!requestId) return undefined;
+  return {
+    request_id: requestId,
+    status: asOptionalString(record.status) || "pending",
+    request_text: asOptionalString(record.request_text) || undefined,
+    request_preview: asOptionalString(record.request_preview) || undefined,
+    reply_text: asOptionalString(record.reply_text) || undefined,
+    document_path: asOptionalString(record.document_path) || undefined,
+    artifact_paths: asStringArray(record.artifact_paths),
+    source_summary: asOptionalString(record.source_summary) || undefined,
+    checked_at: asOptionalString(record.checked_at) || undefined,
+    source_urls: asStringArray(record.source_urls),
+    target_kind: asOptionalString(record.target_kind) || undefined,
+    intent_hint: asOptionalString(record.intent_hint) || undefined,
+    language: asOptionalString(record.language) || undefined,
+    handoff_target: asOptionalString(record.handoff_target) || undefined,
+    handoff_request_id: asOptionalString(record.handoff_request_id) || undefined,
+    target_actor_id: asOptionalString(record.target_actor_id) || undefined,
+    created_at: asOptionalString(record.created_at) || undefined,
+    updated_at: asOptionalString(record.updated_at) || undefined,
+    cleared_at: asOptionalString(record.cleared_at) || undefined,
+  };
+}
+
+function normalizeAssistantStateResult(groupId: string, result: unknown): AssistantStateResult {
+  const record = asRecord(result) ?? {};
+  const assistants = Array.isArray(record.assistants)
+    ? record.assistants
+        .map((item) => normalizeBuiltinAssistant(item))
+        .filter((item): item is BuiltinAssistant => !!item)
+    : [];
+  const assistantsById: Record<string, BuiltinAssistant> = {};
+  for (const assistant of assistants) {
+    assistantsById[assistant.assistant_id] = assistant;
+  }
+  const rawAssistantsById = asRecord(record.assistants_by_id);
+  if (rawAssistantsById) {
+    for (const value of Object.values(rawAssistantsById)) {
+      const assistant = normalizeBuiltinAssistant(value);
+      if (assistant) assistantsById[assistant.assistant_id] = assistant;
+    }
+  }
+  const assistant = normalizeBuiltinAssistant(record.assistant);
+  if (assistant) assistantsById[assistant.assistant_id] = assistant;
+  const documents = Array.isArray(record.documents)
+    ? record.documents
+        .map((item) => normalizeAssistantVoiceDocument(item))
+        .filter((item): item is AssistantVoiceDocument => !!item)
+    : [];
+  const documentsById: Record<string, AssistantVoiceDocument> = {};
+  const documentsByPath: Record<string, AssistantVoiceDocument> = {};
+  for (const document of documents) {
+    documentsById[document.document_id] = document;
+    if (document.document_path) documentsByPath[document.document_path] = document;
+  }
+  const rawDocumentsById = asRecord(record.documents_by_id);
+  if (rawDocumentsById) {
+    for (const value of Object.values(rawDocumentsById)) {
+      const document = normalizeAssistantVoiceDocument(value);
+      if (document) {
+        documentsById[document.document_id] = document;
+        if (document.document_path) documentsByPath[document.document_path] = document;
+      }
+    }
+  }
+  const rawDocumentsByPath = asRecord(record.documents_by_path);
+  if (rawDocumentsByPath) {
+    for (const value of Object.values(rawDocumentsByPath)) {
+      const document = normalizeAssistantVoiceDocument(value);
+      if (document) {
+        documentsById[document.document_id] = document;
+        if (document.document_path) documentsByPath[document.document_path] = document;
+      }
+    }
+  }
+  const askRequests = Array.isArray(record.ask_requests)
+    ? record.ask_requests
+        .map((item) => normalizeAssistantVoiceAskFeedback(item))
+        .filter((item): item is AssistantVoiceAskFeedback => !!item)
+    : [];
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistants: Object.values(assistantsById).sort((a, b) => a.assistant_id.localeCompare(b.assistant_id)),
+    assistants_by_id: assistantsById,
+    assistant: assistant || undefined,
+    documents: Object.values(documentsById).sort((a, b) => {
+      const aCreated = String(a.created_at || "");
+      const bCreated = String(b.created_at || "");
+      if (aCreated !== bCreated) return bCreated.localeCompare(aCreated);
+      return String(b.document_id || "").localeCompare(String(a.document_id || ""));
+    }),
+    documents_by_id: documentsById,
+    documents_by_path: documentsByPath,
+    active_document_id: asOptionalString(record.active_document_id) || undefined,
+    capture_target_document_id:
+      asOptionalString(record.capture_target_document_id) || asOptionalString(record.active_document_id) || undefined,
+    active_document_path: asOptionalString(record.active_document_path) || undefined,
+    capture_target_document_path:
+      asOptionalString(record.capture_target_document_path) || asOptionalString(record.active_document_path) || undefined,
+    new_input_available: Boolean(record.new_input_available),
+    prompt_draft: normalizeAssistantVoicePromptDraft(record.prompt_draft),
+    ask_requests: askRequests,
+    latest_ask_request: normalizeAssistantVoiceAskFeedback(record.latest_ask_request) || askRequests[0],
+  };
+}
+
+type AssistantMutationResult = {
+  group_id: string;
+  assistant?: BuiltinAssistant;
+  event?: unknown;
+};
+
+function normalizeAssistantVoiceTranscriptionResult(groupId: string, result: unknown): AssistantVoiceTranscriptionResult {
+  const record = asRecord(result) ?? {};
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistant: normalizeBuiltinAssistant(record.assistant) || undefined,
+    transcript: asString(record.transcript),
+    mime_type: asOptionalString(record.mime_type) || undefined,
+    language: asOptionalString(record.language) || undefined,
+    bytes: Number.isFinite(Number(record.bytes)) ? Number(record.bytes) : undefined,
+    backend: asOptionalString(record.backend) || undefined,
+    service: asRecord(record.service) ?? undefined,
+    asr: asRecord(record.asr) ?? undefined,
+  };
+}
+
+function normalizeAssistantVoiceTranscriptSegmentResult(groupId: string, result: unknown): AssistantVoiceTranscriptSegmentResult {
+  const record = asRecord(result) ?? {};
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistant: normalizeBuiltinAssistant(record.assistant) || undefined,
+    session_id: asString(record.session_id),
+    segment: asRecord(record.segment) ?? undefined,
+    segment_path: asOptionalString(record.segment_path) || undefined,
+    document: normalizeAssistantVoiceDocument(record.document) || undefined,
+    document_updated: Boolean(record.document_updated),
+    input_event: asRecord(record.input_event) ?? undefined,
+    input_event_created: Boolean(record.input_event_created),
+    input_notify_emitted: Boolean(record.input_notify_emitted),
+  };
+}
+
+function normalizeAssistantMutationResult(groupId: string, result: unknown): AssistantMutationResult {
+  const record = asRecord(result) ?? {};
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistant: normalizeBuiltinAssistant(record.assistant) || undefined,
+    event: record.event,
+  };
+}
+
+function normalizeAssistantVoiceDocumentMutationResult(groupId: string, result: unknown): AssistantVoiceDocumentMutationResult {
+  const record = asRecord(result) ?? {};
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistant: normalizeBuiltinAssistant(record.assistant) || undefined,
+    document: normalizeAssistantVoiceDocument(record.document) || undefined,
+    input_event: asRecord(record.input_event) ?? undefined,
+    input_event_created: Boolean(record.input_event_created),
+    input_notify_emitted: Boolean(record.input_notify_emitted),
+    event: record.event,
+    request_id: asOptionalString(record.request_id) || undefined,
+  };
+}
+
+function normalizeAssistantVoiceInputResult(groupId: string, result: unknown): AssistantVoiceInputResult {
+  const record = asRecord(result) ?? {};
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistant: normalizeBuiltinAssistant(record.assistant) || undefined,
+    document: normalizeAssistantVoiceDocument(record.document) || undefined,
+    input_event: asRecord(record.input_event) ?? undefined,
+    input_event_created: Boolean(record.input_event_created),
+    input_notify_emitted: Boolean(record.input_notify_emitted),
+    event: record.event,
+    request_id: asOptionalString(record.request_id) || undefined,
+  };
+}
+
+function normalizeAssistantVoicePromptDraftMutationResult(
+  groupId: string,
+  result: unknown,
+): AssistantVoicePromptDraftMutationResult {
+  const record = asRecord(result) ?? {};
+  return {
+    group_id: asString(record.group_id).trim() || groupId,
+    assistant: normalizeBuiltinAssistant(record.assistant) || undefined,
+    prompt_draft: normalizeAssistantVoicePromptDraft(record.prompt_draft),
+    event: record.event,
+  };
+}
+
+function clearAssistantStateRequest(groupId: string): void {
+  clearSharedReadRequest(assistantStateRequestKey(groupId));
+}
+
+export async function fetchAssistantState(groupId: string): Promise<ApiResponse<AssistantStateResult>> {
+  const gid = String(groupId || "").trim();
+  return reuseSharedReadRequest(assistantStateRequestKey(gid), async () => {
+    const resp = await apiJson<unknown>(`/api/v1/groups/${encodeURIComponent(gid)}/assistants`);
+    if (!resp.ok) return resp as ApiResponse<AssistantStateResult>;
+    return { ok: true, result: normalizeAssistantStateResult(gid, resp.result) };
+  });
+}
+
+export async function fetchAssistant(
+  groupId: string,
+  assistantId: string,
+  opts?: { promptRequestId?: string },
+): Promise<ApiResponse<AssistantStateResult>> {
+  const gid = String(groupId || "").trim();
+  const aid = String(assistantId || "").trim();
+  const params = new URLSearchParams();
+  const promptRequestId = String(opts?.promptRequestId || "").trim();
+  if (promptRequestId) params.set("prompt_request_id", promptRequestId);
+  const query = params.toString();
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/${encodeURIComponent(aid)}${query ? `?${query}` : ""}`,
+  );
+  if (!resp.ok) return resp as ApiResponse<AssistantStateResult>;
+  return { ok: true, result: normalizeAssistantStateResult(gid, resp.result) };
+}
+
+export async function updateAssistantSettings(
+  groupId: string,
+  assistantId: string,
+  payload: { enabled?: boolean; config?: Record<string, unknown>; by?: string },
+): Promise<ApiResponse<AssistantMutationResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/${encodeURIComponent(String(assistantId || "").trim())}/settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        enabled: payload.enabled,
+        config: payload.config,
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantMutationResult>;
+  return { ok: true, result: normalizeAssistantMutationResult(gid, resp.result) };
+}
+
+export async function updateAssistantStatus(
+  groupId: string,
+  assistantId: string,
+  payload: {
+    lifecycle: BuiltinAssistant["lifecycle"];
+    health?: Record<string, unknown>;
+    by?: string;
+  },
+): Promise<ApiResponse<AssistantMutationResult>> {
+  const gid = String(groupId || "").trim();
+  const aid = String(assistantId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/${encodeURIComponent(aid)}/status`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        assistant_id: aid,
+        lifecycle: payload.lifecycle,
+        health: payload.health || {},
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantMutationResult>;
+  return { ok: true, result: normalizeAssistantMutationResult(gid, resp.result) };
+}
+
+export async function transcribeVoiceAssistantAudio(
+  groupId: string,
+  payload: {
+    audioBase64: string;
+    mimeType: string;
+    language?: string;
+    by?: string;
+  },
+): Promise<ApiResponse<AssistantVoiceTranscriptionResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/transcriptions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        audio_base64: String(payload.audioBase64 || ""),
+        mime_type: String(payload.mimeType || "application/octet-stream"),
+        language: String(payload.language || ""),
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceTranscriptionResult>;
+  return { ok: true, result: normalizeAssistantVoiceTranscriptionResult(gid, resp.result) };
+}
+
+export async function appendVoiceAssistantTranscriptSegment(
+  groupId: string,
+  payload: {
+    sessionId: string;
+    segmentId?: string;
+    documentPath?: string;
+    text?: string;
+    language?: string;
+    isFinal?: boolean;
+    flush?: boolean;
+    trigger?: Record<string, unknown>;
+    by?: string;
+  },
+): Promise<ApiResponse<AssistantVoiceTranscriptSegmentResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/transcript_segments`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: String(payload.sessionId || "").trim(),
+        segment_id: String(payload.segmentId || "").trim(),
+        document_path: String(payload.documentPath || "").trim(),
+        text: String(payload.text || ""),
+        language: String(payload.language || ""),
+        is_final: payload.isFinal !== false,
+        flush: Boolean(payload.flush),
+        trigger: payload.trigger || {},
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceTranscriptSegmentResult>;
+  return { ok: true, result: normalizeAssistantVoiceTranscriptSegmentResult(gid, resp.result) };
+}
+
+export async function selectVoiceAssistantDocument(
+  groupId: string,
+  documentPath: string,
+  payload: { by?: string } = {},
+): Promise<ApiResponse<AssistantVoiceDocumentMutationResult>> {
+  const gid = String(groupId || "").trim();
+  const docPath = String(documentPath || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/documents/select`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        document_path: docPath,
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceDocumentMutationResult>;
+  return { ok: true, result: normalizeAssistantVoiceDocumentMutationResult(gid, resp.result) };
+}
+
+export async function saveVoiceAssistantDocument(
+  groupId: string,
+  payload: {
+    documentPath?: string;
+    title?: string;
+    content: string;
+    status?: string;
+    createNew?: boolean;
+    by?: string;
+  },
+): Promise<ApiResponse<AssistantVoiceDocumentMutationResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const body: Record<string, unknown> = {
+    document_path: String(payload.documentPath || "").trim(),
+    status: String(payload.status || ""),
+    create_new: Boolean(payload.createNew),
+    by: String(payload.by || "user").trim() || "user",
+  };
+  if (payload.title !== undefined) {
+    body.title = String(payload.title || "");
+  }
+  if (!payload.createNew || String(payload.content || "").trim()) {
+    body.content = String(payload.content || "");
+  }
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/documents`,
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceDocumentMutationResult>;
+  return { ok: true, result: normalizeAssistantVoiceDocumentMutationResult(gid, resp.result) };
+}
+
+export async function sendVoiceAssistantDocumentInstruction(
+  groupId: string,
+  documentPath: string,
+  payload: {
+    instruction: string;
+    sourceText?: string;
+    documentPath?: string;
+    trigger?: Record<string, unknown>;
+    by?: string;
+  },
+): Promise<ApiResponse<AssistantVoiceDocumentMutationResult>> {
+  const gid = String(groupId || "").trim();
+  const docPath = String(documentPath || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/documents/instructions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        document_path: String(payload.documentPath || docPath).trim(),
+        instruction: String(payload.instruction || ""),
+        source_text: String(payload.sourceText || ""),
+        trigger: payload.trigger || {},
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceDocumentMutationResult>;
+  return { ok: true, result: normalizeAssistantVoiceDocumentMutationResult(gid, resp.result) };
+}
+
+export async function appendVoiceAssistantInput(
+  groupId: string,
+  payload: {
+    kind: "voice_instruction" | "prompt_refine";
+    text?: string;
+    instruction?: string;
+    sourceText?: string;
+    documentPath?: string;
+    voiceTranscript?: string;
+    composerText?: string;
+    requestId?: string;
+    operation?: string;
+    composerContext?: Record<string, unknown>;
+    composerSnapshotHash?: string;
+    language?: string;
+    trigger?: Record<string, unknown>;
+    by?: string;
+  },
+): Promise<ApiResponse<AssistantVoiceInputResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/inputs`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        kind: String(payload.kind || ""),
+        text: String(payload.text || ""),
+        instruction: String(payload.instruction || ""),
+        source_text: String(payload.sourceText || ""),
+        document_path: String(payload.documentPath || "").trim(),
+        voice_transcript: String(payload.voiceTranscript || ""),
+        composer_text: String(payload.composerText || ""),
+        request_id: String(payload.requestId || ""),
+        operation: String(payload.operation || ""),
+        composer_context: payload.composerContext || {},
+        composer_snapshot_hash: String(payload.composerSnapshotHash || ""),
+        language: String(payload.language || ""),
+        trigger: payload.trigger || {},
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceInputResult>;
+  return { ok: true, result: normalizeAssistantVoiceInputResult(gid, resp.result) };
+}
+
+export async function ackVoiceAssistantPromptDraft(
+  groupId: string,
+  payload: { requestId: string; status: "applied" | "dismissed" | "stale"; by?: string },
+): Promise<ApiResponse<AssistantVoicePromptDraftMutationResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/prompt_drafts/ack`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        request_id: String(payload.requestId || "").trim(),
+        status: payload.status,
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoicePromptDraftMutationResult>;
+  return { ok: true, result: normalizeAssistantVoicePromptDraftMutationResult(gid, resp.result) };
+}
+
+export async function clearVoiceAssistantAskRequests(
+  groupId: string,
+  payload: { keepActive?: boolean; by?: string } = {},
+): Promise<ApiResponse<AssistantStateResult>> {
+  const gid = String(groupId || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/ask_requests/clear`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        keep_active: Boolean(payload.keepActive),
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantStateResult>;
+  return { ok: true, result: normalizeAssistantStateResult(gid, resp.result) };
+}
+
+export async function archiveVoiceAssistantDocument(
+  groupId: string,
+  documentPath: string,
+  payload: { by?: string } = {},
+): Promise<ApiResponse<AssistantVoiceDocumentMutationResult>> {
+  const gid = String(groupId || "").trim();
+  const docPath = String(documentPath || "").trim();
+  clearAssistantStateRequest(gid);
+  const resp = await apiJson<unknown>(
+    `/api/v1/groups/${encodeURIComponent(gid)}/assistants/voice_secretary/documents/archive`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        document_path: docPath,
+        by: String(payload.by || "user").trim() || "user",
+      }),
+    },
+  );
+  clearAssistantStateRequest(gid);
+  if (!resp.ok) return resp as ApiResponse<AssistantVoiceDocumentMutationResult>;
+  return { ok: true, result: normalizeAssistantVoiceDocumentMutationResult(gid, resp.result) };
 }
 
 export async function fetchPresentation(

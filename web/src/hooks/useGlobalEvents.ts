@@ -27,6 +27,10 @@ export function shouldRefreshGroupsAfterGlobalEventsOpen(_hasConnectedOnce: bool
   return true;
 }
 
+export function shouldKeepGlobalEventsConnected(documentHidden: boolean): boolean {
+  return !documentHidden;
+}
+
 export function getGlobalEventGroupId(ev: unknown): string {
   if (!ev || typeof ev !== "object") return "";
   const directGroupId = String((ev as { group_id?: unknown }).group_id || "").trim();
@@ -87,6 +91,13 @@ export function useGlobalEvents({ refreshGroups, refreshActors, selectedGroupId 
       }
     }
 
+    function closeSSE() {
+      if (es) {
+        es.close();
+        es = null;
+      }
+    }
+
     function invalidateAndRefreshGroups() {
       api.invalidateGroupsRead();
       refreshGroupsRef.current();
@@ -117,6 +128,11 @@ export function useGlobalEvents({ refreshGroups, refreshActors, selectedGroupId 
     }
 
     function connectSSE() {
+      if (!shouldKeepGlobalEventsConnected(document.hidden)) {
+        closeSSE();
+        clearFallbackTimer();
+        return;
+      }
       if (es) return;
       es = new EventSource(api.withAuthToken("/api/v1/events/stream"));
       es.addEventListener("event", (e) => {
@@ -157,10 +173,23 @@ export function useGlobalEvents({ refreshGroups, refreshActors, selectedGroupId 
       };
     }
 
+    function handleVisibilityChange() {
+      if (!shouldKeepGlobalEventsConnected(document.hidden)) {
+        closeSSE();
+        clearFallbackTimer();
+        return;
+      }
+      errorCount = 0;
+      fallbackDelayMs = 10000;
+      connectSSE();
+    }
+
     connectSSE();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      es?.close();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      closeSSE();
       clearFallbackTimer();
       hasConnectedOnceRef.current = false;
     };

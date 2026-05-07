@@ -13,6 +13,20 @@ interface ScrollFadeProps {
   style?: CSSProperties;
 }
 
+const INTERACTIVE_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "select",
+  "textarea",
+  "[role='button']",
+  "[role='link']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[role='tab']",
+  "[data-scrollfade-no-drag]",
+].join(", ");
+
 /**
  * Wrapper that adds gradient fade masks on edges when content overflows.
  * Solves the "scrollbar-hide with no affordance" pattern used across the app.
@@ -106,6 +120,8 @@ export function ScrollFade({
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType === "mouse" && event.button !== 0) return;
       if (el.scrollWidth <= el.clientWidth) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR)) return;
       dragStateRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,

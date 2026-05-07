@@ -21,7 +21,7 @@ export function normalizeRuntimeVisibilityMode(
 export function isPetRuntimeActor(actor: Actor | null | undefined): boolean {
   const internalKind = String(actor?.internal_kind || "").trim().toLowerCase();
   const id = String(actor?.id || "").trim();
-  return internalKind === "pet" || id === "pet-peer";
+  return internalKind === "pet" || id === "pet-peer" || internalKind === "voice_secretary" || id === "voice-secretary";
 }
 
 export function isRuntimeSurfaceActorVisible(

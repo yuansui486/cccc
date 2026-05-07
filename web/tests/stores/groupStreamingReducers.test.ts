@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  completeStreamingEventsForActorPatch,
   reconcileStreamingMessagePatch,
   removeStreamingEventPatch,
   upsertStreamingActivityPatch,
@@ -75,6 +76,166 @@ describe("reconcileStreamingMessagePatch", () => {
     expect(((nextEvent?.data as { activities?: StreamingActivity[] } | undefined)?.activities || [])).toHaveLength(1);
     expect(((nextEvent?.data as { activities?: StreamingActivity[] } | undefined)?.activities || [])[0]?.summary).toBe("pwd");
     expect((patch?.streamingActivitiesByStreamId || {})["s-1"]).toHaveLength(1);
+  });
+
+  it("keeps the session live when an individual Codex message stream completes before the turn", () => {
+    const bucket = makeBucket({
+      streamingEvents: [
+        {
+          id: "stream:stream-commentary",
+          ts: "2026-04-09T10:00:00Z",
+          kind: "chat.message",
+          by: "coder",
+          _streaming: true,
+          data: {
+            text: "Commentary",
+            to: ["user"],
+            stream_id: "stream-commentary",
+            pending_event_id: "evt-codex",
+            pending_placeholder: false,
+            stream_phase: "commentary",
+            activities: [],
+          },
+        },
+      ],
+      streamingTextByStreamId: {
+        "stream-commentary": "Commentary",
+      },
+      replySessionsByPendingEventId: {
+        "evt-codex": {
+          pendingEventId: "evt-codex",
+          actorId: "coder",
+          currentStreamId: "stream-commentary",
+          phase: "streaming",
+          updatedAt: Date.parse("2026-04-09T10:00:00Z"),
+        },
+      },
+      pendingEventIdByStreamId: {
+        "stream-commentary": "evt-codex",
+      },
+    });
+
+    const patch = reconcileStreamingMessagePatch(bucket, "g-1", "coder", {
+      pendingEventId: "evt-codex",
+      streamId: "stream-commentary",
+      ts: "2026-04-09T10:00:01Z",
+      fullText: "Commentary",
+      eventText: "Commentary",
+      activities: [],
+      completed: true,
+      transientStream: true,
+      phase: "commentary",
+    });
+
+    expect(patch?.streamingEvents?.[0]?._streaming).toBe(false);
+    expect(patch?.replySessionsByPendingEventId?.["evt-codex"]).toMatchObject({
+      currentStreamId: "stream-commentary",
+      phase: "streaming",
+    });
+  });
+
+  it("completes sessions on turn completion even when their stream row already completed", () => {
+    const bucket = makeBucket({
+      streamingEvents: [
+        {
+          id: "stream:stream-final",
+          ts: "2026-04-09T10:00:10Z",
+          kind: "chat.message",
+          by: "coder",
+          _streaming: false,
+          data: {
+            text: "Final answer",
+            to: ["user"],
+            stream_id: "stream-final",
+            pending_event_id: "evt-codex",
+            pending_placeholder: false,
+            stream_phase: "final_answer",
+            activities: [],
+          },
+        },
+      ],
+      streamingTextByStreamId: {
+        "stream-final": "Final answer",
+      },
+      replySessionsByPendingEventId: {
+        "evt-codex": {
+          pendingEventId: "evt-codex",
+          actorId: "coder",
+          currentStreamId: "stream-final",
+          phase: "streaming",
+          updatedAt: Date.parse("2026-04-09T10:00:10Z"),
+        },
+      },
+      pendingEventIdByStreamId: {
+        "stream-final": "evt-codex",
+      },
+    });
+
+    const patch = completeStreamingEventsForActorPatch(bucket, "coder");
+
+    expect(patch?.streamingEvents?.[0]?._streaming).toBe(false);
+    expect(patch?.replySessionsByPendingEventId?.["evt-codex"]).toMatchObject({
+      currentStreamId: "stream-final",
+      phase: "completed",
+    });
+  });
+
+  it("does not reopen a completed Codex session when a late stream update arrives", () => {
+    const completedAt = Date.parse("2026-04-09T10:00:10Z");
+    const bucket = makeBucket({
+      streamingEvents: [
+        {
+          id: "stream:stream-final",
+          ts: "2026-04-09T10:00:10Z",
+          kind: "chat.message",
+          by: "coder",
+          _streaming: false,
+          data: {
+            text: "Final answer",
+            to: ["user"],
+            stream_id: "stream-final",
+            pending_event_id: "evt-codex",
+            pending_placeholder: false,
+            stream_phase: "final_answer",
+            activities: [],
+          },
+        },
+      ],
+      streamingTextByStreamId: {
+        "stream-final": "Final answer",
+      },
+      replySessionsByPendingEventId: {
+        "evt-codex": {
+          pendingEventId: "evt-codex",
+          actorId: "coder",
+          currentStreamId: "stream-final",
+          phase: "completed",
+          updatedAt: completedAt,
+        },
+      },
+      pendingEventIdByStreamId: {
+        "stream-final": "evt-codex",
+      },
+    });
+
+    const patch = reconcileStreamingMessagePatch(bucket, "g-1", "coder", {
+      pendingEventId: "evt-codex",
+      streamId: "stream-late-commentary",
+      ts: "2026-04-09T10:00:20Z",
+      fullText: "late commentary replay",
+      eventText: "late commentary replay",
+      activities: [],
+      completed: false,
+      transientStream: true,
+      phase: "commentary",
+    });
+
+    expect(patch?.replySessionsByPendingEventId?.["evt-codex"]).toMatchObject({
+      currentStreamId: "stream-final",
+      phase: "completed",
+      updatedAt: completedAt,
+    });
+    expect(patch?.streamingEvents).toHaveLength(2);
   });
 });
 

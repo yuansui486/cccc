@@ -31,21 +31,22 @@ def write_pty_state(group_id: str, actor_id: str, *, pid: int) -> None:
     )
 
 
-def remove_pty_state_if_pid(group_id: str, actor_id: str, *, pid: int) -> None:
+def remove_pty_state_if_pid(group_id: str, actor_id: str, *, pid: int) -> bool:
     p = pty_state_path(group_id, actor_id)
     if not p.exists():
-        return
+        return False
     doc = read_json(p)
     try:
         cur = int(doc.get("pid") or 0) if isinstance(doc, dict) else 0
     except Exception:
         cur = 0
     if cur and int(pid) and cur != int(pid):
-        return
+        return False
     try:
         p.unlink()
+        return True
     except Exception:
-        pass
+        return False
 
 
 def headless_state_path(group_id: str, actor_id: str) -> Path:

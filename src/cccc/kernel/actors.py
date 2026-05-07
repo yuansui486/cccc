@@ -29,6 +29,7 @@ _RESERVED_IDS = frozenset({
 })
 
 INTERNAL_KIND_PET = "pet"
+INTERNAL_KIND_VOICE_SECRETARY = "voice_secretary"
 
 
 def _normalize_capability_id_list(raw: Any) -> List[str]:
@@ -126,6 +127,10 @@ def is_pet_actor(actor: Dict[str, Any]) -> bool:
     return str(actor.get("internal_kind") or "").strip() == INTERNAL_KIND_PET
 
 
+def is_voice_secretary_actor(actor: Dict[str, Any]) -> bool:
+    return str(actor.get("internal_kind") or "").strip() == INTERNAL_KIND_VOICE_SECRETARY
+
+
 def list_visible_actors(group: Group) -> List[Dict[str, Any]]:
     return [actor for actor in list_actors(group) if isinstance(actor, dict) and not is_internal_actor(actor)]
 
@@ -141,13 +146,11 @@ def find_actor(group: Group, actor_id: str) -> Optional[Dict[str, Any]]:
 
 
 def get_effective_role(group: Group, actor_id: str) -> ActorRole:
-    """Get the effective role of an actor based on position.
-    
-    Role is automatically determined:
-    - First enabled actor in the list = foreman
-    - All other actors = peer
-    
-    This ensures every group always has a foreman (if it has any actors).
+    """Get the effective role of an actor based on stable group position.
+
+    Role is intentionally independent of the actor's running/enabled state.
+    Stopping the foreman must not make the first available peer become the
+    `@foreman` message target or inherit foreman-only privileges.
     """
     wanted = actor_id.strip()
     if not wanted:
@@ -157,37 +160,21 @@ def get_effective_role(group: Group, actor_id: str) -> ActorRole:
     if isinstance(actor, dict) and is_internal_actor(actor):
         return "peer"
 
-    actors = list_visible_actors(group)
-    for actor in actors:
+    for actor in list_visible_actors(group):
         if not isinstance(actor, dict):
-            continue
-        # Skip disabled actors when determining foreman
-        if not coerce_bool(actor.get("enabled"), default=True):
             continue
         aid = str(actor.get("id") or "").strip()
         if not aid:
             continue
-        # First enabled actor is foreman
-        if aid == wanted:
-            return "foreman"
-        else:
-            # We found the first enabled actor and it's not the wanted one
-            # So the wanted one must be a peer
-            break
+        return "foreman" if aid == wanted else "peer"
     
     return "peer"
 
 
 def find_foreman(group: Group) -> Optional[Dict[str, Any]]:
-    """Find the current foreman (first enabled actor).
-    
-    Note: This is now based on position, not stored role.
-    """
-    actors = list_visible_actors(group)
-    for actor in actors:
+    """Find the stable foreman actor (first visible actor)."""
+    for actor in list_visible_actors(group):
         if not isinstance(actor, dict):
-            continue
-        if not coerce_bool(actor.get("enabled"), default=True):
             continue
         aid = str(actor.get("id") or "").strip()
         if aid:
@@ -212,8 +199,8 @@ def add_actor(
 ) -> Dict[str, Any]:
     """Add a new actor to the group.
     
-    Role is automatically determined by position:
-    - If this is the first enabled actor, it becomes foreman
+    Role is automatically determined by stable position:
+    - If this is the first visible actor, it becomes foreman
     - Otherwise, it's a peer
     """
     # Validate actor ID using new rules (supports Unicode)

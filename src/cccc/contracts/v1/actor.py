@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...util.time import utc_now_iso
 
 
-# ActorRole is now determined automatically by position in the actors list
-# First enabled actor = foreman, rest = peer
+# ActorRole is now determined automatically by stable position in the actors list
+# First visible actor = foreman, rest = peer; enabled/running state does not move @foreman.
 # Kept for type hints and backward compatibility
 ActorRole = Literal["foreman", "peer"]
 ActorSubmit = Literal["enter", "newline", "none"]
@@ -24,7 +24,7 @@ AgentRuntime = Literal[
     "neovate",
     "custom",
 ]
-InternalActorKind = Literal["pet"]
+InternalActorKind = Literal["pet", "voice_secretary"]
 
 # Group state controls automation/runtime behavior.
 # - active/idle/paused are logical workflow states
@@ -35,8 +35,8 @@ GroupState = Literal["active", "idle", "paused", "stopped"]
 class Actor(BaseModel):
     v: int = 1
     id: str
-    # role is now auto-determined by position, but kept for backward compat
-    # First enabled actor in list = foreman, rest = peer
+    # role is now auto-determined by stable position, but kept for backward compat.
+    # First visible actor in list = foreman, rest = peer.
     role: Optional[ActorRole] = None  # Deprecated: ignored, auto-determined
     title: str = ""
     command: List[str] = Field(default_factory=list)

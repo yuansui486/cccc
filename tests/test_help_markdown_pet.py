@@ -95,6 +95,56 @@ Actor-only note.
         self.assertIn("Actor-only note.", selected)
         self.assertIn("Pet-only persona.", selected)
 
+    def test_select_help_markdown_can_include_voice_secretary_block(self) -> None:
+        markdown = """
+Common guidance.
+
+## @voice_secretary
+
+Voice-only operating contract.
+
+## @actor: voice-secretary
+
+Actor note.
+""".strip()
+
+        normal = _select_help_markdown(markdown, role="peer", actor_id="voice-secretary")
+        selected = _select_help_markdown(
+            markdown,
+            role="peer",
+            actor_id="voice-secretary",
+            include_voice_secretary=True,
+        )
+
+        self.assertIn("Common guidance.", normal)
+        self.assertNotIn("Voice-only operating contract.", normal)
+        self.assertIn("Voice-only operating contract.", selected)
+        self.assertIn("Actor note.", selected)
+
+    def test_voice_secretary_selector_hides_peer_role_block(self) -> None:
+        markdown = """
+Common guidance.
+
+## @role: peer
+
+Peer-only workflow.
+
+## @voice_secretary
+
+Voice-only operating contract.
+""".strip()
+
+        selected = _select_help_markdown(
+            markdown,
+            role="voice_secretary",
+            actor_id="voice-secretary",
+            include_voice_secretary=True,
+        )
+
+        self.assertIn("Common guidance.", selected)
+        self.assertIn("Voice-only operating contract.", selected)
+        self.assertNotIn("Peer-only workflow.", selected)
+
     def test_roundtrip_fixture_matches_expected_shape(self) -> None:
         markdown = _FIXTURE.read_text(encoding="utf-8")
 

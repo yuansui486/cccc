@@ -9,7 +9,16 @@ import type {
 } from "../../../types";
 import * as api from "../../../services/api";
 import { ProjectedBrowserSurfacePanel } from "../../browser/ProjectedBrowserSurfacePanel";
-import { cardClass, inputClass } from "./types";
+import {
+  inputClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
+} from "./types";
 import { resolveNotebookSpacesAfterLoad, shouldRefreshNotebookSpaces } from "./groupSpaceState";
 
 interface GroupSpaceTabProps {
@@ -149,16 +158,14 @@ export function GroupSpaceTab({ isDark: _isDark, groupId, isActive = true }: Gro
   }, [connectionConnected, connectionRunning, connectionState, t]);
 
   const connectionStatusTone = useMemo(() => {
-    if (connectionRunning) return "text-sky-600 dark:text-sky-400";
+    if (connectionRunning) return "text-[rgb(35,36,37)] dark:text-white";
     if (connectionConnected) return "text-emerald-600 dark:text-emerald-400";
     if (connectionState === "failed") return "text-amber-600 dark:text-amber-400";
     return "text-[var(--color-text-secondary)]";
   }, [connectionConnected, connectionRunning, connectionState]);
 
-  const utilityButtonClass =
-    "glass-btn inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-border-subtle)] px-3.5 py-2.5 text-sm font-medium min-h-[44px] text-[var(--color-text-secondary)] disabled:opacity-50 disabled:cursor-not-allowed";
-  const primaryUtilityButtonClass =
-    "glass-btn-accent inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-medium min-h-[44px] text-[var(--color-text-primary)] disabled:opacity-50 disabled:cursor-not-allowed";
+  const utilityButtonClass = secondaryButtonClass();
+  const primaryUtilityButtonClass = primaryButtonClass(false);
   const dangerUtilityButtonClass =
     "inline-flex items-center justify-center gap-2 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3.5 py-2.5 text-sm font-medium min-h-[44px] text-rose-700 dark:text-rose-300 hover:bg-rose-500/16 disabled:opacity-50 disabled:cursor-not-allowed";
   const compactDangerButtonClass =
@@ -451,13 +458,13 @@ export function GroupSpaceTab({ isDark: _isDark, groupId, isActive = true }: Gro
     const headerTone: "good" | "neutral" | "warn" = laneState === "active" ? "good" : laneState === "saved" ? "warn" : "neutral";
 
     return (
-      <div key={lane} className={cardClass()}>
+      <div key={lane} className={settingsWorkspacePanelClass(_isDark)}>
         <div>
           <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t(titleKey)}</div>
           <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">{t(hintKey)}</div>
         </div>
 
-        <div className="mt-3 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3.5 py-3">
+        <div className={`mt-3 ${settingsWorkspaceSoftPanelClass(_isDark)}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">{laneTitleLabel}</div>
@@ -553,163 +560,167 @@ export function GroupSpaceTab({ isDark: _isDark, groupId, isActive = true }: Gro
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t("groupSpace.title")}</h3>
-          <p className="text-xs mt-1 max-w-3xl text-[var(--color-text-muted)]">{t("groupSpace.description")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void loadAll()}
-          disabled={actionBusy || loading}
-          className={utilityButtonClass}
-        >
-          <RefreshIcon size={16} />
-          {loading ? t("common:loading") : t("groupSpace.refresh")}
-        </button>
-      </div>
-
-      <div className={cardClass()}>
-        <div className="flex items-start justify-between gap-3">
+    <div className="space-y-5">
+      <section className={settingsWorkspaceShellClass(_isDark)}>
+        <div className={settingsWorkspaceHeaderClass(_isDark)}>
           <div>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.accountTitle")}</div>
-            <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">{t("groupSpace.accountHint")}</div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.title")}</h3>
+            <p className="mt-1 max-w-3xl text-xs text-[var(--color-text-muted)]">{t("groupSpace.description")}</p>
           </div>
-          <div className={`text-xs font-medium ${connectionStatusTone}`}>{connectionStatusText}</div>
+          <button
+            type="button"
+            onClick={() => void loadAll()}
+            disabled={actionBusy || loading}
+            className={secondaryButtonClass("sm")}
+          >
+            <RefreshIcon size={16} />
+            {loading ? t("common:loading") : t("groupSpace.refresh")}
+          </button>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          {connectionRunning ? (
-            <button
-              type="button"
-              onClick={() => void handleCancelConnect()}
-              disabled={actionBusy}
-              className={dangerUtilityButtonClass}
-            >
-              <CloseIcon size={16} />
-              {t("groupSpace.cancelConnect")}
-            </button>
-          ) : !connectionConnected ? (
-            <button
-              type="button"
-              onClick={() => void handleStartConnect(false)}
-              disabled={actionBusy}
-              className={primaryUtilityButtonClass}
-            >
-              <GlobeIcon size={16} />
-              {t("groupSpace.connectGoogle")}
-            </button>
-          ) : (
-            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => void handleStartConnect(true)}
-                disabled={actionBusy}
-                className={utilityButtonClass}
-              >
-                <RefreshIcon size={16} />
-                {t("groupSpace.switchGoogle")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDisconnect()}
-                disabled={actionBusy}
-                className={dangerUtilityButtonClass}
-              >
-                <PowerIcon size={16} />
-                {t("groupSpace.disconnectGoogle")}
-              </button>
+        <div className={settingsWorkspaceBodyClass}>
+          <div className={settingsWorkspacePanelClass(_isDark)}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.accountTitle")}</div>
+                <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">{t("groupSpace.accountHint")}</div>
+              </div>
+              <div className={`text-xs font-medium ${connectionStatusTone}`}>{connectionStatusText}</div>
             </div>
-          )}
-        </div>
 
-        {connectionConnected && !connectionRunning ? (
-          <div className="mt-3 text-xs text-[var(--color-text-tertiary)]">
-            {t("groupSpace.disconnectBehaviorHint")}
-          </div>
-        ) : null}
-
-        {authFlow?.message ? (
-          <div className="mt-3 text-xs text-[var(--color-text-tertiary)]">{String(authFlow.message)}</div>
-        ) : null}
-        {authFlow?.error?.message ? (
-          <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{String(authFlow.error.message)}</div>
-        ) : null}
-        {connectionRunning &&
-        String(authFlow?.delivery || "").trim() === "projected_browser" &&
-        Boolean(authFlow?.projected_browser?.active) ? (
-          <div className="mt-4">
-            <ProjectedBrowserSurfacePanel
-              key={String(authFlow?.session_id || authFlow?.started_at || "notebooklm-auth")}
-              isDark={_isDark}
-              refreshNonce={0}
-              viewportClassName="h-[68vh] min-h-[460px] max-h-[780px] w-full sm:h-[72vh] sm:min-h-[560px]"
-              fallbackUrl="https://notebooklm.google.com/"
-              labels={{
-                starting: t("groupSpace.projectedAuthStarting"),
-                waiting: t("groupSpace.projectedAuthWaiting"),
-                ready: t("groupSpace.projectedAuthReady"),
-                failed: t("groupSpace.projectedAuthFailed"),
-                closed: t("groupSpace.projectedAuthClosed"),
-                reconnecting: t("groupSpace.projectedAuthReconnecting"),
-                reconnect: t("groupSpace.projectedAuthReconnect"),
-                back: t("groupSpace.projectedAuthBack"),
-                frameAlt: t("groupSpace.projectedAuthFrameAlt"),
-              }}
-              webSocketUrl={api.getGroupSpaceProviderAuthBrowserWebSocketUrl(provider)}
-              loadSession={() => api.fetchGroupSpaceProviderAuthBrowserSession(provider)}
-            />
-          </div>
-        ) : null}
-      </div>
-
-      {showNotebookSection ? (
-        <>
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {NOTEBOOK_LANES.map((lane) => renderNotebookCard(lane))}
-          </div>
-
-          <div className={cardClass()}>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.summaryTitle")}</div>
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("groupSpace.summaryGoogle")}</div>
-                <div className={`mt-1 text-sm font-medium ${connectionStatusTone}`}>{connectionStatusText}</div>
-              </div>
-              <div className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("groupSpace.summaryWork")}</div>
-                <div className={`mt-1 text-sm font-medium ${workLaneState === "active" ? "text-emerald-600 dark:text-emerald-400" : workLaneState === "saved" ? "text-amber-600 dark:text-amber-400" : "text-[var(--color-text-primary)]"}`}>
-                  {laneStatusText(workLaneState, t)}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {connectionRunning ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCancelConnect()}
+                  disabled={actionBusy}
+                  className={dangerUtilityButtonClass}
+                >
+                  <CloseIcon size={16} />
+                  {t("groupSpace.cancelConnect")}
+                </button>
+              ) : !connectionConnected ? (
+                <button
+                  type="button"
+                  onClick={() => void handleStartConnect(false)}
+                  disabled={actionBusy}
+                  className={primaryUtilityButtonClass}
+                >
+                  <GlobeIcon size={16} />
+                  {t("groupSpace.connectGoogle")}
+                </button>
+              ) : (
+                <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleStartConnect(true)}
+                    disabled={actionBusy}
+                    className={utilityButtonClass}
+                  >
+                    <RefreshIcon size={16} />
+                    {t("groupSpace.switchGoogle")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDisconnect()}
+                    disabled={actionBusy}
+                    className={dangerUtilityButtonClass}
+                  >
+                    <PowerIcon size={16} />
+                    {t("groupSpace.disconnectGoogle")}
+                  </button>
                 </div>
-              </div>
-              <div className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("groupSpace.summaryMemory")}</div>
-                <div className={`mt-1 text-sm font-medium ${memoryLaneState === "active" ? "text-emerald-600 dark:text-emerald-400" : memoryLaneState === "saved" ? "text-amber-600 dark:text-amber-400" : "text-[var(--color-text-primary)]"}`}>
-                  {laneStatusText(memoryLaneState, t)}
-                </div>
-              </div>
+              )}
             </div>
-            {connectionWarning ? (
-              <div className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-                {t("groupSpace.summaryWarning")}: {connectionWarning}
+
+            {connectionConnected && !connectionRunning ? (
+              <div className="mt-3 text-xs text-[var(--color-text-tertiary)]">
+                {t("groupSpace.disconnectBehaviorHint")}
+              </div>
+            ) : null}
+
+            {authFlow?.message ? (
+              <div className="mt-3 text-xs text-[var(--color-text-tertiary)]">{String(authFlow.message)}</div>
+            ) : null}
+            {authFlow?.error?.message ? (
+              <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{String(authFlow.error.message)}</div>
+            ) : null}
+            {connectionRunning &&
+            String(authFlow?.delivery || "").trim() === "projected_browser" &&
+            Boolean(authFlow?.projected_browser?.active) ? (
+              <div className="mt-4">
+                <ProjectedBrowserSurfacePanel
+                  key={String(authFlow?.session_id || authFlow?.started_at || "notebooklm-auth")}
+                  isDark={_isDark}
+                  refreshNonce={0}
+                  viewportClassName="h-[68vh] min-h-[460px] max-h-[780px] w-full sm:h-[72vh] sm:min-h-[560px]"
+                  fallbackUrl="https://notebooklm.google.com/"
+                  labels={{
+                    starting: t("groupSpace.projectedAuthStarting"),
+                    waiting: t("groupSpace.projectedAuthWaiting"),
+                    ready: t("groupSpace.projectedAuthReady"),
+                    failed: t("groupSpace.projectedAuthFailed"),
+                    closed: t("groupSpace.projectedAuthClosed"),
+                    reconnecting: t("groupSpace.projectedAuthReconnecting"),
+                    reconnect: t("groupSpace.projectedAuthReconnect"),
+                    back: t("groupSpace.projectedAuthBack"),
+                    frameAlt: t("groupSpace.projectedAuthFrameAlt"),
+                  }}
+                  webSocketUrl={api.getGroupSpaceProviderAuthBrowserWebSocketUrl(provider)}
+                  loadSession={() => api.fetchGroupSpaceProviderAuthBrowserSession(provider)}
+                />
               </div>
             ) : null}
           </div>
-        </>
-      ) : (
-        <div className={cardClass()}>
-          <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.notebookSectionLockedTitle")}</div>
-          <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-            {connectionRunning
-              ? t("groupSpace.notebookSectionLockedConnecting")
-              : t("groupSpace.notebookSectionLockedDisconnected")}
-          </div>
-        </div>
-      )}
 
-      {err ? <div className="text-xs text-rose-600 dark:text-rose-400">{err}</div> : null}
-      {hint ? <div className="text-xs text-emerald-600 dark:text-emerald-400">{hint}</div> : null}
+          {showNotebookSection ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {NOTEBOOK_LANES.map((lane) => renderNotebookCard(lane))}
+              </div>
+
+              <div className={settingsWorkspacePanelClass(_isDark)}>
+                <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.summaryTitle")}</div>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("groupSpace.summaryGoogle")}</div>
+                    <div className={`mt-1 text-sm font-medium ${connectionStatusTone}`}>{connectionStatusText}</div>
+                  </div>
+                  <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("groupSpace.summaryWork")}</div>
+                    <div className={`mt-1 text-sm font-medium ${workLaneState === "active" ? "text-emerald-600 dark:text-emerald-400" : workLaneState === "saved" ? "text-amber-600 dark:text-amber-400" : "text-[var(--color-text-primary)]"}`}>
+                      {laneStatusText(workLaneState, t)}
+                    </div>
+                  </div>
+                  <div className={settingsWorkspaceSoftPanelClass(_isDark)}>
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">{t("groupSpace.summaryMemory")}</div>
+                    <div className={`mt-1 text-sm font-medium ${memoryLaneState === "active" ? "text-emerald-600 dark:text-emerald-400" : memoryLaneState === "saved" ? "text-amber-600 dark:text-amber-400" : "text-[var(--color-text-primary)]"}`}>
+                      {laneStatusText(memoryLaneState, t)}
+                    </div>
+                  </div>
+                </div>
+                {connectionWarning ? (
+                  <div className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                    {t("groupSpace.summaryWarning")}: {connectionWarning}
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className={settingsWorkspacePanelClass(_isDark)}>
+              <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("groupSpace.notebookSectionLockedTitle")}</div>
+              <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+                {connectionRunning
+                  ? t("groupSpace.notebookSectionLockedConnecting")
+                  : t("groupSpace.notebookSectionLockedDisconnected")}
+              </div>
+            </div>
+          )}
+
+          {err ? <div className="text-xs text-rose-600 dark:text-rose-400">{err}</div> : null}
+          {hint ? <div className="text-xs text-emerald-600 dark:text-emerald-400">{hint}</div> : null}
+        </div>
+      </section>
     </div>
   );
 }

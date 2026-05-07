@@ -223,7 +223,7 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertFalse(resp.ok)
         self.assertEqual(getattr(resp.error, "code", ""), "group_settings_update_failed")
         self.assertIn("foreman", str(getattr(resp.error, "message", "")))
-        self.assertEqual(((getattr(resp.error, "details", {}) or {}).get("reason") or ""), "desktop_pet_requires_enabled_foreman")
+        self.assertEqual(((getattr(resp.error, "details", {}) or {}).get("reason") or ""), "desktop_pet_requires_foreman")
         group = load_group(group_id)
         assert group is not None
         features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}

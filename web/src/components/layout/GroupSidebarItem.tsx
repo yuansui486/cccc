@@ -37,19 +37,19 @@ export function GroupSidebarItem({
       <button
         className={classNames(
           "w-11 h-11 rounded-xl flex items-center justify-center transition-all relative",
-          isActive ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105"
+          isActive ? "glass-group-item-active" : "glass-group-item hover:scale-105"
         )}
         onClick={onSelect}
         onMouseEnter={onWarm}
         onFocus={onWarm}
         title={group.title || gid}
       >
-        <span
-          className={classNames(
-            "text-sm font-semibold",
-            isActive ? "text-cyan-700 dark:text-cyan-300" : "text-[var(--color-text-secondary)]"
-          )}
-        >
+          <span
+            className={classNames(
+              "text-sm font-semibold",
+              isActive ? "text-[rgb(35,36,37)] dark:text-white" : "text-[var(--color-text-secondary)]"
+            )}
+          >
           {initial}
         </span>
         <span
@@ -67,7 +67,7 @@ export function GroupSidebarItem({
       <div
         className={classNames(
           "w-full px-3 py-3 rounded-xl transition-all min-h-[48px] flex items-center gap-2 relative",
-          isActive ? "glass-group-item-active glow-pulse" : "glass-group-item",
+          isActive ? "glass-group-item-active" : "glass-group-item",
           isArchived && !isActive && "opacity-90"
         )}
         role="button"
@@ -90,21 +90,13 @@ export function GroupSidebarItem({
               className={classNames(
                 "text-sm font-medium truncate",
                 isActive
-                  ? "text-cyan-700 dark:text-cyan-300"
+                  ? "text-[rgb(35,36,37)] dark:text-white"
                   : "text-[var(--color-text-primary)] group-hover/item:text-[var(--color-text-primary)]"
               )}
             >
               {group.title || gid}
             </span>
           </div>
-          <span
-            className={classNames(
-              "text-[9px] px-2.5 py-1 rounded-full font-semibold flex-shrink-0 uppercase",
-              status.pillClass
-            )}
-          >
-            {status.label}
-          </span>
         </div>
 
         {onMenuAction && menuActionLabel && (
@@ -112,10 +104,11 @@ export function GroupSidebarItem({
             <button
               type="button"
               className={classNames(
-                "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors glass-btn",
-                isActive
-                  ? "text-cyan-700 dark:text-cyan-300"
-                  : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent bg-transparent transition-all duration-150",
+                "text-[var(--color-text-tertiary)] opacity-0 md:group-hover/item:opacity-100 focus-visible:opacity-100",
+                menuOpen && "opacity-100 bg-[var(--glass-tab-bg)] border-[var(--glass-border-subtle)] text-[var(--color-text-primary)] shadow-sm",
+                !menuOpen && isActive && "opacity-100 text-[rgb(35,36,37)] dark:text-white",
+                !menuOpen && "hover:bg-[var(--glass-tab-bg-hover)] hover:border-[var(--glass-border-subtle)] hover:text-[var(--color-text-primary)]"
               )}
               aria-label={menuAriaLabel || menuActionLabel}
               title={menuAriaLabel || menuActionLabel}

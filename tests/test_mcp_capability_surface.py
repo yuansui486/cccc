@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cccc.kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_TOOL_NAMES
+from cccc.kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_TOOL_NAMES, SPECIALIZED_CORE_TOOL_NAMES
 from cccc.ports.mcp.toolspecs import MCP_TOOLS
 
 
@@ -15,11 +15,16 @@ class TestMcpCapabilitySurface(unittest.TestCase):
             for pack in BUILTIN_CAPABILITY_PACKS.values()
             for tool_name in (pack.get("tool_names") or ())
         }
+        specialized_core = {str(x) for x in SPECIALIZED_CORE_TOOL_NAMES}
 
         self.assertTrue(core.issubset(names), msg=f"core tools missing: {sorted(core - names)}")
         self.assertTrue(pack_union.issubset(names), msg=f"pack tools missing: {sorted(pack_union - names)}")
+        self.assertTrue(
+            specialized_core.issubset(names),
+            msg=f"specialized core tools missing: {sorted(specialized_core - names)}",
+        )
 
-        missing_mapping = sorted(names - core - pack_union)
+        missing_mapping = sorted(names - core - pack_union - specialized_core)
         self.assertEqual(
             missing_mapping,
             [],

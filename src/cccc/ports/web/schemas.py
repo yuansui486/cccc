@@ -53,6 +53,23 @@ class SendCrossGroupRequest(BaseModel):
     reply_required: bool = False
 
 
+class TrackedSendRequest(BaseModel):
+    title: str
+    text: str
+    by: str = Field(default="user")
+    to: list[str] = Field(default_factory=list)
+    outcome: str = Field(default="")
+    checklist: list[dict[str, Any]] = Field(default_factory=list)
+    assignee: str = Field(default="")
+    waiting_on: Literal["none", "user", "actor", "external"] | str = "actor"
+    handoff_to: str = Field(default="")
+    notes: str = Field(default="")
+    priority: Literal["normal", "attention"] = "normal"
+    reply_required: bool = True
+    idempotency_key: str = Field(default="")
+    refs: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ReplyRequest(BaseModel):
     text: str
     by: str = Field(default="user")
@@ -82,7 +99,7 @@ WEB_MAX_TEMPLATE_BYTES = 2 * 1024 * 1024  # safety bound for template uploads
 
 class ActorCreateRequest(BaseModel):
     actor_id: str
-    # Note: role is auto-determined by position (first enabled = foreman)
+    # Note: role is auto-determined by stable position (first visible actor = foreman)
     runner: RunnerKind = Field(default_factory=_default_runner_kind)
     runtime: AgentRuntime = Field(default="codex")
     title: str = Field(default="")
@@ -210,6 +227,84 @@ class GroupSettingsRequest(BaseModel):
     desktop_pet_enabled: Optional[bool] = None
     capability_defaults: Optional[Dict[str, Any]] = None
 
+    by: str = Field(default="user")
+
+
+class AssistantSettingsUpdateRequest(BaseModel):
+    enabled: Optional[bool] = None
+    config: Optional[Dict[str, Any]] = None
+    by: str = Field(default="user")
+
+
+class AssistantStatusUpdateRequest(BaseModel):
+    assistant_id: Optional[str] = None
+    lifecycle: Literal["disabled", "idle", "running", "working", "waiting", "failed"]
+    health: Dict[str, Any] = Field(default_factory=dict)
+    by: str = Field(default="user")
+
+
+class AssistantVoiceTranscriptionRequest(BaseModel):
+    audio_base64: str = Field(default="")
+    mime_type: str = Field(default="application/octet-stream")
+    language: str = Field(default="")
+    by: str = Field(default="user")
+
+
+class AssistantVoiceTranscriptSegmentRequest(BaseModel):
+    session_id: str = Field(default="")
+    segment_id: str = Field(default="")
+    document_path: str = Field(default="")
+    text: str = Field(default="")
+    language: str = Field(default="")
+    is_final: bool = Field(default=True)
+    flush: bool = Field(default=False)
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    by: str = Field(default="user")
+
+
+class AssistantVoiceDocumentSaveRequest(BaseModel):
+    document_path: str = Field(default="")
+    workspace_path: str = Field(default="")
+    title: str = Field(default="")
+    content: Optional[str] = None
+    status: str = Field(default="")
+    create_new: bool = Field(default=False)
+    by: str = Field(default="user")
+
+
+class AssistantVoiceDocumentInstructionRequest(BaseModel):
+    document_path: str = Field(default="")
+    instruction: str = Field(default="")
+    source_text: str = Field(default="")
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    by: str = Field(default="user")
+
+
+class AssistantVoiceInputRequest(BaseModel):
+    kind: str = Field(default="")
+    text: str = Field(default="")
+    instruction: str = Field(default="")
+    source_text: str = Field(default="")
+    document_path: str = Field(default="")
+    voice_transcript: str = Field(default="")
+    composer_text: str = Field(default="")
+    request_id: str = Field(default="")
+    operation: str = Field(default="")
+    composer_context: Dict[str, Any] = Field(default_factory=dict)
+    composer_snapshot_hash: str = Field(default="")
+    language: str = Field(default="")
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    by: str = Field(default="user")
+
+
+class AssistantVoicePromptDraftAckRequest(BaseModel):
+    request_id: str = Field(default="")
+    status: Literal["applied", "dismissed", "stale"]
+    by: str = Field(default="user")
+
+
+class AssistantVoiceAskRequestsClearRequest(BaseModel):
+    keep_active: bool = Field(default=False)
     by: str = Field(default="user")
 
 
@@ -418,7 +513,6 @@ class IMSetRequest(BaseModel):
     wecom_secret: str = ""
     # Weixin fields
     weixin_account_id: str = ""
-    weixin_command: str = ""
 
 
 class IMActionRequest(BaseModel):

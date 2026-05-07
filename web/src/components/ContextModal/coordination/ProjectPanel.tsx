@@ -1,5 +1,5 @@
 import type { ProjectMdInfo } from "../../../types";
-import { MarkdownRenderer } from "../../MarkdownRenderer";
+import { LazyMarkdownRenderer } from "../../LazyMarkdownRenderer";
 import { classNames } from "../../../utils/classNames";
 import type { ContextTranslator } from "../model";
 import type { ContextModalUi } from "../ui";
@@ -117,7 +117,12 @@ export function ProjectPanel({
           </>
         ) : projectMd?.found && projectMd.content ? (
           <div className={markdownContainerClass}>
-            <MarkdownRenderer content={String(projectMd.content)} isDark={isDark} className={classNames("text-sm", ui.subtleTextClass)} />
+            <LazyMarkdownRenderer
+              content={String(projectMd.content)}
+              isDark={isDark}
+              className={classNames("text-sm", ui.subtleTextClass)}
+              fallback={<div className={classNames("whitespace-pre-wrap break-words text-sm", ui.subtleTextClass)}>{String(projectMd.content)}</div>}
+            />
           </div>
         ) : (
           <div className={classNames("rounded-xl border border-dashed px-3 py-4 text-sm", "border-[var(--glass-border-subtle)] text-[var(--color-text-muted)]")}>

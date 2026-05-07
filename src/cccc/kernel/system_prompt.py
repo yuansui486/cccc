@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from ..util.conv import coerce_bool
-from .actors import get_effective_role, is_pet_actor, list_visible_actors
+from .actors import get_effective_role, is_pet_actor, is_voice_secretary_actor, list_visible_actors
 from .group import Group
 from .prompt_files import DEFAULT_PREAMBLE_BODY, PREAMBLE_FILENAME, read_group_prompt_file
 
@@ -175,6 +175,10 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
         from .pet_prompt import render_pet_system_prompt
 
         return render_pet_system_prompt(group, actor=actor)
+    if is_voice_secretary_actor(actor):
+        from .voice_secretary_prompt import render_voice_secretary_actor_system_prompt
+
+        return render_voice_secretary_actor_system_prompt(group, actor=actor)
     role = get_effective_role(group, actor_id)
     runner = str(actor.get("runner") or "pty").strip()
     runtime_name = str(actor.get("runtime") or "").strip()

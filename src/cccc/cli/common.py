@@ -432,6 +432,14 @@ def _ensure_daemon_running() -> bool:
             return True
     return False
 
+def _daemon_response_allows_local_fallback(resp: dict[str, Any]) -> bool:
+    error = resp.get("error") if isinstance(resp.get("error"), dict) else {}
+    return str(error.get("code") or "").strip() == "daemon_unavailable"
+
+def _return_daemon_rejection(resp: dict[str, Any]) -> int:
+    _print_json(resp)
+    return 2
+
 def _resolve_group_id(explicit: str) -> str:
     gid = (explicit or "").strip()
     if gid:

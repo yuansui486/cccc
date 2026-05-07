@@ -125,10 +125,10 @@ function WorkspaceList({
                   className={classNames(
                     "flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors",
                     isDark ? "text-slate-200 hover:bg-slate-900/70" : "text-gray-800 hover:bg-gray-50",
-                    isSelected && (isDark ? "bg-cyan-500/10 text-cyan-100" : "bg-cyan-50 text-cyan-800"),
+                    isSelected && (isDark ? "bg-white/[0.08] text-white" : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"),
                   )}
                 >
-                  <span className={classNames("w-5 text-center text-xs", item.is_dir ? "text-blue-500" : isDark ? "text-slate-500" : "text-gray-400")}>
+                  <span className={classNames("w-5 text-center text-xs", item.is_dir ? (isDark ? "text-white" : "text-[rgb(35,36,37)]") : isDark ? "text-slate-500" : "text-gray-400")}>
                     {item.is_dir ? "DIR" : "FILE"}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{item.name}</span>
@@ -351,7 +351,7 @@ export function PresentationPinModal({
                   className={classNames(
                     "rounded-full px-4 py-2 text-sm font-medium transition-colors",
                     active
-                      ? "bg-blue-600 text-white shadow-sm"
+                      ? isDark ? "border border-white/12 bg-white/[0.08] text-white shadow-sm" : "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] shadow-sm"
                       : isDark
                         ? "text-slate-300 hover:bg-slate-800/70"
                         : "text-gray-700 hover:bg-white",
@@ -379,8 +379,8 @@ export function PresentationPinModal({
                 className={classNames(
                   "w-full rounded-2xl border px-4 py-3 text-sm outline-none transition-colors",
                   isDark
-                    ? "border-white/10 bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/50"
-                    : "border-black/10 bg-white text-gray-900 placeholder:text-gray-400 focus:border-cyan-500/50",
+                    ? "border-white/10 bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:border-white/30"
+                    : "border-black/10 bg-white text-gray-900 placeholder:text-gray-400 focus:border-black/20",
                 )}
               />
             </label>
@@ -463,8 +463,8 @@ export function PresentationPinModal({
               className={classNames(
                 "w-full rounded-2xl border px-4 py-3 text-sm outline-none transition-colors",
                 isDark
-                  ? "border-white/10 bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/50"
-                  : "border-black/10 bg-white text-gray-900 placeholder:text-gray-400 focus:border-cyan-500/50",
+                  ? "border-white/10 bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:border-white/30"
+                  : "border-black/10 bg-white text-gray-900 placeholder:text-gray-400 focus:border-black/20",
               )}
             />
           </label>
@@ -483,8 +483,8 @@ export function PresentationPinModal({
               className={classNames(
                 "w-full rounded-2xl border px-4 py-3 text-sm outline-none transition-colors",
                 isDark
-                  ? "border-white/10 bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/50"
-                  : "border-black/10 bg-white text-gray-900 placeholder:text-gray-400 focus:border-cyan-500/50",
+                  ? "border-white/10 bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:border-white/30"
+                  : "border-black/10 bg-white text-gray-900 placeholder:text-gray-400 focus:border-black/20",
               )}
             />
           </label>
@@ -518,7 +518,7 @@ export function PresentationPinModal({
             disabled={busy}
             className={classNames(
               "rounded-full px-4 py-2 text-sm font-medium text-white transition-colors",
-              busy ? "bg-blue-500/70" : "bg-blue-600 hover:bg-blue-500",
+              busy ? "bg-black/40 dark:bg-white/40" : "border border-[rgb(35,36,37)] bg-[rgb(35,36,37)] hover:bg-black dark:border-white dark:bg-white dark:text-[rgb(35,36,37)] dark:hover:bg-white/92",
             )}
           >
             {replaceMode

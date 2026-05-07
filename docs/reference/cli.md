@@ -129,9 +129,20 @@ Send a message.
 
 ```bash
 cccc send "Hello"                  # No --to: default recipient policy applies (default: foreman)
-cccc send "Hello" --to @all        # Explicit broadcast
 cccc send "Hello" --to @foreman    # Send to foreman
 cccc send "Hello" --to peer-1      # Send to specific actor
+cccc send "Announcement" --to @all # Explicit broadcast
+```
+
+### `cccc tracked-send`
+
+Create a task and send one linked delegation message.
+
+```bash
+cccc tracked-send "Please implement this and reply with validation evidence." \
+  --to peer-1 \
+  --title "Implement feature" \
+  --outcome "Feature is implemented and validation evidence is reported"
 ```
 
 ### `cccc reply`
@@ -235,6 +246,21 @@ cccc setup --runtime claude        # Auto-configure for Claude Code
 cccc setup --runtime codex         # Auto-configure for Codex
 cccc setup --runtime kimi          # Auto-configure for Kimi CLI
 ```
+
+### `cccc update`
+
+Upgrade CCCC in the current Python environment.
+
+```bash
+cccc update                        # Upgrade using the detected channel
+cccc update --channel stable       # Force the stable PyPI channel
+cccc update --channel rc           # Force the TestPyPI RC channel
+cccc update --check                # Show install detection + planned command
+```
+
+Notes:
+- The default channel follows the detected install metadata when possible, then falls back to `stable`.
+- Editable and local-path installs are reported but not updated automatically.
 
 ## Web Commands
 

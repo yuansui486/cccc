@@ -14,20 +14,14 @@ import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
 import { IMConfigDraft, saveAndStartIMBridge, saveIMConfigDraft } from "./modals/settings/imBridgeConfig";
 import { useModalA11y } from "../hooks/useModalA11y";
+import { copyTextToClipboard } from "../utils/copy";
 
 const AutomationTab = lazy(() => import("./modals/settings/AutomationTab").then((module) => ({ default: module.AutomationTab })));
-const DeliveryTab = lazy(() => import("./modals/settings/DeliveryTab").then((module) => ({ default: module.DeliveryTab })));
-const MessagingTab = lazy(() => import("./modals/settings/MessagingTab").then((module) => ({ default: module.MessagingTab })));
 const IMBridgeTab = lazy(() => import("./modals/settings/IMBridgeTab").then((module) => ({ default: module.IMBridgeTab })));
-const TranscriptTab = lazy(() => import("./modals/settings/TranscriptTab").then((module) => ({ default: module.TranscriptTab })));
 const GuidanceTab = lazy(() => import("./modals/settings/GuidanceTab").then((module) => ({ default: module.GuidanceTab })));
-const GroupSpaceTab = lazy(() => import("./modals/settings/GroupSpaceTab").then((module) => ({ default: module.GroupSpaceTab })));
 const BlueprintTab = lazy(() => import("./modals/settings/BlueprintTab").then((module) => ({ default: module.BlueprintTab })));
 const CapabilitiesTab = lazy(() => import("./modals/settings/CapabilitiesTab").then((module) => ({ default: module.CapabilitiesTab })));
 const ActorProfilesTab = lazy(() => import("./modals/settings/ActorProfilesTab").then((module) => ({ default: module.ActorProfilesTab })));
-const BrandingTab = lazy(() => import("./modals/settings/BrandingTab").then((module) => ({ default: module.BrandingTab })));
-const WebAccessTab = lazy(() => import("./modals/settings/WebAccessTab").then((module) => ({ default: module.WebAccessTab })));
-const DeveloperTab = lazy(() => import("./modals/settings/DeveloperTab").then((module) => ({ default: module.DeveloperTab })));
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -68,7 +62,7 @@ export function SettingsModal({
   const { modalRef } = useModalA11y(isOpen, onClose);
   const [scope, setScope] = useState<SettingsScope>(groupId ? "group" : "global");
   const [groupTab, setGroupTab] = useState<GroupTabId>("guidance");
-  const [globalTab, setGlobalTab] = useState<GlobalTabId>("actorProfiles");
+  const [globalTab, setGlobalTab] = useState<GlobalTabId>("capabilities");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
 
@@ -83,7 +77,7 @@ export function SettingsModal({
   const [idleSeconds, setIdleSeconds] = useState(0);
   const [keepaliveSeconds, setKeepaliveSeconds] = useState(120);
   const [keepaliveMax, setKeepaliveMax] = useState(3);
-  const [silenceSeconds, setSilenceSeconds] = useState(600);
+  const [silenceSeconds, setSilenceSeconds] = useState(0);
   const [helpNudgeIntervalSeconds, setHelpNudgeIntervalSeconds] = useState(600);
   const [helpNudgeMinMessages, setHelpNudgeMinMessages] = useState(10);
   const [autoMarkOnDelivery, setAutoMarkOnDelivery] = useState(false);
@@ -125,11 +119,11 @@ export function SettingsModal({
   const [imWecomSecret, setImWecomSecret] = useState("");
   // Weixin fields
   const [imWeixinAccountId, setImWeixinAccountId] = useState("");
-  const [imWeixinCommand, setImWeixinCommand] = useState("");
   const [weixinLoginStatus, setWeixinLoginStatus] = useState<WeixinLoginStatus | null>(null);
   const [imBusy, setImBusy] = useState(false);
   const imLoadSeq = useRef(0);
   const weixinAutoStartRef = useRef(false);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   // IM config drafts cache (per-platform local edits, not yet saved to server)
   const [imConfigDrafts, setImConfigDrafts] = useState<Partial<Record<IMPlatform, IMConfigDraft>>>({});
@@ -219,35 +213,6 @@ export function SettingsModal({
     };
   }, [isOpen, groupId]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    loadIMStatus({ resetFirst: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only load when the modal opens or groupId changes.
-  }, [isOpen, groupId]);
-
-  useEffect(() => {
-    if (isOpen && canAccessGlobalSettings === true) loadObservability();
-  }, [isOpen, canAccessGlobalSettings]);
-
-  useEffect(() => {
-    if (isOpen && groupId) loadDevActors();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only load when the modal opens or groupId changes.
-  }, [isOpen, groupId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (scope !== "global" || globalTab !== "developer") return;
-    void loadRegistryPreview();
-  }, [isOpen, scope, globalTab]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (scope !== "global" || globalTab !== "developer") return;
-    void loadRuntimeInfo();
-  }, [isOpen, scope, globalTab]);
-
-  // ============ Data Loading ============
-
   const resetIMState = () => {
     setImStatus(null);
     setImPlatform("telegram");
@@ -262,10 +227,9 @@ export function SettingsModal({
     setImWecomBotId("");
     setImWecomSecret("");
     setImWeixinAccountId("");
-    setImWeixinCommand("");
   };
 
-  const loadIMStatus = async (opts?: { resetFirst?: boolean }) => {
+  const loadIMStatus = useCallback(async (opts?: { resetFirst?: boolean }) => {
     const gid = String(groupId || "").trim();
     const seq = ++imLoadSeq.current;
     if (opts?.resetFirst) resetIMState();
@@ -286,7 +250,6 @@ export function SettingsModal({
         if (im.platform) setImPlatform(im.platform);
         setImBotTokenEnv(im.bot_token_env || im.bot_token || im.token_env || im.token || "");
         setImAppTokenEnv(im.app_token_env || im.app_token || "");
-        // Feishu fields
         {
           const raw = String(im.feishu_domain || "https://open.feishu.cn").trim();
           const canon = raw
@@ -299,21 +262,23 @@ export function SettingsModal({
         }
         setImFeishuAppId(im.feishu_app_id || im.feishu_app_id_env || "");
         setImFeishuAppSecret(im.feishu_app_secret || im.feishu_app_secret_env || "");
-        // DingTalk fields
         setImDingtalkAppKey(im.dingtalk_app_key || im.dingtalk_app_key_env || "");
         setImDingtalkAppSecret(im.dingtalk_app_secret || im.dingtalk_app_secret_env || "");
         setImDingtalkRobotCode(im.dingtalk_robot_code || im.dingtalk_robot_code_env || "");
-        // WeCom fields
         setImWecomBotId(im.wecom_bot_id || "");
         setImWecomSecret(im.wecom_secret || "");
-        // Weixin fields
         setImWeixinAccountId(im.weixin_account_id || "");
-        setImWeixinCommand(im.weixin_command || "");
       }
     } catch (e) {
       console.error("Failed to load IM status:", e);
     }
-  };
+  }, [groupId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    loadIMStatus({ resetFirst: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only load when the modal opens or groupId changes.
+  }, [isOpen, groupId]);
 
   const toWeixinErrorStatus = useCallback((message: string): WeixinLoginStatus => ({
     status: "error",
@@ -346,6 +311,9 @@ export function SettingsModal({
       }
     };
     void loadWeixinStatus();
+    // Only poll while waiting for QR scan; stop once logged in or idle
+    const needsPoll = weixinLoginStatus?.status === "waiting_scan";
+    if (!needsPoll) return () => { cancelled = true; };
     const timer = window.setInterval(() => {
       void loadWeixinStatus();
     }, 3000);
@@ -353,7 +321,7 @@ export function SettingsModal({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [groupId, imPlatform, isOpen, t, toWeixinErrorStatus]);
+  }, [isOpen, groupId, imPlatform, weixinLoginStatus?.status, t, toWeixinErrorStatus]);
 
   useEffect(() => {
     if (imPlatform !== "weixin") {
@@ -363,6 +331,10 @@ export function SettingsModal({
     if (!groupId) return;
     if (!weixinLoginStatus?.logged_in) return;
     if (!imStatus?.configured || String(imStatus.platform || "") !== "weixin") return;
+    if (!imStatus.enabled) {
+      weixinAutoStartRef.current = false;
+      return;
+    }
     if (imStatus.running) {
       weixinAutoStartRef.current = false;
       return;
@@ -383,7 +355,37 @@ export function SettingsModal({
         setImBusy(false);
       }
     })();
-  }, [groupId, imPlatform, imStatus, weixinLoginStatus]);
+  }, [groupId, imPlatform, imStatus, loadIMStatus, weixinLoginStatus]);
+
+  useEffect(() => {
+    if (isOpen && canAccessGlobalSettings === true) loadObservability();
+  }, [isOpen, canAccessGlobalSettings]);
+
+  useEffect(() => {
+    if (isOpen && groupId) loadDevActors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only load when the modal opens or groupId changes.
+  }, [isOpen, groupId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (scope !== "global" || globalTab !== "developer") return;
+    void loadRegistryPreview();
+  }, [isOpen, scope, globalTab]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (scope !== "global" || globalTab !== "developer") return;
+    void loadRuntimeInfo();
+  }, [isOpen, scope, globalTab]);
+
+  useEffect(() => {
+    if (!isOpen || !developerMode) return;
+    if (scope !== "global" || globalTab !== "developer") return;
+    void loadLogTail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Keep refresh tied to modal/view controls; callback identity is not meaningful here.
+  }, [developerMode, globalTab, groupId, isOpen, logComponent, logLines, scope]);
+
+  // ============ Data Loading ============
 
   const loadObservability = async () => {
     try {
@@ -402,9 +404,12 @@ export function SettingsModal({
         if (Number.isFinite(scrollbackLines) && scrollbackLines > 0) {
           setTerminalScrollbackLines(Math.max(1000, Math.round(scrollbackLines)));
         }
-        const runtimeVisibility = obs.runtime_visibility || {};
-        setPeerRuntimeVisibility(runtimeVisibility.peer_runtime === "hidden" ? "hidden" : "visible");
-        setPetRuntimeVisibility(runtimeVisibility.pet_runtime === "visible" ? "visible" : "hidden");
+        setPeerRuntimeVisibility(
+          String(obs.runtime_visibility?.peer_runtime || "").trim().toLowerCase() === "hidden" ? "hidden" : "visible"
+        );
+        setPetRuntimeVisibility(
+          String(obs.runtime_visibility?.pet_runtime || "").trim().toLowerCase() === "visible" ? "visible" : "hidden"
+        );
       }
     } catch (e) {
       console.error("Failed to load observability settings:", e);
@@ -453,6 +458,22 @@ export function SettingsModal({
     });
   };
 
+  const handleResetAutomationSettingsDraft = () => {
+    setNudgeSeconds(300);
+    setReplyRequiredNudgeSeconds(300);
+    setAttentionAckNudgeSeconds(600);
+    setUnreadNudgeSeconds(900);
+    setNudgeDigestMinIntervalSeconds(120);
+    setNudgeMaxRepeatsPerObligation(3);
+    setNudgeEscalateAfterRepeats(2);
+    setIdleSeconds(0);
+    setKeepaliveSeconds(120);
+    setKeepaliveMax(3);
+    setSilenceSeconds(0);
+    setHelpNudgeIntervalSeconds(600);
+    setHelpNudgeMinMessages(10);
+  };
+
   const handleAutoSave = async (field: string, value: number | boolean) => {
     await onUpdateSettings({ [field]: value });
   };
@@ -484,31 +505,8 @@ export function SettingsModal({
       window.setTimeout(() => setTailCopyInfo(""), 1200);
     };
 
-    try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-        await navigator.clipboard.writeText(payload);
-        setToast(t("automation.copiedLines", { n }));
-        return;
-      }
-    } catch {
-      // fallback
-    }
-
-    try {
-      const el = document.createElement("textarea");
-      el.value = payload;
-      el.style.position = "fixed";
-      el.style.left = "-9999px";
-      el.style.top = "0";
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(el);
-      setToast(ok ? t("automation.copiedLines", { n }) : t("common:copyFailed"));
-    } catch {
-      setToast(t("common:copyFailed"));
-    }
+    const ok = await copyTextToClipboard(payload);
+    setToast(ok ? t("automation.copiedLines", { n }) : t("common:copyFailed"));
   };
 
   const loadTerminalTail = async () => {
@@ -566,7 +564,6 @@ export function SettingsModal({
     wecomBotId: imWecomBotId,
     wecomSecret: imWecomSecret,
     weixinAccountId: imWeixinAccountId,
-    weixinCommand: imWeixinCommand,
   });
 
   // Apply a draft to current IM config fields
@@ -582,7 +579,6 @@ export function SettingsModal({
     setImWecomBotId(draft.wecomBotId);
     setImWecomSecret(draft.wecomSecret);
     setImWeixinAccountId(draft.weixinAccountId);
-    setImWeixinCommand(draft.weixinCommand);
   };
 
   const getCurrentIMSaveRequest = () => ({
@@ -618,7 +614,6 @@ export function SettingsModal({
       setImWecomBotId("");
       setImWecomSecret("");
       setImWeixinAccountId("");
-      setImWeixinCommand("");
     }
 
     // 3. Set new platform
@@ -655,7 +650,6 @@ export function SettingsModal({
         setImWecomBotId("");
         setImWecomSecret("");
         setImWeixinAccountId("");
-        setImWeixinCommand("");
         await loadIMStatus();
       }
     } catch (e) {
@@ -701,6 +695,7 @@ export function SettingsModal({
         return;
       }
       await loadIMStatus();
+      weixinAutoStartRef.current = false;
       const resp = await api.startWeixinLogin(groupId);
       if (resp.ok) {
         setWeixinLoginStatus(resp.result ?? null);
@@ -719,6 +714,7 @@ export function SettingsModal({
     if (!groupId) return;
     setImBusy(true);
     try {
+      weixinAutoStartRef.current = false;
       const resp = await api.logoutWeixin(groupId);
       if (resp.ok) {
         setWeixinLoginStatus(resp.result ?? null);
@@ -760,9 +756,12 @@ export function SettingsModal({
         if (Number.isFinite(lines) && lines > 0) {
           setTerminalScrollbackLines(Math.max(1000, Math.round(lines)));
         }
-        const runtimeVisibility = obs.runtime_visibility || {};
-        setPeerRuntimeVisibility(runtimeVisibility.peer_runtime === "hidden" ? "hidden" : "visible");
-        setPetRuntimeVisibility(runtimeVisibility.pet_runtime === "visible" ? "visible" : "hidden");
+        setPeerRuntimeVisibility(
+          String(obs.runtime_visibility?.peer_runtime || "").trim().toLowerCase() === "hidden" ? "hidden" : "visible"
+        );
+        setPetRuntimeVisibility(
+          String(obs.runtime_visibility?.pet_runtime || "").trim().toLowerCase() === "visible" ? "visible" : "hidden"
+        );
       } else if (resp.ok) {
         await loadObservability();
       }
@@ -817,6 +816,11 @@ export function SettingsModal({
   };
 
   const loadLogTail = async () => {
+    if (logComponent === "im" && !groupId) {
+      setLogText("");
+      setLogErr(t("developer.imLogsRequireGroup"));
+      return;
+    }
     setLogBusy(true);
     setLogErr("");
     try {
@@ -911,22 +915,13 @@ export function SettingsModal({
   const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
 
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
-    { id: "capabilities" as const, label: t("tabs.capabilities") },
-    ...(globalSettingsEnabled
-      ? [
-          { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
-        ]
-      : []),
+    ...(globalSettingsEnabled ? [
+      { id: "capabilities" as const, label: t("tabs.capabilities") },
+      { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
+    ] : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
     ...(currentBrowserSignedIn && !globalSettingsEnabled ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }] : []),
   ], [globalSettingsEnabled, currentBrowserSignedIn, t]);
-
-  const groupTabs = useMemo<{ id: GroupTabId; label: string }[]>(() => [
-    { id: "guidance", label: t("tabs.guidance") },
-    { id: "automation", label: t("tabs.automation") },
-    { id: "im", label: t("tabs.im") },
-    { id: "blueprint", label: t("tabs.blueprint") },
-  ], [t]);
 
   useEffect(() => {
     if (scope !== "global") return;
@@ -936,13 +931,26 @@ export function SettingsModal({
     }
   }, [globalTab, globalTabs, scope]);
 
+  const groupTabs: { id: GroupTabId; label: string }[] = [
+    { id: "guidance", label: t("tabs.guidance") },
+    { id: "automation", label: t("tabs.automation") },
+    { id: "im", label: t("tabs.im") },
+    { id: "blueprint", label: t("tabs.blueprint") },
+  ];
+  const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
+  const activeTab = scope === "group" ? groupTab : globalTab;
+  const setActiveTab = (tab: GroupTabId | GlobalTabId) => {
+    if (scope === "group") setGroupTab(tab as GroupTabId);
+    else setGlobalTab(tab as GlobalTabId);
+  };
+
   useEffect(() => {
-    if (scope !== "group") return;
-    if (!groupTabs.length) return;
-    if (!groupTabs.some((tab) => tab.id === groupTab)) {
-      setGroupTab(groupTabs[0].id);
-    }
-  }, [groupTab, groupTabs, scope]);
+    const el = contentScrollRef.current;
+    if (!isOpen || !el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: 0, behavior: "auto" });
+    });
+  }, [isOpen, scope, activeTab]);
 
   // ============ Render ============
 
@@ -957,21 +965,40 @@ export function SettingsModal({
     return String((active || first)?.url || "").trim();
   })();
 
-  const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
-  const activeTab = scope === "group" ? groupTab : globalTab;
-  const setActiveTab = (tab: GroupTabId | GlobalTabId) => {
-    if (scope === "group") setGroupTab(tab as GroupTabId);
-    else setGlobalTab(tab as GlobalTabId);
-  };
-
   return (
     <ModalFrame
       isDark={isDark}
       onClose={onClose}
       titleId="settings-modal-title"
-      title={`⚙️ ${t("title")}`}
+      title={(
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            Workspace Settings
+          </div>
+          <h2 className="mt-1 truncate text-[1.15rem] font-semibold text-[var(--color-text-primary)]">
+            {t("title")}
+          </h2>
+          <div className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
+            {scope === "group"
+              ? t("navigation.groupScopeContent", { scopeRoot: scopeRootUrl || groupId || "—" })
+              : (globalScopeEnabled ? t("navigation.globalScopeContent") : t("navigation.globalLockedContent"))}
+          </div>
+        </div>
+      )}
       closeAriaLabel={t("closeAriaLabel")}
-      panelClassName="w-full h-full sm:h-[640px] sm:max-w-4xl sm:max-h-[85vh]"
+      panelClassName="w-full h-full sm:h-[min(90dvh,920px)] sm:max-w-[min(1280px,calc(100vw-2rem))] sm:max-h-[90dvh]"
+      headerActions={(
+        <div className="hidden sm:flex items-center gap-2">
+          <span className="rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] px-3 py-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
+            {scope === "group" ? t("navigation.thisGroup") : t("navigation.global")}
+          </span>
+          {groupDoc?.title && scope === "group" ? (
+            <span className="max-w-[18rem] truncate rounded-full border border-[var(--glass-border-subtle)] bg-transparent px-3 py-1 text-[11px] font-medium text-[var(--color-text-tertiary)]">
+              {groupDoc.title}
+            </span>
+          ) : null}
+        </div>
+      )}
       modalRef={modalRef}
     >
       <div className="min-h-0 flex-1 flex flex-col sm:flex-row overflow-hidden">
@@ -988,8 +1015,15 @@ export function SettingsModal({
         />
 
         {/* Main Content Area */}
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-subtle flex flex-col [scrollbar-gutter:stable]">
-          <div className="p-5 pb-8 sm:p-8 sm:pb-10 space-y-6">
+        <div
+          ref={contentScrollRef}
+          className={`min-h-0 flex-1 overflow-y-auto scrollbar-subtle flex flex-col [scrollbar-gutter:stable] ${
+            isDark
+              ? "bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_32%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))]"
+              : "bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.96),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgb(255,255,255),rgb(246,248,251))]"
+          }`}
+        >
+          <div className="p-4 pb-6 sm:p-5 lg:p-6 sm:pb-7 space-y-4 lg:space-y-5">
             {scope === "global" && !globalSettingsEnabled && !currentBrowserSignedIn ? (
               <div className={`rounded-xl border p-6 ${isDark ? "border-amber-700/40 bg-amber-900/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                 <div className="text-sm font-semibold">{t("navigation.globalLockedTitle")}</div>
@@ -1039,6 +1073,28 @@ export function SettingsModal({
                   helpNudgeMinMessages={helpNudgeMinMessages}
                   setHelpNudgeMinMessages={setHelpNudgeMinMessages}
                   onSavePolicies={handleSaveAutomationSettings}
+                  onResetPolicies={handleResetAutomationSettingsDraft}
+                />
+              )}
+
+              {activeTab === "delivery" && (
+                <DeliveryTab
+                  isDark={isDark}
+                  busy={busy}
+                  autoMarkOnDelivery={autoMarkOnDelivery}
+                  setAutoMarkOnDelivery={setAutoMarkOnDelivery}
+                  onSave={handleSaveDeliverySettings}
+                  onAutoSave={handleAutoSave}
+                />
+              )}
+
+              {activeTab === "messaging" && (
+                <MessagingTab
+                  isDark={isDark}
+                  busy={busy}
+                  defaultSendTo={defaultSendTo}
+                  setDefaultSendTo={setDefaultSendTo}
+                  onSave={handleSaveMessagingSettings}
                 />
               )}
 
@@ -1071,8 +1127,6 @@ export function SettingsModal({
                   setImWecomSecret={setImWecomSecret}
                   imWeixinAccountId={imWeixinAccountId}
                   setImWeixinAccountId={setImWeixinAccountId}
-                  imWeixinCommand={imWeixinCommand}
-                  setImWeixinCommand={setImWeixinCommand}
                   weixinLoginStatus={weixinLoginStatus}
                   onStartWeixinLogin={handleStartWeixinLogin}
                   onLogoutWeixin={handleLogoutWeixin}
@@ -1084,9 +1138,68 @@ export function SettingsModal({
                 />
               )}
 
+              {activeTab === "transcript" && (
+                <TranscriptTab
+                  isDark={isDark}
+                  busy={busy}
+                  groupId={groupId}
+                  devActors={devActors}
+                  terminalVisibility={terminalVisibility}
+                  setTerminalVisibility={setTerminalVisibility}
+                  terminalNotifyTail={terminalNotifyTail}
+                  setTerminalNotifyTail={setTerminalNotifyTail}
+                  terminalNotifyLines={terminalNotifyLines}
+                  setTerminalNotifyLines={setTerminalNotifyLines}
+                  onSaveTranscriptSettings={handleSaveTranscriptSettings}
+                  tailActorId={tailActorId}
+                  setTailActorId={setTailActorId}
+                  tailMaxChars={tailMaxChars}
+                  setTailMaxChars={setTailMaxChars}
+                  tailStripAnsi={tailStripAnsi}
+                  setTailStripAnsi={setTailStripAnsi}
+                  tailCompact={tailCompact}
+                  setTailCompact={setTailCompact}
+                  tailText={tailText}
+                  tailHint={tailHint}
+                  tailErr={tailErr}
+                  tailBusy={tailBusy}
+                  tailCopyInfo={tailCopyInfo}
+                  onLoadTail={loadTerminalTail}
+                  onCopyTail={copyTailLastLines}
+                  onClearTail={clearTail}
+                />
+              )}
+
               {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
 
+              {activeTab === "assistants" && (
+                <AssistantsTab
+                  isDark={isDark}
+                  groupId={groupId}
+                  isActive={scope === "group" && activeTab === "assistants"}
+                  petEnabled={Boolean(settings?.desktop_pet_enabled)}
+                  busy={busy}
+                  onUpdatePetEnabled={(enabled) => onUpdateSettings({ desktop_pet_enabled: enabled })}
+                />
+              )}
+
+              {activeTab === "space" && (
+                <GroupSpaceTab
+                  isDark={isDark}
+                  groupId={groupId}
+                  isActive={scope === "group" && activeTab === "space"}
+                />
+              )}
+
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
+
+              {activeTab === "capabilities" && (
+                <CapabilitiesTab
+                  isDark={isDark}
+                  isActive={scope === "global" && activeTab === "capabilities"}
+                  groupId={groupId}
+                />
+              )}
 
               {activeTab === "actorProfiles" && (
                 <ActorProfilesTab
@@ -1108,14 +1221,6 @@ export function SettingsModal({
                 <BrandingTab
                   isDark={isDark}
                   isActive={scope === "global" && activeTab === "branding"}
-                />
-              )}
-
-              {activeTab === "capabilities" && (
-                <CapabilitiesTab
-                  isDark={isDark}
-                  isActive={scope === "global" && activeTab === "capabilities"}
-                  groupId={groupId}
                 />
               )}
 

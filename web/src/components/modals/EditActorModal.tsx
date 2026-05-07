@@ -6,11 +6,15 @@ import * as api from "../../services/api";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { parsePrivateEnvSetText, parsePrivateEnvUnsetText } from "../../utils/privateEnvInput";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
-import { actorProfileIdentityKey, actorProfileMatchesRef } from "../../utils/actorProfiles";
+import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Surface } from "../ui/surface";
+import { Textarea } from "../ui/textarea";
 
 type EditMode = "custom" | "profile";
 
@@ -63,6 +67,7 @@ export interface EditActorModalProps {
   linkedProfileOwner?: string;
   actorProfiles: ActorProfile[];
   actorProfilesBusy: boolean;
+  onRequestActorProfiles?: () => Promise<void> | void;
   onSaveAsProfile: () => Promise<SaveActorProfileResult | void>;
   onAvatarChanged?: () => Promise<void>;
   inlineNotice?: string;
@@ -74,12 +79,12 @@ type SecretSource = "none" | "actor" | "profile-preview";
 /** Runtime-specific placeholder hints for secret environment variables */
 const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
   claude: {
-    set: 'ANTHROPIC_API_KEY="..."\nANTHROPIC_BASE_URL="..."',
-    unset: "ANTHROPIC_API_KEY\nANTHROPIC_BASE_URL",
+    set: 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."',
+    unset: "ANTHROPIC_AUTH_TOKEN\nANTHROPIC_BASE_URL",
   },
   codex: {
-    set: 'OPENAI_API_KEY="..."\nOPENAI_BASE_URL="..."',
-    unset: "OPENAI_API_KEY\nOPENAI_BASE_URL",
+    set: "# Configure OpenAI-compatible Codex providers with Codex config or command -c overrides.",
+    unset: "",
   },
   gemini: {
     set: 'GOOGLE_API_KEY="..."',
@@ -88,8 +93,8 @@ const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
 };
 
 const DEFAULT_SECRETS_PLACEHOLDER = {
-  set: 'OPENAI_API_KEY="..."\nANTHROPIC_API_KEY="..."\nANTHROPIC_BASE_URL="..."',
-  unset: "OPENAI_API_KEY\nANTHROPIC_API_KEY\nANTHROPIC_BASE_URL",
+  set: 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."',
+  unset: "ANTHROPIC_AUTH_TOKEN\nANTHROPIC_BASE_URL",
 };
 
 function commandPreview(command: string[] | undefined): string {
@@ -108,7 +113,7 @@ function modeButtonClass(selected: boolean): string {
   return [
     "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
     selected
-      ? "bg-blue-600 text-white border-blue-600"
+      ? "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white dark:border-white dark:bg-white dark:text-[rgb(35,36,37)]"
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
@@ -143,6 +148,7 @@ export function EditActorModal({
   linkedProfileOwner,
   actorProfiles,
   actorProfilesBusy,
+  onRequestActorProfiles,
   onSaveAsProfile,
   onAvatarChanged,
   inlineNotice,
@@ -163,6 +169,8 @@ export function EditActorModal({
   const [localNotice, setLocalNotice] = useState("");
   const [secretSource, setSecretSource] = useState<SecretSource>("none");
   const [avatarBusy, setAvatarBusy] = useState<"" | "upload" | "clear">("");
+  const [secretsPrimed, setSecretsPrimed] = useState(false);
+  const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const secretFetchSeqRef = useRef(0);
   const modalStateRef = useRef<{
     groupId: string;
@@ -187,7 +195,7 @@ export function EditActorModal({
     [actorProfiles, attachProfileId]
   );
   const selectedProfileName = String(selectedProfile?.name || "").trim();
-  const selectedProfileRunner = normalizeActorRunner(selectedProfile?.runner);
+  const selectedProfileRunner = normalizeActorRunner(selectedProfile?.runner || runner);
 
   const secretsPlaceholder = SECRETS_PLACEHOLDER[runtime] ?? DEFAULT_SECRETS_PLACEHOLDER;
 
@@ -324,28 +332,8 @@ export function EditActorModal({
     setSecretsClearAll(false);
     setSecretKeys([]);
     setSecretSource("none");
-    if (!hasLinked) void refreshSecretKeys();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, actorId, isOpen, linkedProfileId, linkedProfileOwner, linkedProfileScope]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const linkedId = String(linkedProfileId || "").trim();
-    if (!linkedId || actorProfilesBusy) return;
-    const exists = actorProfiles.some((profile) =>
-      actorProfileMatchesRef(profile, {
-        profileId: linkedId,
-        profileScope: linkedProfileScope || "global",
-        profileOwner: linkedProfileOwner || "",
-      })
-    );
-    if (exists) return;
-    // Defensive fallback: when profile was deleted/detached and actor list is briefly stale,
-    // prefer Custom tab to avoid opening in an invalid "Use Profile" state.
-    setEditMode("custom");
-    setPendingConvertToCustom(false);
-    setAttachProfileId("");
-  }, [isOpen, linkedProfileId, linkedProfileOwner, linkedProfileScope, actorProfilesBusy, actorProfiles]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -356,9 +344,15 @@ export function EditActorModal({
       setSecretSource("none");
       return;
     }
-    if (!effectiveLinked) void refreshSecretKeys();
+    if (!effectiveLinked && secretsPrimed) void refreshSecretKeys();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, effectiveLinked]);
+  }, [editMode, effectiveLinked, secretsPrimed]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSecretsPrimed(false);
+    setCapabilitiesPrimed(false);
+  }, [isOpen, groupId, actorId]);
 
   if (!isOpen) return null;
 
@@ -549,7 +543,7 @@ export function EditActorModal({
     >
       <div
         ref={modalRef}
-        className="w-full h-full sm:h-auto sm:max-w-2xl sm:mt-10 border border-[var(--glass-border-subtle)] shadow-2xl animate-scale-in flex flex-col sm:max-h-[calc(100vh-5rem)] rounded-none sm:rounded-2xl glass-modal text-[var(--color-text-primary)]"
+        className="w-full h-full sm:h-auto sm:w-[min(100vw-2rem,72rem)] sm:max-w-[72rem] sm:mt-6 border border-[var(--glass-border-subtle)] shadow-2xl animate-scale-in flex flex-col sm:max-h-[calc(100dvh-2rem)] rounded-none sm:rounded-2xl glass-modal text-[var(--color-text-primary)]"
       >
         <div className="px-6 py-4 border-b safe-area-inset-top border-[var(--glass-border-subtle)] glass-header">
           <div id="edit-actor-title" className="text-lg font-semibold text-[var(--color-text-primary)]">
@@ -558,24 +552,25 @@ export function EditActorModal({
           <div className="text-sm mt-1 text-[var(--color-text-muted)]">{t("changeSettings")}</div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
-          <div className="mx-auto max-w-2xl space-y-4">
-            <section className={sectionCardClass}>
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6">
+          <div className="mx-auto w-full max-w-6xl space-y-4">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)] xl:items-start">
+            <Surface className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("sectionBasics", "Basics")}</div>
               <div className={sectionHintClass}>
                 {t("sectionBasicsHint", "Edit the actor label, built-in role preset seed, and stable role notes here.")}
               </div>
 
               <div className="mt-4 space-y-4">
-                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                  <div className="sm:w-[104px] sm:flex-shrink-0">
+                <div className="grid gap-4 sm:grid-cols-[88px_minmax(0,1fr)] sm:items-start">
+                  <div className="justify-self-start">
                     <ActorAvatarField
                       label={null}
                       avatarUrl={avatarUrl}
                       runtime={runtime}
                       title={title || actorId}
                       isDark={isDark}
-                      sizeClassName="h-14 w-14"
+                      sizeClassName="h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]"
                       disabled={busy === "actor-update" || avatarBusy !== ""}
                       resetDisabled={!hasCustomAvatar}
                       uploadBusy={avatarBusy === "upload"}
@@ -585,10 +580,9 @@ export function EditActorModal({
                     />
                   </div>
 
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0">
                     <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("displayName")}</label>
-                    <input
-                      className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                    <Input
                       value={title}
                       onChange={(e) => onChangeTitle(e.target.value)}
                       placeholder={actorId}
@@ -604,8 +598,8 @@ export function EditActorModal({
                     disabled={roleNotesBusy || busy === "actor-update"}
                   />
                   <label className="block text-xs font-medium mt-3 mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
-                  <textarea
-                    className="w-full rounded-xl border px-3 py-2 text-sm min-h-[144px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                  <Textarea
+                    className="min-h-[144px]"
                     value={roleNotes}
                     onChange={(e) => onChangeRoleNotes(e.target.value)}
                     placeholder={t("roleNotesPlaceholder")}
@@ -616,9 +610,9 @@ export function EditActorModal({
                   {roleNotesBusy ? <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">{t("loadingRoleNotes")}</div> : null}
                 </div>
               </div>
-            </section>
+            </Surface>
 
-            <section className={sectionCardClass}>
+            <Surface className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("sectionRuntime", "Runtime & Profile")}</div>
               <div className={sectionHintClass}>
                 {t("sectionRuntimeHint", "Choose a runtime profile or custom runtime config. Role presets above only affect role notes.")}
@@ -626,21 +620,25 @@ export function EditActorModal({
 
               <div className="mt-4">
                 <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" className={modeButtonClass(editMode === "custom")} onClick={() => setEditMode("custom")}>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Button type="button" variant="outline" className={modeButtonClass(editMode === "custom")} onClick={() => setEditMode("custom")}>
                     {t("customAgent")}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     className={modeButtonClass(editMode === "profile")}
                     onClick={() => {
                       setEditMode("profile");
                       setPendingConvertToCustom(false);
                       setLocalNotice("");
+                      if (!actorProfilesBusy && actorProfiles.length <= 0) {
+                        void onRequestActorProfiles?.();
+                      }
                     }}
                   >
                     {t("fromActorProfile")}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -665,7 +663,7 @@ export function EditActorModal({
                     </div>
 
                     {selectedProfile ? (
-                      <div className="rounded-xl border px-3 py-2 text-xs border-[var(--glass-border-subtle)] bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">
+                      <Surface className="px-3 py-2 text-xs text-[var(--color-text-secondary)]" variant="subtle" radius="md" padding="none">
                         <div className="font-medium">{selectedProfile.name || selectedProfile.id}</div>
                         <div className="mt-1">{profileScopeLabel(selectedProfile, t)}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -674,38 +672,27 @@ export function EditActorModal({
                             {selectedProfileRunner === "headless" ? t("headless") : t("pty", { defaultValue: "PTY" })}
                           </span>
                         </div>
-                        <div className="mt-3">
-                          <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
-                            {t("runnerMode", { defaultValue: "运行模式" })}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button type="button" className={modeButtonClass(selectedProfileRunner === "pty")} disabled>
-                              {t("pty", { defaultValue: "PTY" })}
-                            </button>
-                            <button type="button" className={modeButtonClass(selectedProfileRunner === "headless")} disabled>
-                              {t("headless")}
-                            </button>
-                          </div>
-                        </div>
                         {commandPreview(selectedProfile.command) ? <div className="mt-1 font-mono break-all">{commandPreview(selectedProfile.command)}</div> : null}
-                      </div>
+                      </Surface>
                     ) : null}
                   </>
                 ) : effectiveLinked ? (
-                  <div className="rounded-xl border px-3 py-3 border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200">
+                  <Surface className="border-black/10 bg-[rgb(245,245,245)] px-3 py-3 text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white" radius="md" padding="none">
                     <div className="text-sm font-medium">
                       {selectedProfileName ? t("managedByProfileName", { name: selectedProfileName }) : t("managedByProfile")}
                     </div>
-                    <div className="text-xs mt-1 text-sky-700/90 dark:text-sky-200/80">{t("managedByProfileCustomHint")}</div>
-                    <button
+                    <div className="mt-1 text-xs text-[rgb(35,36,37)]/78 dark:text-white/72">{t("managedByProfileCustomHint")}</div>
+                    <Button
                       type="button"
-                      className="mt-3 px-3 py-2 rounded-lg text-sm font-medium border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                      variant="secondary"
+                      size="sm"
+                      className="mt-3"
                       onClick={convertToCustomDraft}
                       disabled={busy === "actor-update"}
                     >
                       {t("convertToCustom")}
-                    </button>
-                  </div>
+                    </Button>
+                  </Surface>
                 ) : (
                   <div className="space-y-4">
                     <div>
@@ -742,22 +729,24 @@ export function EditActorModal({
                         <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
                           {t("runnerMode", { defaultValue: "运行模式" })}
                         </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <Button
                             type="button"
+                            variant="outline"
                             className={modeButtonClass(runner === "pty")}
                             onClick={() => onChangeRunner("pty")}
                           >
                             {t("pty", { defaultValue: "PTY" })}
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            variant="outline"
                             className={modeButtonClass(runner === "headless")}
                             onClick={() => onChangeRunner("headless")}
                             disabled={customRunnerLockedToPty}
                           >
                             {t("headless")}
-                          </button>
+                          </Button>
                         </div>
                         <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
                           {customRunnerLockedToPty
@@ -769,8 +758,8 @@ export function EditActorModal({
 
                     <div>
                       <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("command")}</label>
-                      <input
-                        className="w-full rounded-xl border px-4 py-2.5 text-sm font-mono min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                      <Input
+                        className="font-mono"
                         value={command}
                         onChange={(e) => onChangeCommand(e.target.value)}
                         placeholder={defaultCommand || t("enterCommand")}
@@ -785,7 +774,8 @@ export function EditActorModal({
                   </div>
                 )}
               </div>
-            </section>
+            </Surface>
+            </div>
 
             <details className={`group ${sectionCardClass}`}>
               <summary className={collapsibleSummaryClass}>
@@ -824,7 +814,15 @@ export function EditActorModal({
                 ) : null}
 
                 {editMode === "custom" ? (
-                  <details className={nestedCardClass}>
+                  <details
+                    className={nestedCardClass}
+                    onToggle={(event) => {
+                      const open = (event.currentTarget as HTMLDetailsElement).open;
+                      if (!open || secretsPrimed) return;
+                      setSecretsPrimed(true);
+                      void refreshSecretKeys();
+                    }}
+                  >
                     <summary className={collapsibleSummaryClass}>
                       <div>
                         <div className={collapsibleLabelClass}>{t("secretsSection", "Secrets & Environment")}</div>
@@ -835,14 +833,16 @@ export function EditActorModal({
                     <div className="mt-4">
                       <div className="flex items-center justify-between gap-3">
                         <label className="block text-xs font-medium text-[var(--color-text-muted)]">{t("secretsWriteOnly")}</label>
-                        <button
-                          className="text-xs px-2 py-1 rounded-lg border transition-colors border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => void refreshSecretKeys()}
                           disabled={secretsBusy}
                           title={t("refreshConfiguredKeys")}
                         >
                           {t("refresh")}
-                        </button>
+                        </Button>
                       </div>
                       <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
                         {t("secretsStoredLocallyEdit").replace(/<1>|<\/1>/g, "")} {secretKeys.length ? (
@@ -872,16 +872,16 @@ export function EditActorModal({
                       <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">{t("secretsAppliedNote").replace(/<1>|<\/1>/g, "")}</div>
 
                       <label className="block text-[11px] font-medium mt-3 mb-1.5 text-[var(--color-text-secondary)]">{t("setUpdate")}</label>
-                      <textarea
-                        className="w-full rounded-xl border px-3 py-2 text-sm font-mono min-h-[96px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                      <Textarea
+                        className="min-h-[96px] font-mono"
                         value={secretsSetText}
                         onChange={(e) => setSecretsSetText(e.target.value)}
                         placeholder={secretsPlaceholder.set}
                       />
 
                       <label className="block text-[11px] font-medium mt-3 mb-1.5 text-[var(--color-text-secondary)]">{t("unset")}</label>
-                      <textarea
-                        className="w-full rounded-xl border px-3 py-2 text-sm font-mono min-h-[72px] transition-colors glass-input text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
+                      <Textarea
+                        className="min-h-[72px] font-mono"
                         value={secretsUnsetText}
                         onChange={(e) => setSecretsUnsetText(e.target.value)}
                         placeholder={secretsPlaceholder.unset}
@@ -900,7 +900,14 @@ export function EditActorModal({
                   </details>
                 ) : null}
 
-                <details className={nestedCardClass}>
+                <details
+                  className={nestedCardClass}
+                  onToggle={(event) => {
+                    const open = (event.currentTarget as HTMLDetailsElement).open;
+                    if (!open || capabilitiesPrimed) return;
+                    setCapabilitiesPrimed(true);
+                  }}
+                >
                   <summary className={collapsibleSummaryClass}>
                     <div>
                       <div className={collapsibleLabelClass}>{t("capabilitiesSection", "Capabilities")}</div>
@@ -914,6 +921,7 @@ export function EditActorModal({
                       value={parseCapabilityIdInput(capabilityAutoloadText)}
                       onChange={(next) => onChangeCapabilityAutoloadText(formatCapabilityIdInput(next))}
                       disabled={busy === "actor-update"}
+                      active={capabilitiesPrimed}
                       label={t("autoloadCapabilities")}
                       hint={t("autoloadCapabilitiesHint")}
                     />
@@ -930,14 +938,14 @@ export function EditActorModal({
                       <span aria-hidden="true" className={collapsibleChevronClass}>⌄</span>
                     </summary>
                     <div className="mt-4 flex flex-wrap gap-3">
-                      <button
+                      <Button
                         type="button"
-                        className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+                        variant="secondary"
                         onClick={() => void saveAsProfile()}
                         disabled={busy === "actor-profile-save" || busy === "actor-update"}
                       >
                         {busy === "actor-profile-save" ? t("savingProfile") : t("addToActorProfiles")}
-                      </button>
+                      </Button>
                     </div>
                   </details>
                 ) : null}
@@ -961,7 +969,7 @@ export function EditActorModal({
           {String(localNotice || inlineNotice || "").trim() ? (
             <div
               className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
-                isDark ? "border-sky-500/30 bg-sky-500/10 text-sky-200" : "border-sky-200 bg-sky-50 text-sky-800"
+                isDark ? "border-white/12 bg-white/[0.08] text-white" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
               }`}
               role="status"
             >
@@ -969,27 +977,31 @@ export function EditActorModal({
             </div>
           ) : null}
 
-          <div className="flex flex-col-reverse sm:flex-row gap-3">
-            <button
-              className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
+          <div className="flex flex-col-reverse gap-3 md:flex-row md:items-center">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full md:w-auto"
               onClick={onCancel}
             >
               {t("common:cancel")}
-            </button>
-            <button
-              className="flex-1 rounded-xl bg-sky-700 hover:bg-sky-600 text-white px-4 py-2.5 text-sm font-semibold shadow-lg disabled:opacity-50 transition-all min-h-[44px]"
+            </Button>
+            <Button
+              type="button"
+              className="w-full md:flex-1 border-[rgb(35,36,37)] bg-[rgb(35,36,37)] font-semibold text-white hover:border-black hover:bg-black dark:border-white dark:bg-white dark:text-[rgb(35,36,37)] dark:hover:border-white dark:hover:bg-white/92"
               onClick={() => void submit(true)}
               disabled={saveDisabled}
             >
               {t("saveAndRestart")}
-            </button>
-            <button
-              className="flex-1 rounded-xl bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 text-sm font-semibold shadow-lg disabled:opacity-50 transition-all min-h-[44px]"
+            </Button>
+            <Button
+              type="button"
+              className="w-full md:flex-1 font-semibold"
               onClick={() => void submit(false)}
               disabled={saveDisabled}
             >
               {t("common:save")}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

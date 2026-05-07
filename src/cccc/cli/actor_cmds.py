@@ -109,10 +109,12 @@ def cmd_actor_add(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     try:
         require_actor_permission(group, by=by, action="actor.add")
-        # Note: role is auto-determined by position (first enabled = foreman)
+        # Note: role is auto-determined by stable position (first visible actor = foreman)
         if runner != "pty":
             raise ValueError("invalid runner (must be 'pty')")
         if runtime not in ("amp", "auggie", "claude", "codex", "droid", "gemini", "kimi", "neovate", "custom"):
@@ -150,6 +152,8 @@ def cmd_actor_remove(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(group_id)
     if group is None:
@@ -178,6 +182,8 @@ def cmd_actor_start(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(group_id)
     if group is None:
@@ -206,6 +212,8 @@ def cmd_actor_stop(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(group_id)
     if group is None:
@@ -234,6 +242,8 @@ def cmd_actor_restart(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     group = load_group(group_id)
     if group is None:

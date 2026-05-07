@@ -33,8 +33,8 @@ def _group_settings_error_details(exc: Exception) -> Optional[Dict[str, Any]]:
     message = str(exc or "").strip()
     if not message:
         return None
-    if message == "desktop pet requires an enabled foreman actor":
-        return {"reason": "desktop_pet_requires_enabled_foreman"}
+    if message == "desktop pet requires a foreman actor":
+        return {"reason": "desktop_pet_requires_foreman"}
     if message.startswith("failed to start pet actor:"):
         cause = message.partition(":")[2].strip()
         return {"reason": "pet_actor_start_failed", "cause": cause}

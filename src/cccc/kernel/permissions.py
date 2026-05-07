@@ -30,8 +30,8 @@ GroupAction = Literal[
 def actor_role(group: Group, actor_id: str) -> Optional[str]:
     """Get the effective role of an actor.
     
-    Role is auto-determined by position:
-    - First enabled actor = foreman
+    Role is auto-determined by stable position:
+    - First visible actor = foreman
     - All others = peer
     """
     item = find_actor(group, actor_id)

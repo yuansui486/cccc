@@ -6,10 +6,10 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_TOOL_NAMES
+from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_TOOL_NAMES, SPECIALIZED_CORE_TOOL_NAMES
 from ..common import MCPError, _call_daemon_or_raise
 
-_CORE_TOOL_NAME_SET = set(CORE_TOOL_NAMES)
+_CORE_TOOL_NAME_SET = set(CORE_TOOL_NAMES) | set(SPECIALIZED_CORE_TOOL_NAMES)
 _EXT_TOOL_NAME_RE = re.compile(r"^cccc_ext_[a-f0-9]{8}_(.+)$")
 
 
@@ -95,6 +95,16 @@ def _build_resolution_plan(*, capability_id: str, diagnostics: list[Dict[str, An
         if not isinstance(item, dict):
             continue
         code = str(item.get("code") or "").strip()
+        action_hints = item.get("action_hints") if isinstance(item.get("action_hints"), list) else []
+        agent_actions.extend(str(x).strip() for x in action_hints if str(x).strip())
+        if code == "legacy_agent_self_proposed_namespace":
+            agent_actions.extend(
+                [
+                    "reimport_the_capsule_under_skill_agent_self_proposed_stable_slug",
+                    "call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration",
+                ]
+            )
+            continue
         if code == "missing_required_env":
             requires_user.add(code)
             required_env = item.get("required_env") if isinstance(item.get("required_env"), list) else []
@@ -479,6 +489,8 @@ def capability_use(
                 "group_id": group_id,
                 "actor_id": target_actor,
                 "capability_id": cap_id,
+                "scope": str(enable_result.get("scope") or scope or "session"),
+                "requested_scope": str(scope or "session"),
                 "enabled": False,
                 "enable_result": enable_result,
                 "diagnostics": diagnostics,
@@ -500,6 +512,8 @@ def capability_use(
             "group_id": group_id,
             "actor_id": target_actor,
             "capability_id": cap_id,
+            "scope": str(enable_result.get("scope") or scope or "session"),
+            "requested_scope": str(scope or "session"),
             "enabled": True,
             "state": state,
             "refresh_required": bool(enable_result.get("refresh_required")),
@@ -568,6 +582,8 @@ def capability_use(
         "group_id": group_id,
         "actor_id": target_actor,
         "capability_id": cap_id,
+        "scope": str(enable_result.get("scope") or scope or "session"),
+        "requested_scope": str(scope or "session"),
         "enabled": True,
         "state": "verified",
         "refresh_required": False,

@@ -138,6 +138,148 @@ class TestSystemNotifyOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_voice_secretary_input_notify_delivery_is_lightweight(self) -> None:
+        from cccc.contracts.v1 import SystemNotifyData
+        from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
+
+        text = render_system_notify_delivery_text(
+            notify=SystemNotifyData(
+                kind="info",
+                priority="normal",
+                title="Voice Secretary input available",
+                message='New Secretary input is waiting. Call cccc_voice_secretary_document(action="read_new_input").',
+                target_actor_id="voice-secretary",
+                requires_ack=False,
+                context={
+                    "kind": "voice_secretary_input",
+                    "reason": "new_input",
+                },
+            )
+        )
+
+        self.assertIn("read_new_input", text)
+        self.assertIn("First action: cccc_voice_secretary_document(action=\"read_new_input\")", text)
+        self.assertIn("Pointer only", text)
+        self.assertIn("reason=new_input", text)
+        self.assertNotIn("Do not bootstrap", text)
+        self.assertNotIn("cccc_voice_secretary_composer", text)
+        self.assertNotIn("Do not finish this turn with only a plan", text)
+        self.assertNotIn("alpha beta transcript", text)
+        self.assertIn("cccc_voice_secretary_document", text)
+        self.assertNotIn("source_chars", text)
+
+    def test_voice_secretary_input_notify_delivery_stays_pointer_only_when_group_available(self) -> None:
+        from cccc.contracts.v1 import SystemNotifyData
+        from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+        from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
+        from cccc.kernel.group import load_group
+
+        home, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "voice-inline-batch", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "voice-secretary",
+                    "title": "Voice Secretary",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            group.doc.setdefault("assistants", {})
+            group.doc["assistants"]["voice_secretary"] = {
+                "enabled": True,
+                "config": {
+                    "capture_mode": "browser",
+                    "recognition_backend": "browser_asr",
+                    "recognition_language": "zh-CN",
+                    "retention_ttl_seconds": 900,
+                    "auto_document_enabled": True,
+                    "document_default_dir": "docs/voice-secretary",
+                    "auto_document_quiet_ms": 5000,
+                    "auto_document_min_chars": 700,
+                    "auto_document_max_window_seconds": 120,
+                    "tts_enabled": False,
+                },
+            }
+            group.save()
+
+            resp = handle_assistant_voice_input_append(
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "kind": "prompt_refine",
+                    "request_id": "voice-prompt-inline",
+                    "composer_text": "",
+                    "voice_transcript": "把按钮文案改得更直接",
+                    "language": "zh-CN",
+                },
+            )
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+
+            text = render_system_notify_delivery_text(
+                notify=SystemNotifyData(
+                    kind="info",
+                    priority="normal",
+                    title="Voice Secretary input available",
+                    message='Secretary input is ready. Call cccc_voice_secretary_document(action="read_new_input").',
+                    target_actor_id="voice-secretary",
+                    requires_ack=False,
+                    context={"kind": "voice_secretary_input", "reason": "new_input"},
+                ),
+                group=group,
+            )
+
+            self.assertIn("Pointer only", text)
+            self.assertIn("read_new_input", text)
+            self.assertNotIn("Attached batch:", text)
+            self.assertNotIn("Secretary input batch:", text)
+            self.assertNotIn("voice-prompt-inline", text)
+            self.assertNotIn("把按钮文案改得更直接", text)
+        finally:
+            cleanup()
+
+    def test_voice_secretary_action_request_notify_delivery_is_actionable(self) -> None:
+        from cccc.contracts.v1 import SystemNotifyData
+        from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
+
+        text = render_system_notify_delivery_text(
+            notify=SystemNotifyData(
+                kind="info",
+                priority="normal",
+                title="Voice Secretary action request",
+                message="Please review the weather plan.",
+                target_actor_id="lead",
+                requires_ack=True,
+                context={
+                    "kind": "voice_secretary_action_request",
+                    "request_id": "voice-request-1",
+                    "document_path": "docs/voice-secretary/weather-plan.md",
+                    "summary": "Spoken task detected.",
+                    "request_text": "Please review the weather plan and assign an owner.",
+                },
+            )
+        )
+
+        self.assertIn("voice_secretary_action_request", text)
+        self.assertIn("voice-request-1", text)
+        self.assertIn("docs/voice-secretary/weather-plan.md", text)
+        self.assertNotIn("voice-doc-1", text)
+        self.assertNotIn("voice-job-1", text)
+        self.assertIn("Please review the weather plan", text)
+        self.assertIn("Action: handle the request", text)
+
     def test_system_notify_accepts_auto_idle_kind(self) -> None:
         _, cleanup = self._with_home()
         try:

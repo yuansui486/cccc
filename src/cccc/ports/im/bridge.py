@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import shlex
@@ -43,7 +44,7 @@ from .commands import (
 from .config_schema import canonicalize_im_config
 from .auth import KeyManager
 from .subscribers import SubscriberManager
-from .weixin_sidecar import resolve_weixin_sidecar_script_path
+
 from ...util.file_lock import LockUnavailableError, acquire_lockfile
 
 
@@ -56,6 +57,25 @@ def _is_env_var_name(value: str) -> bool:
 
 
 _PRESERVED_RECIPIENT_TOKENS = frozenset({"user", "@user", "@all", "@peers", "@foreman"})
+_GENERIC_ATTACHMENT_FILENAMES = frozenset({"", "file", "unknown", "attachment"})
+
+
+def _is_generic_attachment_filename(value: str) -> bool:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return True
+    stem = Path(raw).stem.strip().lower()
+    return raw in _GENERIC_ATTACHMENT_FILENAMES or stem in _GENERIC_ATTACHMENT_FILENAMES
+
+
+def _guess_extension_from_mime_type(mime_type: str) -> str:
+    normalized = str(mime_type or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized == "image/jpeg":
+        return ".jpg"
+    guessed = mimetypes.guess_extension(normalized) or ""
+    return guessed if guessed.startswith(".") else ""
 
 
 def _sniff_attachment_content_type(raw: bytes) -> Tuple[str, str]:
@@ -77,6 +97,14 @@ def _sniff_attachment_content_type(raw: bytes) -> Tuple[str, str]:
         text_head = ""
     if text_head.startswith("<svg") or text_head.startswith("<?xml") and "<svg" in text_head:
         return ("image/svg+xml", ".svg")
+    if text_head:
+        lines = [line.strip() for line in text_head.splitlines() if line.strip()]
+        if lines:
+            has_ini_header = any(line.startswith("[") and "]" in line for line in lines[:3])
+            has_key_value = any("=" in line for line in lines[:8])
+            if has_ini_header and has_key_value:
+                return ("text/plain", ".ini")
+            return ("text/plain", ".txt")
     return ("", "")
 
 
@@ -87,14 +115,12 @@ def _normalize_inbound_attachment_metadata(
     mime_type: str,
     kind: str,
 ) -> Tuple[str, str, str]:
-    normalized_filename = str(filename or "").strip() or "file"
+    raw_filename = str(filename or "").strip()
+    normalized_filename = raw_filename or "file"
     normalized_mime_type = str(mime_type or "").strip().lower()
     normalized_kind = str(kind or "").strip().lower() or "file"
 
-    sniffed_mime_type = ""
-    sniffed_ext = ""
-    if not normalized_mime_type or normalized_kind != "image":
-        sniffed_mime_type, sniffed_ext = _sniff_attachment_content_type(raw)
+    sniffed_mime_type, sniffed_ext = _sniff_attachment_content_type(raw)
 
     effective_mime_type = normalized_mime_type or sniffed_mime_type
     effective_kind = normalized_kind
@@ -103,11 +129,27 @@ def _normalize_inbound_attachment_metadata(
     elif sniffed_mime_type.startswith("image/"):
         effective_kind = "image"
 
+    if _is_generic_attachment_filename(normalized_filename):
+        inferred_ext = sniffed_ext or _guess_extension_from_mime_type(effective_mime_type)
+        normalized_filename = f"file{inferred_ext}" if inferred_ext else "file"
+
     has_suffix = bool(Path(normalized_filename).suffix)
     if effective_kind == "image" and not has_suffix and sniffed_ext:
         normalized_filename = f"{normalized_filename}{sniffed_ext}"
 
     return (normalized_filename, effective_mime_type, effective_kind)
+
+
+def _normalize_inbound_attachment_message_text(msg_text: str, stored_attachments: List[Dict[str, Any]]) -> str:
+    normalized_text = str(msg_text or "").strip()
+    if len(stored_attachments) != 1:
+        return normalized_text
+    title = str(stored_attachments[0].get("title") or "").strip() or "file"
+    if not normalized_text:
+        return f"[file] {title}"
+    if re.fullmatch(r"\[file(?::\s*(unknown|file))?\]", normalized_text, flags=re.IGNORECASE):
+        return f"[file] {title}"
+    return normalized_text
 
 
 def _acquire_singleton_lock(lock_path: Path) -> Optional[Any]:
@@ -776,7 +818,7 @@ class IMBridge:
                             end_ok = bool(self.adapter.end_stream(handle, text=text))
                         except Exception:
                             self._log(f"[stream] end_stream exception for stream={stream_id} target={target_key}")
-                        if end_ok:
+                        if end_ok and text:
                             completed = self._completed_stream_targets.setdefault(stream_id, set())
                             completed.add(target_key)
                         targets.pop(target_key, None)
@@ -1340,6 +1382,8 @@ class IMBridge:
                     )
                 )
 
+        msg_text = _normalize_inbound_attachment_message_text(msg_text, stored_attachments)
+
         if not msg_text and stored_attachments:
             if len(stored_attachments) == 1:
                 msg_text = f"[file] {stored_attachments[0].get('title') or 'file'}"
@@ -1421,7 +1465,6 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
     dingtalk_app_secret: str = ""
     dingtalk_robot_code: str = ""
     weixin_account_id: str = ""
-    weixin_command: List[str] = []
 
     def _resolve_secret(*, value_key: str, env_key: str, default_env: str) -> str:
         raw = str(im_config.get(value_key) or "").strip()
@@ -1563,22 +1606,6 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
             or os.environ.get("CCCC_IM_WEIXIN_ACCOUNT_ID")
             or ""
         ).strip()
-        raw_weixin_command = str(
-            im_config.get("weixin_command")
-            or os.environ.get("CCCC_IM_WEIXIN_COMMAND")
-            or ""
-        ).strip()
-        if raw_weixin_command:
-            weixin_command = [part for part in shlex.split(raw_weixin_command) if part]
-        else:
-            default_script = resolve_weixin_sidecar_script_path()
-            if not default_script.exists():
-                print(
-                    "[error] Default weixin sidecar script not found. "
-                    "Set weixin_command in group IM config or CCCC_IM_WEIXIN_COMMAND."
-                )
-                sys.exit(1)
-            weixin_command = ["node", str(default_script)]
     else:
         # Telegram/Discord: single token
         token_env_raw = str(im_config.get("token_env") or im_config.get("bot_token_env") or "").strip()
@@ -1615,7 +1642,7 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
     elif platform.lower() == "wecom":
         lock_identity = f"wecom|bot_id={wecom_bot_id}"
     elif platform.lower() == "weixin":
-        lock_identity = f"weixin|account={weixin_account_id}|cmd={' '.join(weixin_command)}"
+        lock_identity = f"weixin|cred_path={state_dir / 'im_weixin_credentials.json'}"
     else:
         lock_identity = f"{platform.lower()}|token={bot_token or ''}"
     token_material = lock_identity
@@ -1681,9 +1708,10 @@ def start_bridge(group_id: str, platform: str = "telegram") -> None:
     elif platform.lower() == "weixin":
         from .adapters.weixin import WeixinAdapter
         adapter = WeixinAdapter(
-            command=weixin_command,
             account_id=weixin_account_id,
             log_path=log_path,
+            cred_path=state_dir / "im_weixin_credentials.json",
+            context_cache_path=state_dir / "im_weixin_context_tokens.json",
         )
     else:
         print(f"[error] Unsupported platform: {platform}")
@@ -1753,7 +1781,7 @@ if __name__ == "__main__":
         print("  Feishu/Lark: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_DOMAIN (optional: feishu|lark|https://...)")
         print("  DingTalk: DINGTALK_APP_KEY, DINGTALK_APP_SECRET, DINGTALK_ROBOT_CODE (optional)")
         print("  WeCom:    WECOM_BOT_ID, WECOM_SECRET")
-        print("  Weixin:   CCCC_IM_WEIXIN_ACCOUNT_ID (optional), CCCC_IM_WEIXIN_COMMAND (optional)")
+        print("  Weixin:   CCCC_IM_WEIXIN_ACCOUNT_ID (optional)")
         sys.exit(1)
 
     _group_id = sys.argv[1]

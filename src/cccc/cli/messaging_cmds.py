@@ -6,6 +6,7 @@ from .common import *  # noqa: F401,F403
 
 __all__ = [
     "cmd_send",
+    "cmd_tracked_send",
     "cmd_reply",
     "cmd_tail",
     "cmd_ledger_snapshot",
@@ -14,6 +15,18 @@ __all__ = [
     "cmd_read",
     "cmd_prompt",
 ]
+
+
+def _to_tokens_from_args(args: argparse.Namespace) -> list[str]:
+    to_tokens: list[str] = []
+    to_raw = getattr(args, "to", None)
+    if isinstance(to_raw, list):
+        for item in to_raw:
+            if not isinstance(item, str):
+                continue
+            parts = [p.strip() for p in item.split(",") if p.strip()]
+            to_tokens.extend(parts)
+    return to_tokens
 
 def cmd_send(args: argparse.Namespace) -> int:
     group_id = _resolve_group_id(getattr(args, "group", ""))
@@ -25,14 +38,7 @@ def cmd_send(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {group_id}"}})
         return 2
 
-    to_tokens: list[str] = []
-    to_raw = getattr(args, "to", None)
-    if isinstance(to_raw, list):
-        for item in to_raw:
-            if not isinstance(item, str):
-                continue
-            parts = [p.strip() for p in item.split(",") if p.strip()]
-            to_tokens.extend(parts)
+    to_tokens = _to_tokens_from_args(args)
     priority = str(getattr(args, "priority", "normal") or "normal").strip() or "normal"
     if priority not in ("normal", "attention"):
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
@@ -57,6 +63,8 @@ def cmd_send(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     # Fallback: local execution (dev convenience)
     try:
@@ -112,6 +120,46 @@ def cmd_send(args: argparse.Namespace) -> int:
         pass
     _print_json({"ok": True, "result": {"event": event}})
     return 0
+
+
+def cmd_tracked_send(args: argparse.Namespace) -> int:
+    group_id = _resolve_group_id(getattr(args, "group", ""))
+    if not group_id:
+        _print_json({"ok": False, "error": {"code": "missing_group_id", "message": "missing group_id (no active group?)"}})
+        return 2
+    priority = str(getattr(args, "priority", "normal") or "normal").strip() or "normal"
+    if priority not in ("normal", "attention"):
+        _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
+        return 2
+    checklist = [{"text": line.strip()} for line in str(getattr(args, "checklist", "") or "").splitlines() if line.strip()]
+    if not _ensure_daemon_running():
+        _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "tracked-send requires the daemon"}})
+        return 2
+    resp = call_daemon(
+        {
+            "op": "tracked_send",
+            "args": {
+                "group_id": group_id,
+                "by": str(getattr(args, "by", "user") or "user"),
+                "title": str(getattr(args, "title", "") or ""),
+                "text": str(getattr(args, "text", "") or ""),
+                "to": _to_tokens_from_args(args),
+                "outcome": str(getattr(args, "outcome", "") or ""),
+                "checklist": checklist,
+                "assignee": str(getattr(args, "assignee", "") or ""),
+                "waiting_on": str(getattr(args, "waiting_on", "") or ""),
+                "handoff_to": str(getattr(args, "handoff_to", "") or ""),
+                "notes": str(getattr(args, "notes", "") or ""),
+                "priority": priority,
+                "reply_required": not bool(getattr(args, "no_reply_required", False)),
+                "idempotency_key": str(getattr(args, "idempotency_key", "") or ""),
+            },
+        }
+    )
+    if resp.get("ok"):
+        _print_json(resp)
+        return 0
+    return _return_daemon_rejection(resp)
 
 def cmd_reply(args: argparse.Namespace) -> int:
     """Reply to a message (IM-style, with quote)"""
@@ -170,6 +218,8 @@ def cmd_reply(args: argparse.Namespace) -> int:
         if resp.get("ok"):
             _print_json(resp)
             return 0
+        if not _daemon_response_allows_local_fallback(resp):
+            return _return_daemon_rejection(resp)
 
     # Fallback: local execution
     if not to_tokens:

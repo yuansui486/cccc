@@ -23,7 +23,7 @@ export function AgentsView({ agents, tr, ui }: AgentsViewProps) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className={classNames("rounded-full px-2.5 py-1 text-xs", "glass-panel text-[var(--color-text-secondary)]")}>{tr("context.totalAgents", "{{count}} agents", { count: agents.length })}</span>
-          <span className={classNames("rounded-full px-2.5 py-1 text-xs", "bg-blue-500/15 text-blue-600 dark:text-blue-400")}>{tr("context.activeTasksCount", "{{count}} with active task", { count: agentsWithActiveTask })}</span>
+          <span className={classNames("rounded-full px-2.5 py-1 text-xs", "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white")}>{tr("context.activeTasksCount", "{{count}} with active task", { count: agentsWithActiveTask })}</span>
           {agentsWithBlockers > 0 ? <span className={classNames("rounded-full px-2.5 py-1 text-xs", "bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{tr("context.blockersCount", "{{count}} blockers", { count: agentsWithBlockers })}</span> : null}
         </div>
       </div>

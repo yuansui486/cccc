@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cccc-pair"
-version = "0.4.10"
+version = "0.4.12"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
@@ -14,7 +14,7 @@ authors = [
 license = "Apache-2.0"
 keywords = ["orchestrator","ai","rfd","pair","collaboration"]
 dependencies = [
-  "cryptography>=42,<46",
+  "cryptography>=41.0.0,<47.0",
   "PyYAML>=6.0,<7.0",
   "dingtalk-stream>=0.24.3",
   "fastapi>=0.110,<1.0",
@@ -24,6 +24,7 @@ dependencies = [
   "pywinpty>=2.0; platform_system == 'Windows'",
   "python-multipart>=0.0.7,<1.0",
   "uvicorn[standard]>=0.27,<1.0",
+  "wechatbot-sdk>=0.2.0",
   "websocket-client>=1.8,<2.0",
 ]
 classifiers = [
@@ -57,7 +58,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "cccc.ports.web" = ["dist/**"]
-"cccc.resources" = ["*.md", "*.yaml", "im/*.mjs"]
+"cccc.resources" = ["*.md", "*.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

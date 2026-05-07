@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGroupStore, useUIStore } from "../../stores";
+import { useBuiltInAssistantStore } from "../../stores/useBuiltInAssistantStore";
 import { getWebPetPosition, useWebPetStore } from "../../stores/useWebPetStore";
 import {
   fetchActors,
@@ -127,6 +128,7 @@ export function WebPet({
     state.selectedGroupId === groupId ? state.chatByGroup[groupId]?.events || state.events : EMPTY_EVENTS,
   );
   const positions = useWebPetStore((state) => state.positions);
+  const assistantOpenRequest = useBuiltInAssistantStore((state) => state.openRequests[groupId]);
   const position = getWebPetPosition(groupId, positions, stackIndex);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [selectedReminderFingerprint, setSelectedReminderFingerprint] = useState("");
@@ -143,6 +145,7 @@ export function WebPet({
   const petContextRefreshGroupIdRef = useRef("");
   const latestPetContextRefreshMarkerRef = useRef("");
   const desktopPetVisibilityFallbackRef = useRef(false);
+  const handledAssistantOpenNonceRef = useRef(0);
 
   const isSelectedGroup = String(selectedGroupId || "").trim() === String(groupId || "").trim();
   const groupDoc = isSelectedGroup ? selectedGroupDoc : remoteState.groupDoc;
@@ -432,6 +435,13 @@ export function WebPet({
     if (!isPanelOpen) return;
     markRemindersSeen();
   }, [isPanelOpen, markRemindersSeen, reminders]);
+
+  useEffect(() => {
+    if (!assistantOpenRequest || assistantOpenRequest.target !== "pet") return;
+    if (assistantOpenRequest.nonce === handledAssistantOpenNonceRef.current) return;
+    handledAssistantOpenNonceRef.current = assistantOpenRequest.nonce;
+    openPanel();
+  }, [assistantOpenRequest, openPanel]);
 
   useEffect(() => {
     const gid = String(groupId || "").trim();

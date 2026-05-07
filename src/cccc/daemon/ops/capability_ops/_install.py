@@ -738,22 +738,61 @@ def _supported_external_install_record(rec: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def _record_enable_supported(rec: Dict[str, Any], *, capability_id: str = "") -> bool:
-    raw = rec.get("enable_supported")
-    if isinstance(raw, bool):
-        return raw
+    return not bool(_record_enable_unsupported_reason(rec, capability_id=capability_id))
+
+
+def _record_enable_unsupported_reason(rec: Dict[str, Any], *, capability_id: str = "") -> str:
     cap_id = str(capability_id or rec.get("capability_id") or "").strip()
     kind = str(rec.get("kind") or "").strip().lower()
+    source_id = str(rec.get("source_id") or "").strip()
+    if kind == "skill" and source_id == "agent_self_proposed" and not cap_id.startswith("skill:agent_self_proposed:"):
+        return "legacy_agent_self_proposed_namespace"
+    raw = rec.get("enable_supported")
+    if isinstance(raw, bool):
+        return "" if raw else "capability_unavailable"
     qualification = str(rec.get("qualification_status") or "").strip().lower()
     if qualification == _QUAL_BLOCKED:
-        return False
+        return "qualification_blocked"
     if cap_id.startswith("pack:"):
-        return True
+        return ""
     if kind == "skill":
-        return qualification != _QUAL_BLOCKED
+        return ""
     if _needs_registry_hydration(cap_id, rec):
-        return True
-    supported, _ = _supported_external_install_record(rec)
-    return bool(supported)
+        return ""
+    supported, reason = _supported_external_install_record(rec)
+    return "" if supported else (reason or "capability_unavailable")
+
+
+def _enable_unsupported_diagnostics(*, capability_id: str, reason_code: str) -> List[Dict[str, Any]]:
+    code = str(reason_code or "").strip() or "capability_unavailable"
+    if code == "legacy_agent_self_proposed_namespace":
+        return [
+            {
+                "code": code,
+                "message": (
+                    "legacy self-proposed skill ids under skill:agent:* are no longer valid; "
+                    "use skill:agent_self_proposed:<stable-slug>"
+                ),
+                "retryable": False,
+                "action_hints": [
+                    "reimport_the_capsule_under_skill_agent_self_proposed_stable_slug",
+                    "call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration",
+                ],
+                "legacy_capability_id": str(capability_id or ""),
+                "canonical_prefix": "skill:agent_self_proposed:",
+            }
+        ]
+    return [
+        {
+            "code": code,
+            "message": "capability is not enableable in its current catalog/policy state",
+            "retryable": False,
+            "action_hints": [
+                "inspect_capability_search_readiness_preview",
+                "fix_or_import_a_supported_capability_record_before_retrying",
+            ],
+        }
+    ]
 
 
 def _external_artifact_cache_key(rec: Dict[str, Any], *, capability_id: str) -> str:

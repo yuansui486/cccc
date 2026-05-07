@@ -1,7 +1,7 @@
 import { memo, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import type { MutableRefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { LedgerEvent, Actor, AgentState, PresentationMessageRef } from "../types";
+import { LedgerEvent, Actor, AgentState, PresentationMessageRef, Task } from "../types";
 import { MessageBubble } from "./MessageBubble";
 import { useActorDisplayNameMap } from "../hooks/useActorDisplayName";
 import {
@@ -15,6 +15,8 @@ import {
   getStableMessageKey,
   shouldUseVirtualizedMessageList,
 } from "./virtualMessageListHelpers";
+
+const EMPTY_TASK_BY_ID = new Map<string, Task>();
 
 function shouldCollapseMessageHeader(previousMessage: LedgerEvent | undefined, message: LedgerEvent | undefined): boolean {
   void previousMessage;
@@ -54,6 +56,7 @@ export interface VirtualMessageListProps {
   onRelay?: (ev: LedgerEvent) => void;
   onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
   onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
+  taskById?: Map<string, Task>;
   showScrollButton: boolean;
   onScrollButtonClick: () => void;
   chatUnreadCount: number;
@@ -91,6 +94,7 @@ type VirtualMessageRowProps = {
   onRelay?: (ev: LedgerEvent) => void;
   onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
   onOpenPresentationRef?: (ref: PresentationMessageRef, event: LedgerEvent) => void;
+  taskById?: Map<string, Task>;
   measureElement: (node: Element | null) => void;
 };
 
@@ -115,6 +119,7 @@ const VirtualMessageRow = memo(function VirtualMessageRow({
   onRelay,
   onOpenSource,
   onOpenPresentationRef,
+  taskById,
   measureElement,
 }: VirtualMessageRowProps) {
   const attachMeasuredRow = useCallback((node: HTMLDivElement | null) => {
@@ -159,6 +164,7 @@ const VirtualMessageRow = memo(function VirtualMessageRow({
         onRelay={onRelay}
         onOpenSource={onOpenSource}
         onOpenPresentationRef={onOpenPresentationRef}
+        taskById={taskById ?? EMPTY_TASK_BY_ID}
       />
     </div>
   );
@@ -185,6 +191,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   onRelay,
   onOpenSource,
   onOpenPresentationRef,
+  taskById,
   showScrollButton,
   onScrollButtonClick,
   chatUnreadCount,
@@ -882,6 +889,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
                     onRelay={onRelay}
                     onOpenSource={onOpenSource}
                     onOpenPresentationRef={onOpenPresentationRef}
+                    taskById={taskById ?? EMPTY_TASK_BY_ID}
                     measureElement={measureElement}
                   />
                 );
@@ -922,6 +930,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
                       onRelay={onRelay}
                       onOpenSource={onOpenSource}
                       onOpenPresentationRef={onOpenPresentationRef}
+                      taskById={taskById ?? EMPTY_TASK_BY_ID}
                     />
                   </div>
                 );

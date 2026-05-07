@@ -96,4 +96,33 @@ describe("useSelectedGroupRuntime", () => {
       },
     });
   });
+
+  it("does not let a missing groupDoc default overwrite group meta runtime state", () => {
+    const patch = computeGroupRuntimePatch({
+      group: {
+        group_id: "g2",
+        running: false,
+        state: "idle",
+        runtime_status: {
+          lifecycle_state: "idle",
+          runtime_running: false,
+          running_actor_count: 0,
+          has_running_foreman: false,
+        },
+      },
+      groupDoc: null,
+      actors: [],
+    });
+
+    expect(patch).toEqual({
+      running: false,
+      state: "idle",
+      runtime_status: {
+        lifecycle_state: "idle",
+        runtime_running: false,
+        running_actor_count: 0,
+        has_running_foreman: false,
+      },
+    });
+  });
 });

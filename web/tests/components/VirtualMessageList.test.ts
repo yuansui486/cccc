@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { getAutoFollowTrigger, getStableMessageKey, shouldUseVirtualizedMessageList } from "../../src/components/virtualMessageListHelpers";
+import {
+  getAutoFollowTrigger,
+  getStableMessageKey,
+  shouldAutoScrollToBottom,
+  shouldDetachChatFollowOnScroll,
+  shouldUseVirtualizedMessageList,
+} from "../../src/components/virtualMessageListHelpers";
 import type { LedgerEvent } from "../../src/types";
 
 describe("getStableMessageKey", () => {
@@ -162,5 +168,101 @@ describe("getAutoFollowTrigger", () => {
         nextTailMutationSnapshot: { tailKey: "m3", signature: "3|m3|assistant|t3||40|0" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("shouldDetachChatFollowOnScroll", () => {
+  it("detaches when the user scrolls upward away from bottom", () => {
+    expect(
+      shouldDetachChatFollowOnScroll({
+        followMode: "follow",
+        previousTop: 640,
+        currentTop: 560,
+        atBottom: false,
+        isContainerResizing: false,
+        topLoadThresholdPx: 80,
+      }),
+    ).toBe(true);
+  });
+
+  it("detaches once the viewport reaches the history-load threshold", () => {
+    expect(
+      shouldDetachChatFollowOnScroll({
+        followMode: "follow",
+        previousTop: 0,
+        currentTop: 60,
+        atBottom: false,
+        isContainerResizing: false,
+        topLoadThresholdPx: 80,
+      }),
+    ).toBe(true);
+  });
+
+  it("stays attached during container resize compensation", () => {
+    expect(
+      shouldDetachChatFollowOnScroll({
+        followMode: "follow",
+        previousTop: 640,
+        currentTop: 560,
+        atBottom: false,
+        isContainerResizing: true,
+        topLoadThresholdPx: 80,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not detach when already at bottom", () => {
+    expect(
+      shouldDetachChatFollowOnScroll({
+        followMode: "follow",
+        previousTop: 640,
+        currentTop: 640,
+        atBottom: true,
+        isContainerResizing: false,
+        topLoadThresholdPx: 80,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldAutoScrollToBottom", () => {
+  it("allows auto-scroll only when still following from the bottom", () => {
+    expect(
+      shouldAutoScrollToBottom({
+        followMode: "follow",
+        isAtBottom: true,
+        forceStickToBottom: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("blocks auto-scroll when the user has left the bottom even if follow mode is stale", () => {
+    expect(
+      shouldAutoScrollToBottom({
+        followMode: "follow",
+        isAtBottom: false,
+        forceStickToBottom: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("blocks auto-scroll while detached", () => {
+    expect(
+      shouldAutoScrollToBottom({
+        followMode: "detached",
+        isAtBottom: true,
+        forceStickToBottom: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("still allows explicit force-stick requests", () => {
+    expect(
+      shouldAutoScrollToBottom({
+        followMode: "detached",
+        isAtBottom: false,
+        forceStickToBottom: true,
+      }),
+    ).toBe(true);
   });
 });

@@ -104,11 +104,38 @@ Default: `CCCC_HOME=~/.cccc`
 
 | Kind | Description |
 |------|-------------|
-| `group.create/update/attach/start/stop/set_state/settings_update/automation_update` | Working group lifecycle and configuration |
-| `actor.add/update/start/stop/restart/remove` | Actor lifecycle |
+| `group.create` | Create a working group |
+| `group.update` | Update group metadata |
+| `group.attach` | Attach a scope to a working group |
+| `group.detach_scope` | Detach a scope from a working group |
+| `group.set_active_scope` | Select the active scope for a group |
+| `group.start` | Start group runtime actors |
+| `group.stop` | Stop group runtime actors |
+| `group.set_state` | Set group lifecycle state |
+| `group.settings_update` | Update group settings |
+| `group.automation_update` | Update group automation configuration |
+| `actor.add` | Add an actor |
+| `actor.update` | Update actor metadata/configuration |
+| `actor.set_role` | Set actor role |
+| `actor.start` | Start an actor runtime |
+| `actor.stop` | Stop an actor runtime |
+| `actor.restart` | Restart an actor runtime |
+| `actor.remove` | Remove an actor |
+| `actor.activity` | Runtime activity/status snapshot |
+| `context.sync` | Context/control-plane sync event |
 | `chat.message` | Chat message |
+| `chat.stream` | Progressive stream chunk/update |
 | `chat.read` / `chat.ack` | Read and acknowledgement events |
+| `chat.reaction` | Chat reaction |
 | `system.notify` / `system.notify_ack` | System notifications and acknowledgement |
+| `assistant.settings_update` | Update built-in assistant settings |
+| `assistant.status_update` | Update built-in assistant lifecycle/health |
+| `assistant.voice.document` | Voice Secretary working document save/update/archive marker |
+| `assistant.voice.input` | Voice Secretary transcript/input ingestion marker |
+| `assistant.voice.prompt_draft` | Voice Secretary composer prompt draft submit/ack marker |
+| `assistant.voice.request` | Voice Secretary structured action request marker |
+| `presentation.publish` | Publish a presentation rail card |
+| `presentation.clear` | Clear presentation rail card(s) |
 
 ### chat.message Data
 

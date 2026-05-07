@@ -2,6 +2,9 @@ from __future__ import annotations
 
 """System/daemon/web/mcp CLI command handlers."""
 
+import json
+from importlib.metadata import PackageNotFoundError, distribution
+
 from .common import *  # noqa: F401,F403
 
 __all__ = [
@@ -11,8 +14,237 @@ __all__ = [
     "cmd_web",
     "cmd_mcp",
     "cmd_setup",
+    "cmd_update",
     "cmd_daemon",
 ]
+
+_UPDATE_PACKAGE_NAME = "cccc-pair"
+_RC_INDEX_URL = "https://test.pypi.org/simple/"
+_STABLE_CHANNEL = "stable"
+_RC_CHANNEL = "rc"
+_KNOWN_UPDATE_CHANNELS = {_STABLE_CHANNEL, _RC_CHANNEL}
+_BLOCKED_INSTALL_KINDS = {"editable", "local_path"}
+
+
+def _find_installed_distribution() -> Any:
+    """Return the installed CCCC distribution, preferring the published package name."""
+    for dist_name in (_UPDATE_PACKAGE_NAME, "cccc"):
+        try:
+            return distribution(dist_name)
+        except PackageNotFoundError:
+            continue
+    raise PackageNotFoundError(_UPDATE_PACKAGE_NAME)
+
+
+def _read_direct_url_payload(dist: Any) -> dict[str, Any]:
+    """Parse direct_url metadata when present to classify install source."""
+    raw = str(dist.read_text("direct_url.json") or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _distribution_name(dist: Any) -> str:
+    """Return a human-readable distribution name from metadata when available."""
+    metadata = getattr(dist, "metadata", None)
+    if metadata is not None:
+        try:
+            value = str(metadata.get("Name") or "").strip()
+            if value:
+                return value
+        except Exception:
+            pass
+    return str(getattr(dist, "name", "") or _UPDATE_PACKAGE_NAME)
+
+
+def _detect_install_kind(dist: Any) -> tuple[str, dict[str, Any]]:
+    """Classify the current installation without guessing beyond trusted metadata."""
+    direct_url = _read_direct_url_payload(dist)
+    if direct_url:
+        dir_info = direct_url.get("dir_info")
+        if isinstance(dir_info, dict) and bool(dir_info.get("editable")):
+            return "editable", direct_url
+        url = str(direct_url.get("url") or "").strip().lower()
+        if url.startswith("file:") or url.startswith("/"):
+            return "local_path", direct_url
+    return "standard", direct_url
+
+
+def _detect_update_channel(dist: Any, direct_url: dict[str, Any]) -> str:
+    """Infer the current release channel when metadata contains a reliable hint."""
+    version_text = str(getattr(dist, "version", "") or "").strip().lower()
+    if any(marker in version_text for marker in ("a", "b", "rc", "dev")):
+        return _RC_CHANNEL
+
+    archive_info = direct_url.get("archive_info")
+    if isinstance(archive_info, dict):
+        indexes = archive_info.get("index_urls")
+        if isinstance(indexes, list):
+            normalized = {str(item or "").strip().rstrip("/") for item in indexes}
+            if _RC_INDEX_URL.rstrip("/") in normalized:
+                return _RC_CHANNEL
+    return _STABLE_CHANNEL
+
+
+def _build_update_command(channel: str) -> list[str]:
+    """Build the exact pip invocation for the selected release channel."""
+    command = [sys.executable, "-m", "pip", "install", "-U"]
+    if channel == _RC_CHANNEL:
+        command.extend(
+            [
+                "--pre",
+                "--index-url",
+                _RC_INDEX_URL,
+                "--extra-index-url",
+                "https://pypi.org/simple/",
+            ]
+        )
+    command.append(_UPDATE_PACKAGE_NAME)
+    return command
+
+
+def _recommendation_for_install_kind(install_kind: str) -> str:
+    """Return a concrete follow-up command when auto-update is intentionally blocked."""
+    if install_kind == "editable":
+        return "python -m pip install -e ."
+    return f"python -m pip install -U {_UPDATE_PACKAGE_NAME}"
+
+
+def _blocked_update_message(install_kind: str) -> str:
+    """Explain clearly why auto-update is blocked for this install source."""
+    if install_kind == "editable":
+        return "editable installs are not updated automatically by `cccc update`"
+    if install_kind == "local_path":
+        return "local path installs are not updated automatically by `cccc update`"
+    return "this install source is not updated automatically by `cccc update`"
+
+
+def _command_text(command: list[str]) -> str:
+    """Render the exact subprocess command for JSON output."""
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def _inspect_update_target(args: argparse.Namespace) -> tuple[dict[str, Any], list[str]]:
+    """Resolve current installation metadata and the command we would execute."""
+    requested_channel = str(getattr(args, "channel", "") or "").strip().lower()
+    if requested_channel and requested_channel not in _KNOWN_UPDATE_CHANNELS:
+        raise ValueError(f"invalid channel: {requested_channel}")
+
+    dist = _find_installed_distribution()
+    install_kind, direct_url = _detect_install_kind(dist)
+    detected_channel = _detect_update_channel(dist, direct_url)
+    effective_channel = requested_channel or detected_channel or _STABLE_CHANNEL
+
+    result = {
+        "distribution_name": _distribution_name(dist),
+        "version": str(getattr(dist, "version", "") or ""),
+        "channel": effective_channel,
+        "detected_channel": detected_channel,
+        "install_kind": install_kind,
+        "direct_url_present": bool(direct_url),
+    }
+    return result, _build_update_command(effective_channel)
+
+
+def _build_update_result(inspection: dict[str, Any], completed: Any) -> dict[str, Any]:
+    """Convert subprocess output into the structured JSON result shape."""
+    return {
+        **inspection,
+        "before_version": inspection.get("version"),
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "exit_code": int(completed.returncode),
+    }
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Upgrade the current CCCC installation in-place via the active Python runtime."""
+    try:
+        inspection, command = _inspect_update_target(args)
+    except ValueError as e:
+        _print_json({"ok": False, "error": {"code": "invalid_channel", "message": str(e)}})
+        return 2
+    except PackageNotFoundError:
+        _print_json(
+            {
+                "ok": False,
+                "error": {
+                    "code": "distribution_not_found",
+                    "message": "CCCC is not installed in the current Python environment",
+                },
+            }
+        )
+        return 1
+
+    inspection["command"] = _command_text(command)
+
+    if bool(getattr(args, "check", False)):
+        _print_json({"ok": True, "result": inspection})
+        return 0
+
+    install_kind = str(inspection.get("install_kind") or "").strip()
+    if install_kind in _BLOCKED_INSTALL_KINDS:
+        _print_json(
+            {
+                "ok": False,
+                "error": {
+                    "code": "editable_install_not_supported",
+                    "message": _blocked_update_message(install_kind),
+                },
+                "result": {
+                    **inspection,
+                    "recommendation": _recommendation_for_install_kind(install_kind),
+                },
+            }
+        )
+        return 1
+
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as e:
+        _print_json(
+            {
+                "ok": False,
+                "error": {
+                    "code": "update_failed",
+                    "message": str(e),
+                },
+                "result": inspection,
+            }
+        )
+        return 1
+
+    result = _build_update_result(inspection, completed)
+
+    if completed.returncode == 0:
+        try:
+            refreshed = _find_installed_distribution()
+            result["after_version"] = str(getattr(refreshed, "version", "") or "")
+        except PackageNotFoundError:
+            pass
+        _print_json({"ok": True, "result": result})
+        return 0
+
+    _print_json(
+        {
+            "ok": False,
+            "error": {
+                "code": "update_failed",
+                "message": "pip install command failed",
+            },
+            "result": result,
+        }
+    )
+    return 1
 
 def cmd_version(_: argparse.Namespace) -> int:
     print(__version__)

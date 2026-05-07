@@ -1,802 +1,156 @@
+import type { LucideIcon, LucideProps } from "lucide-react";
+import {
+  AppWindow,
+  ArrowDown,
+  Bookmark,
+  Bell,
+  Camera,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Clock3,
+  Check,
+  Clipboard,
+  Compass,
+  Copy,
+  EllipsisVertical,
+  File,
+  Folder,
+  Globe,
+  GripVertical,
+  House,
+  Image,
+  Inbox,
+  Info,
+  LayoutPanelLeft,
+  Maximize2,
+  Menu,
+  Mic,
+  MessageSquare,
+  MessageSquareText,
+  Minimize2,
+  Monitor,
+  Moon,
+  Paperclip,
+  Pause,
+  PawPrint,
+  Pencil,
+  Play,
+  Plus,
+  Power,
+  RefreshCw,
+  Reply,
+  Rocket,
+  Search,
+  Send,
+  Settings2,
+  Sparkles,
+  Square,
+  SquareTerminal,
+  Sun,
+  TextCursorInput,
+  Trash2,
+  Download,
+  X,
+} from "lucide-react";
 
-interface IconProps {
-  className?: string;
-  size?: number;
-}
+type IconProps = Omit<LucideProps, "ref">;
 
-// Minimal line icons, designed to match the "liquid glass" UI style.
-export function ClipboardIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-    </svg>
-  );
-}
+function createIcon(Icon: LucideIcon, defaultStrokeWidth = 1.5) {
+  function WrappedIcon({
+    size = 18,
+    strokeWidth = defaultStrokeWidth,
+    absoluteStrokeWidth = true,
+    ...props
+  }: IconProps) {
+    return (
+      <Icon
+        size={size}
+        strokeWidth={strokeWidth}
+        absoluteStrokeWidth={absoluteStrokeWidth}
+        {...props}
+      />
+    );
+  }
 
-export function CopyIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="9" y="9" width="11" height="11" rx="2" />
-      <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
-    </svg>
-  );
-}
-
-export function RocketIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
-      <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" fill="currentColor" opacity="0.12" />
-      <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
-      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
-      <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
-      <circle cx="15.5" cy="8.5" r="1.5" fill="currentColor" opacity="0.22" />
-      <circle cx="15.5" cy="8.5" r="1.5" />
-    </svg>
-  );
-}
-
-export function PlayIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polygon points="6 3 20 12 6 21 6 3" fill="currentColor" opacity="0.15" />
-      <polygon points="6 3 20 12 6 21 6 3" />
-    </svg>
-  );
+  WrappedIcon.displayName = `Wrapped${Icon.displayName || "Icon"}`;
+  return WrappedIcon;
 }
 
-export function PauseIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor" opacity="0.15" />
-      <rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor" opacity="0.15" />
-      <rect x="6" y="4" width="4" height="16" rx="1" />
-      <rect x="14" y="4" width="4" height="16" rx="1" />
-    </svg>
-  );
+function createControlIcon(Icon: LucideIcon, defaultStrokeWidth = 1.75) {
+  function WrappedIcon({
+    size = 18,
+    strokeWidth = defaultStrokeWidth,
+    absoluteStrokeWidth = true,
+    ...props
+  }: IconProps) {
+    return (
+      <Icon
+        size={size}
+        strokeWidth={strokeWidth}
+        absoluteStrokeWidth={absoluteStrokeWidth}
+        fill="none"
+        {...props}
+      />
+    );
+  }
+
+  WrappedIcon.displayName = `Control${Icon.displayName || "Icon"}`;
+  return WrappedIcon;
 }
 
-export function StopIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" opacity="0.15" />
-      <rect x="4" y="4" width="16" height="16" rx="2" />
-    </svg>
-  );
-}
-
-export function SettingsIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-export function EditIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-  );
-}
-
-export function MoreIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-      <circle cx="12" cy="5" r="1.5" fill="currentColor" />
-      <circle cx="12" cy="19" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-export function MenuIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
-  );
-}
-
-export function CloseIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  );
-}
-
-export function SearchIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  );
-}
-
-export function SplitViewIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <line x1="9" y1="4" x2="9" y2="20" />
-      <path d="M13 8h4" />
-      <path d="M13 12h4" />
-      <path d="M13 16h3" />
-    </svg>
-  );
-}
-
-export function WindowViewIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M3 8h18" />
-      <circle cx="6.5" cy="6" r="0.75" fill="currentColor" stroke="none" />
-      <circle cx="9.5" cy="6" r="0.75" fill="currentColor" stroke="none" />
-      <circle cx="12.5" cy="6" r="0.75" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-export function MonitorIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="2.75" y="3.75" width="18.5" height="12.5" rx="2.25" fill="currentColor" opacity="0.08" />
-      <rect x="2.75" y="3.75" width="18.5" height="12.5" rx="2.25" />
-      <path d="M8.5 20.25h7" />
-      <path d="M12 16.25v4" />
-      <path d="M10.25 20.25h3.5" />
-    </svg>
-  );
-}
-
-export function TextSizeIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M3.5 18L8 6l4.5 12" />
-      <path d="M5.5 13.5h5" />
-      <circle cx="17.5" cy="15" r="2.5" />
-      <path d="M20 12.5V18" />
-    </svg>
-  );
-}
-
-export function CompassIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M14.8 9.2 13.1 13l-3.9 1.8L11 11z" fill="currentColor" opacity="0.18" />
-      <path d="m14.8 9.2-1.7 3.8-3.9 1.8L11 11l3.8-1.8Z" />
-    </svg>
-  );
-}
-
-export function PlusIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-export function FolderIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="currentColor" opacity="0.1" />
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-export function SunIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
-}
-
-export function MoonIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
-  );
-}
-
-export function TerminalIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
-    </svg>
-  );
-}
-
-export function BookmarkIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M7 4.75h10A1.25 1.25 0 0 1 18.25 6v13l-6.25-3.9-6.25 3.9V6A1.25 1.25 0 0 1 7 4.75Z" />
-      <path d="M9.25 8.25h5.5" opacity="0.35" />
-    </svg>
-  );
-}
-
-export function InboxIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  );
-}
-
-export function RefreshIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-    </svg>
-  );
-}
-
-export function TrashIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <line x1="10" y1="11" x2="10" y2="17" />
-      <line x1="14" y1="11" x2="14" y2="17" />
-    </svg>
-  );
-}
-
-export function ChevronDownIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  );
-}
-
-export function SendIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <line x1="22" y1="2" x2="11" y2="13" />
-      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  );
-}
-
-export function AttachmentIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-    </svg>
-  );
-}
-
-export function ReplyIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="9 17 4 12 9 7" />
-      <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
-    </svg>
-  );
-}
-
-export function PowerIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-      <line x1="12" y1="2" x2="12" y2="12" />
-    </svg>
-  );
-}
-export function AlertIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="12" />
-      <line x1="12" y1="16" x2="12.01" y2="16" />
-    </svg>
-  );
-}
-
-export function InfoIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="16" x2="12" y2="12" />
-      <line x1="12" y1="8" x2="12.01" y2="8" />
-    </svg>
-  );
-}
-
-export function ImageIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <polyline points="21 15 16 10 5 21" />
-    </svg>
-  );
-}
-
-export function FileIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
-export function ChevronLeftIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  );
-}
-
-export function ChevronRightIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  );
-}
-
-export function GlobeIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-    </svg>
-  );
-}
-
-export function MicrophoneIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" opacity="0.14" />
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M6.5 10.5a5.5 5.5 0 0 0 11 0" />
-      <path d="M12 16v5" />
-      <path d="M8 21h8" />
-    </svg>
-  );
-}
-
-export function GripIcon({ className, size = 18 }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="9" cy="6" r="1.5" fill="currentColor" />
-      <circle cx="15" cy="6" r="1.5" fill="currentColor" />
-      <circle cx="9" cy="12" r="1.5" fill="currentColor" />
-      <circle cx="15" cy="12" r="1.5" fill="currentColor" />
-      <circle cx="9" cy="18" r="1.5" fill="currentColor" />
-      <circle cx="15" cy="18" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
+export const ClipboardIcon = createIcon(Clipboard);
+export const CheckIcon = createIcon(Check, 2);
+export const CopyIcon = createIcon(Copy);
+export const RocketIcon = createIcon(Rocket);
+export const PlayIcon = createControlIcon(Play);
+export const PauseIcon = createControlIcon(Pause);
+export const StopIcon = createControlIcon(Square);
+export const ClockIcon = createIcon(Clock3);
+export const SettingsIcon = createIcon(Settings2);
+export const EditIcon = createIcon(Pencil);
+export const MoreIcon = createIcon(EllipsisVertical);
+export const MenuIcon = createIcon(Menu);
+export const CloseIcon = createIcon(X);
+export const SearchIcon = createIcon(Search);
+export const SplitViewIcon = createIcon(LayoutPanelLeft);
+export const WindowViewIcon = createIcon(AppWindow);
+export const ExpandIcon = createIcon(Maximize2);
+export const CollapseIcon = createIcon(Minimize2);
+export const MaximizeIcon = createIcon(Maximize2);
+export const MonitorIcon = createIcon(Monitor);
+export const TextSizeIcon = createIcon(TextCursorInput, 2);
+export const CompassIcon = createIcon(Compass);
+export const PlusIcon = createIcon(Plus);
+export const HomeIcon = createIcon(House);
+export const FolderIcon = createIcon(Folder);
+export const DownloadIcon = createIcon(Download);
+export const SunIcon = createIcon(Sun);
+export const MoonIcon = createIcon(Moon);
+export const TerminalIcon = createIcon(SquareTerminal);
+export const BookmarkIcon = createIcon(Bookmark, 1.9);
+export const InboxIcon = createIcon(Inbox);
+export const RefreshIcon = createIcon(RefreshCw);
+export const TrashIcon = createIcon(Trash2);
+export const ChevronDownIcon = createIcon(ChevronDown);
+export const SendIcon = createIcon(Send);
+export const AttachmentIcon = createIcon(Paperclip);
+export const MicrophoneIcon = createIcon(Mic);
+export const CameraIcon = createIcon(Camera, 1.9);
+export const ReplyIcon = createIcon(Reply);
+export const PowerIcon = createIcon(Power);
+export const AlertIcon = createIcon(CircleAlert, 2);
+export const InfoIcon = createIcon(Info, 2);
+export const ImageIcon = createIcon(Image);
+export const FileIcon = createIcon(File);
+export const MessageSquareIcon = createIcon(MessageSquare);
+export const MessageSquareTextIcon = createIcon(MessageSquareText);
+export const BellIcon = createIcon(Bell);
+export const SparklesIcon = createIcon(Sparkles);
+export const ArrowDownIcon = createIcon(ArrowDown, 2);
+export const ChevronLeftIcon = createIcon(ChevronLeft);
+export const ChevronRightIcon = createIcon(ChevronRight);
+export const GlobeIcon = createIcon(Globe);
+export const GripIcon = createIcon(GripVertical);
+export const PetIcon = createIcon(PawPrint);

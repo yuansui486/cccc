@@ -2,7 +2,16 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 
-import { labelClass, primaryButtonClass } from "./types";
+import { ClockIcon } from "../../Icons";
+import {
+  labelClass,
+  primaryButtonClass,
+  settingsWorkspaceActionBarClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
+} from "./types";
 
 interface DeliveryTabProps {
   isDark: boolean;
@@ -12,24 +21,6 @@ interface DeliveryTabProps {
   onSave: () => void;
   onAutoSave?: (field: string, value: boolean) => void;
 }
-
-const ClockIcon = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="12" cy="12" r="10" />
-    <polyline points="12 6 12 12 16 14" />
-  </svg>
-);
 
 const ToggleRow = ({
   label,
@@ -46,9 +37,9 @@ const ToggleRow = ({
   helperText?: React.ReactNode;
   onAutoSave?: (newValue: boolean) => void;
 }) => (
-  <div className="w-full">
+  <div className={settingsWorkspaceSoftPanelClass(isDark)}>
     <label className="flex items-center justify-between cursor-pointer">
-      <span className={labelClass(isDark)}>{label}</span>
+      <span className={`pr-4 ${labelClass(isDark)}`}>{label}</span>
       <button
         type="button"
         role="switch"
@@ -94,33 +85,39 @@ export function DeliveryTab(props: DeliveryTabProps) {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div>
-        <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t("delivery.title")}</h3>
-        <p className="text-xs mt-1 text-[var(--color-text-muted)]">
-          {t("delivery.description")}
-        </p>
-      </div>
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("delivery.title")}</h3>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {t("delivery.description")}
+            </p>
+          </div>
+        </div>
 
-      <ToggleRow
-        isDark={isDark}
-        label={t("delivery.autoMarkRead")}
-        checked={props.autoMarkOnDelivery}
-        onChange={props.setAutoMarkOnDelivery}
-        helperText={t("delivery.autoMarkReadHelp")}
-        onAutoSave={(newValue) => autoSave("auto_mark_on_delivery", () => newValue)}
-      />
+        <div className={settingsWorkspaceBodyClass}>
+          <ToggleRow
+            isDark={isDark}
+            label={t("delivery.autoMarkRead")}
+            checked={props.autoMarkOnDelivery}
+            onChange={props.setAutoMarkOnDelivery}
+            helperText={t("delivery.autoMarkReadHelp")}
+            onAutoSave={(newValue) => autoSave("auto_mark_on_delivery", () => newValue)}
+          />
+        </div>
 
-      <div className="pt-2">
-        <button onClick={onSave} disabled={busy} className={primaryButtonClass(busy)}>
-          {busy ? (
-            t("common:saving")
-          ) : (
-            <span className="flex items-center gap-2">
-              <ClockIcon className="w-4 h-4" /> {t("delivery.saveDelivery")}
-            </span>
-          )}
-        </button>
+        <div className={settingsWorkspaceActionBarClass(isDark)}>
+          <button onClick={onSave} disabled={busy} className={primaryButtonClass(busy)}>
+            {busy ? (
+              t("common:saving")
+            ) : (
+              <span className="flex items-center gap-2">
+                <ClockIcon className="w-4 h-4" /> {t("delivery.saveDelivery")}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

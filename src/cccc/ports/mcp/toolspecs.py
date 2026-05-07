@@ -105,7 +105,7 @@ MCP_TOOLS = [
     },
     {
         "name": "cccc_message_send",
-        "description": "Send a visible chat message.",
+        "description": "Send a visible chat message. Choose `to` deliberately; use @all only when the whole group needs it.",
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
@@ -126,8 +126,47 @@ MCP_TOOLS = [
         ),
     },
     {
+        "name": "cccc_tracked_send",
+        "description": "Create a durable task and send one linked visible delegation message. Use only when owner/scope/done/evidence must survive chat; do not use for ordinary discussion or quick solo work.",
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "title": {"type": "string", "description": "Short task title"},
+                "text": {"type": "string", "description": "Visible message to send to the recipient"},
+                "to": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ]
+                },
+                "outcome": {"type": "string", "description": "Done criterion; defaults to text when omitted"},
+                "checklist": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "done"]},
+                        },
+                        "required": ["text"],
+                    },
+                },
+                "assignee": {"type": "string", "description": "Optional explicit owner; defaults from a single concrete `to` actor"},
+                "waiting_on": {"type": "string", "enum": ["none", "user", "actor", "external"], "default": "actor"},
+                "handoff_to": {"type": "string"},
+                "notes": {"type": "string"},
+                "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
+                "reply_required": {"type": "boolean", "default": True},
+                "idempotency_key": {"type": "string", "description": "Stable caller retry key to avoid duplicate successful sends"},
+                "refs": {"type": "array", "items": {"type": "object"}},
+            },
+            required=["title", "text"],
+        ),
+    },
+    {
         "name": "cccc_message_reply",
-        "description": "Reply to a visible chat message (by event_id/reply_to).",
+        "description": "Reply to a visible chat message (by event_id/reply_to). Use only for the thread you are answering; set `to` explicitly if the audience differs.",
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
@@ -158,6 +197,68 @@ MCP_TOOLS = [
                 "action": {"type": "string", "enum": ["get", "replace", "clear"], "default": "get"},
                 "decisions": {"type": "array", "items": {"type": "object"}},
             }
+        ),
+    },
+    {
+        "name": "cccc_voice_secretary_document",
+        "description": "Voice Secretary-only input/document surface. Use read_new_input for input notifications; use list/create/archive for document lifecycle. Edit repo markdown directly; this tool has no save action.",
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "action": {"type": "string", "enum": ["list", "create", "read_new_input", "archive"], "default": "list"},
+                "document_path": {"type": "string", "description": "Repository-relative markdown path returned by list/create/read_new_input."},
+                "title": {"type": "string"},
+                "include_archived": {"type": "boolean", "default": False},
+            }
+        ),
+    },
+    {
+        "name": "cccc_voice_secretary_request",
+        "description": (
+            "Voice Secretary-only request surface. Use report for user-visible Ask replies; use handoff only for explicit non-secretary work "
+            "that must go to foreman or one concrete actor."
+        ),
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "action": {"type": "string", "enum": ["handoff", "report"], "default": "handoff"},
+                "target": {"type": "string", "description": "Required for action=handoff: @foreman or one concrete actor id. Do not omit it for handoff."},
+                "request_text": {"type": "string", "description": "Short actionable handoff request. Do not include raw transcript dumps or secretary-scope work."},
+                "summary": {"type": "string", "description": "For action=handoff only: optional one-line context summary for the receiving peer."},
+                "request_id": {"type": "string", "description": "Required for action=report: Request id from Target: secretary/document input."},
+                "source_request_id": {"type": "string", "description": "For action=handoff, the original Ask request id being handed off."},
+                "status": {"type": "string", "enum": ["working", "done", "needs_user", "failed"], "description": "Required for action=report."},
+                "reply_text": {"type": "string", "description": "For action=report, the concise user-visible reply shown near the composer."},
+                "document_path": {"type": "string"},
+                "artifact_paths": {"type": "array", "items": {"type": "string"}, "description": "For action=report, optional repo-relative document/artifact paths to show as links instead of repeating them in reply_text."},
+                "source_summary": {"type": "string", "description": "For action=report, optional concise source/evidence note for factual answers."},
+                "checked_at": {"type": "string", "description": "For action=report, optional ISO timestamp or short freshness note for factual answers."},
+                "source_urls": {"type": "array", "items": {"type": "string"}, "description": "For action=report, optional source URLs for factual answers."},
+                "source_event_id": {"type": "string"},
+                "priority": {"type": "string", "enum": ["low", "normal", "high", "urgent"], "default": "normal"},
+                "requires_ack": {"type": "boolean", "default": True},
+            },
+        ),
+    },
+    {
+        "name": "cccc_voice_secretary_composer",
+        "description": (
+            "Voice Secretary-only composer result surface. Use submit_prompt_draft for prompt_refine results instead of sending chat."
+        ),
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "action": {"type": "string", "enum": ["submit_prompt_draft"], "default": "submit_prompt_draft"},
+                "request_id": {"type": "string", "description": "Request id from the prompt_refine input batch."},
+                "draft_text": {"type": "string", "description": "Composer text to insert. Follow the prompt_refine Operation: append operations return an addition; replace operations return a complete replacement."},
+                "summary": {"type": "string", "description": "Optional one-line summary of what changed."},
+                "operation": {"type": "string", "description": "Optional; omit to inherit the Operation from the prompt_refine input."},
+                "composer_snapshot_hash": {"type": "string"},
+            },
+            required=["request_id", "draft_text"],
         ),
     },
     {
@@ -234,7 +335,7 @@ MCP_TOOLS = [
     },
     {
         "name": "cccc_actor",
-        "description": "Actor operations: list/profile_list/add/remove/start/stop/restart. Standard actor creation uses PTY only.",
+        "description": "Actor operations: list/profile_list/add/remove/start/stop/restart. Actor creation follows the caller's allowed runner/profile surface.",
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
@@ -246,6 +347,7 @@ MCP_TOOLS = [
                 },
                 "actor_id": {"type": "string"},
                 "runtime": {"type": "string", "default": "codex"},
+                "runner": {"type": "string", "enum": ["pty", "headless"], "default": "pty"},
                 "title": {"type": "string"},
                 "command": {"type": "array", "items": {"type": "string"}},
                 "env": {"type": "object", "additionalProperties": {"type": "string"}},
@@ -326,6 +428,20 @@ MCP_TOOLS = [
             "Import an agent-prepared normalized capability record (mcp_toolpack or skill) from any external source. "
             "Daemon performs validation/probe/persist and can optionally enable after import. "
             "record.source_id is optional; empty/unknown values are normalized to manual_import. "
+            "Use source_id=agent_self_proposed for autonomous low-risk capsule skill proposals; "
+            "self-proposed skill capability_id values must use skill:agent_self_proposed:<stable-slug>; "
+            "include required When to use/Avoid when/Procedure/Pitfalls/Verification sections; "
+            "real imports missing them are rejected to preserve the last valid active version, "
+            "direct import is acceptable for low-risk syntax-valid proposals, "
+            "while dry_run is recommended before immediate enablement or unclear-risk records; "
+            "reuse the same capability_id to update stale/incomplete/wrong self-proposed skills instead of duplicating; "
+            "import results report scope/import_action/record_changed/already_active/active_after_import; "
+            "import_action is the primary create/update/unchanged signal, while record_changed only compares an existing record; "
+            "already_active is the pre-import binding and active_after_import is the post-import runnable binding; "
+            "when active/readiness_preview.active, do not enable again; "
+            "verify full active capsule updates via capability_state.active_capsule_skills[].capsule_text; "
+            "use scope=session for a temporary trial, scope=actor for cross-session reusable self-proposed skills, "
+            "and scope=group only for shared team-wide behavior. "
             "Dry runs return readiness_preview; external capability actionability follows external capability safety mode."
         ),
         "inputSchema": _obj(
@@ -341,7 +457,10 @@ MCP_TOOLS = [
                         "description_short": {"type": "string"},
                         "source_id": {
                             "type": "string",
-                            "description": "Optional source id; empty/unknown values are normalized to manual_import.",
+                            "description": (
+                                "Optional source id; empty/unknown values are normalized to manual_import. "
+                                "Use agent_self_proposed for autonomous capsule skill proposals."
+                            ),
                         },
                         "source_uri": {"type": "string"},
                         "source_record_id": {"type": "string"},
@@ -416,7 +535,11 @@ MCP_TOOLS = [
     },
     {
         "name": "cccc_capability_uninstall",
-        "description": "Uninstall external capability runtime cache and revoke bindings.",
+        "description": (
+            "Uninstall a capability from local use: revoke bindings and runtime cache, remove current-group actor autoload references, "
+            "and for source_id=agent_self_proposed skill records also remove the generated local catalog record plus all actor/profile autoload references. "
+            "External registry catalog records are not deleted."
+        ),
         "inputSchema": _obj(
             {
                 **_COMMON_GROUP,
@@ -432,6 +555,10 @@ MCP_TOOLS = [
         "description": (
             "One-step capability use: enable capability and optionally call a target tool. "
             "For skill:* capabilities this is runtime capsule activation (not full local skill package install). "
+            "Use cccc_capability_import to create or update self-proposed capsule skills; use capability_use only to activate an existing valid skill id. "
+            "Returns top-level scope/requested_scope so callers do not have to infer activation scope from nested enable_result. "
+            "Use scope=session for temporary activation and scope=actor for cross-session reuse by the selected actor. "
+            "Legacy self-proposed ids under skill:agent:* are invalid; re-import under skill:agent_self_proposed:<stable-slug>, then call cccc_capability_uninstall on the legacy id. "
             "If enable returns activation_pending, relist/reconnect before claiming success; inspect diagnostics/resolution_plan for blockers. "
             "For skill:* capsule runtime, success is primarily visible in capability_state.active_capsule_skills, not necessarily in dynamic_tools."
         ),

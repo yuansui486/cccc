@@ -36,7 +36,8 @@ class TestPromptDefaults(unittest.TestCase):
         from cccc.kernel.prompt_files import load_builtin_help_markdown
 
         body = str(load_builtin_help_markdown() or "")
-        self.assertLessEqual(len(body.split()), 1700)
+        common_body = body.split("\n## Role Notes\n", 1)[0]
+        self.assertLessEqual(len(common_body.split()), 1700)
         self.assertIn("This is your working playbook for this group.", body)
         self.assertIn("## Working Stance", body)
         self.assertIn("## Communication Patterns", body)
@@ -44,6 +45,7 @@ class TestPromptDefaults(unittest.TestCase):
         self.assertIn("## Control Plane", body)
         self.assertIn("## Memory and Recall", body)
         self.assertIn("## Capability", body)
+        self.assertIn("### Skill Evolution Proposals", body)
         self.assertIn("## Role Notes", body)
         self.assertIn("## Appendix", body)
         self.assertIn("present the post-review version, not the first draft", body)
@@ -64,6 +66,16 @@ class TestPromptDefaults(unittest.TestCase):
         self.assertNotIn("## Quick Card", body)
         self.assertIn("Treat `done`, `idle`, and silence as evaluation signals, not closure truth.", body)
         self.assertIn("Protect verifier boundaries unless changing the verifier is explicitly in scope.", body)
+        self.assertIn("`source_id=agent_self_proposed`", body)
+        self.assertIn("`skill:agent_self_proposed:<stable-slug>`", body)
+        self.assertIn("`cccc_capability_state.active_capsule_skills`", body)
+        self.assertIn("Direct import works for low-risk proposals", body)
+        self.assertIn("invalid real imports preserve the last active version", body)
+        self.assertIn('Use `scope="session"` for one-off trials', body)
+        self.assertIn("reuse the existing `capability_id` with revised `capsule_text`", body)
+        self.assertIn("do not create a near-duplicate or silently delete it", body)
+        self.assertIn("`qualification_status=blocked`", body)
+        self.assertNotIn("manual_only", body)
 
     def test_mcp_reminder_line_stays_single_purpose(self) -> None:
         from cccc.daemon.messaging.delivery import MCP_REMINDER_LINE

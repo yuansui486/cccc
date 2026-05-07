@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
@@ -8,12 +9,16 @@ export default defineConfig({
     // Prefer the CJS build for xterm to avoid a minification bug that can break
     // the ESM build's `requestMode` handler (seen as `ReferenceError: i is not defined`).
     alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
       { find: /^@xterm\/xterm$/, replacement: "@xterm/xterm/lib/xterm.js" },
     ],
   },
   build: {
     outDir: "../src/cccc/ports/web/dist",
     emptyOutDir: true,
+    // Keep the warning meaningful after explicit app chunking; 500 kB is the
+    // default Vite threshold and is now too noisy for this bundle graph.
+    chunkSizeWarningLimit: 520,
     rollupOptions: {
       output: {
         entryFileNames: "assets/[name]-[hash].js",
@@ -21,6 +26,23 @@ export default defineConfig({
         assetFileNames: "assets/[name]-[hash][extname]",
         // Split large deps into dedicated chunks to avoid oversized bundles.
         manualChunks(id) {
+          const normalizedId = id.split(path.sep).join("/");
+
+          if (normalizedId.includes("/src/pages/chat/")
+            || normalizedId.includes("/src/components/messageBubble/")
+            || normalizedId.includes("/src/components/MessageBubble.tsx")
+            || normalizedId.includes("/src/components/VirtualMessageList.tsx")
+            || normalizedId.includes("/src/hooks/useChatTab.ts")
+            || normalizedId.includes("/src/hooks/useChatTab.tsx")) {
+            return "chat-core";
+          }
+
+          if (normalizedId.includes("/src/components/app/AppBackground.tsx")
+            || normalizedId.includes("/src/components/app/AppFeedback.tsx")
+            || normalizedId.includes("/src/components/DropOverlay.tsx")) {
+            return "app-chrome";
+          }
+
           if (!id.includes("node_modules")) return;
           // React core + libs that import react (must stay in the same chunk
           // to avoid circular cross-chunk dependencies during initialisation)

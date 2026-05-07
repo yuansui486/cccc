@@ -30,6 +30,19 @@ class TestPetReviewScheduler(unittest.TestCase):
     def tearDown(self) -> None:
         review_scheduler.cancel_pet_review("g-test")
 
+    def test_assistive_job_registry_contains_pet_jobs(self) -> None:
+        from cccc.daemon.pet import assistive_jobs
+
+        self.assertIn(assistive_jobs.JOB_KIND_PET_REVIEW, assistive_jobs.registered_assistive_job_kinds())
+        self.assertIn(assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH, assistive_jobs.registered_assistive_job_kinds())
+        self.assertIn(assistive_jobs.JOB_KIND_VOICE_IDLE_REVIEW, assistive_jobs.registered_assistive_job_kinds())
+        with self.assertRaises(ValueError):
+            assistive_jobs.request_job(
+                "g-test",
+                job_kind="unknown",
+                trigger_class=assistive_jobs.TRIGGER_EVENT,
+            )
+
     def test_chat_messages_are_debounced_into_single_review(self) -> None:
         emitted: list[tuple[str, set[str], str]] = []
 

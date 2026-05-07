@@ -4,42 +4,11 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import type { AutomationRule, AutomationRuleAction } from "../../../types";
+import { BellIcon as AppBellIcon, SparklesIcon } from "../../Icons";
 import { cardClass, inputClass, labelClass } from "./types";
 
-export const BellIcon = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-  </svg>
-);
-
-export const SparkIcon = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M12 2l1.5 6L20 10l-6.5 2L12 18l-1.5-6L4 10l6.5-2L12 2z" />
-  </svg>
-);
+export const BellIcon = ({ className }: { className?: string }) => <AppBellIcon className={className} />;
+export const SparkIcon = ({ className }: { className?: string }) => <SparklesIcon className={className} />;
 
 export const formatDuration = (secondsRaw: number, t?: TFunction): string => {
   const seconds = Number.isFinite(secondsRaw) ? Math.max(0, Math.trunc(secondsRaw)) : 0;
@@ -77,7 +46,7 @@ export const Section = ({
 }) => (
   <div className={cardClass(isDark)}>
     <div className="flex items-center gap-2 mb-1">
-      <div className="p-1.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+      <div className="rounded-md border border-black/8 bg-[rgb(245,245,245)] p-1.5 text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white">
         <Icon className="w-4 h-4" />
       </div>
       <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</h3>

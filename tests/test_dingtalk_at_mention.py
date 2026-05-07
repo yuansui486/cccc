@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -370,3 +370,32 @@ class TestSendMessageAtResolution:
         assert formatted.startswith("[foreman] ")
         assert len(formatted) > DINGTALK_MAX_MESSAGE_LENGTH
         assert not formatted.endswith("...")
+
+
+class TestStreamMessageSafety:
+    def test_streaming_paths_reuse_safe_text_preparation(self, adapter: DingTalkAdapter) -> None:
+        """AI Card start/update/end should reuse the same safe text envelope."""
+        fake_client = MagicMock()
+        fake_client.create_card = AsyncMock(return_value="card_123")
+        fake_client.update_card = AsyncMock(return_value=None)
+        fake_client.finalize_card = AsyncMock(return_value=None)
+
+        with patch.object(adapter, "_get_card_client", return_value=fake_client), patch.object(
+            adapter,
+            "_prepare_stream_text",
+            side_effect=lambda value: f"SAFE::{value}",
+        ) as safe_mock:
+            handle = adapter.begin_stream("cidGroupStream", "stream-1", text="raw start")
+            assert handle is not None
+
+            ok_update = adapter.update_stream(handle, text="raw update", seq=7)
+            ok_end = adapter.end_stream(handle, text="raw final")
+
+        assert ok_update is True
+        assert ok_end is True
+        assert safe_mock.call_args_list[0].args == ("raw start",)
+        assert safe_mock.call_args_list[1].args == ("raw update",)
+        assert safe_mock.call_args_list[2].args == ("raw final",)
+        fake_client.create_card.assert_awaited_once_with("cidGroupStream", "SAFE::raw start")
+        fake_client.update_card.assert_awaited_once_with("card_123", "SAFE::raw update", seq=7)
+        fake_client.finalize_card.assert_awaited_once_with("card_123", "SAFE::raw final")

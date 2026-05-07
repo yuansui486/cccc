@@ -954,6 +954,10 @@ class DingTalkAdapter(IMAdapter):
 
         return summarized
 
+    def _prepare_stream_text(self, text: str) -> str:
+        """Normalize AI Card content to the same safe envelope as plain messages."""
+        return self._compose_safe(text)
+
     def _normalize_text(self, text: str) -> str:
         """Normalize outbound text without truncating content."""
         if not text:
@@ -1370,6 +1374,11 @@ class DingTalkAdapter(IMAdapter):
                 self._get_token,
                 robot_code=self.robot_code,
             )
+        else:
+            try:
+                self._card_client._robot_code = self.robot_code
+            except Exception:
+                pass
         return self._card_client
 
     @staticmethod
@@ -1392,7 +1401,8 @@ class DingTalkAdapter(IMAdapter):
         """Create a DingTalk AI Card and return a stream handle."""
         try:
             client = self._get_card_client()
-            card_instance_id = self._run_async(client.create_card(chat_id, text))
+            safe_text = self._prepare_stream_text(text)
+            card_instance_id = self._run_async(client.create_card(chat_id, safe_text))
             if not card_instance_id:
                 self._log(f"[stream] begin_stream create_card failed for chat={chat_id} stream={stream_id}")
                 return None
@@ -1411,7 +1421,8 @@ class DingTalkAdapter(IMAdapter):
             card_instance_id = handle.get("platform_handle", "")
             if not card_instance_id:
                 return False
-            self._run_async(client.update_card(str(card_instance_id), text, seq=seq))
+            safe_text = self._prepare_stream_text(text)
+            self._run_async(client.update_card(str(card_instance_id), safe_text, seq=seq))
             return True
         except Exception:
             self._log(f"[stream] update_stream failed for stream={handle.get('stream_id', '')}")
@@ -1424,7 +1435,8 @@ class DingTalkAdapter(IMAdapter):
             card_instance_id = handle.get("platform_handle", "")
             if not card_instance_id:
                 return False
-            self._run_async(client.finalize_card(str(card_instance_id), text))
+            safe_text = self._prepare_stream_text(text)
+            self._run_async(client.finalize_card(str(card_instance_id), safe_text))
             return True
         except Exception:
             self._log(f"[stream] end_stream failed for stream={handle.get('stream_id', '')}")

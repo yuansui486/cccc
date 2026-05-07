@@ -145,7 +145,7 @@ export function TaskEditorPanel({
         ];
 
   return (
-    <section className={classNames(ui.surfaceClass, "p-4")}>
+    <section className={classNames(ui.surfaceClass, "min-h-full p-4 pb-24 sm:pb-28")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className={classNames("text-sm font-semibold", "text-[var(--color-text-primary)]")}>{isCreate ? tr("context.newTask", "New task") : tr("context.taskDetails", "Task editor")}</div>

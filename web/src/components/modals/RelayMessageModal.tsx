@@ -5,6 +5,10 @@ import { classNames } from "../../utils/classNames";
 import { formatRecipientList, getRecipientDisplayLabel } from "../../utils/displayText";
 import * as api from "../../services/api";
 import { useModalA11y } from "../../hooks/useModalA11y";
+import { Button } from "../ui/button";
+import { Surface } from "../ui/surface";
+import { Textarea } from "../ui/textarea";
+import { GroupCombobox } from "../GroupCombobox";
 
 export interface RelayMessageModalProps {
   isOpen: boolean;
@@ -28,12 +32,23 @@ export function RelayMessageModal({
   const { t } = useTranslation("modals");
   const dstGroups = useMemo(() => {
     return (groups || [])
-      .map((g) => ({ group_id: String(g.group_id || ""), title: String(g.title || "") }))
-      .filter((g) => g.group_id && g.group_id !== srcGroupId);
+      .map((g) => {
+        const groupId = String(g.group_id || "").trim();
+        const title = String(g.title || "").trim();
+        const topic = String(g.topic || "").trim();
+        const label = title || topic || groupId;
+        return {
+          value: groupId,
+          label,
+          description: label !== groupId ? groupId : undefined,
+          keywords: [groupId, title, topic].filter(Boolean),
+        };
+      })
+      .filter((g) => g.value && g.value !== srcGroupId);
   }, [groups, srcGroupId]);
 
   const defaultDstGroupId = useMemo(() => {
-    return dstGroups[0]?.group_id || "";
+    return dstGroups[0]?.value || "";
   }, [dstGroups]);
 
   const [dstGroupId, setDstGroupId] = useState(() => defaultDstGroupId);
@@ -141,7 +156,7 @@ export function RelayMessageModal({
 
         <div className="p-6 flex flex-1 min-h-0 flex-col gap-5">
           {/* Source preview */}
-          <div className="shrink-0 overflow-hidden rounded-xl p-4 glass-panel">
+          <Surface className="shrink-0 overflow-hidden" padding="md" radius="md">
             <div className="text-xs font-semibold text-[var(--color-text-primary)]">
               {t("relay.source")}
             </div>
@@ -156,7 +171,7 @@ export function RelayMessageModal({
               ) : null}
               {srcText || t("relay.emptyMessage")}
             </div>
-          </div>
+          </Surface>
 
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             <div className="space-y-5">
@@ -165,26 +180,25 @@ export function RelayMessageModal({
                 <label className="block text-xs font-medium mb-2 text-[var(--color-text-secondary)]">
                   {t("relay.destinationGroup")}
                 </label>
-                <select
+                <GroupCombobox
+                  items={dstGroups}
                   value={dstGroupId}
-                  onChange={(e) => {
-                    const gid = e.target.value;
+                  onChange={(gid) => {
                     setDstGroupId(gid);
                     setDstActors([]);
                     setDstActorsLoadingFor(gid);
                   }}
-                  className="w-full rounded-xl px-3 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
+                  placeholder={t("relay.destinationGroup")}
+                  searchPlaceholder={t("relay.searchDestinationGroup", { defaultValue: "搜索目标 group..." })}
+                  emptyText={t("relay.noMatchingGroups", { defaultValue: "没有匹配的 group" })}
+                  ariaLabel={t("relay.destinationGroup")}
+                  triggerClassName="glass-input min-h-[44px] w-full px-3 py-2.5 text-sm"
+                  contentClassName="w-[var(--radix-popover-trigger-width)]"
                   disabled={busy || dstGroups.length === 0}
-                >
-                  {dstGroups.length === 0 ? (
-                    <option value="">{t("relay.noOtherGroups")}</option>
-                  ) : null}
-                  {dstGroups.map((g) => (
-                    <option key={g.group_id} value={g.group_id}>
-                      {g.title ? `${g.title} (${g.group_id})` : g.group_id}
-                    </option>
-                  ))}
-                </select>
+                />
+                {dstGroups.length === 0 ? (
+                  <div className="mt-2 text-xs text-[var(--color-text-muted)]">{t("relay.noOtherGroups")}</div>
+                ) : null}
               </div>
 
               {/* Recipients */}
@@ -193,14 +207,16 @@ export function RelayMessageModal({
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                     {t("relay.recipients")}
                   </label>
-                  <button
+                  <Button
                     type="button"
-                    className="text-xs underline text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                    className="h-auto min-h-0 px-0 py-0 text-xs underline text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setToTokens([])}
                     disabled={busy}
                   >
                     {t("common:reset")}
-                  </button>
+                  </Button>
                 </div>
 
                 <div className={classNames("mt-2 flex flex-wrap gap-2", dstActorsBusy ? "opacity-60" : "")}>
@@ -235,11 +251,11 @@ export function RelayMessageModal({
                 <label className="block text-xs font-medium mb-2 text-[var(--color-text-secondary)]">
                   {t("relay.noteLabel")}
                 </label>
-                <textarea
+                <Textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   rows={3}
-                  className="w-full rounded-xl px-3 py-2.5 text-sm transition-colors glass-input text-[var(--color-text-primary)]"
+                  className="px-3 py-2.5"
                   placeholder={t("relay.notePlaceholder")}
                   disabled={busy}
                 />
@@ -248,20 +264,19 @@ export function RelayMessageModal({
           </div>
 
           <div className="shrink-0 flex gap-3 pt-1 flex-wrap justify-end">
-            <button
-              className="px-4 py-2.5 rounded-xl text-sm font-medium transition-colors min-h-[44px] glass-btn text-[var(--color-text-secondary)]"
+            <Button
+              variant="secondary"
               onClick={onCancel}
               disabled={busy}
             >
               {t("common:cancel")}
-            </button>
-            <button
-              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-lg disabled:opacity-50 transition-all min-h-[44px]"
+            </Button>
+            <Button
               onClick={() => onSubmit(dstGroupId, toTokens, note)}
               disabled={!canSubmit}
             >
               {busy ? t("relay.sending") : t("relay.relay")}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

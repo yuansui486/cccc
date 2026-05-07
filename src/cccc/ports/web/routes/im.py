@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shlex
 import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -15,7 +15,6 @@ from ....daemon.im.im_bridge_ops import stop_im_bridges_for_group
 from ....kernel.group import load_group
 from ....paths import ensure_home
 from ....ports.im.config_schema import canonicalize_im_config
-from ....ports.im.weixin_sidecar import resolve_weixin_sidecar_script_path
 from ....util.conv import coerce_bool
 from ....util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive, resolve_background_python_argv, supervised_process_popen_kwargs
 from ..schemas import (
@@ -39,20 +38,118 @@ def _weixin_state_paths(group: Any) -> Dict[str, Any]:
         "status_path": state_dir / "im_weixin_login.json",
         "pid_path": state_dir / "im_weixin_login.pid",
         "log_path": state_dir / "im_weixin_login.log",
+        "cred_path": state_dir / "im_weixin_credentials.json",
+        "context_cache_path": state_dir / "im_weixin_context_tokens.json",
     }
 
 
-def _resolve_weixin_command(im_cfg: Dict[str, Any]) -> list[str]:
-    raw = str(
-        im_cfg.get("weixin_command")
-        or os.environ.get("CCCC_IM_WEIXIN_COMMAND")
-        or ""
-    ).strip()
-    if raw:
-        return [part for part in shlex.split(raw) if part]
+def _write_weixin_status(status_path: Path, data: Dict[str, Any]) -> None:
+    """Write weixin login status to the state file."""
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    merged = {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    merged.update(data)
+    status_path.write_text(
+        json.dumps(merged, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-    script_path = resolve_weixin_sidecar_script_path()
-    return ["node", str(script_path)]
+
+async def _refresh_weixin_login_status(group: Any, status: Dict[str, Any]) -> Dict[str, Any]:
+    """Poll the wechatbot QR state and persist credentials on confirmation."""
+    current = dict(status or {})
+    if current.get("logged_in"):
+        return current
+    if str(current.get("status") or "").strip().lower() != "waiting_scan":
+        return current
+
+    qrcode = str(current.get("qrcode") or "").strip()
+    poll_base_url = str(current.get("poll_base_url") or "").strip()
+    if not qrcode:
+        return current
+
+    im_cfg = canonicalize_im_config(group.doc.get("im", {}))
+    if str(im_cfg.get("platform") or "").strip().lower() not in ("", "weixin"):
+        return current
+
+    paths = _weixin_state_paths(group)
+    status_path = paths["status_path"]
+    try:
+        from wechatbot.auth import FIXED_QR_BASE_URL, save_credentials
+        from wechatbot.protocol import ILinkApi
+        from wechatbot.types import Credentials
+
+        api = ILinkApi()
+        result = await api.poll_qr_status(poll_base_url or FIXED_QR_BASE_URL, qrcode)
+        qr_status = str(result.get("status") or "").strip().lower()
+
+        if qr_status == "confirmed":
+            token = str(result.get("bot_token") or "").strip()
+            account_id = str(result.get("ilink_bot_id") or "").strip()
+            user_id = str(result.get("ilink_user_id") or "").strip()
+            base_url = str(result.get("baseurl") or poll_base_url or FIXED_QR_BASE_URL).strip()
+            if not (token and account_id and user_id):
+                _write_weixin_status(status_path, {
+                    "status": "error",
+                    "logged_in": False,
+                    "account_id": "",
+                    "error": "Login confirmed but missing credentials",
+                    "user_id": "",
+                    "qrcode_url": "",
+                    "qrcode": "",
+                    "poll_base_url": "",
+                })
+                return _read_weixin_status(group)
+            await save_credentials(
+                Credentials(
+                    token=token,
+                    base_url=base_url,
+                    account_id=account_id,
+                    user_id=user_id,
+                ),
+                paths["cred_path"],
+            )
+            _write_weixin_status(status_path, {
+                "status": "logged_in",
+                "logged_in": True,
+                "account_id": account_id,
+                "error": "",
+                "user_id": user_id,
+                "qrcode_url": "",
+                "qrcode": "",
+                "poll_base_url": "",
+            })
+        elif qr_status == "expired":
+            _write_weixin_status(status_path, {
+                "status": "expired",
+                "logged_in": False,
+                "error": "QR code expired, please regenerate",
+                "qrcode_url": "",
+                "qrcode": "",
+                "poll_base_url": "",
+            })
+        elif qr_status == "scaned_but_redirect":
+            redirect_host = str(result.get("redirect_host") or "").strip()
+            next_base_url = f"https://{redirect_host}" if redirect_host else (poll_base_url or FIXED_QR_BASE_URL)
+            _write_weixin_status(status_path, {
+                "status": "waiting_scan",
+                "logged_in": False,
+                "qrcode_url": str(current.get("qrcode_url") or "").strip(),
+                "qrcode": qrcode,
+                "poll_base_url": next_base_url,
+                "error": "",
+            })
+        elif qr_status in {"error", "failed"}:
+            _write_weixin_status(status_path, {
+                "status": "error",
+                "logged_in": False,
+                "error": str(result.get("errmsg") or "login check failed"),
+                "qrcode_url": "",
+                "qrcode": "",
+                "poll_base_url": "",
+            })
+    except Exception:
+        return current
+    return _read_weixin_status(group)
 
 
 def _read_weixin_status(group: Any) -> Dict[str, Any]:
@@ -68,6 +165,19 @@ def _read_weixin_status(group: Any) -> Dict[str, Any]:
         "running": False,
         "pid": None,
     }
+    try:
+        if paths["cred_path"].exists():
+            loaded_creds = json.loads(paths["cred_path"].read_text(encoding="utf-8"))
+            if isinstance(loaded_creds, dict) and str(loaded_creds.get("token") or "").strip():
+                data.update({
+                    "status": "logged_in",
+                    "logged_in": True,
+                    "account_id": str(loaded_creds.get("accountId") or loaded_creds.get("account_id") or "").strip(),
+                    "user_id": str(loaded_creds.get("userId") or loaded_creds.get("user_id") or "").strip(),
+                    "error": "",
+                })
+    except Exception:
+        pass
     if status_path.exists():
         try:
             loaded = json.loads(status_path.read_text(encoding="utf-8"))
@@ -208,6 +318,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             "result": {
                 "group_id": group_id,
                 "configured": bool(im_config),
+                "enabled": coerce_bool(im_config.get("enabled"), default=False) if im_config else False,
                 "platform": platform,
                 "running": running,
                 "pid": pid,
@@ -233,11 +344,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group = load_group(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
-        return {"ok": True, "result": _read_weixin_status(group)}
+        status = _read_weixin_status(group)
+        status = await _refresh_weixin_login_status(group, status)
+        return {"ok": True, "result": status}
 
     @im_router.post("/api/im/weixin/login/start")
     async def im_weixin_login_start(request: Request, req: IMActionRequest) -> Dict[str, Any]:
-        """Start a Weixin QR login flow in a supervised sidecar process."""
+        """Start a Weixin QR login flow using the Python SDK."""
         check_group(request, req.group_id)
         group = load_group(req.group_id)
         if group is None:
@@ -250,81 +363,62 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         paths = _weixin_state_paths(group)
         status = _read_weixin_status(group)
-        if status.get("running"):
+        if status.get("logged_in"):
             return {"ok": True, "result": status}
 
-        _stop_weixin_login_runner(group)
-        command = _resolve_weixin_command(im_cfg)
-        if not command:
-            return {"ok": False, "error": {"code": "missing_command", "message": "missing weixin sidecar command"}}
-        if len(command) >= 2 and command[0] == "node":
-            script_path = Path(command[1]).expanduser()
-            if not script_path.exists():
-                return {
-                    "ok": False,
-                    "error": {
-                        "code": "missing_sidecar_script",
-                        "message": f"weixin sidecar script not found: {script_path}",
-                    },
-                }
-
-        env = os.environ.copy()
         account_id = str(im_cfg.get("weixin_account_id") or "").strip()
-        if account_id:
-            env["CCCC_IM_WEIXIN_ACCOUNT_ID"] = account_id
-
         paths["state_dir"].mkdir(parents=True, exist_ok=True)
         status_path = paths["status_path"]
-        status_path.write_text(
-            json.dumps(
-                {
-                    "status": "starting_login",
-                    "logged_in": False,
-                    "account_id": account_id,
-                    "qr_ascii": "",
-                    "error": "",
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        popen_kwargs: Dict[str, Any] = {
-            "env": env,
-            "stdin": subprocess.DEVNULL,
-            "close_fds": True,
-            "cwd": str(ensure_home()),
-        }
-        if os.name == "nt":
-            popen_kwargs.update(supervised_process_popen_kwargs())
-        else:
-            popen_kwargs["start_new_session"] = True
 
         try:
-            with paths["log_path"].open("a", encoding="utf-8") as log_file:
-                proc = subprocess.Popen(
-                    [*command, "--login", "--state-file", str(status_path)],
-                    stdout=log_file,
-                    stderr=log_file,
-                    **popen_kwargs,
-                )
-            paths["pid_path"].write_text(str(proc.pid), encoding="utf-8")
-        except Exception as e:
-            return {"ok": False, "error": {"code": "start_failed", "message": str(e)}}
+            from wechatbot.auth import FIXED_QR_BASE_URL, load_credentials
+            from wechatbot.protocol import ILinkApi
 
-        await asyncio.sleep(0.15)
-        return {"ok": True, "result": _read_weixin_status(group)}
+            creds = await load_credentials(paths["cred_path"])
+            if creds is not None:
+                _write_weixin_status(status_path, {
+                    "status": "logged_in",
+                    "logged_in": True,
+                    "account_id": str(getattr(creds, "account_id", "") or account_id),
+                    "user_id": str(getattr(creds, "user_id", "") or ""),
+                    "error": "",
+                })
+                return {"ok": True, "result": _read_weixin_status(group)}
+
+            api = ILinkApi()
+            session = await api.get_qr_code(FIXED_QR_BASE_URL)
+            qr_url = str(session.get("qrcode_img_content") or "").strip()
+            qrcode = str(session.get("qrcode") or "").strip()
+            if not qr_url or not qrcode:
+                raise RuntimeError("wechatbot returned no QR code")
+
+            _write_weixin_status(status_path, {
+                "status": "waiting_scan",
+                "logged_in": False,
+                "account_id": account_id,
+                "qrcode_url": qr_url,
+                "qrcode": qrcode,
+                "poll_base_url": FIXED_QR_BASE_URL,
+                "error": "",
+            })
+            return {"ok": True, "result": _read_weixin_status(group)}
+        except Exception as e:
+            _write_weixin_status(status_path, {
+                "status": "error",
+                "logged_in": False,
+                "error": str(e),
+            })
+            return {"ok": False, "error": {"code": "login_failed", "message": str(e)}}
 
     @im_router.post("/api/im/weixin/logout")
     async def im_weixin_logout(request: Request, req: IMActionRequest) -> Dict[str, Any]:
-        """Clear Weixin login state on the host."""
+        """Clear Weixin login state."""
         check_group(request, req.group_id)
         group = load_group(req.group_id)
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {req.group_id}"})
 
         im_cfg = canonicalize_im_config(group.doc.get("im", {}))
-        command = _resolve_weixin_command(im_cfg)
         paths = _weixin_state_paths(group)
         _stop_weixin_login_runner(group)
 
@@ -338,26 +432,23 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
 
         try:
-            completed = subprocess.run(
-                [*command, "--logout", "--state-file", str(paths["status_path"])],
-                cwd=str(ensure_home()),
-                env=os.environ.copy(),
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False,
-            )
-            if int(completed.returncode or 0) != 0:
-                return {
-                    "ok": False,
-                    "error": {
-                        "code": "logout_failed",
-                        "message": (completed.stderr or completed.stdout or "weixin logout failed").strip(),
-                    },
-                }
+            from wechatbot.auth import clear_credentials
+
+            await clear_credentials(paths["cred_path"])
         except Exception as e:
             return {"ok": False, "error": {"code": "logout_failed", "message": str(e)}}
 
+        try:
+            paths["context_cache_path"].unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        _write_weixin_status(paths["status_path"], {
+            "status": "logged_out",
+            "logged_in": False,
+            "account_id": "",
+            "error": "",
+        })
         return {"ok": True, "result": _read_weixin_status(group)}
 
     @im_router.post("/api/im/set")
@@ -424,11 +515,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 im_cfg["wecom_secret"] = secret
         elif platform == "weixin":
             account_id = str(req.weixin_account_id or "").strip()
-            command = str(req.weixin_command or "").strip()
             if account_id:
                 im_cfg["weixin_account_id"] = account_id
-            if command:
-                im_cfg["weixin_command"] = command
 
         im_cfg = canonicalize_im_config(im_cfg)
 

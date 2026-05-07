@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from typing import get_args
 
 
@@ -19,6 +20,15 @@ class TestEventContractInternalParity(unittest.TestCase):
             [],
             msg=f"Model map has kinds not declared in EventKind: {sorted(mapped - kinds)}",
         )
+
+    def test_reference_architecture_names_all_event_kinds(self) -> None:
+        from cccc.contracts.v1.event import EventKind
+
+        repo_root = Path(__file__).resolve().parents[1]
+        text = (repo_root / "docs/reference/architecture.md").read_text(encoding="utf-8")
+        missing = [kind for kind in get_args(EventKind) if f"`{kind}`" not in text]
+
+        self.assertEqual(missing, [])
 
 
 if __name__ == "__main__":

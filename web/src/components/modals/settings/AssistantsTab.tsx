@@ -1,0 +1,936 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import * as api from "../../../services/api";
+import type { GroupPromptInfo } from "../../../services/api";
+import type { AssistantStateResult, BuiltinAssistant } from "../../../types";
+import { parseHelpMarkdown, updatePetHelpNote, updateVoiceSecretaryHelpNote } from "../../../utils/helpMarkdown";
+import { getDefaultPetPersonaSeed } from "../../../utils/rolePresets";
+import { BodyPortal } from "../../ui/BodyPortal";
+import {
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsDialogBodyClass,
+  settingsDialogPanelClass,
+  settingsWorkspaceActionBarClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
+} from "./types";
+
+interface AssistantsTabProps {
+  isDark: boolean;
+  groupId?: string;
+  isActive: boolean;
+  petEnabled: boolean;
+  busy: boolean;
+  onUpdatePetEnabled?: (enabled: boolean) => Promise<boolean | void>;
+}
+
+const VOICE_BACKENDS = [
+  "browser_asr",
+  "assistant_service_local_asr",
+  "external_provider_asr",
+];
+const VOICE_AVAILABLE_BACKENDS = new Set(["browser_asr"]);
+
+const VOICE_RECOMMENDED_QUIET_SECONDS = 5;
+const VOICE_MIN_QUIET_SECONDS = 1;
+const VOICE_MAX_QUIET_SECONDS = 60;
+const VOICE_RECOMMENDED_MAX_WINDOW_SECONDS = 120;
+const VOICE_MIN_MAX_WINDOW_SECONDS = 10;
+const VOICE_MAX_MAX_WINDOW_SECONDS = 300;
+
+const DEFAULT_VOICE_SECRETARY_GUIDANCE = [
+  "- Keep working documents useful: synthesize decisions, action items, requirements, risks, and open questions; do not dump raw transcript.",
+  "- Treat safe secretary-scope work as yours: summarize, structure, compare, draft, lightly inspect available context, and refine documents.",
+  "- Hand off only non-secretary work such as code/test/deploy, actor management, risky commands, or explicit peer/foreman coordination.",
+  "- Use `document_path` as the document identity. Create separate markdown documents for separate deliverables.",
+  "- Preserve uncertainty and ASR-risk terms. For fragmented audio, write a best-effort rolling summary instead of refusing.",
+].join("\n");
+
+type AssistantPromptBlock = "pet" | "voice_secretary";
+
+function findAssistant(state: AssistantStateResult | null, assistantId: string): BuiltinAssistant | null {
+  if (!state) return null;
+  const byId = state.assistants_by_id || {};
+  if (byId[assistantId]) return byId[assistantId];
+  return (state.assistants || []).find((assistant) => assistant.assistant_id === assistantId) || null;
+}
+
+function readStringConfig(assistant: BuiltinAssistant | null, key: string, fallback: string): string {
+  const value = assistant?.config?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function readNumberConfig(assistant: BuiltinAssistant | null, key: string, fallback: number, min: number, max: number): number {
+  const raw = assistant?.config?.[key];
+  const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : fallback;
+  return clampNumber(value, min, max);
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function resolvePetPersonaDraft(savedPetPersona: string): string {
+  const saved = String(savedPetPersona || "").trim();
+  return saved || getDefaultPetPersonaSeed();
+}
+
+function resolveVoiceSecretaryGuidanceDraft(savedGuidance: string): string {
+  const saved = String(savedGuidance || "").trim();
+  return saved || DEFAULT_VOICE_SECRETARY_GUIDANCE;
+}
+
+function promptDraftDirty(savedText: string, draft: string, loaded: boolean, fallback: string): boolean {
+  const draftText = String(draft || "");
+  if (!loaded && !draftText.trim()) return false;
+  return draftText !== (String(savedText || "").trim() || fallback);
+}
+
+function StatusPill({ children, tone }: { children: React.ReactNode; tone: "on" | "off" | "info" }) {
+  const classes =
+    tone === "on"
+      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+      : tone === "off"
+        ? "bg-slate-500/12 text-[var(--color-text-muted)]"
+        : "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${classes}`}>
+      {children}
+    </span>
+  );
+}
+
+function AssistantSwitch({
+  checked,
+  disabled,
+  label,
+  hint,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  hint?: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={`inline-flex select-none items-center justify-end gap-3 ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+      <span className="min-w-0 text-right">
+        <span className="block text-xs font-medium text-[var(--color-text-secondary)]">{label}</span>
+        {hint ? <span className="mt-1 block text-[11px] leading-5 text-[var(--color-text-muted)]">{hint}</span> : null}
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="sr-only"
+      />
+      <span
+        aria-hidden="true"
+        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors ${
+          checked
+            ? "border-emerald-500 bg-emerald-500"
+            : "border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)]"
+        } ${disabled ? "opacity-50" : ""}`}
+      >
+        <span
+          className={`absolute left-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </span>
+    </label>
+  );
+}
+
+function SettingsBlock({
+  isDark,
+  title,
+  hint,
+  children,
+}: {
+  isDark: boolean;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={settingsWorkspacePanelClass(isDark)}>
+      <div>
+        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</div>
+        {hint ? <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">{hint}</p> : null}
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function AssistantPromptEditor({
+  isDark,
+  title,
+  hint,
+  path,
+  value,
+  placeholder,
+  busy,
+  error,
+  notice,
+  hasUnsaved,
+  reloadLabel,
+  discardLabel,
+  saveLabel,
+  expandLabel,
+  expanded,
+  onReload,
+  onDiscard,
+  onSave,
+  onExpand,
+  onChange,
+}: {
+  isDark: boolean;
+  title: string;
+  hint: string;
+  path?: string;
+  value: string;
+  placeholder: string;
+  busy: boolean;
+  error: string;
+  notice: string;
+  hasUnsaved: boolean;
+  reloadLabel: string;
+  discardLabel: string;
+  saveLabel: string;
+  expandLabel?: string;
+  expanded?: boolean;
+  onReload: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+  onExpand?: () => void;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className={`${expanded ? "flex h-full min-h-0 flex-col" : settingsWorkspaceShellClass(isDark)}`}>
+      <div className={expanded ? "flex flex-wrap items-start justify-between gap-2" : settingsWorkspaceHeaderClass(isDark)}>
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-[var(--color-text-primary)]">{title}</div>
+          <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">{hint}</p>
+          {path ? (
+            <p className="mt-2 break-all font-mono text-[11px] leading-5 text-[var(--color-text-muted)]">{path}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {!expanded && onExpand ? (
+            <button type="button" onClick={onExpand} disabled={busy} className={secondaryButtonClass("sm")}>
+              {expandLabel}
+            </button>
+          ) : null}
+          <button type="button" onClick={onReload} disabled={busy} className={secondaryButtonClass("sm")}>
+            {reloadLabel}
+          </button>
+        </div>
+      </div>
+
+      <div className={`${expanded ? "mt-3 min-h-0 flex flex-1 flex-col" : settingsWorkspaceBodyClass}`}>
+        {error ? (
+          <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
+            {error}
+          </div>
+        ) : null}
+        {notice ? (
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+            {notice}
+          </div>
+        ) : null}
+
+        <div className={`${settingsWorkspaceSoftPanelClass(isDark)} ${
+          expanded ? "min-h-0 flex flex-1 flex-col" : ""
+        }`}>
+          <textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            disabled={busy}
+            placeholder={placeholder}
+            className={`${inputClass(isDark)} resize-y font-mono text-[12px] leading-6 ${
+              expanded ? "min-h-[560px] flex-1" : "min-h-[28rem] lg:min-h-[32rem]"
+            }`}
+            spellCheck={false}
+          />
+        </div>
+      </div>
+
+      <div className={expanded ? "mt-3 flex flex-wrap justify-end gap-2" : settingsWorkspaceActionBarClass(isDark)}>
+        <button type="button" onClick={onDiscard} disabled={busy || !hasUnsaved} className={secondaryButtonClass("sm")}>
+          {discardLabel}
+        </button>
+        <button type="button" onClick={onSave} disabled={busy || !hasUnsaved} className={primaryButtonClass(busy)}>
+          {saveLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function AssistantsTab({
+  isDark,
+  groupId,
+  isActive,
+  petEnabled,
+  busy,
+  onUpdatePetEnabled,
+}: AssistantsTabProps) {
+  const { t } = useTranslation("settings");
+  const loadSeq = useRef(0);
+  const visibleLoadCount = useRef(0);
+
+  const [assistantState, setAssistantState] = useState<AssistantStateResult | null>(null);
+  const [loadBusy, setLoadBusy] = useState(false);
+  const [voiceSaveBusy, setVoiceSaveBusy] = useState(false);
+  const [petSaveBusy, setPetSaveBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [recognitionBackend, setRecognitionBackend] = useState("browser_asr");
+  const [voiceQuietWindowSeconds, setVoiceQuietWindowSeconds] = useState(VOICE_RECOMMENDED_QUIET_SECONDS);
+  const [voiceMaxWindowSeconds, setVoiceMaxWindowSeconds] = useState(VOICE_RECOMMENDED_MAX_WINDOW_SECONDS);
+
+  const [assistantHelpPrompt, setAssistantHelpPrompt] = useState<GroupPromptInfo | null>(null);
+  const [petPersonaDraft, setPetPersonaDraft] = useState("");
+  const [voiceSecretaryGuidanceDraft, setVoiceSecretaryGuidanceDraft] = useState("");
+  const [assistantPromptBusy, setAssistantPromptBusy] = useState(false);
+  const [assistantPromptError, setAssistantPromptError] = useState("");
+  const [assistantPromptNotice, setAssistantPromptNotice] = useState("");
+  const [assistantPromptFeedbackBlock, setAssistantPromptFeedbackBlock] = useState<AssistantPromptBlock | "">("");
+  const [expandedPromptBlock, setExpandedPromptBlock] = useState<AssistantPromptBlock | null>(null);
+
+  const voiceAssistant = useMemo(
+    () => findAssistant(assistantState, "voice_secretary"),
+    [assistantState],
+  );
+  const petAssistant = useMemo(
+    () => findAssistant(assistantState, "pet"),
+    [assistantState],
+  );
+  const effectivePetEnabled = Boolean(petAssistant?.enabled ?? petEnabled);
+
+  const syncVoiceDraft = useCallback((state: AssistantStateResult | null) => {
+    const voice = findAssistant(state, "voice_secretary");
+    const backend = readStringConfig(voice, "recognition_backend", "browser_asr");
+    setVoiceEnabled(Boolean(voice?.enabled));
+    setRecognitionBackend(backend || "browser_asr");
+    setVoiceQuietWindowSeconds(readNumberConfig(
+      voice,
+      "auto_document_quiet_ms",
+      VOICE_RECOMMENDED_QUIET_SECONDS * 1000,
+      VOICE_MIN_QUIET_SECONDS * 1000,
+      VOICE_MAX_QUIET_SECONDS * 1000,
+    ) / 1000);
+    setVoiceMaxWindowSeconds(readNumberConfig(
+      voice,
+      "auto_document_max_window_seconds",
+      VOICE_RECOMMENDED_MAX_WINDOW_SECONDS,
+      VOICE_MIN_MAX_WINDOW_SECONDS,
+      VOICE_MAX_MAX_WINDOW_SECONDS,
+    ));
+  }, []);
+
+  const loadAssistants = useCallback(async (opts?: { quiet?: boolean }) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return;
+    const seq = ++loadSeq.current;
+    const showBusy = !opts?.quiet;
+    if (showBusy) {
+      visibleLoadCount.current += 1;
+      setLoadBusy(true);
+    }
+    setError("");
+    try {
+      const resp = await api.fetchAssistantState(gid);
+      if (seq !== loadSeq.current) return;
+      if (!resp.ok) {
+        setAssistantState(null);
+        setError(resp.error?.message || t("assistants.loadFailed"));
+        return;
+      }
+      setAssistantState(resp.result);
+      syncVoiceDraft(resp.result);
+    } catch {
+      if (seq === loadSeq.current) {
+        setAssistantState(null);
+        setError(t("assistants.loadFailed"));
+      }
+    } finally {
+      if (showBusy) {
+        visibleLoadCount.current = Math.max(0, visibleLoadCount.current - 1);
+        if (visibleLoadCount.current === 0) setLoadBusy(false);
+      }
+    }
+  }, [groupId, syncVoiceDraft, t]);
+
+  const loadAssistantGuidance = useCallback(async (opts?: { force?: boolean }) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return null;
+    void opts;
+    setAssistantPromptBusy(true);
+    setAssistantPromptError("");
+    setAssistantPromptFeedbackBlock("");
+    try {
+      const resp = await api.fetchGroupPrompts(gid);
+      if (!resp.ok) {
+        setAssistantHelpPrompt(null);
+        setAssistantPromptError(resp.error?.message || t("assistants.assistantGuidanceLoadFailed"));
+        return null;
+      }
+      const nextHelp = resp.result?.help ?? null;
+      if (!nextHelp) {
+        setAssistantHelpPrompt(null);
+        setAssistantPromptError(t("assistants.assistantGuidanceLoadFailed"));
+        return null;
+      }
+      const parsed = parseHelpMarkdown(String(nextHelp.content || ""));
+      setAssistantHelpPrompt(nextHelp);
+      setPetPersonaDraft(resolvePetPersonaDraft(parsed.pet));
+      setVoiceSecretaryGuidanceDraft(resolveVoiceSecretaryGuidanceDraft(parsed.voiceSecretary));
+      return nextHelp;
+    } catch {
+      setAssistantHelpPrompt(null);
+      setAssistantPromptError(t("assistants.assistantGuidanceLoadFailed"));
+      return null;
+    } finally {
+      setAssistantPromptBusy(false);
+    }
+  }, [groupId, t]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    void loadAssistants();
+    void loadAssistantGuidance();
+  }, [isActive, loadAssistants, loadAssistantGuidance]);
+
+  const saveVoiceSettings = async (overrides?: {
+    enabled?: boolean;
+    backend?: string;
+    quietSeconds?: number;
+    maxWindowSeconds?: number;
+  }) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return false;
+    setVoiceSaveBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const nextEnabled = typeof overrides?.enabled === "boolean" ? overrides.enabled : voiceEnabled;
+      const nextBackend = String((overrides?.backend ?? recognitionBackend) || "browser_asr").trim() || "browser_asr";
+      const quietSeconds = clampNumber(
+        Number(overrides?.quietSeconds ?? voiceQuietWindowSeconds),
+        VOICE_MIN_QUIET_SECONDS,
+        VOICE_MAX_QUIET_SECONDS,
+      );
+      const maxWindowSeconds = clampNumber(
+        Number(overrides?.maxWindowSeconds ?? voiceMaxWindowSeconds),
+        VOICE_MIN_MAX_WINDOW_SECONDS,
+        VOICE_MAX_MAX_WINDOW_SECONDS,
+      );
+      const resp = await api.updateAssistantSettings(gid, "voice_secretary", {
+        enabled: nextEnabled,
+        config: {
+          capture_mode: nextBackend === "assistant_service_local_asr" ? "service" : "browser",
+          recognition_backend: nextBackend,
+          auto_document_enabled: true,
+          auto_document_quiet_ms: Math.round(quietSeconds * 1000),
+          auto_document_max_window_seconds: Math.round(maxWindowSeconds),
+          document_default_dir: "docs/voice-secretary",
+          tts_enabled: false,
+        },
+        by: "user",
+      });
+      if (!resp.ok) {
+        setError(resp.error?.message || t("assistants.saveFailed"));
+        return false;
+      }
+      setVoiceEnabled(nextEnabled);
+      setRecognitionBackend(nextBackend);
+      setVoiceQuietWindowSeconds(quietSeconds);
+      setVoiceMaxWindowSeconds(maxWindowSeconds);
+      setNotice(t("assistants.voiceSaved"));
+      await loadAssistants({ quiet: true });
+      return true;
+    } catch {
+      setError(t("assistants.saveFailed"));
+      return false;
+    } finally {
+      setVoiceSaveBusy(false);
+    }
+  };
+
+  const resetVoiceBatching = async () => {
+    const previousQuiet = voiceQuietWindowSeconds;
+    const previousMaxWindow = voiceMaxWindowSeconds;
+    setVoiceQuietWindowSeconds(VOICE_RECOMMENDED_QUIET_SECONDS);
+    setVoiceMaxWindowSeconds(VOICE_RECOMMENDED_MAX_WINDOW_SECONDS);
+    const ok = await saveVoiceSettings({
+      quietSeconds: VOICE_RECOMMENDED_QUIET_SECONDS,
+      maxWindowSeconds: VOICE_RECOMMENDED_MAX_WINDOW_SECONDS,
+    });
+    if (!ok) {
+      setVoiceQuietWindowSeconds(previousQuiet);
+      setVoiceMaxWindowSeconds(previousMaxWindow);
+    }
+  };
+
+  const toggleVoiceEnabled = async (nextEnabled: boolean) => {
+    const previous = voiceEnabled;
+    setVoiceEnabled(nextEnabled);
+    const ok = await saveVoiceSettings({ enabled: nextEnabled });
+    if (!ok) setVoiceEnabled(previous);
+  };
+
+  const togglePet = async (nextEnabled?: boolean) => {
+    if (!onUpdatePetEnabled) return;
+    setPetSaveBusy(true);
+    setError("");
+    setNotice("");
+    const requestedEnabled = typeof nextEnabled === "boolean" ? nextEnabled : !effectivePetEnabled;
+    try {
+      const ok = await onUpdatePetEnabled(requestedEnabled);
+      if (ok === false) {
+        setError(t("assistants.petSaveFailed"));
+        return;
+      }
+      setNotice(requestedEnabled ? t("assistants.petEnabled") : t("assistants.petDisabled"));
+      await loadAssistants({ quiet: true });
+    } catch {
+      setError(t("assistants.petSaveFailed"));
+    } finally {
+      setPetSaveBusy(false);
+    }
+  };
+
+  const saveAssistantGuidance = async (block: AssistantPromptBlock) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return;
+    setAssistantPromptBusy(true);
+    setAssistantPromptError("");
+    setAssistantPromptNotice("");
+    setAssistantPromptFeedbackBlock(block);
+    try {
+      const currentHelp = assistantHelpPrompt ?? await loadAssistantGuidance({ force: true });
+      if (!currentHelp) return;
+      setAssistantPromptFeedbackBlock(block);
+      const currentContent = String(currentHelp.content || "");
+      const parsed = parseHelpMarkdown(currentContent);
+      const actorOrder = Object.keys(parsed.actorNotes);
+      const nextContent =
+        block === "pet"
+          ? updatePetHelpNote(currentContent, petPersonaDraft, actorOrder)
+          : updateVoiceSecretaryHelpNote(currentContent, voiceSecretaryGuidanceDraft, actorOrder);
+      const resp = await api.updateGroupPrompt(gid, "help", nextContent, {
+        editorMode: "structured",
+        changedBlocks: [block],
+      });
+      if (!resp.ok) {
+        setAssistantPromptError(resp.error?.message || t("assistants.assistantGuidanceSaveFailed"));
+        return;
+      }
+      const nextHelp = resp.result;
+      const nextParsed = parseHelpMarkdown(String(nextHelp.content || ""));
+      setAssistantHelpPrompt(nextHelp);
+      setPetPersonaDraft(resolvePetPersonaDraft(nextParsed.pet));
+      setVoiceSecretaryGuidanceDraft(resolveVoiceSecretaryGuidanceDraft(nextParsed.voiceSecretary));
+      setAssistantPromptNotice(
+        block === "pet" ? t("assistants.petPersonaSaved") : t("assistants.voiceGuidanceSaved"),
+      );
+    } catch {
+      setAssistantPromptError(t("assistants.assistantGuidanceSaveFailed"));
+    } finally {
+      setAssistantPromptBusy(false);
+    }
+  };
+
+  const discardPetPersona = () => {
+    const saved = assistantHelpPrompt ? parseHelpMarkdown(String(assistantHelpPrompt.content || "")).pet : "";
+    setPetPersonaDraft(resolvePetPersonaDraft(saved));
+    setAssistantPromptError("");
+    setAssistantPromptNotice("");
+    setAssistantPromptFeedbackBlock("");
+  };
+
+  const discardVoiceSecretaryGuidance = () => {
+    const saved = assistantHelpPrompt ? parseHelpMarkdown(String(assistantHelpPrompt.content || "")).voiceSecretary : "";
+    setVoiceSecretaryGuidanceDraft(resolveVoiceSecretaryGuidanceDraft(saved));
+    setAssistantPromptError("");
+    setAssistantPromptNotice("");
+    setAssistantPromptFeedbackBlock("");
+  };
+
+  const backendOptions = VOICE_BACKENDS.includes(recognitionBackend)
+    ? VOICE_BACKENDS
+    : [recognitionBackend, ...VOICE_BACKENDS];
+  const backendLabel = (backend: string) => t(`assistants.backends.${backend}`, { defaultValue: backend });
+  const backendSelectable = (backend: string) => VOICE_AVAILABLE_BACKENDS.has(backend);
+  const currentBackendUnavailable = !backendSelectable(recognitionBackend);
+
+  if (!groupId) {
+    return (
+      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div>
+          <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t("assistants.title")}</h3>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">{t("assistants.openFromGroup")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const voiceEnabledTone = voiceEnabled ? "on" : "off";
+  const serviceHealth = recordFromUnknown(recordFromUnknown(voiceAssistant?.health).service);
+  const serviceStatus = String(serviceHealth.status || (recognitionBackend === "assistant_service_local_asr" ? "not_started" : "")).trim();
+  const serviceAlive = Boolean(serviceHealth.alive);
+  const asrCommandConfigured = Boolean(serviceHealth.asr_command_configured || serviceHealth.asr_mock_configured);
+  const serviceLastError = recordFromUnknown(serviceHealth.last_error);
+  const serviceLastErrorMessage = String(serviceLastError.message || "").trim();
+  const serviceTone: "on" | "off" | "info" = recognitionBackend === "assistant_service_local_asr"
+    ? serviceAlive
+      ? "on"
+      : asrCommandConfigured
+        ? "info"
+        : "off"
+    : "info";
+  const showServiceAsrDiagnostic =
+    backendSelectable(recognitionBackend)
+    && recognitionBackend === "assistant_service_local_asr"
+    && (!asrCommandConfigured || Boolean(serviceLastErrorMessage));
+  const parsedHelp = assistantHelpPrompt ? parseHelpMarkdown(String(assistantHelpPrompt.content || "")) : null;
+  const savedPetPersona = parsedHelp?.pet || "";
+  const savedVoiceSecretaryGuidance = parsedHelp?.voiceSecretary || "";
+  const hasPetPersonaUnsaved = promptDraftDirty(
+    savedPetPersona,
+    petPersonaDraft,
+    assistantHelpPrompt !== null,
+    resolvePetPersonaDraft(""),
+  );
+  const hasVoiceGuidanceUnsaved = promptDraftDirty(
+    savedVoiceSecretaryGuidance,
+    voiceSecretaryGuidanceDraft,
+    assistantHelpPrompt !== null,
+    resolveVoiceSecretaryGuidanceDraft(""),
+  );
+
+  const renderVoiceGuidanceEditor = (expanded = false) => (
+    <AssistantPromptEditor
+      isDark={isDark}
+      title={t("assistants.voiceGuidanceTitle")}
+      hint={t("assistants.voiceGuidanceHint")}
+      path={assistantHelpPrompt?.path || undefined}
+      value={voiceSecretaryGuidanceDraft}
+      placeholder={t("assistants.voiceGuidancePlaceholder")}
+      busy={assistantPromptBusy}
+      error={!assistantPromptFeedbackBlock || assistantPromptFeedbackBlock === "voice_secretary" ? assistantPromptError : ""}
+      notice={assistantPromptFeedbackBlock === "voice_secretary" ? assistantPromptNotice : ""}
+      hasUnsaved={hasVoiceGuidanceUnsaved}
+      reloadLabel={assistantPromptBusy ? t("assistants.refreshing") : t("assistants.reloadAssistantGuidance")}
+      discardLabel={t("assistants.discardAssistantGuidance")}
+      saveLabel={assistantPromptBusy ? t("common:saving") : t("assistants.saveVoiceGuidance")}
+      expandLabel={t("assistants.expandAssistantGuidance")}
+      expanded={expanded}
+      onReload={() => void loadAssistantGuidance({ force: true })}
+      onDiscard={discardVoiceSecretaryGuidance}
+      onSave={() => void saveAssistantGuidance("voice_secretary")}
+      onExpand={() => setExpandedPromptBlock("voice_secretary")}
+      onChange={(value) => {
+        setVoiceSecretaryGuidanceDraft(value);
+        setAssistantPromptNotice("");
+        setAssistantPromptFeedbackBlock("");
+      }}
+    />
+  );
+
+  const renderPetPersonaEditor = (expanded = false) => (
+    <AssistantPromptEditor
+      isDark={isDark}
+      title={t("assistants.petPersonaTitle")}
+      hint={t("assistants.petPersonaHint")}
+      path={assistantHelpPrompt?.path || undefined}
+      value={petPersonaDraft}
+      placeholder={t("assistants.petPersonaPlaceholder")}
+      busy={assistantPromptBusy}
+      error={!assistantPromptFeedbackBlock || assistantPromptFeedbackBlock === "pet" ? assistantPromptError : ""}
+      notice={assistantPromptFeedbackBlock === "pet" ? assistantPromptNotice : ""}
+      hasUnsaved={hasPetPersonaUnsaved}
+      reloadLabel={assistantPromptBusy ? t("assistants.refreshing") : t("assistants.reloadAssistantGuidance")}
+      discardLabel={t("assistants.discardAssistantGuidance")}
+      saveLabel={assistantPromptBusy ? t("common:saving") : t("assistants.savePetPersona")}
+      expandLabel={t("assistants.expandAssistantGuidance")}
+      expanded={expanded}
+      onReload={() => void loadAssistantGuidance({ force: true })}
+      onDiscard={discardPetPersona}
+      onSave={() => void saveAssistantGuidance("pet")}
+      onExpand={() => setExpandedPromptBlock("pet")}
+      onChange={(value) => {
+        setPetPersonaDraft(value);
+        setAssistantPromptNotice("");
+        setAssistantPromptFeedbackBlock("");
+      }}
+    />
+  );
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("assistants.title")}</h3>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+              {t("assistants.description")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void loadAssistants();
+              void loadAssistantGuidance({ force: true });
+            }}
+            disabled={loadBusy || assistantPromptBusy}
+            className={secondaryButtonClass("sm")}
+          >
+            {loadBusy || assistantPromptBusy ? t("assistants.refreshing") : t("assistants.refresh")}
+          </button>
+        </div>
+
+        <div className={settingsWorkspaceBodyClass}>
+          {error ? (
+            <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
+              {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+              {notice}
+            </div>
+          ) : null}
+
+          <div className="space-y-5">
+            <div className={settingsWorkspacePanelClass(isDark)}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("assistants.voiceTitle")}</h4>
+                    <StatusPill tone={voiceEnabledTone}>{voiceEnabled ? t("assistants.enabled") : t("assistants.disabled")}</StatusPill>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+                    {t("assistants.voiceDescription")}
+                  </p>
+                </div>
+                <AssistantSwitch
+                  checked={voiceEnabled}
+                  disabled={busy || voiceSaveBusy}
+                  label={t("assistants.groupSwitch")}
+                  onChange={(checked) => void toggleVoiceEnabled(checked)}
+                />
+              </div>
+
+              <div className="mt-5 space-y-5">
+                <SettingsBlock isDark={isDark} title={t("assistants.voiceRecognitionTitle")} hint={t("assistants.voiceRecognitionHint")}>
+                  <div className="grid gap-4 md:grid-cols-1">
+                    <div>
+                      <label className={labelClass(isDark)}>{t("assistants.recognitionBackend")}</label>
+                      <select
+                        value={recognitionBackend}
+                        onChange={(event) => setRecognitionBackend(event.target.value)}
+                        className={`${inputClass(isDark)} cursor-pointer`}
+                      >
+                        {backendOptions.map((backend) => (
+                          <option key={backend} value={backend} disabled={!backendSelectable(backend)}>
+                            {backendLabel(backend)}
+                          </option>
+                        ))}
+                      </select>
+                      {currentBackendUnavailable ? (
+                        <p className="mt-1 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+                          {t("assistants.recognitionBackendUnavailable")}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                        {t("assistants.recognitionBackendHint")}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className={`mt-4 ${settingsWorkspaceSoftPanelClass(isDark)}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[var(--color-text-primary)]">
+                          {t("assistants.transcriptBatchingTitle")}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                          {t("assistants.transcriptBatchingHint")}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void resetVoiceBatching()}
+                        disabled={busy || voiceSaveBusy}
+                        className={secondaryButtonClass("sm")}
+                      >
+                        {t("assistants.resetTranscriptBatching")}
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label className={labelClass(isDark)}>{t("assistants.transcriptQuietWindow")}</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={VOICE_MIN_QUIET_SECONDS}
+                            max={VOICE_MAX_QUIET_SECONDS}
+                            step={1}
+                            value={voiceQuietWindowSeconds}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              if (Number.isFinite(value)) setVoiceQuietWindowSeconds(value);
+                            }}
+                            className={inputClass(isDark)}
+                          />
+                          <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
+                            {t("assistants.secondsUnit")}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                          {t("assistants.transcriptQuietWindowHint")}
+                        </p>
+                      </div>
+                      <div>
+                        <label className={labelClass(isDark)}>{t("assistants.transcriptMaxWindow")}</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={VOICE_MIN_MAX_WINDOW_SECONDS}
+                            max={VOICE_MAX_MAX_WINDOW_SECONDS}
+                            step={1}
+                            value={voiceMaxWindowSeconds}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              if (Number.isFinite(value)) setVoiceMaxWindowSeconds(value);
+                            }}
+                            className={inputClass(isDark)}
+                          />
+                          <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
+                            {t("assistants.secondsUnit")}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                          {t("assistants.transcriptMaxWindowHint")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {showServiceAsrDiagnostic ? (
+                    <div className="mt-4 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--color-bg-secondary)] px-3 py-2 text-xs leading-5 text-[var(--color-text-muted)]">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-medium text-[var(--color-text-secondary)]">{t("assistants.serviceAsrStatus")}</div>
+                        <StatusPill tone={serviceTone}>
+                          {t("assistants.serviceAsrStatusValue", { status: serviceStatus || "not_started" })}
+                        </StatusPill>
+                      </div>
+                      <div className="mt-1">
+                        {asrCommandConfigured
+                          ? t("assistants.serviceAsrConfigured")
+                          : t("assistants.serviceAsrMissingCommand")}
+                      </div>
+                      {serviceLastErrorMessage ? (
+                        <div className="mt-1 text-rose-700 dark:text-rose-300">
+                          {t("assistants.serviceAsrLastError", { message: serviceLastErrorMessage })}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void saveVoiceSettings()}
+                      disabled={busy || voiceSaveBusy}
+                      className={primaryButtonClass(voiceSaveBusy)}
+                    >
+                      {voiceSaveBusy ? t("common:saving") : t("assistants.saveVoiceRecognition")}
+                    </button>
+                  </div>
+                </SettingsBlock>
+
+                {renderVoiceGuidanceEditor()}
+              </div>
+            </div>
+
+            <div className={settingsWorkspacePanelClass(isDark)}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("assistants.petTitle")}</h4>
+                    <StatusPill tone={effectivePetEnabled ? "on" : "off"}>
+                      {effectivePetEnabled ? t("assistants.enabled") : t("assistants.disabled")}
+                    </StatusPill>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+                    {t("assistants.petDescription")}
+                  </p>
+                </div>
+                <AssistantSwitch
+                  checked={effectivePetEnabled}
+                  disabled={busy || petSaveBusy || !onUpdatePetEnabled}
+                  label={t("assistants.groupSwitch")}
+                  onChange={(checked) => void togglePet(checked)}
+                />
+              </div>
+
+              <div className="mt-5">
+                {renderPetPersonaEditor()}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {expandedPromptBlock
+        ? (
+          <BodyPortal>
+            <div
+              key={expandedPromptBlock}
+              className="fixed inset-0 z-[1000] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) setExpandedPromptBlock(null);
+              }}
+            >
+              <div className="absolute inset-0 glass-overlay" />
+              <div className={settingsDialogPanelClass("xl")}>
+                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                  <button type="button" className={secondaryButtonClass("sm")} onClick={() => setExpandedPromptBlock(null)}>
+                    {t("common:close")}
+                  </button>
+                </div>
+                <div className={settingsDialogBodyClass}>
+                  {expandedPromptBlock === "voice_secretary" ? renderVoiceGuidanceEditor(true) : renderPetPersonaEditor(true)}
+                </div>
+              </div>
+            </div>
+          </BodyPortal>
+          )
+        : null}
+    </div>
+  );
+}

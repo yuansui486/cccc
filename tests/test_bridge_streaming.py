@@ -145,6 +145,43 @@ class TestBridgeStreamForwarding(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_forward_stream_end_with_empty_text_closes_adapter_and_keeps_fallback(self) -> None:
+        adapter = FakeStreamAdapter()
+        bridge, cleanup = self._make_bridge(adapter)
+        try:
+            adapter.send_message = MagicMock(return_value=True)
+            bridge._forward_stream_event({
+                "kind": "chat.stream",
+                "by": "agent-1",
+                "data": {"op": "start", "stream_id": "s3-empty", "text": ""},
+            })
+            self.assertIn("s3-empty", bridge._active_streams)
+
+            bridge._forward_stream_event({
+                "kind": "chat.stream",
+                "by": "agent-1",
+                "data": {"op": "end", "stream_id": "s3-empty", "text": ""},
+            })
+
+            self.assertNotIn("s3-empty", bridge._active_streams)
+            self.assertNotIn("s3-empty", bridge._completed_stream_targets)
+            self.assertEqual(len(adapter.streams_ended), 1)
+            self.assertEqual(adapter.streams_ended[0]["text"], "")
+
+            bridge._forward_event({
+                "kind": "chat.message",
+                "by": "agent-1",
+                "data": {
+                    "text": "final fallback",
+                    "to": ["user"],
+                    "stream_id": "s3-empty",
+                    "attachments": [],
+                },
+            })
+            adapter.send_message.assert_called_once()
+        finally:
+            cleanup()
+
     def test_forward_event_routes_stream_to_handler(self) -> None:
         adapter = FakeStreamAdapter()
         bridge, cleanup = self._make_bridge(adapter)

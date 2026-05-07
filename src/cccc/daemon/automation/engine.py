@@ -699,7 +699,7 @@ def _queue_notify_to_pty(
         event_ts = str(ev.get("ts") or "").strip()
         headless_control_text = render_headless_control_text(
             control_kind="system_notify",
-            body=render_system_notify_delivery_text(notify=notify),
+            body=render_system_notify_delivery_text(notify=notify, group=group),
         )
         if not headless_control_text:
             return

@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MarkdownRenderer } from "../MarkdownRenderer";
-import { CloseIcon, CopyIcon, EditIcon, RefreshIcon, SplitViewIcon, TrashIcon, WindowViewIcon } from "../Icons";
+import { useUIStore } from "../../stores";
+import { MarkdownDocumentSurface } from "../document/MarkdownDocumentSurface";
+import {
+  CloseIcon,
+  CollapseIcon,
+  CopyIcon,
+  EditIcon,
+  ExpandIcon,
+  ImageIcon,
+  MessageSquareTextIcon,
+  RefreshIcon,
+  SplitViewIcon,
+  TrashIcon,
+  WindowViewIcon,
+} from "../Icons";
 import { ModalFrame } from "../modals/ModalFrame";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import type { GroupPresentation, LedgerEvent, PresentationMessageRef, PresentationSlot } from "../../types";
@@ -12,6 +25,7 @@ import {
   uploadPresentationReferenceSnapshot,
 } from "../../services/api";
 import { classNames } from "../../utils/classNames";
+import { copyTextToClipboard } from "../../utils/copy";
 import { findPresentationSlot, shouldPreferPresentationLiveBrowser } from "../../utils/presentation";
 import {
   canRestorePresentationRefInViewer,
@@ -80,34 +94,6 @@ async function dataUrlToFile(dataUrl: string, filename: string): Promise<File | 
   }
 }
 
-async function copyText(value: string): Promise<boolean> {
-  const text = String(value || "");
-  if (!text) return false;
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Fall through to textarea copy.
-  }
-  try {
-    if (typeof document === "undefined") return false;
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(textarea);
-    return !!ok;
-  } catch {
-    return false;
-  }
-}
-
 function formatTimestamp(value: string | undefined, locale: string): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -140,20 +126,8 @@ function getCardTypeLabel(type: string, t: (key: string, options?: Record<string
 }
 
 function PresentationWindowExpandIcon({ expanded }: { expanded: boolean }) {
-  if (expanded) {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-        <path d="M7 3.75H4.75v2.5M13 3.75h2.25v2.5M7 16.25H4.75v-2.5M13 16.25h2.25v-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M8 8l-3.25-3.25M12 8l3.25-3.25M8 12l-3.25 3.25M12 12l3.25 3.25" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-      <path d="M7 3.75H4.75v2.5M13 3.75h2.25v2.5M7 16.25H4.75v-2.5M13 16.25h2.25v-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8 4.75H4.75V8M12 4.75h3.25V8M8 15.25H4.75V12M12 15.25h3.25V12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  const Icon = expanded ? CollapseIcon : ExpandIcon;
+  return <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.6} />;
 }
 
 function PresentationViewer({
@@ -178,6 +152,7 @@ function PresentationViewer({
   onClose,
 }: PresentationViewerProps) {
   const { t, i18n } = useTranslation("chat");
+  const showError = useUIStore((state) => state.showError);
   const isModal = variant === "modal";
   const { modalRef } = useModalA11y(isModal && isOpen, onClose);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -262,16 +237,16 @@ function PresentationViewer({
         : t("presentationOpenQuotedSnapshotAction", { defaultValue: "Open quoted snapshot" })
       : t("presentationHideSnapshotAction", { defaultValue: "Hide snapshot" });
   const iconButtonClassName = classNames(
-    "inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-    isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+    "inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors",
+    isDark ? "border-white/12 bg-white/[0.06] text-white hover:bg-white/[0.1]" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-white",
   );
   const destructiveIconButtonClassName = classNames(
     "inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors",
     isDark ? "bg-rose-500/15 text-rose-200 hover:bg-rose-500/25" : "bg-rose-50 text-rose-700 hover:bg-rose-100",
   );
   const copiedIconButtonClassName = classNames(
-    "inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-    isDark ? "bg-cyan-500/20 text-cyan-100" : "bg-cyan-50 text-cyan-700",
+    "inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors",
+    isDark ? "border-white/16 bg-white/[0.12] text-white" : "border-black/10 bg-white text-[rgb(35,36,37)]",
   );
   const refreshActionLabel = t("presentationRefreshAction", { defaultValue: "Refresh" });
   const copyActionLabel = copiedReference
@@ -296,8 +271,8 @@ function PresentationViewer({
           type="button"
           onClick={() => onOpenMessageContext(sourceEventId)}
           className={classNames(
-            "inline-flex min-h-[40px] items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors glass-btn",
-            isDark ? "text-slate-300 hover:text-slate-100" : "text-gray-600 hover:text-gray-900",
+            "inline-flex min-h-[40px] items-center justify-center rounded-lg border px-3 text-sm font-medium transition-colors",
+            isDark ? "border-white/12 bg-white/[0.06] text-white hover:bg-white/[0.1]" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-white",
           )}
         >
           {t("presentationJumpToChatAction", { defaultValue: "Jump to chat" })}
@@ -308,8 +283,8 @@ function PresentationViewer({
           type="button"
           onClick={() => onReplyToMessage(sourceEvent)}
           className={classNames(
-            "inline-flex min-h-[40px] items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors glass-btn",
-            isDark ? "text-cyan-200 hover:text-cyan-100" : "text-cyan-700 hover:text-cyan-800",
+            "inline-flex min-h-[40px] items-center justify-center rounded-lg border px-3 text-sm font-medium transition-colors",
+            isDark ? "border-white/12 bg-white/[0.06] text-white hover:bg-white/[0.1]" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-white",
           )}
         >
           {t("presentationReplyInChatAction", { defaultValue: "Reply in chat" })}
@@ -320,8 +295,8 @@ function PresentationViewer({
           type="button"
           onClick={() => setRefreshTick((value) => value + 1)}
           className={classNames(
-            "inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg transition-colors glass-btn",
-            isDark ? "text-slate-300 hover:text-slate-100" : "text-gray-600 hover:text-gray-900",
+            "inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border transition-colors",
+            isDark ? "border-white/12 bg-white/[0.06] text-white hover:bg-white/[0.1]" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-white",
           )}
           aria-label={refreshActionLabel}
           title={refreshActionLabel}
@@ -334,8 +309,8 @@ function PresentationViewer({
           type="button"
           onClick={() => setIsExpanded((value) => !value)}
           className={classNames(
-            "hidden sm:inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg transition-colors glass-btn",
-            isDark ? "text-slate-300 hover:text-slate-100" : "text-gray-600 hover:text-gray-900",
+            "hidden sm:inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border transition-colors",
+            isDark ? "border-white/12 bg-white/[0.06] text-white hover:bg-white/[0.1]" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-white",
           )}
           aria-label={fullScreenLabel}
           title={fullScreenLabel}
@@ -348,8 +323,8 @@ function PresentationViewer({
           type="button"
           onClick={onOpenSplit}
           className={classNames(
-            "inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg transition-colors glass-btn",
-            isDark ? "text-cyan-200 hover:text-cyan-100" : "text-cyan-700 hover:text-cyan-800",
+            "inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border transition-colors",
+            isDark ? "border-white/12 bg-white/[0.06] text-white hover:bg-white/[0.1]" : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-white",
           )}
           aria-label={t("presentationOpenSplitViewAction", { defaultValue: "Open beside chat" })}
           title={t("presentationOpenSplitViewAction", { defaultValue: "Open beside chat" })}
@@ -509,8 +484,11 @@ function PresentationViewer({
 
   const handleCopyReference = async () => {
     if (!copyReferenceValue) return;
-    const ok = await copyText(copyReferenceValue);
-    if (!ok) return;
+    const ok = await copyTextToClipboard(copyReferenceValue);
+    if (!ok) {
+      showError(t("common:copyFailed", { defaultValue: "Copy failed" }));
+      return;
+    }
     setCopiedReference(true);
     if (copyResetTimerRef.current !== null) {
       window.clearTimeout(copyResetTimerRef.current);
@@ -601,7 +579,7 @@ function PresentationViewer({
         )}
       >
         <div className="min-w-0">
-          <div className={classNames("text-xs font-semibold uppercase tracking-[0.16em]", isDark ? "text-cyan-200/85" : "text-cyan-700/85")}>
+          <div className={classNames("text-xs font-semibold uppercase tracking-[0.16em]", isDark ? "text-white/85" : "text-[rgb(35,36,37)]/85")}>
             {t("presentationSnapshotFromQuoteLabel", { defaultValue: "Snapshot from this quote" })}
           </div>
           {snapshotTimestamp ? (
@@ -625,10 +603,7 @@ function PresentationViewer({
           aria-label={t("presentationOpenSnapshotLightboxAction", { defaultValue: "Open snapshot" })}
           title={t("presentationOpenSnapshotLightboxAction", { defaultValue: "Open snapshot" })}
         >
-          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-            <path d="M7 3.75H4.75v2.5M13 3.75h2.25v2.5M7 16.25H4.75v-2.5M13 16.25h2.25v-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M8 4.75H4.75V8M12 4.75h3.25V8M8 15.25H4.75V12M12 15.25h3.25V12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <ExpandIcon aria-hidden="true" className="h-4 w-4" strokeWidth={1.6} />
         </button>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-3">
@@ -653,17 +628,11 @@ function PresentationViewer({
       {t("presentationMissingCard", { defaultValue: "This presentation slot is empty." })}
     </div>
   ) : card.card_type === "markdown" ? (
-    <div className={classNames("rounded-3xl border p-5", isDark ? "border-white/10 bg-slate-950/60" : "border-black/10 bg-white/90")}>
-      {linkedMarkdownError ? (
-        <div className={classNames("text-sm", isDark ? "text-rose-300" : "text-rose-600")}>{linkedMarkdownError}</div>
-      ) : (
-        <MarkdownRenderer
-          content={String(card.content.mode === "inline" ? card.content.markdown || "" : linkedMarkdown || "")}
-          isDark={isDark}
-          className="break-words [overflow-wrap:anywhere]"
-        />
-      )}
-    </div>
+    <MarkdownDocumentSurface
+      content={String(card.content.mode === "inline" ? card.content.markdown || "" : linkedMarkdown || "")}
+      error={linkedMarkdownError}
+      isDark={isDark}
+    />
   ) : card.card_type === "table" ? (
     <div className={classNames("overflow-hidden rounded-3xl border", isDark ? "border-white/10 bg-slate-950/60" : "border-black/10 bg-white/95")}>
       <div className="overflow-auto">
@@ -750,7 +719,7 @@ function PresentationViewer({
         >
           {card ? (
             <>
-              <span className={classNames("rounded-full px-2 py-1 font-medium", isDark ? "bg-cyan-500/10 text-cyan-200" : "bg-cyan-50 text-cyan-700")}>
+              <span className={classNames("rounded-full px-2 py-1 font-medium", isDark ? "bg-white/[0.08] text-white" : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]")}>
                 {getCardTypeLabel(card.card_type, t)}
               </span>
               {isWorkspaceLinked ? (
@@ -795,8 +764,8 @@ function PresentationViewer({
                         "rounded-full px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition-colors",
                         webPreviewMode === "interactive"
                           ? isDark
-                            ? "bg-cyan-400/18 text-cyan-50"
-                            : "bg-cyan-50 text-cyan-700"
+                            ? "bg-white/[0.08] text-white"
+                            : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
                           : isDark
                             ? "text-slate-300 hover:bg-white/8"
                             : "text-gray-600 hover:bg-black/6",
@@ -970,9 +939,7 @@ function PresentationViewer({
                     aria-label={t("presentationCloseSnapshotAction", { defaultValue: "Close snapshot" })}
                     title={t("presentationCloseSnapshotAction", { defaultValue: "Close snapshot" })}
                   >
-                    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-                      <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    </svg>
+                    <CloseIcon aria-hidden="true" className="h-4 w-4" strokeWidth={1.6} />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto bg-black/10 p-4">
@@ -995,8 +962,8 @@ function PresentationViewer({
                     "pointer-events-auto inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium shadow-lg backdrop-blur-xl transition-colors",
                     snapshotViewMode !== "hidden"
                       ? isDark
-                        ? "border-cyan-400/20 bg-cyan-500/18 text-cyan-50 hover:bg-cyan-500/24"
-                        : "border-cyan-200 bg-cyan-50/92 text-cyan-700 hover:bg-cyan-100"
+                        ? "border-white/12 bg-white/[0.08] text-white hover:bg-white/[0.12]"
+                        : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] hover:bg-[rgb(240,240,240)]"
                       : isDark
                         ? "border-white/10 bg-slate-900/78 text-slate-200 hover:bg-slate-900"
                         : "border-black/10 bg-white/88 text-gray-700 hover:bg-white",
@@ -1004,11 +971,7 @@ function PresentationViewer({
                   aria-label={snapshotToggleLabel}
                   title={snapshotToggleLabel}
                 >
-                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-                    <rect x="3.75" y="4.25" width="12.5" height="9.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                    <path d="M6.5 11l2-2 1.75 1.75 2.75-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M16.25 15.75H8.75" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
+                  <ImageIcon aria-hidden="true" className="h-4 w-4" strokeWidth={1.5} />
                   <span>{snapshotToggleLabel}</span>
                 </button>
               ) : null}
@@ -1021,17 +984,14 @@ function PresentationViewer({
                 className={classNames(
                   "pointer-events-auto inline-flex h-10 items-center gap-2 rounded-full border px-3.5 text-sm font-medium shadow-lg backdrop-blur-xl transition-colors",
                   isDark
-                    ? "border-white/10 bg-slate-900/82 text-cyan-100 hover:bg-slate-900"
-                    : "border-black/10 bg-white/88 text-cyan-700 hover:bg-white",
+                    ? "border-white/10 bg-slate-900/82 text-white hover:bg-slate-900"
+                    : "border-black/10 bg-white/88 text-[rgb(35,36,37)] hover:bg-white",
                   quotePending ? "opacity-70" : "",
                 )}
                 aria-label={t("presentationQuoteInChatAction", { defaultValue: "Quote in chat" })}
                 title={t("presentationQuoteInChatAction", { defaultValue: "Quote in chat" })}
               >
-                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
-                  <path d="M6.25 5.75h7.5a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2h-4.25L6 17v-2.75H6.25a2 2 0 0 1-2-2v-4.5a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M7.75 8.75h4.5M7.75 11.25h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
+                <MessageSquareTextIcon aria-hidden="true" className="h-4 w-4" strokeWidth={1.5} />
                 <span>
                   {quotePending
                     ? t("presentationQuotePendingAction", { defaultValue: "Quoting..." })
@@ -1064,7 +1024,7 @@ function PresentationViewer({
               {card?.title || t("presentationTitle", { defaultValue: "Presentation" })}
             </div>
             {card ? (
-              <span className={classNames("flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium", isDark ? "bg-cyan-500/10 text-cyan-200" : "bg-cyan-50 text-cyan-700")}>
+              <span className={classNames("flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium", isDark ? "bg-white/[0.08] text-white" : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]")}>
                 {getCardTypeLabel(card.card_type, t)}
               </span>
             ) : null}
@@ -1104,8 +1064,8 @@ function PresentationViewer({
                     "rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap transition-colors",
                     webPreviewMode === "interactive"
                       ? isDark
-                        ? "bg-cyan-400/18 text-cyan-50"
-                        : "bg-cyan-50 text-cyan-700"
+                        ? "bg-white/[0.08] text-white"
+                        : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
                       : isDark
                         ? "text-slate-300 hover:bg-white/8"
                         : "text-gray-600 hover:bg-black/6",
@@ -1140,7 +1100,7 @@ function PresentationViewer({
                 className={classNames(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
                   copiedReference
-                    ? isDark ? "bg-cyan-500/20 text-cyan-100" : "bg-cyan-50 text-cyan-700"
+                    ? isDark ? "bg-white/[0.08] text-white" : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
                     : isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
                 )}
                 aria-label={copyActionLabel}
@@ -1155,7 +1115,7 @@ function PresentationViewer({
                 onClick={onOpenWindow}
                 className={classNames(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                  isDark ? "bg-slate-800 text-cyan-200 hover:bg-slate-700 hover:text-cyan-100" : "bg-gray-100 text-cyan-700 hover:bg-gray-200 hover:text-cyan-800",
+                  isDark ? "bg-slate-800 text-white hover:bg-slate-700 hover:text-white" : "bg-gray-100 text-[rgb(35,36,37)] hover:bg-gray-200 hover:text-black",
                 )}
                 aria-label={t("presentationOpenWindowAction", { defaultValue: "Open in window" })}
                 title={t("presentationOpenWindowAction", { defaultValue: "Open in window" })}

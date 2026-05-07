@@ -428,12 +428,12 @@ class TestPetActorSeed(unittest.TestCase):
             self.assertEqual(seed["submit"], "ctrl-enter")
             self.assertEqual(seed["env"], {"FOO": "bar"})
 
-    def test_pet_actor_seed_requires_enabled_foreman(self) -> None:
+    def test_pet_actor_seed_requires_foreman(self) -> None:
         from cccc.kernel.pet_actor import _pet_actor_seed
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
-            with self.assertRaisesRegex(ValueError, "desktop pet requires an enabled foreman actor"):
+            with self.assertRaisesRegex(ValueError, "desktop pet requires a foreman actor"):
                 _pet_actor_seed(group)
 
     def test_pet_actor_seed_uses_available_runtime_when_foreman_runtime_missing(self) -> None:

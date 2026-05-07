@@ -15,7 +15,7 @@ interface ModalFrameProps {
 
 export function ModalFrame({
   isOpen = true,
-  isDark: _isDark,
+  isDark,
   onClose,
   titleId,
   title,
@@ -25,6 +25,8 @@ export function ModalFrame({
   modalRef,
   children,
 }: ModalFrameProps) {
+  const hasHeaderContent = Boolean(title) || Boolean(headerActions);
+
   return (
     <div
       className={`fixed inset-0 z-50 flex items-stretch justify-center p-0 transition-[opacity,visibility] duration-200 sm:items-center sm:p-4 ${
@@ -40,7 +42,7 @@ export function ModalFrame({
       />
 
       <div
-        className={`relative flex flex-col rounded-none border shadow-2xl transition-[opacity,transform] duration-200 sm:rounded-xl glass-modal ${panelClassName} ${
+        className={`relative flex flex-col rounded-none border shadow-2xl transition-[opacity,transform] duration-200 sm:rounded-[28px] glass-modal ${panelClassName} ${
           isOpen ? "opacity-100 animate-scale-in" : "pointer-events-none translate-y-2 scale-[0.985] opacity-0"
         }`}
         ref={modalRef}
@@ -48,23 +50,47 @@ export function ModalFrame({
         aria-modal={isOpen ? "true" : undefined}
         aria-labelledby={titleId}
       >
-        <div
-          className="flex flex-shrink-0 items-center justify-between px-5 py-4 border-b safe-area-inset-top border-[var(--glass-border-subtle)]"
-        >
-          <h2 id={titleId} className="min-w-0 flex-1 pr-3 text-lg font-semibold text-[var(--color-text-primary)]">
-            {title}
-          </h2>
-          <div className="flex flex-shrink-0 items-center gap-1.5">
-            {headerActions}
+        {hasHeaderContent ? (
+          <div
+            className={`flex flex-shrink-0 items-start justify-between gap-4 border-b px-5 py-4 safe-area-inset-top sm:px-6 sm:py-5 border-[var(--glass-border-subtle)] ${
+              isDark
+                ? "bg-[linear-gradient(180deg,rgba(24,26,31,0.96),rgba(16,18,22,0.9))]"
+                : "bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(246,248,251,0.96))]"
+            }`}
+          >
+            <div id={titleId} className="min-w-0 flex-1 pr-3">
+              {title}
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-2">
+              {headerActions}
+              <button
+                onClick={onClose}
+                className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl border border-[var(--glass-border-subtle)] text-lg leading-none text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] ${
+                  isDark
+                    ? "bg-[rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.08)]"
+                    : "bg-[rgba(255,255,255,0.88)] hover:bg-[rgba(255,255,255,0.98)]"
+                }`}
+                aria-label={closeAriaLabel}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="pointer-events-none absolute right-4 top-4 z-10 sm:right-5 sm:top-5">
             <button
               onClick={onClose}
-              className="text-xl leading-none min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors glass-btn text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+              className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl border border-[var(--glass-border-subtle)] text-lg leading-none text-[var(--color-text-muted)] shadow-sm backdrop-blur-xl transition-colors hover:text-[var(--color-text-primary)] ${
+                isDark
+                  ? "bg-[rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.08)]"
+                  : "bg-[rgba(255,255,255,0.88)] hover:bg-[rgba(255,255,255,0.98)]"
+              }`}
               aria-label={closeAriaLabel}
             >
               ×
             </button>
           </div>
-        </div>
+        )}
 
         {children}
       </div>

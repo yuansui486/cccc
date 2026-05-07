@@ -5,7 +5,7 @@ Static MCP surface:
 - cccc_help / cccc_bootstrap / cccc_project_info
 - cccc_inbox_list / cccc_inbox_mark_read
 - cccc_message_send / cccc_message_reply
-- cccc_file / cccc_group / cccc_actor / cccc_runtime_list
+- cccc_file / cccc_voice_secretary_document / cccc_voice_secretary_request / cccc_group / cccc_actor / cccc_runtime_list
 - cccc_capability_search / cccc_capability_enable / cccc_capability_block / cccc_capability_state / cccc_capability_import / cccc_capability_uninstall / cccc_capability_use
 - cccc_space / cccc_automation
 - cccc_context_get / cccc_coordination / cccc_task / cccc_agent_state
@@ -24,12 +24,13 @@ import os
 from typing import Any, Dict, List, Optional
 
 # Kernel/util imports needed by routing
-from ...kernel.actors import find_actor, get_effective_role, is_pet_actor
+from ...kernel.actors import find_actor, get_effective_role, is_pet_actor, is_voice_secretary_actor
 from ...kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ...kernel.group import load_group
 from ...kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_ADMIN_TOOLS, resolve_visible_tool_names
 from ...kernel.memory_guide import build_memory_guide
 from ...kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
+from ...kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID
 from ...util.conv import coerce_bool
 
 # Common MCP utilities
@@ -62,6 +63,7 @@ from .handlers.cccc_messaging import (  # noqa: F401
     file_send,
     message_reply,
     message_send,
+    tracked_send,
 )
 from .handlers.presentation import (  # noqa: F401
     presentation_clear,
@@ -213,16 +215,21 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
                         role = get_effective_role(g, aid)
                     except Exception:
                         role = None
+                actor = _safe_find_actor(g, aid)
+                actor_is_pet = bool(isinstance(actor, dict) and is_pet_actor(actor))
+                actor_is_voice_secretary = bool(isinstance(actor, dict) and is_voice_secretary_actor(actor))
+                if actor_is_voice_secretary:
+                    role = "voice_secretary"
                 pf = read_group_prompt_file(g, HELP_FILENAME)
                 if pf.found and isinstance(pf.content, str) and pf.content.strip():
-                    actor = _safe_find_actor(g, aid)
                     help_result = {
                         "markdown": _append_runtime_help_addenda(
                             _select_help_markdown(
                                 pf.content,
                                 role=role,
                                 actor_id=aid,
-                                include_pet=bool(isinstance(actor, dict) and is_pet_actor(actor)),
+                                include_pet=actor_is_pet,
+                                include_voice_secretary=actor_is_voice_secretary,
                             ),
                             group_id=gid,
                             actor_id=aid,
@@ -230,14 +237,14 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
                         "source": str(pf.path or ""),
                     }
                 else:
-                    actor = _safe_find_actor(g, aid)
                     help_result = {
                         "markdown": _append_runtime_help_addenda(
                             _select_help_markdown(
                                 _CCCC_HELP_BUILTIN,
                                 role=role,
                                 actor_id=aid,
-                                include_pet=bool(isinstance(actor, dict) and is_pet_actor(actor)),
+                                include_pet=actor_is_pet,
+                                include_voice_secretary=actor_is_voice_secretary,
                             ),
                             group_id=gid,
                             actor_id=aid,
@@ -337,7 +344,33 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val,
-            enforce_runtime_guard=False,
+        )
+
+    if name == "cccc_tracked_send":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        to_raw = arguments.get("to")
+        refs_raw = arguments.get("refs")
+        checklist_raw = arguments.get("checklist")
+        to_val = _normalize_to_arg(to_raw)
+        refs_val = [item for item in refs_raw if isinstance(item, dict)] if isinstance(refs_raw, list) else None
+        checklist_val = [item for item in checklist_raw if isinstance(item, dict)] if isinstance(checklist_raw, list) else None
+        return tracked_send(
+            group_id=gid,
+            actor_id=aid,
+            title=str(arguments.get("title") or ""),
+            text=str(arguments.get("text") or ""),
+            to=to_val,
+            outcome=str(arguments.get("outcome") or ""),
+            checklist=checklist_val,
+            assignee=str(arguments.get("assignee") or ""),
+            waiting_on=str(arguments.get("waiting_on") or ""),
+            handoff_to=str(arguments.get("handoff_to") or ""),
+            notes=str(arguments.get("notes") or ""),
+            priority=str(arguments.get("priority") or "normal"),
+            reply_required=coerce_bool(arguments.get("reply_required"), default=True),
+            idempotency_key=str(arguments.get("idempotency_key") or ""),
+            refs=refs_val,
         )
 
     if name == "cccc_message_reply":
@@ -357,7 +390,6 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val_reply,
-            enforce_runtime_guard=False,
         )
 
     if name == "cccc_pet_decisions":
@@ -380,6 +412,143 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
         if action == "clear":
             return _call_daemon_or_raise({"op": "pet_decisions_clear", "args": {"group_id": gid, "actor_id": aid}})
         raise MCPError(code="invalid_request", message="cccc_pet_decisions action must be get|replace|clear")
+
+    if name == "cccc_voice_secretary_document":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        if aid != VOICE_SECRETARY_ACTOR_ID:
+            raise MCPError(code="permission_denied", message="cccc_voice_secretary_document is only available to the voice-secretary actor")
+        action = str(arguments.get("action") or "list").strip().lower()
+        if action == "list":
+            if coerce_bool(arguments.get("include_content"), default=False):
+                raise MCPError(
+                    code="invalid_request",
+                    message="cccc_voice_secretary_document list is compact; read repository markdown directly at document_path",
+                )
+            return _call_daemon_or_raise(
+                {
+                    "op": "assistant_voice_document_list",
+                    "args": {
+                        "group_id": gid,
+                        "include_archived": coerce_bool(arguments.get("include_archived"), default=False),
+                        "include_content": False,
+                        "include_documents_by_id": False,
+                        "include_documents_by_path": False,
+                        "document_path": str(arguments.get("document_path") or arguments.get("workspace_path") or ""),
+                    },
+                }
+            )
+        if action == "read_new_input":
+            return _call_daemon_or_raise(
+                {
+                    "op": "assistant_voice_document_input_read",
+                    "args": {
+                        "group_id": gid,
+                        "by": "assistant:voice_secretary",
+                    },
+                }
+            )
+        if action == "create":
+            if any(key in arguments for key in ("content", "new_source", "markdown")):
+                raise MCPError(
+                    code="invalid_request",
+                    message="cccc_voice_secretary_document create only creates a markdown file; edit document content directly at document_path",
+                )
+            create_args = {
+                "group_id": gid,
+                "title": str(arguments.get("title") or ""),
+                "create_new": True,
+                "by": "assistant:voice_secretary",
+            }
+            return _call_daemon_or_raise(
+                {
+                    "op": "assistant_voice_document_save",
+                    "args": create_args,
+                }
+            )
+        if action == "archive":
+            return _call_daemon_or_raise(
+                {
+                    "op": "assistant_voice_document_archive",
+                    "args": {
+                        "group_id": gid,
+                        "document_path": str(arguments.get("document_path") or arguments.get("workspace_path") or ""),
+                        "by": "assistant:voice_secretary",
+                    },
+                }
+            )
+        raise MCPError(code="invalid_request", message="cccc_voice_secretary_document action must be list|create|read_new_input|archive")
+
+    if name == "cccc_voice_secretary_request":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        if aid != VOICE_SECRETARY_ACTOR_ID:
+            raise MCPError(code="permission_denied", message="cccc_voice_secretary_request is only available to the voice-secretary actor")
+        action = str(arguments.get("action") or "handoff").strip().lower()
+        if action == "report":
+            return _call_daemon_or_raise(
+                {
+                    "op": "assistant_voice_instruction_feedback",
+                    "args": {
+                        "group_id": gid,
+                        "request_id": str(arguments.get("request_id") or arguments.get("source_request_id") or ""),
+                        "status": str(arguments.get("status") or ""),
+                        "reply_text": str(arguments.get("reply_text") or arguments.get("result_text") or arguments.get("message") or ""),
+                        "document_path": str(arguments.get("document_path") or arguments.get("workspace_path") or ""),
+                        "artifact_paths": arguments.get("artifact_paths") or [],
+                        "source_summary": str(arguments.get("source_summary") or ""),
+                        "checked_at": str(arguments.get("checked_at") or ""),
+                        "source_urls": arguments.get("source_urls") or [],
+                        "by": VOICE_SECRETARY_ACTOR_ID,
+                    },
+                }
+            )
+        if action != "handoff":
+            raise MCPError(code="invalid_request", message="cccc_voice_secretary_request action must be handoff or report")
+        target = str(arguments.get("target") or "").strip()
+        if not target:
+            raise MCPError(code="invalid_request", message="cccc_voice_secretary_request target is required; use @foreman or one concrete actor id")
+        return _call_daemon_or_raise(
+            {
+                "op": "assistant_voice_request",
+                "args": {
+                    "group_id": gid,
+                    "action": "handoff",
+                    "target": target,
+                    "request_text": str(arguments.get("request_text") or ""),
+                    "summary": str(arguments.get("summary") or ""),
+                    "document_path": str(arguments.get("document_path") or arguments.get("workspace_path") or ""),
+                    "source_event_id": str(arguments.get("source_event_id") or ""),
+                    "source_request_id": str(arguments.get("source_request_id") or ""),
+                    "priority": str(arguments.get("priority") or "normal"),
+                    "requires_ack": coerce_bool(arguments.get("requires_ack"), default=True),
+                    "by": VOICE_SECRETARY_ACTOR_ID,
+                },
+            }
+        )
+
+    if name == "cccc_voice_secretary_composer":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        if aid != VOICE_SECRETARY_ACTOR_ID:
+            raise MCPError(code="permission_denied", message="cccc_voice_secretary_composer is only available to the voice-secretary actor")
+        action = str(arguments.get("action") or "submit_prompt_draft").strip().lower()
+        if action != "submit_prompt_draft":
+            raise MCPError(code="invalid_request", message="cccc_voice_secretary_composer action must be submit_prompt_draft")
+        return _call_daemon_or_raise(
+            {
+                "op": "assistant_voice_prompt_draft_submit",
+                "args": {
+                    "group_id": gid,
+                    "request_id": str(arguments.get("request_id") or ""),
+                    "draft_text": str(arguments.get("draft_text") or ""),
+                    "summary": str(arguments.get("summary") or ""),
+                    "operation": str(arguments.get("operation") or ""),
+                    "composer_snapshot_hash": str(arguments.get("composer_snapshot_hash") or ""),
+                    "by": VOICE_SECRETARY_ACTOR_ID,
+                },
+            }
+        )
 
     if name == "cccc_file":
         gid = _resolve_group_id(arguments)
@@ -462,7 +631,7 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
         if action == "list":
             return actor_list(group_id=gid)
         if action == "profile_list":
-            return actor_profile_list(by=by)
+            return actor_profile_list(group_id=gid, by=by)
         if action == "add":
             cmd_raw = arguments.get("command")
             env_raw = arguments.get("env")
@@ -963,6 +1132,7 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
     # Determine actor role for admin tool gating.
     actor_role = ""
     actor_is_pet = False
+    actor_is_voice_secretary = False
     builtin_enabled_fallback: List[str] = []
     if gid and aid and aid != "user":
         try:
@@ -971,6 +1141,7 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
             actor = find_actor(group, aid)
             if isinstance(actor, dict):
                 actor_is_pet = is_pet_actor(actor)
+                actor_is_voice_secretary = is_voice_secretary_actor(actor)
                 autoload = actor.get("capability_autoload") if isinstance(actor.get("capability_autoload"), list) else []
                 builtin_enabled_fallback = [
                     str(cap_id or "").strip()
@@ -995,6 +1166,7 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                     builtin_enabled_fallback,
                     actor_role=actor_role,
                     is_pet=actor_is_pet,
+                    is_voice_secretary=actor_is_voice_secretary,
                 )
             ) - admin_excluded
 

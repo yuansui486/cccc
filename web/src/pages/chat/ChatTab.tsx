@@ -156,6 +156,7 @@ export function ChatTab({
 
     // Agent state
     agentStates,
+    taskById,
 
     // Actions
     sendMessage,
@@ -663,6 +664,7 @@ export function ChatTab({
                   onRelay={relayMessage}
                   onOpenSource={openSourceMessage}
                   onOpenPresentationRef={openPresentationRef}
+                  taskById={taskById}
                   showScrollButton={showScrollButton}
                   onScrollButtonClick={handleScrollButtonClick}
                   chatUnreadCount={chatUnreadCount}
@@ -789,6 +791,7 @@ export function ChatTab({
             setDestGroupId={setDestGroupId}
             destGroupScopeLabel={destGroupScopeLabel}
             busy={busy}
+            recentMessages={chatMessages}
             replyTarget={replyTarget}
             onCancelReply={cancelReply}
             quotedPresentationRef={quotedPresentationRef}
@@ -805,12 +808,11 @@ export function ChatTab({
             setComposerText={setComposerText}
             priority={priority}
             replyRequired={replyRequired}
-              setPriority={setPriority}
-              setReplyRequired={setReplyRequired}
-              onSendMessage={sendMessage}
-              onVoiceError={reportComposerError}
-              showMentionMenu={showMentionMenu}
-              setShowMentionMenu={setShowMentionMenu}
+            setPriority={setPriority}
+            setReplyRequired={setReplyRequired}
+            onSendMessage={sendMessage}
+            showMentionMenu={showMentionMenu}
+            setShowMentionMenu={setShowMentionMenu}
             mentionSuggestions={mentionSuggestions}
             mentionSelectedIndex={mentionSelectedIndex}
             setMentionSelectedIndex={setMentionSelectedIndex}

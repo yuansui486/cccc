@@ -26,6 +26,7 @@ from .group.group_state_ops import try_handle_group_state_op
 from .group.group_lifecycle_ops import try_handle_group_lifecycle_op
 from .automation.automation_ops import try_handle_group_automation_op
 from .group.group_settings_ops import try_handle_group_settings_op
+from .assistants.assistant_ops import try_handle_assistant_op
 from .pet.pet_decision_ops import try_handle_pet_decision_op
 from .group.presentation_ops import try_handle_presentation_op
 from .group.presentation_browser_ops import try_handle_presentation_browser_op
@@ -179,6 +180,22 @@ def dispatch_request(
     )
     if group_settings_resp is not None:
         return group_settings_resp, False
+
+    assistant_resp = try_handle_assistant_op(
+        op,
+        args,
+        effective_runner_kind=deps.effective_runner_kind,
+        start_actor_process=deps.start_actor_process,
+        load_actor_private_env=deps.load_actor_private_env,
+        update_actor_private_env=deps.update_actor_private_env,
+        delete_actor_private_env=deps.delete_actor_private_env,
+        get_actor_profile=deps.get_actor_profile,
+        load_actor_profile_secrets=deps.load_actor_profile_secrets,
+        remove_headless_state=deps.remove_headless_state,
+        remove_pty_state_if_pid=deps.remove_pty_state_if_pid,
+    )
+    if assistant_resp is not None:
+        return assistant_resp, False
 
     pet_decision_resp = try_handle_pet_decision_op(op, args)
     if pet_decision_resp is not None:

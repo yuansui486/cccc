@@ -83,6 +83,8 @@ interface ContextModalProps {
   isDark: boolean;
   settings?: GroupSettings | null;
   onUpdateSettings?: (settings: Partial<GroupSettings>) => Promise<boolean | void>;
+  initialTaskId?: string | null;
+  onInitialTaskHandled?: () => void;
 }
 
 export function ContextModal({
@@ -95,6 +97,8 @@ export function ContextModal({
   isDark,
   settings,
   onUpdateSettings,
+  initialTaskId,
+  onInitialTaskHandled,
 }: ContextModalProps) {
   const { t } = useTranslation("modals");
   const tr = useCallback((key: string, fallback: string, vars?: Record<string, unknown>) =>
@@ -345,6 +349,14 @@ export function ContextModal({
     lastOpenedGroupRef.current = groupId;
     void onOpenContext();
   }, [groupId, isOpen, onOpenContext]);
+
+  useEffect(() => {
+    if (!isOpen || !initialTaskId) return;
+    setActiveView("coordination");
+    setSelectedTaskId(String(initialTaskId));
+    setTaskEditorMode("edit");
+    onInitialTaskHandled?.();
+  }, [initialTaskId, isOpen, onInitialTaskHandled]);
 
   const applyContextWriteback = useCallback(
     async <T,>(response: ApiResponse<T>) =>
