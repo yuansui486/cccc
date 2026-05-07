@@ -17,7 +17,7 @@ import {
 type PromptKind = "preamble" | "help";
 type PromptInfo = api.GroupPromptInfo;
 type HelpViewMode = "structured" | "raw";
-type HelpScopeId = "common" | "role:foreman" | "role:peer" | `actor:${string}`;
+type HelpScopeId = "role:foreman" | "role:peer" | `actor:${string}`;
 
 const EMPTY_HELP: ParsedHelpMarkdown = {
   common: "",
@@ -60,7 +60,7 @@ export function GuidanceTab({ isDark, groupId }: {
   const [helpStructured, setHelpStructured] = useState<ParsedHelpMarkdown>(EMPTY_HELP);
   const [helpTouchedRaw, setHelpTouchedRaw] = useState(false);
   const [helpChangedBlocks, setHelpChangedBlocks] = useState<HelpChangedBlock[]>([]);
-  const [selectedHelpScope, setSelectedHelpScope] = useState<HelpScopeId>("common");
+  const [selectedHelpScope, setSelectedHelpScope] = useState<HelpScopeId>("role:foreman");
 
   const actorIds = useMemo(
     () => actors.map((actor) => String(actor.id || "").trim()).filter(Boolean),
@@ -106,7 +106,7 @@ export function GuidanceTab({ isDark, groupId }: {
       setHelpTouchedRaw(false);
       setHelpChangedBlocks([]);
       setHelpViewMode("structured");
-      setSelectedHelpScope("common");
+      setSelectedHelpScope("role:foreman");
     } catch {
       setErr(t("guidance.failedToLoad"));
       setPrompts(null);
@@ -151,10 +151,6 @@ export function GuidanceTab({ isDark, groupId }: {
     // trailing blank lines, which makes Enter feel broken in structured mode.
     setHelpStructured(next);
     setHelpChangedBlocks((current) => uniqueChangedBlocks([...current, changed]));
-  };
-
-  const updateCommon = (value: string) => {
-    applyStructuredHelp({ ...helpStructured, common: value }, "common");
   };
 
   const updateRole = (role: "foreman" | "peer", value: string) => {
@@ -246,13 +242,7 @@ export function GuidanceTab({ isDark, groupId }: {
     isDark ? "border-b border-white/8 bg-white/[0.025]" : "border-b border-black/6 bg-[rgba(18,18,20,0.018)]"
   }`;
   const promptHeaderTextClass = isDark ? "text-white" : "text-[rgb(22,24,29)]";
-  const promptHintClass = isDark ? "text-white/50" : "text-gray-500";
   const promptBodyClass = (expanded = false) => `px-4 py-4 sm:px-5 sm:py-5 ${expanded ? "min-h-0 flex flex-1 flex-col" : "space-y-4"}`;
-  const promptPathClass = `inline-flex max-w-full items-center rounded-full border px-3 py-1 text-[11px] font-mono leading-5 ${
-    isDark
-      ? "border-white/8 bg-white/[0.03] text-white/64"
-      : "border-black/8 bg-black/[0.03] text-gray-600"
-  }`;
   const editorSurfaceSoftClass = `rounded-[18px] border px-4 py-3 sm:px-4 sm:py-4 ${
     isDark
       ? "border-white/8 bg-white/[0.025]"
@@ -323,16 +313,6 @@ export function GuidanceTab({ isDark, groupId }: {
     );
   };
 
-  const commonScope = {
-    id: "common" as HelpScopeId,
-    title: t("guidance.commonNotesTitle", "Common Notes"),
-    hint: t("guidance.commonNotesHint", "Untagged help content shared by all actors."),
-    placeholder: t("guidance.commonNotesPlaceholder", "Keep shared guidance, workflow details, and appendices here..."),
-    value: helpStructured.common,
-    roleLabel: undefined as string | undefined,
-    isOrphan: false,
-  };
-
   const foremanScope = {
     id: "role:foreman" as HelpScopeId,
     title: t("guidance.foremanNotesTitle", "Foreman Notes"),
@@ -381,15 +361,11 @@ export function GuidanceTab({ isDark, groupId }: {
     };
   });
 
-  const selectedHelpScopeItem = [commonScope, foremanScope, peerScope, ...actorScopes, ...orphanActorScopes].find(
+  const selectedHelpScopeItem = [foremanScope, peerScope, ...actorScopes, ...orphanActorScopes].find(
     (item) => item.id === selectedHelpScope
-  ) || commonScope;
+  ) || foremanScope;
 
   const updateSelectedHelpScopeValue = (value: string) => {
-    if (selectedHelpScopeItem.id === "common") {
-      updateCommon(value);
-      return;
-    }
     if (selectedHelpScopeItem.id === "role:foreman") {
       updateRole("foreman", value);
       return;
@@ -439,7 +415,6 @@ export function GuidanceTab({ isDark, groupId }: {
       <div className={expanded ? "flex items-start justify-between gap-3" : promptHeaderClass}>
         <div className="min-w-0">
           <div className={`text-sm font-semibold ${promptHeaderTextClass}`}>{t("guidance.helpTitle")}</div>
-          <div className={`text-[11px] ${promptHintClass}`}>{t("guidance.helpHint")}</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {!expanded ? (
@@ -458,12 +433,6 @@ export function GuidanceTab({ isDark, groupId }: {
       </div>
 
       <div className={expanded ? "mt-3 min-h-0 flex flex-1 flex-col" : promptBodyClass(expanded)}>
-        {help?.path ? (
-          <div className={promptPathClass}>
-            <span className="truncate">{help.path}</span>
-          </div>
-        ) : null}
-
         <div className={`${expanded ? "min-h-0 flex flex-1 flex-col" : ""}`}>
           <div className={`flex items-start justify-between gap-4 ${expanded ? "pb-4" : "mb-4"}`}>
             <div className="min-w-0">
@@ -512,8 +481,7 @@ export function GuidanceTab({ isDark, groupId }: {
               <div className={`${navigationPanelClass} ${expanded ? "min-h-0 flex flex-col" : "space-y-2.5"}`}>
                 <div className={expanded ? `min-h-0 flex-1 space-y-4 ${settingsScrollAreaClass}` : "space-y-4"}>
                   <div className="space-y-2.5">
-                    <div className={navSectionTitleClass}>{t("guidance.commonAndRolesTitle", "Shared Scopes")}</div>
-                    {renderHelpScopeButton(commonScope)}
+                    <div className={navSectionTitleClass}>{t("guidance.commonAndRolesTitle")}</div>
                     {renderHelpScopeButton(foremanScope)}
                     {renderHelpScopeButton(peerScope)}
                   </div>

@@ -412,7 +412,9 @@ export function AutomationRuleEditorModal(props: AutomationRuleEditorModalProps)
                         className={secondaryButtonClass("sm")}
                         onClick={() => onSetOneShotAfterMinutes(minutes)}
                       >
-                        {minutes >= 60 ? `${Math.round(minutes / 60)}h` : `${minutes}m`}
+                        {minutes >= 60
+                          ? t("automation.quickHours", { count: Math.round(minutes / 60) })
+                          : t("automation.quickMinutes", { count: minutes })}
                       </button>
                     ))}
                   </div>

@@ -16,10 +16,10 @@ export const formatDuration = (secondsRaw: number, t?: TFunction): string => {
   const parts: string[] = [];
   let rem = seconds;
   const units: Array<[number, string]> = [
-    [86400, "d"],
-    [3600, "h"],
-    [60, "m"],
-    [1, "s"],
+    [86400, t ? t("automation.durationDay") : "d"],
+    [3600, t ? t("automation.durationHour") : "h"],
+    [60, t ? t("automation.durationMinute") : "m"],
+    [1, t ? t("automation.durationSecond") : "s"],
   ];
   for (const [unit, label] of units) {
     if (rem < unit) continue;
@@ -233,11 +233,11 @@ export function getAutomationVarHelp(t: TFunction): Record<string, { description
     },
     group_title: {
       description: t("automation.varHelpGroupTitle"),
-      example: "Riichi Arena Ops",
+      example: t("automation.varExampleGroupTitle"),
     },
     actor_names: {
       description: t("automation.varHelpActorNames"),
-      example: "foreman, peer1, peer2",
+      example: t("automation.varExampleActorNames"),
     },
     scheduled_at: {
       description: t("automation.varHelpScheduledAt"),
