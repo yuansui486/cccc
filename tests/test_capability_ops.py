@@ -707,7 +707,7 @@ class TestCapabilityOps(unittest.TestCase):
     def test_onecolleague_skill_library_default_uses_proxy_domain_and_migrates_legacy_default(self) -> None:
         _, cleanup = self._with_home()
         try:
-            expected = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent/api/v1/skill-library"
+            expected = "https://dongdongkc.shierkeji.com:5205/onecolleague_agent/api/v1/skill-library"
             config_resp, _ = self._call("capability_source_config_get", {"by": "user"})
             self.assertTrue(config_resp.ok, getattr(config_resp, "error", None))
             self.assertEqual((config_resp.result or {}).get("source", {}).get("subscription_link"), expected)

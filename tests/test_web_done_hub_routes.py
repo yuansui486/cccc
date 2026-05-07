@@ -188,7 +188,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_presets_proxy_uses_bearer_token(self) -> None:
         base = "https://peer.shierkeji.com"
-        preset_base = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent"
+        preset_base = "https://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
 
         def _factory(*args, **kwargs):
@@ -226,7 +226,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_presets_falls_back_to_agent_service_base(self) -> None:
         base = "https://peer.shierkeji.com"
-        preset_base = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent"
+        preset_base = "https://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
 
         def _factory(*args, **kwargs):
@@ -255,7 +255,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_preset_download_returns_template_text(self) -> None:
         base = "https://peer.shierkeji.com"
-        preset_base = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent"
+        preset_base = "https://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
         template = "kind: cccc.group_template\nv: 1\ntitle: 自由剪辑skill\nactors: []\n"
 

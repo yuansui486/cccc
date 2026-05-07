@@ -26,7 +26,7 @@ from ._skill_packages import ensure_codex_skill_package_installed, is_codex_skil
 
 ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library"
 _ONECOLLEAGUE_LEGACY_BASE_URL = "http://dongdongkc.top:8012/api/v1/skill-library"
-ONECOLLEAGUE_DEFAULT_BASE_URL = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent/api/v1/skill-library"
+ONECOLLEAGUE_DEFAULT_BASE_URL = "https://dongdongkc.shierkeji.com:5205/onecolleague_agent/api/v1/skill-library"
 _SOURCE_LOCK = threading.RLock()
 _HIGH_RISK_TAGS = {
     "computer_use",
