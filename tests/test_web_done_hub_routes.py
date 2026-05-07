@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -187,7 +188,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_presets_proxy_uses_bearer_token(self) -> None:
         base = "https://peer.shierkeji.com"
-        preset_base = "http://dongdongkc.top:8012"
+        preset_base = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
 
         def _factory(*args, **kwargs):
@@ -225,7 +226,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_presets_falls_back_to_agent_service_base(self) -> None:
         base = "https://peer.shierkeji.com"
-        preset_base = "http://dongdongkc.top:8012"
+        preset_base = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
 
         def _factory(*args, **kwargs):
@@ -254,7 +255,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
     def test_done_hub_team_preset_download_returns_template_text(self) -> None:
         base = "https://peer.shierkeji.com"
-        preset_base = "http://dongdongkc.top:8012"
+        preset_base = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
         template = "kind: cccc.group_template\nv: 1\ntitle: 自由剪辑skill\nactors: []\n"
 
@@ -289,6 +290,38 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertEqual(result.get("template"), template)
         self.assertEqual(result.get("filename"), "skill-team.yaml")
         self.assertEqual(result.get("sha256"), "abc123")
+
+    def test_done_hub_team_presets_can_use_env_override(self) -> None:
+        base = "https://peer.shierkeji.com"
+        preset_base = "http://agent-service.local:8012"
+        calls: list[tuple[str, str, dict]] = []
+
+        def _factory(*args, **kwargs):
+            return _FakeAsyncClient(
+                {
+                    ("GET", f"{preset_base}/api/v1/team-presets"): _FakeResponse(
+                        200,
+                        {"items": [{"slug": "custom-env", "name": "Custom Env"}]},
+                    ),
+                },
+                calls,
+            )
+
+        with (
+            patch.dict(os.environ, {"ONECOLLEAGUE_TEAM_PRESET_BASE_URL": preset_base}, clear=False),
+            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+        ):
+            client = self._create_client()
+            resp = client.post(
+                "/api/v1/done_hub/team_presets/list",
+                json={"base_url": base, "access_token": "token-32"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(bool(body.get("ok")))
+        self.assertEqual(((body.get("result") or {}).get("items") or [])[0]["slug"], "custom-env")
+        self.assertEqual(calls[0][0:2], ("GET", f"{preset_base}/api/v1/team-presets"))
         headers = calls[0][2].get("headers") or {}
         self.assertEqual(headers.get("Authorization"), "Bearer token-32")
 

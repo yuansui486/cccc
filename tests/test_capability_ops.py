@@ -704,6 +704,23 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_onecolleague_skill_library_default_uses_proxy_domain_and_migrates_legacy_default(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            expected = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent/api/v1/skill-library"
+            config_resp, _ = self._call("capability_source_config_get", {"by": "user"})
+            self.assertTrue(config_resp.ok, getattr(config_resp, "error", None))
+            self.assertEqual((config_resp.result or {}).get("source", {}).get("subscription_link"), expected)
+
+            legacy_resp, _ = self._call(
+                "capability_source_config_update",
+                {"subscription_link": "http://dongdongkc.top:8012/api/v1/skill-library", "enabled": True, "by": "user"},
+            )
+            self.assertTrue(legacy_resp.ok, getattr(legacy_resp, "error", None))
+            self.assertEqual((legacy_resp.result or {}).get("source", {}).get("subscription_link"), expected)
+        finally:
+            cleanup()
+
     def test_onecolleague_skill_library_refresh_rejects_hash_mismatch(self) -> None:
         _, cleanup = self._with_home()
         try:

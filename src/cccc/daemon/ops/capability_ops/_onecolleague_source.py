@@ -25,7 +25,8 @@ from ._handlers import _normalize_import_record, _refresh_source_record_counts, 
 from ._skill_packages import ensure_codex_skill_package_installed, is_codex_skill_package_record
 
 ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library"
-ONECOLLEAGUE_DEFAULT_BASE_URL = "http://dongdongkc.top:8012/api/v1/skill-library"
+_ONECOLLEAGUE_LEGACY_BASE_URL = "http://dongdongkc.top:8012/api/v1/skill-library"
+ONECOLLEAGUE_DEFAULT_BASE_URL = "http://dongdongkc.shierkeji.com:5205/onecolleague_agent/api/v1/skill-library"
 _SOURCE_LOCK = threading.RLock()
 _HIGH_RISK_TAGS = {
     "computer_use",
@@ -100,7 +101,7 @@ def _normalize_source_doc(raw: Any) -> Dict[str, Any]:
     source = {
         "source_id": ONECOLLEAGUE_SOURCE_ID,
         "enabled": bool(source_raw.get("enabled", True)),
-        "base_url": _normalize_base_url(source_raw.get("base_url")),
+        "base_url": _normalize_source_base_url(source_raw.get("base_url")),
         "last_synced_at": str(source_raw.get("last_synced_at") or "").strip(),
         "last_success_at": str(source_raw.get("last_success_at") or "").strip(),
         "last_error": str(source_raw.get("last_error") or "").strip(),
@@ -110,6 +111,13 @@ def _normalize_source_doc(raw: Any) -> Dict[str, Any]:
     }
     doc["source"] = source
     return doc
+
+
+def _normalize_source_base_url(raw: Any) -> str:
+    base_url = _normalize_base_url(raw)
+    if base_url == _ONECOLLEAGUE_LEGACY_BASE_URL:
+        return ONECOLLEAGUE_DEFAULT_BASE_URL
+    return base_url
 
 
 def _new_pending_doc() -> Dict[str, Any]:
@@ -384,7 +392,7 @@ def handle_capability_source_config_update(args: Dict[str, Any]) -> DaemonRespon
                 source["enabled"] = bool(args.get("enabled"))
             source_url = args.get("base_url") if "base_url" in args else args.get("subscription_link")
             if source_url is not None:
-                source["base_url"] = _normalize_base_url(source_url)
+                source["base_url"] = _normalize_source_base_url(source_url)
             doc["source"] = _normalize_source_doc({"source": source})["source"]
             _save_source_doc(path, doc)
         action_id = _append_source_audit("config_update", {"source": doc["source"], "by": str(args.get("by") or "")})
@@ -397,7 +405,7 @@ def handle_capability_source_test(args: Dict[str, Any]) -> DaemonResponse:
     try:
         with _SOURCE_LOCK:
             _, doc = _load_source_doc()
-        base_url = _normalize_base_url(args.get("base_url") or args.get("subscription_link") or doc["source"].get("base_url"))
+        base_url = _normalize_source_base_url(args.get("base_url") or args.get("subscription_link") or doc["source"].get("base_url"))
         metadata = _http_get_platform(base_url, "source/metadata")
         source_id = str(metadata.get("source_id") or "").strip()
         if source_id and source_id != ONECOLLEAGUE_SOURCE_ID:
@@ -424,7 +432,7 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
             source = dict(source_doc.get("source") or {})
             if not bool(source.get("enabled", True)):
                 return _error("capability_source_disabled", "onecolleague skill library source is disabled")
-            base_url = _normalize_base_url(args.get("base_url") or args.get("subscription_link") or source.get("base_url"))
+            base_url = _normalize_source_base_url(args.get("base_url") or args.get("subscription_link") or source.get("base_url"))
             updated_since = str(args.get("updated_since") or source.get("updated_since") or source.get("last_success_at") or "").strip()
 
         index_payload = _http_get_platform(base_url, "capabilities/index", {"updated_since": updated_since, "limit": str(limit)})

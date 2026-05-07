@@ -16,7 +16,10 @@ _DONE_HUB_TIMEOUT = 15.0
 _TOKEN_PAGE_SIZE = 100
 _CODEX_BASE_URL = "https://peer.shierkeji.com/v1"
 _GEMINI_BASE_URL = "https://peer.shierkeji.com/gemini"
-_TEAM_PRESET_BASE_URLS = ("http://dongdongkc.top:8012", "http://127.0.0.1:8012")
+_TEAM_PRESET_BASE_URLS = (
+    "http://dongdongkc.shierkeji.com:5205/onecolleague_agent",
+    "http://127.0.0.1:8012",
+)
 _CLIENT_CONFIG_ERROR_MESSAGE = "登录成功，但本机客户端配置写入失败，请稍后重试或联系管理员。"
 
 
