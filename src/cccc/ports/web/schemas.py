@@ -208,6 +208,7 @@ class GroupSettingsRequest(BaseModel):
     # Features
     panorama_enabled: Optional[bool] = None
     desktop_pet_enabled: Optional[bool] = None
+    capability_defaults: Optional[Dict[str, Any]] = None
 
     by: str = Field(default="user")
 

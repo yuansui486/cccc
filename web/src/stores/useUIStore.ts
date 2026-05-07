@@ -348,6 +348,7 @@ export const useUIStore = create<UIState>((set) => ({
       return {
         chatSessions: updateChatSession(state.chatSessions, groupId, {
           chatUnreadCount: current.chatUnreadCount + 1,
+          showScrollButton: true,
         }),
       };
     }),

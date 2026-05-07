@@ -1,21 +1,21 @@
 {
   "createGroup": {
-    "title": "作業グループを作成",
+    "title": "チームを作成",
     "subtitle": "共同作業を始めるために、プロジェクトディレクトリを選択してください",
     "quickSelect": "クイック選択",
     "projectDirectory": "プロジェクトディレクトリ",
     "browse": "参照",
     "noSubdirectories": "サブディレクトリがありません",
-    "groupName": "グループ名",
+    "groupName": "チーム名",
     "groupNamePlaceholder": "ディレクトリ名から自動入力",
     "pathPlaceholder": "/あなたの/プロジェクト/パス",
     "pathAutoCreateHint": "フォルダが存在しない場合は自動的に作成されます。",
-    "blueprintLabel": "ブループリントからグループを作成（任意）",
-    "loadingBlueprint": "ブループリントを読み込み中…",
+    "blueprintLabel": "チームをクイック複製（任意）",
+    "loadingBlueprint": "チーム設定を読み込み中…",
     "blueprintHint": "Actor、設定、自動化ルール/スニペットを適用します。",
     "creating": "作成…",
-    "createFromBlueprint": "ブループリントからグループを作成",
-    "createGroup": "グループの作成"
+    "createFromBlueprint": "チームをクイック複製",
+    "createGroup": "チームを作成"
   },
   "groupEdit": {
     "title": "グループを編集",

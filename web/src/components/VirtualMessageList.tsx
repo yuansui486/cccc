@@ -690,7 +690,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     prevTailMutationSnapshotRef.current = nextSnapshot;
     if (!didInitialScrollRef.current) return;
     if (isLoadingHistory) return;
-    if (followModeRef.current !== "follow" && !shouldForceStickToBottom()) return;
+    if (!shouldForceStickToBottom()) return;
     if (
       !getAutoFollowTrigger({
         previousTailSnapshot: prevTailSnapshot,
@@ -703,7 +703,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     }
 
     scheduleScroll(() => {
-      if (followModeRef.current !== "follow" && !shouldForceStickToBottom()) return;
+      if (!shouldForceStickToBottom()) return;
       scrollToBottom();
     });
   }, [displayMessages, isLoadingHistory, scheduleScroll, scrollToBottom, shouldForceStickToBottom, tailMutationSignature]);
@@ -722,9 +722,9 @@ const VirtualMessageListInner = function VirtualMessageListInner({
       isContainerResizingRef.current = true;
       lastScrollTopRef.current = scrollEl.scrollTop;
 
-      if (followModeRef.current === "follow" || shouldForceStickToBottom()) {
+      if (shouldForceStickToBottom()) {
         scheduleScroll(() => {
-          if (followModeRef.current !== "follow" && !shouldForceStickToBottom()) return;
+          if (!shouldForceStickToBottom()) return;
           scrollToBottom();
         });
       }
@@ -937,7 +937,9 @@ const VirtualMessageListInner = function VirtualMessageListInner({
                 : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
                 }`}
               onClick={() => {
-                scrollToBottom();
+                setAtBottom(true);
+                setFollowMode("follow");
+                scheduleForceStickToBottom();
                 onScrollButtonClick();
               }}
               aria-label="Scroll to bottom"

@@ -48,7 +48,7 @@ export interface BoardColumns {
 }
 
 export type BoardStatus = keyof BoardColumns;
-export type ContextModalView = "coordination" | "agents" | "desktop_pet";
+export type ContextModalView = "coordination" | "agents" | "skills" | "desktop_pet";
 export type SteeringTab = "summary" | "project" | "log";
 export type TaskFilterValue = "all" | "blocked" | "waiting_user" | "handoff" | "unassigned";
 export type ContextTranslator = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;

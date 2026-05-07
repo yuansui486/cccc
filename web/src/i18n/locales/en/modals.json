@@ -1,21 +1,21 @@
 {
   "createGroup": {
-    "title": "Create Working Group",
+    "title": "Create Team",
     "subtitle": "Select a project directory to start collaborating",
     "quickSelect": "Quick Select",
     "projectDirectory": "Project Directory",
     "browse": "Browse",
     "noSubdirectories": "No subdirectories",
-    "groupName": "Group Name",
+    "groupName": "Team Name",
     "groupNamePlaceholder": "Auto-filled from directory name",
     "pathPlaceholder": "/path/to/your/project",
     "pathAutoCreateHint": "If the folder doesn't exist yet, it will be created automatically.",
-    "blueprintLabel": "Create Group From Blueprint (optional)",
-    "loadingBlueprint": "Loading blueprint…",
+    "blueprintLabel": "Quick Clone Team (optional)",
+    "loadingBlueprint": "Loading team configuration…",
     "blueprintHint": "Applies actors, settings, and automation rules/snippets.",
     "creating": "Creating...",
-    "createFromBlueprint": "Create Group From Blueprint",
-    "createGroup": "Create Group"
+    "createFromBlueprint": "Quick Clone Team",
+    "createGroup": "Create Team"
   },
   "groupEdit": {
     "title": "Edit Group",

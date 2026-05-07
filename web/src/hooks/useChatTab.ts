@@ -1,7 +1,7 @@
 // useChatTab - Encapsulates ChatTab business logic and state.
 // Reduces prop drilling by providing state from stores and computed values directly.
 
-import { useMemo, useCallback, useRef, useState } from "react";
+import { useMemo, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useGroupStore,
@@ -648,7 +648,6 @@ export function useChatTab({
   scrollRef: _scrollRef,
 }: UseChatTabOptions) {
   const { t } = useTranslation(["chat", "common"]);
-  const [forceStickToBottomToken, setForceStickToBottomToken] = useState(0);
   // ============ Stores ============
   const { events, streamingEvents, chatWindow, hasMoreHistory, hasLoadedTail, hasLoadedActors, isLoadingHistory, isChatWindowLoading } = useGroupStore(
     useCallback((state) => selectChatBucketState(state, selectedGroupId), [selectedGroupId])
@@ -669,6 +668,7 @@ export function useChatTab({
   const setChatFilter = useUIStore((s) => s.setChatFilter);
   const setShowScrollButton = useUIStore((s) => s.setShowScrollButton);
   const setChatUnreadCount = useUIStore((s) => s.setChatUnreadCount);
+  const incrementChatUnread = useUIStore((s) => s.incrementChatUnread);
   const setChatScrollSnapshot = useUIStore((s) => s.setChatScrollSnapshot);
   const setChatMobileSurface = useUIStore((s) => s.setChatMobileSurface);
   const showError = useUIStore((s) => s.showError);
@@ -1090,14 +1090,10 @@ export function useChatTab({
     };
 
     const applyImmediateComposerFeedback = () => {
-      const shouldLockBottom = chatAtBottomRef ? chatAtBottomRef.current : true;
       clearComposer();
-      if (chatAtBottomRef) chatAtBottomRef.current = true;
-      if (selectedGroupId) {
-        setShowScrollButton(selectedGroupId, false);
-      }
-      if (shouldLockBottom) {
-        setForceStickToBottomToken((value) => value + 1);
+      if (!isCrossGroup && selectedGroupId) {
+        setShowScrollButton(selectedGroupId, true);
+        incrementChatUnread(selectedGroupId);
       }
     };
 
@@ -1274,11 +1270,11 @@ export function useChatTab({
     clearDraft,
     closeChatWindow,
     fileInputRef,
-    chatAtBottomRef,
     setChatFilter,
     setChatMobileSurface,
     setShowScrollButton,
     setChatUnreadCount,
+    incrementChatUnread,
     onMessageSent,
     promoteStreamingEventsByPrefix,
     removeStreamingEventsByPrefix,
@@ -1504,8 +1500,6 @@ export function useChatTab({
     busy,
     showScrollButton,
     chatUnreadCount,
-    forceStickToBottomToken,
-
     // Setup checklist
     showSetupCard,
     needsScope,

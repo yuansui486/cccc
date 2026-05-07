@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.group import load_group
+from ...kernel.group import load_group, normalize_group_capability_defaults
 from ...kernel.ledger import append_event
 from ...kernel.messaging import get_default_send_to
 from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
@@ -58,6 +58,70 @@ def _safe_int(value: Any, *, default: int, min_value: int = 0, max_value: Option
     return out
 
 
+def _settings_payload(group: Any) -> Dict[str, Any]:
+    automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
+    delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+    features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
+    tt = get_terminal_transcript_settings(group.doc)
+    return {
+        "default_send_to": get_default_send_to(group.doc),
+        "nudge_after_seconds": _safe_int(automation.get("nudge_after_seconds", 300), default=300, min_value=0),
+        "reply_required_nudge_after_seconds": _safe_int(
+            automation.get("reply_required_nudge_after_seconds", 300),
+            default=300,
+            min_value=0,
+        ),
+        "attention_ack_nudge_after_seconds": _safe_int(
+            automation.get("attention_ack_nudge_after_seconds", 600),
+            default=600,
+            min_value=0,
+        ),
+        "unread_nudge_after_seconds": _safe_int(automation.get("unread_nudge_after_seconds", 900), default=900, min_value=0),
+        "nudge_digest_min_interval_seconds": _safe_int(
+            automation.get("nudge_digest_min_interval_seconds", 120),
+            default=120,
+            min_value=0,
+        ),
+        "nudge_max_repeats_per_obligation": _safe_int(
+            automation.get("nudge_max_repeats_per_obligation", 3),
+            default=3,
+            min_value=0,
+        ),
+        "nudge_escalate_after_repeats": _safe_int(
+            automation.get("nudge_escalate_after_repeats", 2),
+            default=2,
+            min_value=0,
+        ),
+        "actor_idle_timeout_seconds": _safe_int(
+            automation.get("actor_idle_timeout_seconds", 0),
+            default=0,
+            min_value=0,
+        ),
+        "keepalive_delay_seconds": _safe_int(automation.get("keepalive_delay_seconds", 120), default=120, min_value=0),
+        "keepalive_max_per_actor": _safe_int(automation.get("keepalive_max_per_actor", 3), default=3, min_value=0),
+        "silence_timeout_seconds": _safe_int(automation.get("silence_timeout_seconds", 0), default=0, min_value=0),
+        "help_nudge_interval_seconds": _safe_int(
+            automation.get("help_nudge_interval_seconds", 600),
+            default=600,
+            min_value=0,
+        ),
+        "help_nudge_min_messages": _safe_int(automation.get("help_nudge_min_messages", 10), default=10, min_value=0),
+        "min_interval_seconds": _safe_int(delivery.get("min_interval_seconds", 0), default=0, min_value=0),
+        "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
+        "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
+        "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
+        "terminal_transcript_notify_lines": _safe_int(
+            tt.get("notify_lines", 20),
+            default=20,
+            min_value=1,
+            max_value=80,
+        ),
+        "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
+        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
+        "capability_defaults": normalize_group_capability_defaults(group.doc.get("capability_defaults")),
+    }
+
+
 def handle_group_settings_update(
     args: Dict[str, Any],
     *,
@@ -103,7 +167,8 @@ def handle_group_settings_update(
         "terminal_transcript_notify_lines",
     }
     feature_keys = {"panorama_enabled", "desktop_pet_enabled"}
-    allowed = messaging_keys | delivery_keys | automation_keys | terminal_transcript_keys | feature_keys
+    capability_keys = {"capability_defaults"}
+    allowed = messaging_keys | delivery_keys | automation_keys | terminal_transcript_keys | feature_keys | capability_keys
 
     unknown = set(patch.keys()) - allowed
     if unknown:
@@ -154,6 +219,11 @@ def handle_group_settings_update(
             tt_patch["notify_lines"] = patch.get("terminal_transcript_notify_lines")
         if tt_patch:
             apply_terminal_transcript_patch(group.doc, tt_patch)
+
+        capability_patch = {k: v for k, v in patch.items() if k in capability_keys}
+        if capability_patch:
+            defaults = normalize_group_capability_defaults(capability_patch.get("capability_defaults"))
+            group.doc["capability_defaults"] = defaults
 
         features_patch = {k: v for k, v in patch.items() if k in feature_keys}
         if features_patch:
@@ -303,66 +373,7 @@ def handle_group_settings_update(
     except Exception as e:
         return _error("group_settings_update_failed", str(e), details=_group_settings_error_details(e))
 
-    automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
-    delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
-    features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
-    tt = get_terminal_transcript_settings(group.doc)
-    settings = {
-        "default_send_to": get_default_send_to(group.doc),
-        "nudge_after_seconds": _safe_int(automation.get("nudge_after_seconds", 300), default=300, min_value=0),
-        "reply_required_nudge_after_seconds": _safe_int(
-            automation.get("reply_required_nudge_after_seconds", 300),
-            default=300,
-            min_value=0,
-        ),
-        "attention_ack_nudge_after_seconds": _safe_int(
-            automation.get("attention_ack_nudge_after_seconds", 600),
-            default=600,
-            min_value=0,
-        ),
-        "unread_nudge_after_seconds": _safe_int(automation.get("unread_nudge_after_seconds", 900), default=900, min_value=0),
-        "nudge_digest_min_interval_seconds": _safe_int(
-            automation.get("nudge_digest_min_interval_seconds", 120),
-            default=120,
-            min_value=0,
-        ),
-        "nudge_max_repeats_per_obligation": _safe_int(
-            automation.get("nudge_max_repeats_per_obligation", 3),
-            default=3,
-            min_value=0,
-        ),
-        "nudge_escalate_after_repeats": _safe_int(
-            automation.get("nudge_escalate_after_repeats", 2),
-            default=2,
-            min_value=0,
-        ),
-        "actor_idle_timeout_seconds": _safe_int(
-            automation.get("actor_idle_timeout_seconds", 0),
-            default=0,
-            min_value=0,
-        ),
-        "keepalive_delay_seconds": _safe_int(automation.get("keepalive_delay_seconds", 120), default=120, min_value=0),
-        "keepalive_max_per_actor": _safe_int(automation.get("keepalive_max_per_actor", 3), default=3, min_value=0),
-        "silence_timeout_seconds": _safe_int(automation.get("silence_timeout_seconds", 0), default=0, min_value=0),
-        "help_nudge_interval_seconds": _safe_int(
-            automation.get("help_nudge_interval_seconds", 600),
-            default=600,
-            min_value=0,
-        ),
-        "help_nudge_min_messages": _safe_int(automation.get("help_nudge_min_messages", 10), default=10, min_value=0),
-        "min_interval_seconds": _safe_int(delivery.get("min_interval_seconds", 0), default=0, min_value=0),
-        "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
-        "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
-        "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
-        "terminal_transcript_notify_lines": _safe_int(
-            tt.get("notify_lines", 20),
-            default=20,
-            min_value=1,
-            max_value=80,
-        ),
-        "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
-        "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
-    }
+    settings = _settings_payload(group)
 
     event = append_event(
         group.ledger_path,

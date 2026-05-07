@@ -5,7 +5,6 @@ import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } fro
 import { classNames } from "../../utils/classNames";
 import { TextScaleSwitcher } from "../TextScaleSwitcher";
 import { ThemeToggleCompact } from "../ThemeToggle";
-import { LanguageSwitcher } from "../LanguageSwitcher";
 import { formatDoneHubQuota } from "../../services/doneHub";
 import {
   ClipboardIcon,
@@ -296,7 +295,6 @@ export function AppHeader({
               <div className={headerRailClass}>
                 <ThemeToggleCompact theme={theme} onThemeChange={onThemeChange} isDark={isDark} variant="rail" />
                 <TextScaleSwitcher textScale={textScale} onTextScaleChange={onTextScaleChange} variant="rail" />
-                <LanguageSwitcher isDark={isDark} variant="rail" />
                 <button
                   onClick={onOpenSettings}
                   disabled={!selectedGroupId}

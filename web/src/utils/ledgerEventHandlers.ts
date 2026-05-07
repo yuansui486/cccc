@@ -275,10 +275,13 @@ export function shouldIncrementUnread(
   chatActive: boolean,
   atBottom: boolean
 ): boolean {
+  void chatActive;
+  void atBottom;
   if (!isChatMessageEvent(ev)) return false;
   const by = String(ev.by || "");
   if (!by || by === "user") return false;
-  return !chatActive || !atBottom;
+  if (!hasRenderableChatMessageContent(ev)) return false;
+  return true;
 }
 
 /**

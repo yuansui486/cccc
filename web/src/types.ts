@@ -396,6 +396,9 @@ export type CapabilityStateResult = {
     policy_level?: string;
   }>;
   autoload_capabilities?: string[];
+  group_autoload_capabilities?: string[];
+  actor_autoload_capabilities?: string[];
+  profile_autoload_capabilities?: string[];
   enabled: CapabilityEnabledEntry[];
   dynamic_tools?: Array<{ name: string; capability_id: string; description?: string }>;
 };
@@ -660,6 +663,12 @@ export type GroupSettings = {
   terminal_transcript_notify_tail: boolean;
   terminal_transcript_notify_lines: number;
 
+  capability_defaults?: {
+    autoload_capabilities?: string[];
+    default_scope?: "actor" | "session";
+    session_ttl_seconds?: number;
+  };
+  panorama_enabled?: boolean;
   desktop_pet_enabled: boolean;
 };
 

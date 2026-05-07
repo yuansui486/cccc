@@ -191,16 +191,16 @@ class TestCapabilityOps(unittest.TestCase):
                     }
                 if "/capabilities/index" in url:
                     return {
-                        "server_time": "2026-04-28T00:00:00Z",
+                        "server_time": str(platform_record.get("updated_at_source") or "2026-04-28T00:00:00Z"),
                         "items": [
                             {
                                 "capability_id": "skill:onecolleague:test-skill",
                                 "kind": "skill",
                                 "name": "test-skill",
-                                "description_short": "Test skill",
-                                "source_record_id": "test-skill",
-                                "source_record_version": "1.0.0",
-                                "updated_at_source": "2026-04-28T00:00:00Z",
+                                "description_short": str(platform_record.get("description_short") or ""),
+                                "source_record_id": str(platform_record.get("source_record_id") or ""),
+                                "source_record_version": str(platform_record.get("source_record_version") or ""),
+                                "updated_at_source": str(platform_record.get("updated_at_source") or ""),
                                 "checksum": platform_hash,
                             }
                         ],
@@ -224,6 +224,38 @@ class TestCapabilityOps(unittest.TestCase):
                 self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
                 summary = (refresh_resp.result or {}).get("summary") or {}
                 self.assertEqual(summary.get("new"), 1)
+                self.assertEqual(summary.get("auto_imported"), 1)
+                self.assertEqual(summary.get("pending"), 0)
+
+            pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
+            self.assertTrue(pending_resp.ok, getattr(pending_resp, "error", None))
+            items = (pending_resp.result or {}).get("items") or []
+            self.assertEqual(items, [])
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {"query": "test-skill", "include_indexed": True, "limit": 20},
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            ids = {str(item.get("capability_id") or "") for item in ((overview_resp.result or {}).get("items") or [])}
+            self.assertIn("skill:onecolleague:test-skill", ids)
+
+            platform_record = dict(platform_record)
+            platform_record["source_record_version"] = "1.0.1"
+            platform_record["updated_at_source"] = "2026-04-28T01:00:00Z"
+            platform_record["description_short"] = "Updated test skill"
+            platform_record["capsule_text"] = "Use this updated test skill for focused verification."
+            platform_record.pop("content_hash", None)
+            platform_hash = "sha256:" + hashlib.sha256(
+                json.dumps(platform_record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            platform_record["content_hash"] = platform_hash
+
+            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
+                refresh_resp, _ = self._call("capability_source_refresh", {"by": "user"})
+                self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
+                summary = (refresh_resp.result or {}).get("summary") or {}
+                self.assertEqual(summary.get("updated"), 1)
                 self.assertEqual(summary.get("pending"), 1)
 
             pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
@@ -256,7 +288,7 @@ class TestCapabilityOps(unittest.TestCase):
 
             rollback_resp, _ = self._call("capability_source_rollback", {"pending_id": pending_id, "by": "user"})
             self.assertTrue(rollback_resp.ok, getattr(rollback_resp, "error", None))
-            self.assertEqual((rollback_resp.result or {}).get("rollback_action"), "removed_new_record")
+            self.assertEqual((rollback_resp.result or {}).get("rollback_action"), "restored_previous")
         finally:
             cleanup()
 
@@ -340,23 +372,14 @@ class TestCapabilityOps(unittest.TestCase):
                     refresh_body = refresh_resp.json()
                     self.assertTrue(refresh_body.get("ok"), refresh_body)
                     self.assertEqual(((refresh_body.get("result") or {}).get("summary") or {}).get("new"), 1)
+                    self.assertEqual(((refresh_body.get("result") or {}).get("summary") or {}).get("auto_imported"), 1)
 
                     pending_resp = client.get("/api/v1/capabilities/sources/onecolleague_skill_library/pending")
                     self.assertEqual(pending_resp.status_code, 200)
                     pending_body = pending_resp.json()
                     self.assertTrue(pending_body.get("ok"), pending_body)
                     pending_items = (pending_body.get("result") or {}).get("items") or []
-                    self.assertEqual(len(pending_items), 1)
-                    pending_id = str(pending_items[0].get("pending_id") or "")
-
-                    confirm_resp = client.post(
-                        "/api/v1/capabilities/sources/onecolleague_skill_library/pending/confirm",
-                        json={"group_id": gid, "actor_id": "agent1", "pending_ids": [pending_id]},
-                    )
-                    self.assertEqual(confirm_resp.status_code, 200)
-                    confirm_body = confirm_resp.json()
-                    self.assertTrue(confirm_body.get("ok"), confirm_body)
-                    self.assertTrue(((confirm_body.get("result") or {}).get("results") or [])[0].get("ok"))
+                    self.assertEqual(pending_items, [])
 
                     overview_resp = client.get("/api/v1/capabilities/overview?query=store-flow&include_indexed=true&limit=20")
                     self.assertEqual(overview_resp.status_code, 200)
@@ -467,24 +490,17 @@ class TestCapabilityOps(unittest.TestCase):
             ) as download:
                 refresh_resp, _ = self._call("capability_source_refresh", {"by": "user", "subscription_link": "http://skills.local/api/v1/skill-library"})
                 self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
-                download.assert_not_called()
-
-                pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
-                pending_id = str(((pending_resp.result or {}).get("items") or [])[0]["pending_id"])
-
-                confirm_resp, _ = self._call(
-                    "capability_source_pending_confirm",
-                    {"group_id": gid, "by": "user", "actor_id": "user", "pending_ids": [pending_id]},
-                )
-                self.assertTrue(confirm_resp.ok, getattr(confirm_resp, "error", None))
                 download.assert_called_once()
-                result = ((confirm_resp.result or {}).get("results") or [])[0]
-                self.assertTrue(result.get("ok"))
-                package_install = result.get("package_install") if isinstance(result.get("package_install"), dict) else {}
-                extracted = Path(str(package_install.get("extracted_path") or ""))
+                auto_imported = (refresh_resp.result or {}).get("auto_imported") or []
+                self.assertEqual(len(auto_imported), 1)
+                package_install = auto_imported[0].get("package_install") if isinstance(auto_imported[0], dict) else {}
+                extracted = Path(str((package_install or {}).get("extracted_path") or ""))
                 self.assertTrue((extracted / "SKILL.md").is_file())
                 for rel_path in arbitrary_files:
                     self.assertTrue((extracted / rel_path).is_file(), rel_path)
+
+                pending_resp, _ = self._call("capability_source_pending_list", {"by": "user"})
+                self.assertEqual((pending_resp.result or {}).get("items") or [], [])
 
                 catalog_path, catalog_doc = ops._load_catalog_doc()
                 rec = catalog_doc.get("records", {}).get("skill:onecolleague:demo-skill")
@@ -778,6 +794,107 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertNotIn("cccc_file", visible)
             self.assertNotIn("cccc_coordination", visible)
             self.assertNotIn("cccc_task", visible)
+        finally:
+            cleanup()
+
+    def test_group_scope_enable_updates_group_capability_defaults(self) -> None:
+        from cccc.daemon.ops import capability_ops as ops
+        from cccc.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            cap_id = "skill:onecolleague:group-default"
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][cap_id] = {
+                "capability_id": cap_id,
+                "kind": "skill",
+                "name": "group-default",
+                "description_short": "Group default skill",
+                "source_id": "onecolleague_skill_library",
+                "source_tier": "tier1",
+                "trust_tier": "tier1",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "capsule_text": "Use this skill from group defaults.",
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "capability_id": cap_id,
+                    "scope": "group",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            defaults = (group.doc.get("capability_defaults") if group is not None else {}) or {}
+            self.assertIn(cap_id, defaults.get("autoload_capabilities") or [])
+
+            state_resp, _ = self._call("capability_state", {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"})
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            self.assertIn(cap_id, state.get("enabled_capabilities") or [])
+            self.assertIn(cap_id, state.get("group_autoload_capabilities") or [])
+            self.assertIn(cap_id, state.get("autoload_capabilities") or [])
+
+            disable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "capability_id": cap_id,
+                    "scope": "group",
+                    "enabled": False,
+                },
+            )
+            self.assertTrue(disable_resp.ok, getattr(disable_resp, "error", None))
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            defaults = (group.doc.get("capability_defaults") if group is not None else {}) or {}
+            self.assertNotIn(cap_id, defaults.get("autoload_capabilities") or [])
+        finally:
+            cleanup()
+
+    def test_group_settings_update_persists_capability_defaults(self) -> None:
+        from cccc.kernel.group import load_group
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            patch = {
+                "group_id": gid,
+                "patch": {
+                    "capability_defaults": {
+                        "autoload_capabilities": ["skill:onecolleague:group-default"],
+                        "default_scope": "session",
+                        "session_ttl_seconds": 7200,
+                    },
+                },
+                "by": "user",
+            }
+            resp, _ = self._call("group_settings_update", patch)
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            result = resp.result if isinstance(resp.result, dict) else {}
+            settings = result.get("settings") if isinstance(result.get("settings"), dict) else {}
+            defaults = settings.get("capability_defaults") if isinstance(settings.get("capability_defaults"), dict) else {}
+            self.assertEqual(defaults.get("default_scope"), "session")
+            self.assertEqual(defaults.get("session_ttl_seconds"), 7200)
+            self.assertIn("skill:onecolleague:group-default", defaults.get("autoload_capabilities") or [])
+
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            stored = (group.doc.get("capability_defaults") if group is not None else {}) or {}
+            self.assertEqual(stored.get("default_scope"), "session")
+            self.assertIn("skill:onecolleague:group-default", stored.get("autoload_capabilities") or [])
         finally:
             cleanup()
 

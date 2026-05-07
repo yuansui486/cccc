@@ -4,7 +4,6 @@ import { getGroupStatusFromSource } from "../../utils/groupStatus";
 import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
-import { LanguageSwitcher } from "../LanguageSwitcher";
 import { TextScaleSwitcher } from "../TextScaleSwitcher";
 import { formatDoneHubQuota } from "../../services/doneHub";
 import {
@@ -54,7 +53,7 @@ export interface MobileMenuSheetProps {
 
 export function MobileMenuSheet({
   isOpen,
-  isDark,
+  isDark: _isDark,
   theme,
   textScale,
   selectedGroupId,
@@ -305,7 +304,6 @@ export function MobileMenuSheet({
               onTextScaleChange={onTextScaleChange}
               variant="row"
             />
-            <LanguageSwitcher isDark={isDark} variant="row" />
           </section>
 
           <section className={sectionCardClass}>

@@ -1338,6 +1338,20 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                 }
             )
 
+        enabled_entries: List[Dict[str, Any]] = []
+        for cap_id in _pkg()._normalize_capability_id_list(group_enabled_map.get(group_id)):
+            enabled_entries.append({"capability_id": cap_id, "scope": "group"})
+        own_actor_caps = per_group_actor.get(actor_id) if isinstance(per_group_actor.get(actor_id), list) else []
+        for cap_id in _pkg()._normalize_capability_id_list(own_actor_caps):
+            enabled_entries.append({"capability_id": cap_id, "scope": "actor", "actor_id": actor_id})
+        for entry in session_bindings:
+            if not isinstance(entry, dict):
+                continue
+            row = dict(entry)
+            row["scope"] = "session"
+            row["actor_id"] = actor_id
+            enabled_entries.append(row)
+
         with _CATALOG_LOCK:
             catalog_path, catalog_doc = _pkg()._load_catalog_doc()
             if _pkg()._ensure_curated_catalog_records(catalog_doc, policy=policy):
@@ -1362,6 +1376,13 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
         actor_autoload_capabilities = _pkg()._normalize_capability_id_list(
             actor_record.get("capability_autoload") if isinstance(actor_record, dict) else []
         )
+        try:
+            from ....kernel.group import normalize_group_capability_defaults
+
+            group_defaults = normalize_group_capability_defaults(group.doc.get("capability_defaults"))
+            group_autoload_capabilities = list(group_defaults.get("autoload_capabilities") or [])
+        except Exception:
+            group_autoload_capabilities = []
         profile_id = str(actor_record.get("profile_id") or "").strip() if isinstance(actor_record, dict) else ""
         profile_autoload_capabilities: List[str] = []
         if profile_id:
@@ -1377,7 +1398,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
             except Exception:
                 profile_autoload_capabilities = []
         effective_autoload_capabilities = _pkg()._normalize_capability_id_list(
-            [*profile_autoload_capabilities, *actor_autoload_capabilities]
+            [*group_autoload_capabilities, *profile_autoload_capabilities, *actor_autoload_capabilities]
         )
 
         active_capsule_skills: List[Dict[str, Any]] = []
@@ -1584,10 +1605,12 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                 "dynamic_tools": dynamic_tools,
                 "dynamic_tool_limit": max_dynamic_tools_visible,
                 "dynamic_tool_dropped": dynamic_tool_dropped,
+                "enabled": enabled_entries,
                 "enabled_capabilities": enabled_caps_effective,
                 "active_capsule_skills": active_capsule_skills,
                 "autoload_skills": autoload_skills,
                 "autoload_capabilities": effective_autoload_capabilities,
+                "group_autoload_capabilities": group_autoload_capabilities,
                 "actor_autoload_capabilities": actor_autoload_capabilities,
                 "profile_autoload_capabilities": profile_autoload_capabilities,
                 "hidden_capabilities": hidden_capabilities,

@@ -286,6 +286,7 @@ export async function refreshOneColleagueCapabilitySource(opts?: {
     source?: OneColleagueCapabilitySource;
     summary?: Record<string, number>;
     invalid?: Array<Record<string, unknown>>;
+    auto_imported?: Array<Record<string, unknown>>;
     pending_count?: number;
   }>("/api/v1/capabilities/sources/onecolleague_skill_library/refresh", {
     method: "POST",

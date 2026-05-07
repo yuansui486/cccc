@@ -201,6 +201,30 @@ def _set_enabled_capability(
         session_enabled.pop(gid, None)
 
 
+def _sync_group_capability_default(group: Any, *, capability_id: str, enabled: bool) -> None:
+    """Mirror group-scope capability toggles into the group's default autoload list."""
+    cap_id = str(capability_id or "").strip()
+    if not cap_id or group is None or not hasattr(group, "doc"):
+        return
+    try:
+        from ....kernel.group import normalize_group_capability_defaults
+
+        defaults = normalize_group_capability_defaults(group.doc.get("capability_defaults"))
+        items = [str(x or "").strip() for x in defaults.get("autoload_capabilities", []) if str(x or "").strip()]
+        before = list(items)
+        if enabled and cap_id not in items:
+            items.append(cap_id)
+        elif not enabled:
+            items = [item for item in items if item != cap_id]
+        if items == before:
+            return
+        defaults["autoload_capabilities"] = items
+        group.doc["capability_defaults"] = defaults
+        group.save()
+    except Exception:
+        return
+
+
 def _remove_capability_bindings(
     state_doc: Dict[str, Any],
     *,
@@ -680,6 +704,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     ttl_seconds=ttl_seconds,
                 )
                 _save_state_doc(state_path, state_doc)
+            if scope == "group":
+                _sync_group_capability_default(group, capability_id=capability_id, enabled=enabled)
             if enabled:
                 with _RUNTIME_LOCK:
                     runtime_path, runtime_doc = _load_runtime_doc()
@@ -734,6 +760,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     )
                     has_remaining_binding = _has_any_binding_for_capability(state_doc, capability_id=capability_id)
                     _save_state_doc(state_path, state_doc)
+                if scope == "group":
+                    _sync_group_capability_default(group, capability_id=capability_id, enabled=False)
                 removed_binding_count = 0
                 with _RUNTIME_LOCK:
                     runtime_path, runtime_doc = _load_runtime_doc()
@@ -879,6 +907,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 )
                 has_remaining_binding = _has_any_binding_for_capability(state_doc, capability_id=capability_id)
                 _save_state_doc(state_path, state_doc)
+            if scope == "group":
+                _sync_group_capability_default(group, capability_id=capability_id, enabled=False)
             removed_binding_count = 0
             with _RUNTIME_LOCK:
                 runtime_path, runtime_doc = _load_runtime_doc()
@@ -1009,6 +1039,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     )
                     applied_dependencies.append(dep_cap_id)
                 _save_state_doc(state_path, state_doc)
+            if scope == "group":
+                _sync_group_capability_default(group, capability_id=capability_id, enabled=True)
 
             refresh_required = bool(applied_dependencies)
             result_state = "activation_pending" if refresh_required else "runnable"
@@ -1291,6 +1323,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 ttl_seconds=ttl_seconds,
             )
             _save_state_doc(state_path, state_doc)
+        if scope == "group":
+            _sync_group_capability_default(group, capability_id=capability_id, enabled=True)
         with _RUNTIME_LOCK:
             runtime_path, runtime_doc = _load_runtime_doc()
             _record_runtime_recent_success(

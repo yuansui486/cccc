@@ -6,7 +6,6 @@ import {
   CapabilityBlockEntry,
   CapabilityOverviewItem,
   CapabilityReadinessPreview,
-  CapabilitySourceState,
   CapabilityStateResult,
   OneColleagueCapabilitySource,
   OneColleaguePendingCapability,
@@ -19,13 +18,14 @@ interface CapabilitiesTabProps {
   groupId?: string;
 }
 
-type SourceVisibility = "all" | "enabled" | "disabled";
 type RegistryKindFilter = "all" | "pack" | "mcp" | "skill";
 type RegistryPolicyFilter = "all" | "actionable" | "blocked" | "indexed";
 type ExternalCapabilitySafetyMode = "normal" | "conservative";
 
-const SOURCE_PREVIEW_LIMIT = 8;
 const REGISTRY_PAGE_SIZE_OPTIONS = [20, 40, 80];
+const ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library";
+const VISIBLE_SOURCE_IDS = ["cccc_builtin", ONECOLLEAGUE_SOURCE_ID] as const;
+const VISIBLE_SOURCE_ID_SET = new Set<string>(VISIBLE_SOURCE_IDS);
 const SOURCE_PRIORITY: Record<string, number> = {
   cccc_builtin: 0,
   mcp_registry_official: 1,
@@ -49,7 +49,6 @@ const EXTERNAL_SOURCE_IDS = [
   "clawskills_remote",
 ] as const;
 
-const ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library";
 const DEFAULT_ENABLE_ACTOR_ID = "user";
 
 function normalizeExternalCapabilitySafetyMode(value: unknown): ExternalCapabilitySafetyMode {
@@ -88,18 +87,13 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
   const [err, setErr] = useState("");
   const [storeErr, setStoreErr] = useState("");
   const [query, setQuery] = useState("");
-  const [sourceQuery, setSourceQuery] = useState("");
-  const [sourceVisibility, setSourceVisibility] = useState<SourceVisibility>("all");
-  const [showAllSources, setShowAllSources] = useState(false);
   const [registryKind, setRegistryKind] = useState<RegistryKindFilter>("all");
   const [registryPolicy, setRegistryPolicy] = useState<RegistryPolicyFilter>("all");
   const [registrySource, setRegistrySource] = useState("all");
   const [registryPageSize, setRegistryPageSize] = useState(40);
   const [registryPage, setRegistryPage] = useState(1);
   const [items, setItems] = useState<CapabilityOverviewItem[]>([]);
-  const [sources, setSources] = useState<Record<string, CapabilitySourceState>>({});
   const [blocked, setBlocked] = useState<CapabilityBlockEntry[]>([]);
-  const [allowlistSources, setAllowlistSources] = useState<Array<{ source_id: string; enabled: boolean; rationale?: string }>>([]);
   const [externalSafetyMode, setExternalSafetyMode] = useState<ExternalCapabilitySafetyMode>("normal");
   const [oneColleagueSource, setOneColleagueSource] = useState<OneColleagueCapabilitySource | null>(null);
   const [pendingItems, setPendingItems] = useState<OneColleaguePendingCapability[]>([]);
@@ -125,15 +119,9 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
       if (!overviewResp.ok) {
         setErr(overviewResp.error?.message || t("capabilities.failedLoad"));
         setItems([]);
-        setSources({});
         setBlocked([]);
       } else {
         setItems(Array.isArray(overviewResp.result?.items) ? overviewResp.result.items : []);
-        setSources(
-          overviewResp.result?.sources && typeof overviewResp.result.sources === "object"
-            ? overviewResp.result.sources
-            : {}
-        );
         setBlocked(
           Array.isArray(overviewResp.result?.blocked_capabilities)
             ? overviewResp.result.blocked_capabilities
@@ -141,24 +129,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
         );
       }
       if (allowlistResp.ok) {
-        const effective = allowlistResp.result?.effective && typeof allowlistResp.result.effective === "object"
-          ? allowlistResp.result.effective
-          : {};
-        const effectiveSources = Array.isArray((effective as { sources?: unknown[] }).sources)
-          ? (effective as { sources: unknown[] }).sources
-          : [];
-        const nextSources = effectiveSources
-          .filter((row) => row && typeof row === "object")
-          .map((row) => {
-            const obj = row as Record<string, unknown>;
-            return {
-              source_id: String(obj.source_id || "").trim(),
-              enabled: Boolean(obj.enabled),
-              rationale: String(obj.rationale || ""),
-            };
-          })
-          .filter((row) => row.source_id.length > 0);
-        setAllowlistSources(nextSources);
         setExternalSafetyMode(
           normalizeExternalCapabilitySafetyMode(allowlistResp.result?.external_capability_safety_mode)
         );
@@ -184,7 +154,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     } catch (e) {
       setErr(e instanceof Error ? e.message : t("capabilities.failedLoad"));
       setItems([]);
-      setSources({});
       setBlocked([]);
     } finally {
       setLoading(false);
@@ -195,76 +164,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     if (!isActive) return;
     void load();
   }, [isActive, load]);
-
-  const sourceRationaleMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of allowlistSources) {
-      const sid = String(row.source_id || "").trim();
-      if (!sid) continue;
-      map.set(sid, String(row.rationale || "").trim());
-    }
-    return map;
-  }, [allowlistSources]);
-
-  const sourceRows = useMemo(() => {
-    return Object.values(sources || {}).sort((a, b) => {
-      const aEnabled = a.enabled ? 0 : 1;
-      const bEnabled = b.enabled ? 0 : 1;
-      if (aEnabled !== bEnabled) return aEnabled - bEnabled;
-      const aPriority = SOURCE_PRIORITY[String(a.source_id || "").trim()] ?? 99;
-      const bPriority = SOURCE_PRIORITY[String(b.source_id || "").trim()] ?? 99;
-      if (aPriority !== bPriority) return aPriority - bPriority;
-      const aCount = Number(a.record_count || 0);
-      const bCount = Number(b.record_count || 0);
-      if (aCount !== bCount) return bCount - aCount;
-      return String(a.source_id || "").localeCompare(String(b.source_id || ""));
-    });
-  }, [sources]);
-
-  const sourceSummary = useMemo(() => {
-    const total = sourceRows.length;
-    const enabled = sourceRows.filter((row) => Boolean(row.enabled)).length;
-    return {
-      total,
-      enabled,
-      disabled: Math.max(0, total - enabled),
-    };
-  }, [sourceRows]);
-
-  const levelDistribution = useMemo(() => {
-    const counts: Record<string, number> = { indexed: 0, mounted: 0, pinned: 0 };
-    for (const row of sourceRows) {
-      const level = String(row.source_level || "indexed").toLowerCase();
-      if (level in counts) counts[level]++;
-      else counts.indexed++;
-    }
-    return counts;
-  }, [sourceRows]);
-
-  const filteredSources = useMemo(() => {
-    const q = String(sourceQuery || "").trim().toLowerCase();
-    return sourceRows.filter((row) => {
-      const enabled = Boolean(row.enabled);
-      if (sourceVisibility === "enabled" && !enabled) return false;
-      if (sourceVisibility === "disabled" && enabled) return false;
-      if (!q) return true;
-      const text = [
-        String(row.source_id || ""),
-        String(row.source_level || ""),
-        String(row.sync_state || ""),
-        String(sourceRationaleMap.get(String(row.source_id || "").trim()) || ""),
-        String(row.rationale || ""),
-      ]
-        .join(" ")
-        .toLowerCase();
-      return text.includes(q);
-    });
-  }, [sourceRows, sourceQuery, sourceVisibility, sourceRationaleMap]);
-
-  const sourceRowsVisible = useMemo(() => {
-    if (showAllSources) return filteredSources;
-    return filteredSources.slice(0, SOURCE_PREVIEW_LIMIT);
-  }, [filteredSources, showAllSources]);
 
   const oneColleagueRows = useMemo(() => {
     return items
@@ -355,7 +254,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     const out = new Set<string>();
     for (const row of items) {
       const sid = String(row.source_id || "").trim();
-      if (sid) out.add(sid);
+      if (VISIBLE_SOURCE_ID_SET.has(sid)) out.add(sid);
     }
     return Array.from(out).sort((a, b) => {
       const aPriority = SOURCE_PRIORITY[a] ?? 99;
@@ -424,6 +323,8 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     const q = String(query || "").trim().toLowerCase();
     const rows = items.filter((row) => {
       const capId = String(row.capability_id || "").trim();
+      const sourceId = String(row.source_id || "").trim();
+      if (!VISIBLE_SOURCE_ID_SET.has(sourceId)) return false;
       const kind = String(row.kind || "").trim().toLowerCase();
       const blockedNow = Boolean(row.blocked_global);
       const policyLevel = String(row.policy_level || "").trim().toLowerCase();
@@ -484,6 +385,12 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
   }, [query, registryKind, registryPolicy, registrySource, registryPageSize]);
 
   useEffect(() => {
+    if (registrySource !== "all" && !registrySourceOptions.includes(registrySource)) {
+      setRegistrySource("all");
+    }
+  }, [registrySource, registrySourceOptions]);
+
+  useEffect(() => {
     setRegistryPage((prev) => (prev <= registryTotalPages ? prev : registryTotalPages));
   }, [registryTotalPages]);
 
@@ -500,52 +407,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     const to = from + pagedRegistry.length - 1;
     return { from, to };
   }, [filteredRegistry.length, registryPage, registryPageSize, registryTotalPages, pagedRegistry.length]);
-
-  const toggleSource = async (sourceId: string, nextEnabled: boolean) => {
-    const sid = String(sourceId || "").trim();
-    if (!sid) return;
-    setBusyKey(`source:${sid}`);
-    setErr("");
-    try {
-      const baseline = allowlistSources.length > 0
-        ? allowlistSources
-        : sourceRows.map((row) => ({
-            source_id: String(row.source_id || "").trim(),
-            enabled: Boolean(row.enabled),
-            rationale: "",
-          }));
-      const mergedById = new Map<string, { source_id: string; enabled: boolean; rationale?: string }>();
-      for (const row of baseline) {
-        const id = String(row.source_id || "").trim();
-        if (!id) continue;
-        mergedById.set(id, { source_id: id, enabled: Boolean(row.enabled), rationale: String(row.rationale || "") });
-      }
-      for (const row of sourceRows) {
-        const id = String(row.source_id || "").trim();
-        if (!id || mergedById.has(id)) continue;
-        mergedById.set(id, { source_id: id, enabled: Boolean(row.enabled), rationale: "" });
-      }
-      const current = Array.from(mergedById.values());
-      const idx = current.findIndex((row) => String(row.source_id || "").trim() === sid);
-      if (idx >= 0) current[idx] = { ...current[idx], enabled: nextEnabled };
-      else current.push({ source_id: sid, enabled: nextEnabled, rationale: "" });
-      const patchSources = current.map((row) => ({
-        source_id: String(row.source_id || "").trim(),
-        enabled: Boolean(row.enabled),
-        rationale: String(row.rationale || ""),
-      }));
-      const resp = await api.updateCapabilityAllowlist({ patch: { sources: patchSources } });
-      if (!resp.ok) {
-        setErr(resp.error?.message || t("capabilities.failedSourceToggle"));
-        return;
-      }
-      await load();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : t("capabilities.failedSourceToggle"));
-    } finally {
-      setBusyKey("");
-    }
-  };
 
   const updateExternalCapabilitySafetyMode = async (nextMode: ExternalCapabilitySafetyMode) => {
     if (nextMode === externalSafetyMode) return;
@@ -943,66 +804,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
         </div>
         <div className="text-[11px] mt-2 text-[var(--color-text-muted)]">
           {t("capabilities.safetyModeCurrentRule", { mode: t(`capabilities.safetyMode.${externalSafetyMode}.label`) })}
-        </div>
-      </div>
-
-      <div className={cardClass()}>
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("capabilities.sourcesTitle")}</div>
-        <div className="text-xs mt-1 mb-2 text-[var(--color-text-muted)]">{t("capabilities.sourcesHint")}</div>
-        <div className="text-[11px] text-[var(--color-text-muted)]">
-          {t("capabilities.sourcesSummary", sourceSummary)}
-        </div>
-        <div className="text-[11px] mt-0.5 text-[var(--color-text-muted)]">
-          {t("capabilities.levelDistribution", levelDistribution)}
-        </div>
-        <div className="mt-2 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-2 items-center">
-          <input
-            value={sourceQuery}
-            onChange={(e) => setSourceQuery(e.target.value)}
-            placeholder={t("capabilities.sourceSearchPlaceholder")}
-            className="glass-input w-full rounded-lg px-3 py-2 text-sm min-h-[40px] text-[var(--color-text-primary)]"
-          />
-          <div className="inline-flex rounded-lg border border-[var(--glass-border-subtle)] overflow-hidden">
-            <button type="button" onClick={() => setSourceVisibility("all")} className={`px-2.5 py-2 text-xs min-h-[40px] ${sourceVisibility === "all" ? "bg-[var(--glass-tab-bg)] text-[var(--color-text-primary)]" : "bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)]"}`}>{t("capabilities.sourcesVisibilityAll")}</button>
-            <button type="button" onClick={() => setSourceVisibility("enabled")} className={`px-2.5 py-2 text-xs min-h-[40px] border-l border-[var(--glass-border-subtle)] ${sourceVisibility === "enabled" ? "bg-[var(--glass-tab-bg)] text-[var(--color-text-primary)]" : "bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)]"}`}>{t("capabilities.sourcesVisibilityEnabled")}</button>
-            <button type="button" onClick={() => setSourceVisibility("disabled")} className={`px-2.5 py-2 text-xs min-h-[40px] border-l border-[var(--glass-border-subtle)] ${sourceVisibility === "disabled" ? "bg-[var(--glass-tab-bg)] text-[var(--color-text-primary)]" : "bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)]"}`}>{t("capabilities.sourcesVisibilityDisabled")}</button>
-          </div>
-        </div>
-        <div className="mt-3 space-y-2">
-          {sourceRowsVisible.map((row) => {
-            const sid = String(row.source_id || "");
-            const enabled = Boolean(row.enabled);
-            const rationale = String(sourceRationaleMap.get(sid) || row.rationale || "");
-            const syncState = String(row.sync_state || "never");
-            const count = Number(row.record_count || 0);
-            return (
-              <div key={sid} className="rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate text-[var(--color-text-primary)]">{sid}</div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${enabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]"}`}>{enabled ? t("capabilities.sourceEnabled") : t("capabilities.sourceDisabled")}</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{t("capabilities.sourceMeta", { level: String(row.source_level || "indexed"), sync: syncState, count })}</span>
-                    </div>
-                    {rationale ? <div className="text-[11px] mt-1 text-[var(--color-text-tertiary)]">{t("capabilities.sourceRationale", { text: rationale })}</div> : null}
-                  </div>
-                  <button
-                    type="button"
-                    className={`px-2.5 py-1.5 rounded text-xs min-h-[32px] ${enabled ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"} ${busyKey === `source:${sid}` ? "opacity-60 cursor-not-allowed" : ""}`}
-                    disabled={busyKey === `source:${sid}`}
-                    onClick={() => void toggleSource(sid, !enabled)}
-                  >
-                    {enabled ? t("capabilities.sourceDisableAction") : t("capabilities.sourceEnableAction")}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {filteredSources.length > SOURCE_PREVIEW_LIMIT ? (
-            <button type="button" className="text-xs text-emerald-600 dark:text-emerald-400" onClick={() => setShowAllSources((v) => !v)}>
-              {showAllSources ? t("capabilities.showLessSources") : t("capabilities.showMoreSources", { count: filteredSources.length - SOURCE_PREVIEW_LIMIT })}
-            </button>
-          ) : null}
         </div>
       </div>
 

@@ -467,7 +467,8 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
         now = utc_now_iso()
         pending_path, pending_doc = _load_pending_doc()
         pending_items = pending_doc.get("items") if isinstance(pending_doc.get("items"), dict) else {}
-        summary = {"new": 0, "updated": 0, "unchanged": 0, "deleted": 0, "deprecated": 0, "invalid": len(invalid), "pending": 0}
+        summary = {"new": 0, "updated": 0, "unchanged": 0, "deleted": 0, "deprecated": 0, "invalid": len(invalid), "pending": 0, "auto_imported": 0}
+        auto_imported: List[Dict[str, Any]] = []
 
         for cap_id, record in records.items():
             previous = catalog_rows.get(cap_id) if isinstance(catalog_rows.get(cap_id), dict) else None
@@ -476,6 +477,45 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
             status = "deprecated" if deprecated else ("new" if not previous else ("unchanged" if _records_equal(previous, record) else "updated"))
             summary[status] = int(summary.get(status) or 0) + 1
             if status == "unchanged":
+                continue
+            if status == "new":
+                try:
+                    package_install: Dict[str, Any] = {}
+                    if is_codex_skill_package_record(record):
+                        package_install = ensure_codex_skill_package_installed(record)
+                    with _CATALOG_LOCK:
+                        catalog_path, catalog_doc = _load_catalog_doc()
+                        rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+                        rows[cap_id] = record
+                        catalog_doc["records"] = rows
+                        sources = catalog_doc.get("sources") if isinstance(catalog_doc.get("sources"), dict) else {}
+                        source_state = sources.get(ONECOLLEAGUE_SOURCE_ID) if isinstance(sources.get(ONECOLLEAGUE_SOURCE_ID), dict) else _source_state_template("never")
+                        source_state["sync_state"] = "imported"
+                        source_state["last_synced_at"] = now
+                        source_state["staleness_seconds"] = 0
+                        source_state["error"] = ""
+                        sources[ONECOLLEAGUE_SOURCE_ID] = source_state
+                        catalog_doc["sources"] = sources
+                        _refresh_source_record_counts(catalog_doc)
+                        _save_catalog_doc(catalog_path, catalog_doc)
+                    for existing_item in pending_items.values():
+                        if not isinstance(existing_item, dict):
+                            continue
+                        if str(existing_item.get("capability_id") or "").strip() != cap_id:
+                            continue
+                        if str(existing_item.get("status") or "").strip() != "new":
+                            continue
+                        existing_item["status"] = "imported"
+                        existing_item["imported_at"] = now
+                        existing_item["updated_at"] = now
+                    payload: Dict[str, Any] = {"capability_id": cap_id, "kind": str(record.get("kind") or "")}
+                    if package_install:
+                        payload["package_install"] = package_install
+                    auto_imported.append(payload)
+                    summary["auto_imported"] += 1
+                except Exception as e:
+                    invalid.append({"capability_id": cap_id, "error": f"auto_import_failed:{str(e)}"})
+                    summary["invalid"] = int(summary.get("invalid") or 0) + 1
                 continue
             version = _record_version(record, index_item)
             checksum = _record_checksum(record, index_item)
@@ -552,8 +592,8 @@ def handle_capability_source_refresh(args: Dict[str, Any]) -> DaemonResponse:
             source["last_summary"] = summary
             source_doc["source"] = _normalize_source_doc({"source": source})["source"]
             _save_source_doc(source_path, source_doc)
-        action_id = _append_source_audit("refresh", {"summary": summary, "invalid": invalid})
-        return DaemonResponse(ok=True, result={"action_id": action_id, "source": _source_result(source_doc["source"]), "summary": summary, "invalid": invalid, "pending_count": summary["pending"]})
+        action_id = _append_source_audit("refresh", {"summary": summary, "invalid": invalid, "auto_imported": auto_imported})
+        return DaemonResponse(ok=True, result={"action_id": action_id, "source": _source_result(source_doc["source"]), "summary": summary, "invalid": invalid, "auto_imported": auto_imported, "pending_count": summary["pending"]})
     except Exception as e:
         with _SOURCE_LOCK:
             path, doc = _load_source_doc()

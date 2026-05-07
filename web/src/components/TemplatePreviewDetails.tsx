@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { cardClass } from "./modals/settings/types";
 
@@ -92,6 +93,7 @@ export function TemplatePreviewDetails({
   wrap = true,
   detailsOpenByDefault = false,
 }: TemplatePreviewDetailsProps) {
+  const { t } = useTranslation("settings");
   const [detailsOpen, setDetailsOpen] = useState(Boolean(detailsOpenByDefault));
 
   const actors = Array.isArray(template.actors) ? template.actors : [];
@@ -189,14 +191,14 @@ export function TemplatePreviewDetails({
 
   const body = (
     <>
-      <div className="text-sm font-semibold text-[var(--color-text-primary)]">Blueprint preview</div>
+      <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("blueprint.previewTitle")}</div>
       <div className="text-xs mt-1 text-[var(--color-text-muted)]">
-        Blueprint title/topic are informational only (not applied automatically).
+        {t("blueprint.previewInfo")}
       </div>
 
       <div className="mt-3 space-y-1">
         <div className="text-xs text-[var(--color-text-tertiary)]">
-          Blueprint:{" "}
+          {t("blueprint.previewLabel")}{" "}
           <span className="font-mono">
             v{String(template.v || "")} {String(template.cccc_version || "")}
           </span>

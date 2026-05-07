@@ -39,6 +39,12 @@ _DEFAULT_AUTOMATION_BUILTIN_SNIPPETS = {
     "standup": _DEFAULT_AUTOMATION_STANDUP_SNIPPET,
 }
 
+_DEFAULT_GROUP_CAPABILITY_DEFAULTS = {
+    "autoload_capabilities": [],
+    "default_scope": "actor",
+    "session_ttl_seconds": 3600,
+}
+
 
 def _normalize_automation_snippet_map(raw: Any) -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -56,6 +62,41 @@ def _normalize_automation_snippet_map(raw: Any) -> Dict[str, str]:
 
 def default_automation_builtin_snippets() -> Dict[str, str]:
     return copy.deepcopy(_DEFAULT_AUTOMATION_BUILTIN_SNIPPETS)
+
+
+def default_group_capability_defaults() -> Dict[str, Any]:
+    return copy.deepcopy(_DEFAULT_GROUP_CAPABILITY_DEFAULTS)
+
+
+def _normalize_capability_id_list(raw: Any) -> list[str]:
+    out: list[str] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[str] = set()
+    for item in raw:
+        cap_id = str(item or "").strip()
+        if not cap_id or cap_id in seen:
+            continue
+        seen.add(cap_id)
+        out.append(cap_id)
+    return out
+
+
+def normalize_group_capability_defaults(raw: Any) -> Dict[str, Any]:
+    out = default_group_capability_defaults()
+    if not isinstance(raw, dict):
+        return out
+    scope = str(raw.get("default_scope") or out["default_scope"]).strip().lower()
+    if scope not in ("actor", "session"):
+        scope = str(out["default_scope"])
+    try:
+        ttl = int(raw.get("session_ttl_seconds") or out["session_ttl_seconds"])
+    except Exception:
+        ttl = int(out["session_ttl_seconds"])
+    out["autoload_capabilities"] = _normalize_capability_id_list(raw.get("autoload_capabilities"))
+    out["default_scope"] = scope
+    out["session_ttl_seconds"] = max(60, ttl)
+    return out
 
 
 def split_automation_snippets_for_storage(snippets: Any) -> tuple[Dict[str, str], Dict[str, str]]:
@@ -225,6 +266,7 @@ def create_group(reg: Registry, *, title: str, topic: str = "") -> Group:
         "active_scope_key": "",
         "scopes": [],
         "actors": [],
+        "capability_defaults": default_group_capability_defaults(),
         # Single-layer storage: automation rules/snippets live in group.yaml under CCCC_HOME.
         "automation": default_automation_ruleset_doc(),
     }
@@ -372,6 +414,7 @@ def ensure_group_for_scope(reg: Registry, scope: ScopeIdentity) -> Group:
         "active_scope_key": "",
         "scopes": [],
         "actors": [],
+        "capability_defaults": default_group_capability_defaults(),
         # Keep deterministic defaults consistent with create_group().
         "automation": default_automation_ruleset_doc(),
     }

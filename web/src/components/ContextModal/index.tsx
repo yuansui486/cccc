@@ -44,6 +44,7 @@ import { SteeringPanel } from "./coordination/SteeringPanel";
 import { TaskBoard } from "./coordination/TaskBoard";
 import { TaskEditorPanel } from "./coordination/TaskEditorPanel";
 import { DesktopPetView } from "./desktopPet/DesktopPetView";
+import { SkillsView } from "./skills/SkillsView";
 import {
   briefDraftMatches,
   briefToDraft,
@@ -993,6 +994,7 @@ export function ContextModal({
               <div className={classNames("inline-flex w-fit rounded-2xl border p-1", isDark ? "border-slate-800 bg-slate-950/70" : "border-gray-200 bg-gray-100/80")}>
                 <button type="button" onClick={() => handleSwitchActiveView("coordination")} className={viewButtonClass(activeView === "coordination")}>{tr("context.coordination", "Coordination")}</button>
                 <button type="button" onClick={() => handleSwitchActiveView("agents")} className={viewButtonClass(activeView === "agents")}>{tr("context.agents", "Agents")}</button>
+                <button type="button" onClick={() => handleSwitchActiveView("skills")} className={viewButtonClass(activeView === "skills")}>{tr("context.skillsTab", "Skills")}</button>
                 <button type="button" onClick={() => handleSwitchActiveView("desktop_pet")} className={viewButtonClass(activeView === "desktop_pet")}>{tr("context.desktopPetTab", "Web Pet")}<span className="ml-1.5 rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-400">Beta</span></button>
               </div>
             </div>
@@ -1067,6 +1069,8 @@ export function ContextModal({
               </div>
             ) : activeView === "agents" ? (
               <AgentsView agents={agents} tr={tr} ui={ui} />
+            ) : activeView === "skills" ? (
+              <SkillsView groupId={groupId} agents={agents} tr={tr} ui={ui} />
             ) : (
               <DesktopPetView
                 tr={tr}

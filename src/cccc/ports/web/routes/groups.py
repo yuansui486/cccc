@@ -22,7 +22,7 @@ from ....runners import headless as headless_runner
 from ....runners import pty as pty_runner
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ....kernel.headless_events import headless_events_path
-from ....kernel.group import get_group_state, load_group
+from ....kernel.group import get_group_state, load_group, normalize_group_capability_defaults
 from ....kernel.context import ContextStorage
 from ....kernel.query_projections import get_groups_projection
 from ....daemon.runner_state_ops import headless_state_path, pty_state_path
@@ -1668,6 +1668,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "terminal_transcript_notify_lines": _safe_int(tt.get("notify_lines", 20), default=20, min_value=1, max_value=80),
                     "panorama_enabled": coerce_bool(features.get("panorama_enabled"), default=False),
                     "desktop_pet_enabled": coerce_bool(features.get("desktop_pet_enabled"), default=False),
+                    "capability_defaults": normalize_group_capability_defaults(group.doc.get("capability_defaults")),
                 }
             }
         }
@@ -1734,6 +1735,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch["panorama_enabled"] = bool(req.panorama_enabled)
         if req.desktop_pet_enabled is not None:
             patch["desktop_pet_enabled"] = bool(req.desktop_pet_enabled)
+        if req.capability_defaults is not None:
+            patch["capability_defaults"] = dict(req.capability_defaults)
 
         if not patch:
             return {"ok": True, "result": {"message": "no changes"}}

@@ -354,11 +354,39 @@ def _prepare_overlay_base(overlay: Path, env: Dict[str, Any]) -> None:
         _copy_or_link(src_system, skills_dir / ".system")
 
 
+def _normalize_capability_id_list(raw: Any) -> List[str]:
+    out: List[str] = []
+    if not isinstance(raw, list):
+        return out
+    seen: set[str] = set()
+    for item in raw:
+        cap_id = str(item or "").strip()
+        if not cap_id or cap_id in seen:
+            continue
+        seen.add(cap_id)
+        out.append(cap_id)
+    return out
+
+
+def _effective_package_autoload_for_actor(group: Any, actor: Dict[str, Any]) -> List[str]:
+    group_autoload: List[str] = []
+    try:
+        from ....kernel.group import normalize_group_capability_defaults
+
+        defaults = normalize_group_capability_defaults(getattr(group, "doc", {}).get("capability_defaults"))
+        group_autoload = _normalize_capability_id_list(defaults.get("autoload_capabilities"))
+    except Exception:
+        group_autoload = []
+
+    actor_autoload = _normalize_capability_id_list(actor.get("capability_autoload"))
+    return _normalize_capability_id_list([*group_autoload, *actor_autoload])
+
+
 def prepare_codex_skill_package_overlay_for_actor(group: Any, actor_id: str, env: Dict[str, Any]) -> Dict[str, Any]:
     actor = find_actor(group, actor_id)
     if not isinstance(actor, dict):
         return {}
-    autoload = [str(x or "").strip() for x in (actor.get("capability_autoload") or []) if str(x or "").strip()]
+    autoload = _effective_package_autoload_for_actor(group, actor)
     if not autoload:
         return {}
     _, catalog = _load_catalog_doc()
