@@ -5,10 +5,19 @@ import { DirItem } from "../../types";
 import { TemplatePreviewDetails } from "../TemplatePreviewDetails";
 import type { TemplatePreviewDetailsProps } from "../TemplatePreviewDetails";
 import { useModalA11y } from "../../hooks/useModalA11y";
-import { FileIcon, FolderIcon, PlusIcon } from "../Icons";
+import { FolderIcon, PlusIcon } from "../Icons";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
+
+const TEAM_PRESET_ICON_URLS = [
+  "/team-presets/1_team.png",
+  "/team-presets/2_产品调研.png",
+  "/team-presets/3_代码编写.png",
+  "/team-presets/4_个人助理.png",
+  "/team-presets/5_人事招聘.png",
+  "/team-presets/6_私域销售.png",
+];
 
 export interface CreateGroupModalProps {
   isOpen: boolean;
@@ -106,22 +115,29 @@ export function CreateGroupModal({
                   {teamPresetsError}
                 </div>
               ) : teamPresets.length > 0 ? (
-                teamPresets.slice(0, 8).map((preset) => {
+                teamPresets.slice(0, 8).map((preset, index) => {
                   const slug = String(preset.slug || preset.id || "").trim();
                   const title = String(preset.name || preset.title || slug).trim();
                   const summary = preset.config_summary && typeof preset.config_summary === "object" ? preset.config_summary : {};
                   const configTitle = String(summary.title || "").trim();
+                  const iconUrl = TEAM_PRESET_ICON_URLS[index % TEAM_PRESET_ICON_URLS.length];
                   return (
                   <button
                     key={slug || title}
                     type="button"
-                    className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors text-left min-h-[58px] glass-card ${
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left min-h-[64px] glass-card ${
                       selectedTeamPresetSlug === slug ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] shadow-[var(--glass-accent-shadow)]" : ""
                     }`}
                     onClick={() => onSelectTeamPreset(preset)}
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]">
-                      <FileIcon className="h-[1.05rem] w-[1.05rem]" />
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)]">
+                      <img
+                        src={iconUrl}
+                        alt=""
+                        aria-hidden="true"
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
                     </span>
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate text-[var(--color-text-secondary)]">{title}</div>
