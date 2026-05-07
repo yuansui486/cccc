@@ -145,13 +145,7 @@ export function CreateGroupModal({
               <Input
                 className="flex-1 font-mono"
                 value={createGroupPath}
-                onChange={(e) => {
-                  setCreateGroupPath(e.target.value);
-                  const dirName = e.target.value.split("/").filter(Boolean).pop() || "";
-                  if (!createGroupName || createGroupName === currentDir.split("/").filter(Boolean).pop()) {
-                    setCreateGroupName(dirName);
-                  }
-                }}
+                onChange={(e) => setCreateGroupPath(e.target.value)}
                 placeholder={t("createGroup.pathPlaceholder")}
                 autoFocus
               />
@@ -183,7 +177,6 @@ export function CreateGroupModal({
                       onClick={() => {
                         onFetchDirContents(parentDir);
                         setCreateGroupPath(parentDir);
-                        setCreateGroupName(parentDir.split("/").filter(Boolean).pop() || "");
                       }}
                     >
                       <span className="text-[var(--color-text-muted)]"><FolderIcon size={16} /></span>
@@ -201,7 +194,6 @@ export function CreateGroupModal({
                         className="w-full flex items-center gap-2 px-3 py-2 text-left min-h-[44px] hover:bg-[var(--glass-tab-bg-hover)]"
                         onClick={() => {
                           setCreateGroupPath(item.path);
-                          setCreateGroupName(item.name);
                           onFetchDirContents(item.path);
                         }}
                       >
@@ -283,7 +275,7 @@ export function CreateGroupModal({
                 <div className="mt-3">
                   <TemplatePreviewDetails
                     template={templatePreview}
-                    detailsOpenByDefault={true}
+                    hideDetails={true}
                     wrap={false}
                   />
                 </div>

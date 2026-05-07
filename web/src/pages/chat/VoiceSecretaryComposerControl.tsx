@@ -10,7 +10,7 @@ import type {
   BuiltinAssistant,
 } from "../../types";
 import { classNames } from "../../utils/classNames";
-import { ChevronDownIcon, CloseIcon, CopyIcon, MaximizeIcon, MicrophoneIcon, SparklesIcon, StopIcon } from "../../components/Icons";
+import { ChevronDownIcon, CloseIcon, CopyIcon, MaximizeIcon, MessageSquareTextIcon, MicrophoneIcon, SparklesIcon, StopIcon } from "../../components/Icons";
 import { MarkdownDocumentSurface } from "../../components/document/MarkdownDocumentSurface";
 import { GroupCombobox } from "../../components/GroupCombobox";
 import { LazyMarkdownRenderer } from "../../components/LazyMarkdownRenderer";
@@ -2659,18 +2659,18 @@ export function VoiceSecretaryComposerControl({
   const assistantRowModeOptions: Array<{ key: VoiceSecretaryCaptureMode; label: string; description: string }> = useMemo(() => [
     {
       key: "document",
-      label: t("voiceSecretaryModeDocument", { defaultValue: "Doc" }),
-      description: t("voiceSecretaryModeDocumentDesc", { defaultValue: "Record into working docs" }),
+      label: t("voiceSecretaryModeDocument", { defaultValue: "文档" }),
+      description: t("voiceSecretaryModeDocumentDesc", { defaultValue: "记录到工作文档" }),
     },
     {
       key: "instruction",
-      label: t("voiceSecretaryModeInstruction", { defaultValue: "Ask" }),
-      description: t("voiceSecretaryModeInstructionDesc", { defaultValue: "Handle directly" }),
+      label: t("voiceSecretaryModeInstruction", { defaultValue: "提问" }),
+      description: t("voiceSecretaryModeInstructionDesc", { defaultValue: "直接处理" }),
     },
     {
       key: "prompt",
-      label: t("voiceSecretaryModePrompt", { defaultValue: "Prompt" }),
-      description: t("voiceSecretaryModePromptDesc", { defaultValue: "Polish composer" }),
+      label: t("voiceSecretaryModePrompt", { defaultValue: "提示词" }),
+      description: t("voiceSecretaryModePromptDesc", { defaultValue: "润色输入" }),
     },
   ], [t]);
   const statusLabel = recording
@@ -2698,7 +2698,7 @@ export function VoiceSecretaryComposerControl({
     : Math.max(20, Math.min(26, Math.round(buttonSizePx - 14)));
   const promptDraftWaiting = Boolean(pendingPromptRequestId && !pendingPromptDraft);
   const promptDraftWaitingTitle = t("voiceSecretaryPromptDraftWaitingShort", { defaultValue: "Polishing prompt..." });
-  const promptDraftReadyTitle = t("voiceSecretaryPromptDraftReadyShort", { defaultValue: "Prompt ready" });
+  const promptDraftReadyTitle = t("voiceSecretaryPromptDraftReadyShort", { defaultValue: "提示词已就绪" });
   const documentsCountLabel = t("voiceSecretaryDocumentsCount", { count: documents.length, defaultValue: "{{count}} docs" });
   const askFeedbackStatusLabel = useCallback((status: string) => {
     const key = String(status || "pending").trim().toLowerCase();
@@ -2758,17 +2758,17 @@ export function VoiceSecretaryComposerControl({
   const canOptimizeComposerPrompt = captureMode === "prompt" && !!composerText.trim() && !promptOptimizePending && !pendingPromptDraft;
   const panelRequestSending = actionBusy === "instruct_doc" || actionBusy === "instruct_ask";
   const panelRequestTitle = captureMode === "document"
-    ? t("voiceSecretaryDocumentRequestLabel", { defaultValue: "Ask about this document" })
+    ? t("voiceSecretaryDocumentRequestLabel", { defaultValue: "询问此文档" })
     : captureMode === "instruction"
-      ? t("voiceSecretaryAskRequestLabel", { defaultValue: "Ask Voice Secretary" })
-      : t("voiceSecretaryPromptRequestLabel", { defaultValue: "Prompt mode" });
+      ? t("voiceSecretaryAskRequestLabel", { defaultValue: "询问语音秘书" })
+      : t("voiceSecretaryPromptRequestLabel", { defaultValue: "提示词模式" });
   const panelRequestPlaceholder = captureMode === "document"
     ? t("voiceSecretaryDocumentRequestPlaceholder", {
       defaultValue: "Tell Voice Secretary how to refine, split, summarize, or send this document.",
     })
     : captureMode === "instruction"
       ? t("voiceSecretaryAskRequestPlaceholder", {
-        defaultValue: "Ask a question or give Voice Secretary a task. This is not tied to the current document.",
+        defaultValue: "提出问题或交给语音秘书一个任务。此请求不绑定当前文档。",
       })
       : t("voiceSecretaryPromptRequestDisabledPlaceholder", {
         defaultValue: "Use the sparkle button in the composer capsule to optimize the current input box, or use the record button to add spoken context.",
@@ -2915,7 +2915,7 @@ export function VoiceSecretaryComposerControl({
     ? t("voiceSecretaryModeChangeDisabledRecording", { defaultValue: "Stop recording before changing mode." })
     : "";
   const workspaceModeHint = captureMode === "prompt"
-    ? t("voiceSecretaryWorkspaceHintPrompt", { defaultValue: "Speech is refined into the message composer." })
+    ? t("voiceSecretaryWorkspaceHintPrompt", { defaultValue: "语音会被润色到消息输入框。" })
     : captureMode === "instruction"
       ? t("voiceSecretaryWorkspaceHintInstruction", { defaultValue: "Speech is sent as a request to Voice Secretary." })
       : t("voiceSecretaryWorkspaceHintDocument", { defaultValue: "Speech is written into the default document." });
@@ -4190,9 +4190,9 @@ export function VoiceSecretaryComposerControl({
                             {option.key === "document" ? (
                               <MicrophoneIcon size={13} />
                             ) : option.key === "instruction" ? (
-                              <span className="text-[12px] font-black leading-none">?</span>
+                              <MessageSquareTextIcon size={13} />
                             ) : (
-                              <span className="text-[11px] font-black italic leading-none">P</span>
+                              <SparklesIcon size={13} />
                             )}
                           </span>
                           <span className="min-w-0 flex-1">

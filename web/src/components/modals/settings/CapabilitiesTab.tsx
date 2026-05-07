@@ -20,7 +20,6 @@ interface CapabilitiesTabProps {
 
 type RegistryKindFilter = "all" | "pack" | "mcp" | "skill";
 type RegistryPolicyFilter = "all" | "actionable" | "blocked" | "indexed";
-type ExternalCapabilitySafetyMode = "normal" | "conservative";
 
 const REGISTRY_PAGE_SIZE_OPTIONS = [20, 40, 80];
 const ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library";
@@ -28,32 +27,10 @@ const VISIBLE_SOURCE_IDS = ["cccc_builtin", ONECOLLEAGUE_SOURCE_ID] as const;
 const VISIBLE_SOURCE_ID_SET = new Set<string>(VISIBLE_SOURCE_IDS);
 const SOURCE_PRIORITY: Record<string, number> = {
   cccc_builtin: 0,
-  mcp_registry_official: 1,
-  anthropic_skills: 2,
-  github_skills_curated: 3,
-  openclaw_skills_remote: 4,
-  clawskills_remote: 5,
-  clawhub_remote: 6,
-  skillsmp_remote: 7,
-  manual_import: 8,
-  onecolleague_skill_library: 9,
+  onecolleague_skill_library: 1,
 };
-const EXTERNAL_SOURCE_IDS = [
-  "manual_import",
-  "mcp_registry_official",
-  "anthropic_skills",
-  "github_skills_curated",
-  "skillsmp_remote",
-  "clawhub_remote",
-  "openclaw_skills_remote",
-  "clawskills_remote",
-] as const;
 
 const DEFAULT_ENABLE_ACTOR_ID = "user";
-
-function normalizeExternalCapabilitySafetyMode(value: unknown): ExternalCapabilitySafetyMode {
-  return String(value || "").trim().toLowerCase() === "conservative" ? "conservative" : "normal";
-}
 
 function normalizeReadinessPreview(value: unknown): CapabilityReadinessPreview | null {
   return value && typeof value === "object" ? (value as CapabilityReadinessPreview) : null;
@@ -94,7 +71,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
   const [registryPage, setRegistryPage] = useState(1);
   const [items, setItems] = useState<CapabilityOverviewItem[]>([]);
   const [blocked, setBlocked] = useState<CapabilityBlockEntry[]>([]);
-  const [externalSafetyMode, setExternalSafetyMode] = useState<ExternalCapabilitySafetyMode>("normal");
   const [oneColleagueSource, setOneColleagueSource] = useState<OneColleagueCapabilitySource | null>(null);
   const [pendingItems, setPendingItems] = useState<OneColleaguePendingCapability[]>([]);
   const [storeSummary, setStoreSummary] = useState<Record<string, number>>({});
@@ -108,9 +84,8 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     setLoading(true);
     setErr("");
     try {
-      const [overviewResp, allowlistResp, sourceResp, pendingResp, actorsResp, stateResp] = await Promise.all([
+      const [overviewResp, sourceResp, pendingResp, actorsResp, stateResp] = await Promise.all([
         api.fetchCapabilityOverview({ includeIndexed: true, limit: 1200 }),
-        api.fetchCapabilityAllowlist(),
         api.fetchOneColleagueCapabilitySource(),
         api.fetchOneColleaguePendingCapabilities(),
         groupId ? api.fetchActors(groupId, false, { noCache: true }) : Promise.resolve(null),
@@ -126,11 +101,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
           Array.isArray(overviewResp.result?.blocked_capabilities)
             ? overviewResp.result.blocked_capabilities
             : []
-        );
-      }
-      if (allowlistResp.ok) {
-        setExternalSafetyMode(
-          normalizeExternalCapabilitySafetyMode(allowlistResp.result?.external_capability_safety_mode)
         );
       }
       if (sourceResp.ok) {
@@ -407,33 +377,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
     const to = from + pagedRegistry.length - 1;
     return { from, to };
   }, [filteredRegistry.length, registryPage, registryPageSize, registryTotalPages, pagedRegistry.length]);
-
-  const updateExternalCapabilitySafetyMode = async (nextMode: ExternalCapabilitySafetyMode) => {
-    if (nextMode === externalSafetyMode) return;
-    setBusyKey("policy");
-    setErr("");
-    try {
-      const nextLevel = nextMode === "conservative" ? "indexed" : "mounted";
-      const sourceLevelPatch = Object.fromEntries(EXTERNAL_SOURCE_IDS.map((sourceId) => [sourceId, nextLevel]));
-      const resp = await api.updateCapabilityAllowlist({
-        patch: {
-          defaults: {
-            source_level: sourceLevelPatch,
-          },
-        },
-      });
-      if (!resp.ok) {
-        setErr(resp.error?.message || t("capabilities.failedSafetyMode"));
-        return;
-      }
-      setExternalSafetyMode(normalizeExternalCapabilitySafetyMode(resp.result?.external_capability_safety_mode));
-      await load();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : t("capabilities.failedSafetyMode"));
-    } finally {
-      setBusyKey("");
-    }
-  };
 
   const refreshStore = async () => {
     setBusyKey("store:refresh");
@@ -770,40 +713,6 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "" }: Cap
               })
             )}
           </div>
-        </div>
-      </div>
-
-      <div className={cardClass()}>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("capabilities.safetyModeTitle")}</div>
-            <div className="text-xs mt-1 text-[var(--color-text-muted)]">{t("capabilities.safetyModeHint")}</div>
-          </div>
-          <div className="text-[11px] text-[var(--color-text-tertiary)]">
-            {t("capabilities.safetyModeCurrent", { mode: t(`capabilities.safetyMode.${externalSafetyMode}.label`) })}
-          </div>
-        </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
-          {(["normal", "conservative"] as ExternalCapabilitySafetyMode[]).map((mode) => {
-            const selected = externalSafetyMode === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                className={`rounded-lg border px-3 py-3 text-left ${selected
-                  ? "border-emerald-500/30 bg-emerald-500/15"
-                  : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]"} ${busyKey === "policy" ? "opacity-60 cursor-not-allowed" : ""}`}
-                disabled={busyKey === "policy" || selected}
-                onClick={() => void updateExternalCapabilitySafetyMode(mode)}
-              >
-                <div className="text-sm font-medium text-[var(--color-text-primary)]">{t(`capabilities.safetyMode.${mode}.label`)}</div>
-                <div className="text-xs mt-1 text-[var(--color-text-tertiary)]">{t(`capabilities.safetyMode.${mode}.hint`)}</div>
-              </button>
-            );
-          })}
-        </div>
-        <div className="text-[11px] mt-2 text-[var(--color-text-muted)]">
-          {t("capabilities.safetyModeCurrentRule", { mode: t(`capabilities.safetyMode.${externalSafetyMode}.label`) })}
         </div>
       </div>
 

@@ -20,7 +20,6 @@ from ._common import (
     _CATALOG_LOCK,
     _STATE_LOCK,
     _RUNTIME_LOCK,
-    _LEVEL_INDEXED,
     _LEVEL_MOUNTED,
     _QUAL_QUALIFIED,
     _QUAL_BLOCKED,
@@ -30,7 +29,6 @@ from ._common import (
     _ensure_group,
     _is_foreman,
     _normalize_scope,
-    _env_bool,
     _quota_limit,
 )
 from ._documents import (
@@ -54,14 +52,12 @@ from ._runtime import (
 )
 from ._install import (
     _catalog_staleness_seconds,
-    _needs_registry_hydration,
     _supported_external_install_record,
     _tool_name_aliases,
     _build_synthetic_tool_name,
     _invoke_installed_external_tool_with_aliases,
 )
 from ._policy import _normalize_policy_level
-from ._remote import _mark_source_disabled
 from ._skill_packages import normalize_codex_skill_package_spec
 from ._state import (
     _binding_state_allows_external_tool,
@@ -175,78 +171,12 @@ def _build_import_readiness_preview(
 # ---------------------------------------------------------------------------
 
 def _curated_install_metadata(install_mode_preference: str) -> Tuple[str, Dict[str, Any]]:
-    pref = str(install_mode_preference or "").strip().lower()
-    if pref == "remote_only":
-        return "remote_only", {"transport": "http", "url": ""}
-    if pref == "package:npm":
-        return "package", {"registry_type": "npm", "runtime_hint": "npx", "identifier": "", "version": ""}
-    if pref.startswith("package:"):
-        return "package", {"registry_type": pref.split(":", 1)[1], "runtime_hint": "", "identifier": "", "version": ""}
     return "", {}
 
 
 def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     now_iso = utc_now_iso()
     out: Dict[str, Dict[str, Any]] = {}
-    mcp_rows = policy.get("curated_mcp_entries") if isinstance(policy.get("curated_mcp_entries"), list) else []
-    for raw in mcp_rows:
-        if not isinstance(raw, dict):
-            continue
-        cap_id = str(raw.get("capability_id") or "").strip()
-        if not cap_id.startswith("mcp:"):
-            continue
-        level = _normalize_policy_level(raw.get("level"), default=_LEVEL_MOUNTED)
-        trust = str(raw.get("trust") or "").strip().lower()
-        notes = str(raw.get("notes") or "").strip()
-        risk_tags_raw = raw.get("risk_tags")
-        risk_tags = [str(x).strip() for x in risk_tags_raw if str(x).strip()] if isinstance(risk_tags_raw, list) else []
-        required_secrets_raw = raw.get("required_secrets")
-        required_secrets = (
-            [str(x).strip() for x in required_secrets_raw if str(x).strip()]
-            if isinstance(required_secrets_raw, list)
-            else []
-        )
-        install_mode, install_spec = _curated_install_metadata(str(raw.get("install_mode_preference") or ""))
-        supported, unsupported_reason = _supported_external_install_record(
-            {"install_mode": install_mode, "install_spec": install_spec}
-        )
-        hydration_needed = _needs_registry_hydration(
-            cap_id,
-            {"capability_id": cap_id, "kind": "mcp_toolpack", "install_mode": install_mode, "install_spec": install_spec},
-        )
-        qualification = _QUAL_QUALIFIED if (supported or hydration_needed) else _QUAL_UNAVAILABLE
-        reasons: List[str] = []
-        if level == _LEVEL_INDEXED:
-            reasons.append("curated_indexed_default")
-        if risk_tags:
-            reasons.append("risk_tags_present")
-        if unsupported_reason:
-            reasons.append(unsupported_reason)
-        out[cap_id] = {
-            "capability_id": cap_id,
-            "kind": "mcp_toolpack",
-            "name": _display_name_from_capability_id(cap_id),
-            "description_short": notes or f"Curated MCP capability {cap_id}",
-            "tags": ["mcp", "external", "curated", *risk_tags],
-            "source_id": "mcp_registry_official",
-            "source_tier": "tier1",
-            "source_uri": "",
-            "source_record_id": cap_id.split(":", 1)[1],
-            "source_record_version": "",
-            "updated_at_source": now_iso,
-            "last_synced_at": now_iso,
-            "sync_state": "curated",
-            "install_mode": install_mode,
-            "install_spec": install_spec,
-            "requirements": {"required_secrets": required_secrets} if required_secrets else {},
-            "license": "",
-            "trust_tier": trust or "tier1",
-            "qualification_status": qualification,
-            "qualification_reasons": reasons,
-            "health_status": "curated",
-            "enable_supported": bool(supported or hydration_needed),
-        }
-
     skill_rows = policy.get("curated_skill_entries") if isinstance(policy.get("curated_skill_entries"), list) else []
     for raw in skill_rows:
         if not isinstance(raw, dict):
@@ -258,14 +188,14 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
         level = _normalize_policy_level(raw.get("level"), default=_LEVEL_MOUNTED)
         trust = str(raw.get("trust") or "").strip().lower()
         notes = str(raw.get("notes") or "").strip()
-        source_id = str(raw.get("source_id") or "anthropic_skills").strip() or "anthropic_skills"
+        source_id = str(raw.get("source_id") or "onecolleague_skill_library").strip() or "onecolleague_skill_library"
+        if source_id not in _SOURCE_IDS:
+            continue
         source_uri = str(raw.get("source_uri") or "").strip()
         description_short = str(raw.get("description_short") or "").strip()
         license_text = str(raw.get("license") or "").strip()
         tags_raw = raw.get("tags")
         tags = [str(x).strip() for x in tags_raw if str(x).strip()] if isinstance(tags_raw, list) else []
-        if source_id == "anthropic_skills" and "anthropic" not in {t.lower() for t in tags}:
-            tags.append("anthropic")
         requires_raw = raw.get("requires_capabilities")
         requires_capabilities = (
             [str(x).strip() for x in requires_raw if str(x).strip()]
@@ -284,8 +214,6 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
         )
         if not reasons and qualification != _QUAL_QUALIFIED:
             reasons = [f"curated_{qualification}"]
-        if not source_uri and source_id == "anthropic_skills":
-            source_uri = f"https://github.com/anthropics/skills/tree/main/skills/{name}"
         if not description_short:
             description_short = notes or f"Curated skill {name}"
         if not capsule_text:
@@ -298,7 +226,7 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
             "description_short": description_short,
             "tags": ["skill", "external", "curated", *tags],
             "source_id": source_id,
-            "source_tier": "tier1" if source_id == "anthropic_skills" else "tier2",
+            "source_tier": "tier2",
             "source_uri": source_uri,
             "source_record_id": name,
             "source_record_version": "",
@@ -309,7 +237,7 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
             "install_spec": {},
             "requirements": {},
             "license": license_text,
-            "trust_tier": trust or ("tier1" if source_id == "anthropic_skills" else "tier2"),
+            "trust_tier": trust or "tier2",
             "qualification_status": qualification,
             "qualification_reasons": reasons,
             "health_status": "curated",
@@ -400,7 +328,7 @@ def _ensure_curated_catalog_records(catalog_doc: Dict[str, Any], *, policy: Dict
     sources = catalog_doc.get("sources") if isinstance(catalog_doc.get("sources"), dict) else {}
     now_iso = utc_now_iso()
     for source_id in touched_sources:
-        if not source_id:
+        if not source_id or source_id not in _SOURCE_IDS:
             continue
         state = sources.get(source_id) if isinstance(sources.get(source_id), dict) else _source_state_template("never")
         if str(state.get("sync_state") or "").strip() in {"", "never", "disabled"}:
@@ -501,6 +429,14 @@ def _refresh_source_record_counts(catalog: Dict[str, Any]) -> None:
         sid = str(rec.get("source_id") or "").strip()
         if sid in counts:
             counts[sid] += 1
+    sources = {
+        source_id: (
+            sources.get(source_id)
+            if isinstance(sources.get(source_id), dict)
+            else _source_state_template("never")
+        )
+        for source_id in _SOURCE_IDS
+    }
     for source_id in _SOURCE_IDS:
         state = sources.get(source_id) if isinstance(sources.get(source_id), dict) else _source_state_template("never")
         state["record_count"] = int(counts.get(source_id) or 0)
@@ -510,19 +446,7 @@ def _refresh_source_record_counts(catalog: Dict[str, Any]) -> None:
 
 def _sync_catalog(catalog_doc: Dict[str, Any], *, force: bool) -> Dict[str, Any]:
     before = json.dumps(catalog_doc, ensure_ascii=False, sort_keys=True)
-    upserted: Dict[str, int] = {}
-
-    if _env_bool("CCCC_CAPABILITY_SOURCE_MCP_REGISTRY_ENABLED", True):
-        upserted["mcp_registry_official"] = int(_pkg()._sync_mcp_registry_source(catalog_doc, force=force))
-    else:
-        _mark_source_disabled(catalog_doc, "mcp_registry_official")
-        upserted["mcp_registry_official"] = 0
-
-    if _env_bool("CCCC_CAPABILITY_SOURCE_ANTHROPIC_SKILLS_ENABLED", True):
-        upserted["anthropic_skills"] = int(_pkg()._sync_anthropic_skills_source(catalog_doc, force=force))
-    else:
-        _mark_source_disabled(catalog_doc, "anthropic_skills")
-        upserted["anthropic_skills"] = 0
+    upserted: Dict[str, int] = {source_id: 0 for source_id in _SOURCE_IDS}
 
     pruned = _prune_catalog_records(catalog_doc)
     _refresh_source_record_counts(catalog_doc)
@@ -740,9 +664,11 @@ def _normalize_import_kind(raw_kind: Any) -> str:
 
 def _coerce_import_source_id(kind: str, raw_source_id: Any) -> str:
     source_id = str(raw_source_id or "").strip()
-    if source_id:
-        return source_id if source_id in _SOURCE_IDS else "manual_import"
-    return "manual_import"
+    if not source_id:
+        raise ValueError("record.source_id is required")
+    if source_id not in _SOURCE_IDS:
+        raise ValueError("record.source_id must be one of: cccc_builtin, onecolleague_skill_library")
+    return source_id
 
 
 def _normalize_import_tags(raw: Any, *, kind: str) -> List[str]:

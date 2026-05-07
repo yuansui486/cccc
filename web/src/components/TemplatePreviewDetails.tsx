@@ -72,6 +72,7 @@ export interface TemplatePreviewDetailsProps {
   diff?: TemplateDiff | null;
   wrap?: boolean;
   detailsOpenByDefault?: boolean;
+  hideDetails?: boolean;
 }
 
 function asStringArray(v: unknown): string[] {
@@ -92,6 +93,7 @@ export function TemplatePreviewDetails({
   diff,
   wrap = true,
   detailsOpenByDefault = false,
+  hideDetails = false,
 }: TemplatePreviewDetailsProps) {
   const { t } = useTranslation("settings");
   const [detailsOpen, setDetailsOpen] = useState(Boolean(detailsOpenByDefault));
@@ -130,8 +132,8 @@ export function TemplatePreviewDetails({
   };
 
   const formatSource = (s: unknown): string => {
-    if (s === "home") return "override";
-    if (s === "builtin") return "builtin";
+    if (s === "home") return t("blueprint.previewSourceOverride", "覆盖");
+    if (s === "builtin") return t("blueprint.previewSourceBuiltin", "内置");
     return "";
   };
 
@@ -140,24 +142,6 @@ export function TemplatePreviewDetails({
   const automationRules = Number(template.automation?.rules || 0);
   const automationSnippets = Number(template.automation?.snippets || 0);
   const hasAutomation = automationRules > 0 || automationSnippets > 0;
-
-  const formatSettingLine = (key: string) => {
-    if (diff?.settings_changed && diff.settings_changed[key]) {
-      const row = diff.settings_changed[key];
-      return (
-        <div key={key} className="text-xs text-[var(--color-text-tertiary)]">
-          <span className="font-mono">{key}</span>: <span className="font-mono">{String(row.from)}</span> →{" "}
-          <span className="font-mono">{String(row.to)}</span>
-        </div>
-      );
-    }
-    return (
-      <div key={key} className="text-xs text-[var(--color-text-tertiary)]">
-        <span className="font-mono">{key}</span>: <span className="font-mono">{String(settings[key])}</span>
-      </div>
-    );
-  };
-
   const stableSettingsKeys: string[] = [
     "default_send_to",
     "nudge_after_seconds",
@@ -188,6 +172,76 @@ export function TemplatePreviewDetails({
       if (aChanged !== bChanged) return aChanged ? -1 : 1;
       return 0;
     });
+  const guidanceChangedCount = diff?.guidance_changed || diff?.prompts_changed
+    ? Object.keys(diff.guidance_changed || diff.prompts_changed || {}).filter(
+        (k) => (diff.guidance_changed || diff.prompts_changed || {})[k]?.changed
+      ).length
+    : 0;
+  const diffSummaryParts = [
+    t("blueprint.previewActorsDiff", {
+      add: addIds.length,
+      update: updateIds.length,
+      remove: removeIds.length,
+      defaultValue: "智能体：+{{add}} / ~{{update}} / -{{remove}}",
+    }),
+    t("blueprint.previewSettingsChanges", {
+      count: settingsChangedKeys.length,
+      defaultValue: "设置变更：{{count}} 项",
+    }),
+    t("blueprint.previewGuidanceChanges", {
+      count: guidanceChangedCount,
+      defaultValue: "引导变更：{{count}} 项",
+    }),
+  ];
+  if (hasAutomation) {
+    diffSummaryParts.push(t("blueprint.previewAutomation", {
+      rules: automationRules,
+      snippets: automationSnippets,
+      defaultValue: "自动化：{{rules}} 条规则 / {{snippets}} 个模板",
+    }));
+  }
+  const fullSummaryParts = [
+    t("blueprint.previewActors", {
+      count: actors.length,
+      defaultValue: "智能体：{{count}} 个",
+    }),
+    t("blueprint.previewSettings", {
+      count: stableSettingsKeys.length,
+      defaultValue: "设置：{{count}} 项",
+    }),
+    promptOverrideCount > 0
+      ? t("blueprint.previewGuidanceOverrides", {
+          count: promptOverrideCount,
+          defaultValue: "引导：{{count}} 个覆盖",
+        })
+      : t("blueprint.previewGuidanceBuiltin", {
+          defaultValue: "引导：内置",
+        }),
+  ];
+  if (hasAutomation) {
+    fullSummaryParts.push(t("blueprint.previewAutomation", {
+      rules: automationRules,
+      snippets: automationSnippets,
+      defaultValue: "自动化：{{rules}} 条规则 / {{snippets}} 个模板",
+    }));
+  }
+
+  const formatSettingLine = (key: string) => {
+    if (diff?.settings_changed && diff.settings_changed[key]) {
+      const row = diff.settings_changed[key];
+      return (
+        <div key={key} className="text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-mono">{key}</span>: <span className="font-mono">{String(row.from)}</span> →{" "}
+          <span className="font-mono">{String(row.to)}</span>
+        </div>
+      );
+    }
+    return (
+      <div key={key} className="text-xs text-[var(--color-text-tertiary)]">
+        <span className="font-mono">{key}</span>: <span className="font-mono">{String(settings[key])}</span>
+      </div>
+    );
+  };
 
   const body = (
     <>
@@ -211,36 +265,23 @@ export function TemplatePreviewDetails({
 
         {diff ? (
           <div className="text-xs text-[var(--color-text-tertiary)]">
-            Actors: +{addIds.length} / ~{updateIds.length} / -{removeIds.length} • Settings changes:{" "}
-            {settingsChangedKeys.length} • Guidance changes:{" "}
-            {diff.guidance_changed || diff.prompts_changed
-              ? Object.keys(diff.guidance_changed || diff.prompts_changed || {}).filter(
-                  (k) => (diff.guidance_changed || diff.prompts_changed || {})[k]?.changed
-                ).length
-              : 0}
-            {hasAutomation ? (
-              <>
-                {" "}
-                • Automation: {automationRules} rule(s) / {automationSnippets} snippet(s)
-              </>
-            ) : null}
+            {diffSummaryParts.join(" • ")}
           </div>
         ) : (
           <div className="text-xs text-[var(--color-text-tertiary)]">
-            Actors: {actors.length} • Settings: {stableSettingsKeys.length} keys • Guidance:{" "}
-            {promptOverrideCount > 0 ? `${promptOverrideCount} override(s)` : "builtin"}
-            {hasAutomation ? ` • Automation: ${automationRules} rule(s) / ${automationSnippets} snippet(s)` : ""}
+            {fullSummaryParts.join(" • ")}
           </div>
         )}
       </div>
 
+      {!hideDetails ? (
       <details
         className="mt-3 rounded-lg border px-3 py-2 border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]"
         open={detailsOpen}
         onToggle={(e) => setDetailsOpen(e.currentTarget.open)}
       >
         <summary className="cursor-pointer text-xs font-medium text-[var(--color-text-secondary)]">
-          Preview details
+          {t("blueprint.previewDetails", "预览详情")}
         </summary>
 
         <div className="mt-2 space-y-3">
@@ -248,20 +289,20 @@ export function TemplatePreviewDetails({
             <div className="space-y-1">
               {addIds.length ? (
                 <div className="text-xs text-[var(--color-text-tertiary)]">
-                  Add: <span className="font-mono">{addIds.slice(0, 12).join(", ")}</span>
-                  {addIds.length > 12 ? ` (+${addIds.length - 12} more)` : ""}
+                  {t("blueprint.previewAdd", "新增")}：<span className="font-mono">{addIds.slice(0, 12).join(", ")}</span>
+                  {addIds.length > 12 ? t("blueprint.previewMore", { count: addIds.length - 12, defaultValue: "（另有 {{count}} 个）" }) : ""}
                 </div>
               ) : null}
               {updateIds.length ? (
                 <div className="text-xs text-[var(--color-text-tertiary)]">
-                  Update: <span className="font-mono">{updateIds.slice(0, 12).join(", ")}</span>
-                  {updateIds.length > 12 ? ` (+${updateIds.length - 12} more)` : ""}
+                  {t("blueprint.previewUpdate", "更新")}：<span className="font-mono">{updateIds.slice(0, 12).join(", ")}</span>
+                  {updateIds.length > 12 ? t("blueprint.previewMore", { count: updateIds.length - 12, defaultValue: "（另有 {{count}} 个）" }) : ""}
                 </div>
               ) : null}
               {removeIds.length ? (
                 <div className="text-xs text-[var(--color-text-tertiary)]">
-                  Remove: <span className="font-mono">{removeIds.slice(0, 12).join(", ")}</span>
-                  {removeIds.length > 12 ? ` (+${removeIds.length - 12} more)` : ""}
+                  {t("blueprint.previewRemove", "移除")}：<span className="font-mono">{removeIds.slice(0, 12).join(", ")}</span>
+                  {removeIds.length > 12 ? t("blueprint.previewMore", { count: removeIds.length - 12, defaultValue: "（另有 {{count}} 个）" }) : ""}
                 </div>
               ) : null}
             </div>
@@ -269,7 +310,7 @@ export function TemplatePreviewDetails({
 
           {actors.length > 0 ? (
             <div>
-              <div className="text-xs font-medium text-[var(--color-text-secondary)]">Actors</div>
+              <div className="text-xs font-medium text-[var(--color-text-secondary)]">{t("blueprint.previewActorsTitle", "智能体")}</div>
               <div className="mt-1 space-y-1">
                 {actors.slice(0, 20).map((a) => {
                   const id = String(a.id || "").trim();
@@ -277,7 +318,9 @@ export function TemplatePreviewDetails({
                   const title = String(a.title || "").trim();
                   const rt = String(a.runtime || "").trim();
                   const runner = String(a.runner || "").trim();
-                  const enabled = a.enabled === false ? "disabled" : "enabled";
+                  const enabled = a.enabled === false
+                    ? t("blueprint.previewActorDisabled", "已停用")
+                    : t("blueprint.previewActorEnabled", "已启用");
                   const cmd = formatCommand(a.command);
                   const autoload = asStringArray(a.capability_autoload);
                   return (
@@ -290,7 +333,7 @@ export function TemplatePreviewDetails({
                       {cmd ? <div className="mt-1 font-mono text-[11px] opacity-90">{cmd}</div> : null}
                       {autoload.length ? (
                         <div className="mt-1 text-[11px] opacity-90">
-                          autoload: <span className="font-mono">{autoload.join(", ")}</span>
+                          {t("blueprint.previewAutoload", "自动加载")}：<span className="font-mono">{autoload.join(", ")}</span>
                         </div>
                       ) : null}
                     </div>
@@ -298,7 +341,7 @@ export function TemplatePreviewDetails({
                 })}
                 {actors.length > 20 ? (
                   <div className="text-[11px] text-[var(--color-text-muted)]">
-                    …and {actors.length - 20} more
+                    {t("blueprint.previewMorePrefix", { count: actors.length - 20, defaultValue: "另有 {{count}} 项" })}
                   </div>
                 ) : null}
               </div>
@@ -307,12 +350,12 @@ export function TemplatePreviewDetails({
 
           {stableSettingsKeys.length > 0 ? (
             <div>
-              <div className="text-xs font-medium text-[var(--color-text-secondary)]">Settings</div>
+              <div className="text-xs font-medium text-[var(--color-text-secondary)]">{t("blueprint.previewSettingsTitle", "设置")}</div>
               <div className="mt-1 space-y-1">
                 {stableSettingsKeys.slice(0, 16).map((k) => formatSettingLine(k))}
                 {stableSettingsKeys.length > 16 ? (
                   <div className="text-[11px] text-[var(--color-text-muted)]">
-                    …and {stableSettingsKeys.length - 16} more
+                    {t("blueprint.previewMorePrefix", { count: stableSettingsKeys.length - 16, defaultValue: "另有 {{count}} 项" })}
                   </div>
                 ) : null}
               </div>
@@ -320,27 +363,38 @@ export function TemplatePreviewDetails({
           ) : null}
 
           <div>
-            <div className="text-xs font-medium text-[var(--color-text-secondary)]">Guidance</div>
+            <div className="text-xs font-medium text-[var(--color-text-secondary)]">{t("blueprint.previewGuidanceTitle", "引导")}</div>
             {(["preamble", "help"] as const).map((kind) => {
               const meta = promptMeta(kind);
               const label = formatPromptLabel(kind);
               const changed =
                 typeof meta.changed === "boolean" ? meta.changed : undefined;
               const changedLabel =
-                changed === undefined ? "" : changed ? "(changed)" : "(unchanged)";
+                changed === undefined ? "" : changed
+                  ? t("blueprint.previewChanged", "（已变更）")
+                  : t("blueprint.previewUnchanged", "（无变更）");
               const srcLabel = (() => {
                 const cur = formatSource(meta.currentSource);
                 const nxt = formatSource(meta.newSource);
                 if (cur && nxt) return `${cur} → ${nxt}`;
-                if (meta.p.source === "builtin") return "builtin";
-                if (meta.p.source === "home") return "override";
+                if (meta.p.source === "builtin") return t("blueprint.previewSourceBuiltin", "内置");
+                if (meta.p.source === "home") return t("blueprint.previewSourceOverride", "覆盖");
                 return "";
               })();
               const charLabel = (() => {
                 if (typeof meta.currentChars === "number" || typeof meta.newChars === "number") {
-                  return `${String(meta.currentChars ?? "")} → ${String(meta.newChars ?? "")} chars`;
+                  return t("blueprint.previewCharsDiff", {
+                    current: String(meta.currentChars ?? ""),
+                    next: String(meta.newChars ?? ""),
+                    defaultValue: "{{current}} → {{next}} 字符",
+                  });
                 }
-                if (typeof meta.p.chars === "number") return `${String(meta.p.chars)} chars`;
+                if (typeof meta.p.chars === "number") {
+                  return t("blueprint.previewChars", {
+                    count: meta.p.chars,
+                    defaultValue: "{{count}} 字符",
+                  });
+                }
                 return "";
               })();
               const summaryMeta = [srcLabel, charLabel].filter(Boolean).join(" • ");
@@ -360,7 +414,7 @@ export function TemplatePreviewDetails({
                     </pre>
                   ) : meta.p.source === "builtin" ? (
                     <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-                      Uses built-in defaults (no override file).
+                      {t("blueprint.previewBuiltInDefaults", "使用内置默认值（没有覆盖文件）。")}
                     </div>
                   ) : null}
                 </details>
@@ -369,6 +423,7 @@ export function TemplatePreviewDetails({
           </div>
         </div>
       </details>
+      ) : null}
     </>
   );
 

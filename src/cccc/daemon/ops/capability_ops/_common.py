@@ -17,16 +17,8 @@ from ....kernel.group import load_group
 from ....paths import ensure_home
 
 _SOURCE_IDS = (
-    "manual_import",
+    "cccc_builtin",
     "onecolleague_skill_library",
-    "agent_self_proposed",
-    "mcp_registry_official",
-    "anthropic_skills",
-    "github_skills_curated",
-    "skillsmp_remote",
-    "clawhub_remote",
-    "openclaw_skills_remote",
-    "clawskills_remote",
 )
 
 _MCP_REGISTRY_BASE = "https://registry.modelcontextprotocol.io"

@@ -42,6 +42,8 @@ def _policy_level_visible(level: str) -> bool:
 def _external_capability_safety_mode_from_source_levels(source_levels: Any) -> str:
     levels = source_levels if isinstance(source_levels, dict) else {}
     for source_id in _SOURCE_IDS:
+        if source_id == "cccc_builtin":
+            continue
         level = _normalize_policy_level(levels.get(source_id), default=_LEVEL_MOUNTED)
         if level != _LEVEL_INDEXED:
             return "normal"
@@ -63,21 +65,10 @@ def _policy_default_compiled() -> Dict[str, Any]:
     return {
         "source_levels": {
             "cccc_builtin": _LEVEL_MOUNTED,
-            "manual_import": _LEVEL_MOUNTED,
             "onecolleague_skill_library": _LEVEL_MOUNTED,
-            "agent_self_proposed": _LEVEL_INDEXED,
-            "anthropic_skills": _LEVEL_MOUNTED,
-            "github_skills_curated": _LEVEL_MOUNTED,
-            "skillsmp_remote": _LEVEL_MOUNTED,
-            "clawhub_remote": _LEVEL_MOUNTED,
-            "openclaw_skills_remote": _LEVEL_MOUNTED,
-            "clawskills_remote": _LEVEL_MOUNTED,
-            "mcp_registry_official": _LEVEL_MOUNTED,
         },
         "capability_levels": {},
-        "skill_source_levels": {
-            "agent_self_proposed": _LEVEL_MOUNTED,
-        },
+        "skill_source_levels": {},
         "role_pinned": {},
         "curated_mcp_entries": [],
         "curated_skill_entries": [],
@@ -208,7 +199,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
     source_levels = defaults.get("source_level") if isinstance(defaults.get("source_level"), dict) else {}
     for source_id, level in source_levels.items():
         sid = str(source_id or "").strip()
-        if not sid:
+        if not sid or sid not in _SOURCE_IDS:
             continue
         compiled["source_levels"][sid] = _normalize_policy_level(level, default=_LEVEL_INDEXED)
 
@@ -242,7 +233,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
         if not isinstance(item, dict):
             continue
         sid = str(item.get("source_id") or "").strip()
-        if not sid:
+        if not sid or sid not in _SOURCE_IDS:
             continue
         skill_source_levels[sid] = _normalize_policy_level(item.get("level"), default=_LEVEL_MOUNTED)
 
@@ -256,6 +247,8 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
         level = _normalize_policy_level(raw_item.get("level"), default=_LEVEL_MOUNTED)
         capability_levels[cid] = level
         source_id = str(raw_item.get("source_id") or default_source_id).strip() or default_source_id
+        if source_id not in _SOURCE_IDS:
+            return
         trust = str(raw_item.get("trust") or "").strip().lower()
         notes = str(raw_item.get("notes") or "").strip()
         name = str(raw_item.get("name") or "").strip()
@@ -301,13 +294,15 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
                 continue
             role_pinned.setdefault(role, set()).add(cid)
 
-    for item in skills.get("official_anthropic") if isinstance(skills.get("official_anthropic"), list) else []:
+    for item in skills.get("onecolleague") if isinstance(skills.get("onecolleague"), list) else []:
         if isinstance(item, dict):
-            _append_skill_entry(item, default_source_id="anthropic_skills")
+            _append_skill_entry(item, default_source_id="onecolleague_skill_library")
 
-    for item in skills.get("curated") if isinstance(skills.get("curated"), list) else []:
-        if isinstance(item, dict):
-            _append_skill_entry(item, default_source_id="github_skills_curated")
+    curated_skill_entries = [
+        item
+        for item in curated_skill_entries
+        if str(item.get("source_id") or "").strip() in _SOURCE_IDS
+    ]
 
     role_defaults = doc.get("role_defaults") if isinstance(doc.get("role_defaults"), dict) else {}
     for role_name, role_cfg in role_defaults.items():

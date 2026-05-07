@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
 import type { Actor } from "../../../types";
 import { buildHelpMarkdown, parseHelpMarkdown, type HelpChangedBlock, type ParsedHelpMarkdown } from "../../../utils/helpMarkdown";
@@ -55,7 +55,7 @@ export function GuidanceTab({ isDark, groupId }: {
   const [err, setErr] = useState("");
   const [prompts, setPrompts] = useState<Record<PromptKind, PromptInfo> | null>(null);
   const [actors, setActors] = useState<Actor[]>([]);
-  const [expandedKind, setExpandedKind] = useState<PromptKind | null>(null);
+  const [helpExpanded, setHelpExpanded] = useState(false);
   const [helpViewMode, setHelpViewMode] = useState<HelpViewMode>("structured");
   const [helpStructured, setHelpStructured] = useState<ParsedHelpMarkdown>(EMPTY_HELP);
   const [helpTouchedRaw, setHelpTouchedRaw] = useState(false);
@@ -171,24 +171,6 @@ export function GuidanceTab({ isDark, groupId }: {
     applyStructuredHelp({ ...helpStructured, actorNotes: nextActorNotes }, `actor:${actorId}`);
   };
 
-  const savePrompt = async (kind: PromptKind) => {
-    if (!groupId || !prompts) return;
-    setBusy(true);
-    setErr("");
-    try {
-      const resp = await api.updateGroupPrompt(groupId, kind, prompts[kind].content || "");
-      if (!resp.ok) {
-        setErr(resp.error?.message || t("guidance.failedToSave", { kind }));
-        return;
-      }
-      await load();
-    } catch {
-      setErr(t("guidance.failedToSave", { kind }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const saveHelp = async () => {
     if (!groupId || !prompts) return;
     setBusy(true);
@@ -243,7 +225,6 @@ export function GuidanceTab({ isDark, groupId }: {
     );
   }
 
-  const preamble = prompts?.preamble;
   const help = prompts?.help;
   const helpSource = help?.source || "builtin";
   const helpBadge =
@@ -255,15 +236,6 @@ export function GuidanceTab({ isDark, groupId }: {
         ? "bg-white/[0.04] text-white/68 border border-white/8"
         : "bg-gray-100 text-gray-700 border border-gray-200";
 
-  const preambleSource = preamble?.source || "builtin";
-  const preambleBadge =
-    preambleSource === "home"
-      ? isDark
-        ? "bg-white/[0.07] text-white border border-white/10"
-        : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)] border border-black/10"
-      : isDark
-        ? "bg-white/[0.04] text-white/68 border border-white/8"
-        : "bg-gray-100 text-gray-700 border border-gray-200";
   const settingsScrollAreaClass = "overflow-y-auto scrollbar-subtle pr-2 pb-2 [scrollbar-gutter:stable]";
   const promptShellClass = `overflow-hidden rounded-[22px] border backdrop-blur-xl ${
     isDark
@@ -306,25 +278,16 @@ export function GuidanceTab({ isDark, groupId }: {
   const navSectionTitleClass = `mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] ${
     isDark ? "text-white/36" : "text-gray-500"
   }`;
-  const overridesHintClass = `rounded-[18px] border px-4 py-3 text-[11px] leading-5 ${
-    isDark
-      ? "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] text-white/50"
-      : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,248,252,0.9))] text-[rgb(91,92,97)]"
-  }`;
 
-  const renderSourceBadge = (kind: PromptKind) => {
-    const badgeClass = kind === "help" ? helpBadge : preambleBadge;
-    const source = kind === "help" ? helpSource : preambleSource;
+  const renderSourceBadge = () => {
     return (
-      <div className={`inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium ${badgeClass}`}>
-        {source === "home" ? t("guidance.overrideBadge") : t("guidance.builtinBadge")}
+      <div className={`inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium ${helpBadge}`}>
+        {helpSource === "home" ? t("guidance.overrideBadge") : t("guidance.builtinBadge")}
       </div>
     );
   };
 
-  const renderPromptActions = (kind: PromptKind, expanded = false) => {
-    const source = kind === "help" ? helpSource : preambleSource;
-    const handleSave = kind === "help" ? () => void saveHelp() : () => void savePrompt("preamble");
+  const renderPromptActions = (expanded = false) => {
     return (
       <div
         className={
@@ -335,15 +298,15 @@ export function GuidanceTab({ isDark, groupId }: {
               }`
         }
       >
-        <button className={primaryButtonClass(busy)} onClick={handleSave} disabled={busy}>
+        <button className={primaryButtonClass(busy)} onClick={() => void saveHelp()} disabled={busy}>
           {t("common:save")}
         </button>
         <button
           type="button"
           className={secondaryButtonClass()}
-          onClick={() => void resetPrompt(kind)}
-          disabled={busy || source !== "home"}
-          title={source === "home" ? t("guidance.resetHint") : t("guidance.noOverride")}
+          onClick={() => void resetPrompt("help")}
+          disabled={busy || helpSource !== "home"}
+          title={helpSource === "home" ? t("guidance.resetHint") : t("guidance.noOverride")}
         >
           {t("common:reset")}
         </button>
@@ -359,55 +322,6 @@ export function GuidanceTab({ isDark, groupId }: {
       </div>
     );
   };
-
-  const renderPreambleCard = (expanded = false) => (
-    <div className={expanded ? "flex h-full min-h-0 flex-col" : promptShellClass}>
-      <div className={expanded ? "flex items-start justify-between gap-3" : promptHeaderClass}>
-        <div className="min-w-0">
-          <div className={`text-sm font-semibold ${promptHeaderTextClass}`}>{t("guidance.preambleTitle")}</div>
-          <div className={`text-[11px] ${promptHintClass}`}>{t("guidance.preambleHint")}</div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {!expanded ? (
-            <button
-              type="button"
-              className={secondaryButtonClass("sm")}
-              onClick={() => setExpandedKind("preamble")}
-              disabled={busy}
-              title={t("guidance.expandTitle")}
-            >
-              {t("guidance.expand")}
-            </button>
-          ) : null}
-          {renderSourceBadge("preamble")}
-        </div>
-      </div>
-
-      <div className={expanded ? "mt-3 min-h-0 flex flex-1 flex-col" : promptBodyClass(expanded)}>
-        {preamble?.path ? (
-          <div className={promptPathClass}>
-            <span className="truncate">{preamble.path}</span>
-          </div>
-        ) : null}
-
-        <div className={`${editorSurfaceSoftClass} ${expanded ? "min-h-0 flex flex-1 flex-col" : ""}`}>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <label className={labelClass(isDark)}>{t("guidance.markdown")}</label>
-            <div className={editorMetaBadgeClass}>Markdown</div>
-          </div>
-          <textarea
-            className={`${editorTextareaClass} font-mono text-[12px] ${expanded ? "min-h-[440px] flex-1" : ""}`}
-            style={expanded ? undefined : { minHeight: 220 }}
-            value={preamble?.content || ""}
-            onChange={(e) => setPromptContent("preamble", e.target.value)}
-            spellCheck={false}
-          />
-        </div>
-      </div>
-
-      {renderPromptActions("preamble", expanded)}
-    </div>
-  );
 
   const commonScope = {
     id: "common" as HelpScopeId,
@@ -532,14 +446,14 @@ export function GuidanceTab({ isDark, groupId }: {
             <button
               type="button"
               className={secondaryButtonClass("sm")}
-              onClick={() => setExpandedKind("help")}
+              onClick={() => setHelpExpanded(true)}
               disabled={busy}
               title={t("guidance.expandTitle")}
             >
               {t("guidance.expand")}
             </button>
           ) : null}
-          {renderSourceBadge("help")}
+          {renderSourceBadge()}
         </div>
       </div>
 
@@ -684,7 +598,7 @@ export function GuidanceTab({ isDark, groupId }: {
         </div>
       </div>
 
-      {renderPromptActions("help", expanded)}
+      {renderPromptActions(expanded)}
     </div>
   );
 
@@ -692,34 +606,28 @@ export function GuidanceTab({ isDark, groupId }: {
     <div className="space-y-3">
       {err ? <div className={`text-sm ${isDark ? "text-rose-300" : "text-red-600"}`}>{err}</div> : null}
 
-      <div className={overridesHintClass}>
-        <Trans i18nKey="guidance.overridesHint" ns="settings" components={[<span className="font-mono" />]} />
-      </div>
-
-      {renderPreambleCard()}
       {renderHelpCard()}
 
-      {expandedKind
+      {helpExpanded
         ? (
           <BodyPortal>
             <div
-              key={expandedKind}
               className="fixed inset-0 z-[1000] animate-fade-in"
               role="dialog"
               aria-modal="true"
               onPointerDown={(e) => {
-                if (e.target === e.currentTarget) setExpandedKind(null);
+                if (e.target === e.currentTarget) setHelpExpanded(false);
               }}
             >
               <div className="absolute inset-0 glass-overlay" />
               <div className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
-                  <button type="button" className={secondaryButtonClass("sm")} onClick={() => setExpandedKind(null)}>
+                  <button type="button" className={secondaryButtonClass("sm")} onClick={() => setHelpExpanded(false)}>
                     {t("common:close")}
                   </button>
                 </div>
                 <div className={settingsDialogBodyClass}>
-                  {expandedKind === "help" ? renderHelpCard(true) : renderPreambleCard(true)}
+                  {renderHelpCard(true)}
                 </div>
               </div>
             </div>

@@ -37,8 +37,6 @@ from ._common import (
     _error,
     _ensure_group,
     _is_foreman,
-    _env_int,
-    _env_bool,
     _quota_limit,
 )
 from ._documents import (
@@ -61,11 +59,7 @@ from ._policy import (
     _allowlist_policy,
     _allowlist_effective_snapshot,
 )
-from ._remote import (
-    _tokenize_search_text,
-    _remote_search_mcp_registry_records,
-    _remote_search_skill_records,
-)
+from ._remote import _tokenize_search_text
 from ._install import (
     _catalog_staleness_seconds,
 )
@@ -584,26 +578,17 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
                 _upsert_entry(row)
         for row in external_rows:
             if isinstance(row, dict):
+                source_id = str(row.get("source_id") or "").strip()
+                if source_id not in _SOURCE_IDS:
+                    continue
                 _upsert_entry(row)
 
         for cap_id, row in recent_success.items():
             cid = str(cap_id or "").strip()
             if not cid:
                 continue
-            if cid in entries:
+            if cid not in entries:
                 continue
-            kind = "skill" if cid.startswith("skill:") else ("mcp_toolpack" if cid.startswith("mcp:") else "")
-            _upsert_entry(
-                {
-                    "capability_id": cid,
-                    "kind": kind,
-                    "name": _display_name_from_capability_id(cid),
-                    "description_short": "Recently successful capability",
-                    "source_id": "runtime_recent_success",
-                    "sync_state": "runtime",
-                    "qualification_status": _QUAL_QUALIFIED,
-                }
-            )
 
         source_cfg_map: Dict[str, Dict[str, Any]] = {}
         effective_sources = effective_doc.get("sources") if isinstance(effective_doc.get("sources"), list) else []
@@ -611,7 +596,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
             if not isinstance(row, dict):
                 continue
             sid = str(row.get("source_id") or "").strip()
-            if not sid:
+            if not sid or sid not in _SOURCE_IDS:
                 continue
             source_cfg_map[sid] = {
                 "enabled": bool(row.get("enabled", True)),
@@ -622,6 +607,8 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
         for cap_id, rec in entries.items():
             kind = str(rec.get("kind") or "").strip()
             source_id = str(rec.get("source_id") or "").strip()
+            if source_id not in _SOURCE_IDS:
+                continue
             policy_level = _effective_policy_level(
                 policy,
                 capability_id=cap_id,
@@ -761,14 +748,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
         total_count = len(rows)
         items = rows[offset: offset + limit]
 
-        source_ids = sorted(
-            {
-                *_SOURCE_IDS,
-                *(source_states.keys() if isinstance(source_states, dict) else []),
-                *(source_levels.keys() if isinstance(source_levels, dict) else []),
-                *(source_cfg_map.keys() if isinstance(source_cfg_map, dict) else []),
-            }
-        )
+        source_ids = sorted(_SOURCE_IDS)
         sources: Dict[str, Dict[str, Any]] = {}
         for source_id in source_ids:
             state = source_states.get(source_id) if isinstance(source_states.get(source_id), dict) else {}
@@ -858,9 +838,6 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
 
         external_records: List[Dict[str, Any]] = []
         source_states: Dict[str, Dict[str, Any]] = {}
-        remote_augmented = False
-        remote_added = 0
-        remote_error = ""
         with _CATALOG_LOCK:
             catalog_path, catalog_doc = _pkg()._load_catalog_doc()
             if include_external and _pkg()._ensure_curated_catalog_records(catalog_doc, policy=policy):
@@ -871,7 +848,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
                     if isinstance(catalog_doc.get("records"), dict)
                     else {}
                 ).values():
-                    if isinstance(item, dict):
+                    if isinstance(item, dict) and str(item.get("source_id") or "").strip() in _SOURCE_IDS:
                         external_records.append(dict(item))
             source_states = _render_source_states(catalog_doc)
 
@@ -922,137 +899,6 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
             visible_records.append(next_rec)
         records = visible_records
         records = [r for r in records if _search_matches(query, r)]
-
-        remote_limit = max(1, min(_env_int("CCCC_CAPABILITY_SEARCH_REMOTE_FALLBACK_LIMIT", 40), 100))
-        target_fill = max(1, min(limit, remote_limit))
-        should_remote_augment = (
-            include_external
-            and bool(str(query or "").strip())
-            and len(records) < target_fill
-            and kind_filter in {"", "mcp_toolpack", "skill"}
-            and _env_bool("CCCC_CAPABILITY_SEARCH_REMOTE_FALLBACK", True)
-        )
-        if should_remote_augment:
-            remote_rows: List[Dict[str, Any]] = []
-            remote_errors: List[str] = []
-            needed = max(1, target_fill - len(records))
-            try:
-                if kind_filter in {"", "mcp_toolpack"} and _env_bool("CCCC_CAPABILITY_SOURCE_MCP_REGISTRY_ENABLED", True):
-                    remote_rows.extend(_remote_search_mcp_registry_records(query=query, limit=needed))
-            except Exception as e:
-                remote_errors.append(f"mcp_registry:{e}")
-            try:
-                if kind_filter in {"", "skill"}:
-                    skill_limit = max(
-                        1,
-                        min(_env_int("CCCC_CAPABILITY_SEARCH_REMOTE_SKILL_LIMIT", remote_limit), 100),
-                    )
-                    remote_rows.extend(
-                        _remote_search_skill_records(
-                            query=query,
-                            limit=min(needed, skill_limit),
-                            source_filter=source_filter,
-                        )
-                    )
-            except Exception as e:
-                remote_errors.append(f"skills:{e}")
-
-            if remote_rows:
-                existing = {str(r.get("capability_id") or "") for r in records if isinstance(r, dict)}
-                accepted: List[Dict[str, Any]] = []
-                for rec in remote_rows:
-                    if kind_filter and str(rec.get("kind") or "").strip().lower() != kind_filter:
-                        continue
-                    if source_filter and str(rec.get("source_id") or "").strip() != source_filter:
-                        continue
-                    if trust_filter and str(rec.get("trust_tier") or "").strip().lower() != trust_filter:
-                        continue
-                    if qualification_filter and str(rec.get("qualification_status") or "").strip().lower() != qualification_filter:
-                        continue
-                    if not _search_matches(query, rec):
-                        continue
-                    cap_id = str(rec.get("capability_id") or "").strip()
-                    if not cap_id or cap_id in existing:
-                        continue
-                    policy_level = _effective_policy_level(
-                        policy,
-                        capability_id=cap_id,
-                        kind=str(rec.get("kind") or ""),
-                        source_id=str(rec.get("source_id") or ""),
-                        actor_role=actor_role,
-                    )
-                    if (not _policy_level_visible(policy_level)) and (cap_id not in enabled_set):
-                        policy_hidden_count += 1
-                        continue
-                    existing.add(cap_id)
-                    accepted_rec = dict(rec)
-                    accepted_rec["policy_level"] = policy_level
-                    block_entry = blocked_caps.get(cap_id) if isinstance(blocked_caps.get(cap_id), dict) else None
-                    if isinstance(block_entry, dict):
-                        accepted_rec["qualification_status"] = _QUAL_BLOCKED
-                        reason_text = str(block_entry.get("reason") or "").strip()
-                        scope_text = str(block_entry.get("scope") or "").strip().lower()
-                        accepted_rec["qualification_reasons"] = (
-                            [f"runtime_block:{reason_text}"]
-                            if reason_text
-                            else [f"runtime_block_{scope_text or 'group'}"]
-                        )
-                        accepted_rec["blocked_scope"] = scope_text or "group"
-                    accepted.append(accepted_rec)
-                if accepted:
-                    records.extend(accepted)
-                    remote_augmented = True
-                    remote_added = len(accepted)
-                    with _CATALOG_LOCK:
-                        path, doc = _pkg()._load_catalog_doc()
-                        rows = doc.get("records") if isinstance(doc.get("records"), dict) else {}
-                        changed = False
-                        touched_sources: set[str] = set()
-                        for rec in accepted:
-                            cap_id = str(rec.get("capability_id") or "").strip()
-                            if not cap_id:
-                                continue
-                            store_rec = dict(rec)
-                            store_rec.pop("blocked_scope", None)
-                            rec_reasons = store_rec.get("qualification_reasons")
-                            reasons = (
-                                [str(x).strip() for x in rec_reasons if str(x).strip()]
-                                if isinstance(rec_reasons, list)
-                                else []
-                            )
-                            if (
-                                str(store_rec.get("qualification_status") or "").strip().lower() == _QUAL_BLOCKED
-                                and any(r.startswith("runtime_block") for r in reasons)
-                            ):
-                                store_rec["qualification_status"] = _QUAL_QUALIFIED
-                                store_rec["qualification_reasons"] = []
-                            source_id = str(store_rec.get("source_id") or "").strip()
-                            if source_id:
-                                touched_sources.add(source_id)
-                            if rows.get(cap_id) != store_rec:
-                                rows[cap_id] = store_rec
-                                changed = True
-                        if changed:
-                            doc["records"] = rows
-                            now_iso = utc_now_iso()
-                            sources_doc = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
-                            for source_id in touched_sources:
-                                state = (
-                                    sources_doc.get(source_id)
-                                    if isinstance(sources_doc.get(source_id), dict)
-                                    else _source_state_template("never")
-                                )
-                                state["sync_state"] = "remote_fallback"
-                                state["last_synced_at"] = now_iso
-                                state["staleness_seconds"] = 0
-                                state["error"] = ""
-                                sources_doc[source_id] = state
-                            doc["sources"] = sources_doc
-                            _pkg()._refresh_source_record_counts(doc)
-                            _pkg()._save_catalog_doc(path, doc)
-                        source_states = _render_source_states(doc)
-            if remote_errors:
-                remote_error = "; ".join(str(x) for x in remote_errors if str(x))
 
         def _rank(item: Dict[str, Any]) -> Tuple[int, int, int, int, int, str]:
             cap_id = str(item.get("capability_id") or "")
@@ -1202,9 +1048,9 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
                     "qualification_status": qualification_filter,
                 },
                 "search_diagnostics": {
-                    "remote_augmented": bool(remote_augmented),
-                    "remote_added": int(remote_added),
-                    "remote_error": str(remote_error or ""),
+                    "remote_augmented": False,
+                    "remote_added": 0,
+                    "remote_error": "",
                     "policy_hidden_count": int(policy_hidden_count),
                 },
             },
@@ -1493,7 +1339,12 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
             external_records = {
                 str(cid): dict(rec)
                 for cid, rec in records_raw.items()
-                if isinstance(rec, dict) and str(cid) and (not str(cid).startswith("pack:"))
+                if (
+                    isinstance(rec, dict)
+                    and str(cid)
+                    and (not str(cid).startswith("pack:"))
+                    and str(rec.get("source_id") or "").strip() in _SOURCE_IDS
+                )
             }
 
         actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []

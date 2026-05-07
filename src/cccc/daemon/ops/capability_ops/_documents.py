@@ -73,15 +73,8 @@ def _new_catalog_doc() -> Dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "sources": {
-            "manual_import": _source_state_template("never"),
-            "agent_self_proposed": _source_state_template("never"),
-            "mcp_registry_official": _source_state_template("never"),
-            "anthropic_skills": _source_state_template("never"),
-            "github_skills_curated": _source_state_template("never"),
-            "skillsmp_remote": _source_state_template("never"),
-            "clawhub_remote": _source_state_template("never"),
-            "openclaw_skills_remote": _source_state_template("never"),
-            "clawskills_remote": _source_state_template("never"),
+            "cccc_builtin": _source_state_template("never"),
+            "onecolleague_skill_library": _source_state_template("never"),
         },
         "records": {},
     }
@@ -262,6 +255,9 @@ def _normalize_catalog_doc(raw: Any) -> Dict[str, Any]:
             if not cap_id or not isinstance(item, dict):
                 continue
             candidate = dict(item)
+            source_id = str(candidate.get("source_id") or "").strip()
+            if source_id not in _SOURCE_IDS:
+                continue
             candidate["capability_id"] = cap_id
             _normalize_catalog_enable_supported(cap_id, candidate)
             records[cap_id] = candidate
