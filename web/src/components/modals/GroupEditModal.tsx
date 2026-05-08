@@ -100,7 +100,7 @@ export function GroupEditModal({
             {t("groupEdit.title")}
           </div>
         </div>
-        <div className="scrollbar-hide flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_28%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] px-6 pb-6 pt-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_32%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:px-7 sm:pb-7 sm:pt-5">
+        <div className="scrollbar-hide flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(219,234,254,0.82),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgb(248,251,255),rgb(240,247,255))] px-6 pb-6 pt-4 dark:bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.16),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(13,24,42,0.98),rgba(8,15,28,1))] sm:px-7 sm:pb-7 sm:pt-5">
           <div className="space-y-5">
           <div>
             <label className="mb-2 block text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
@@ -128,8 +128,8 @@ export function GroupEditModal({
               placeholder={t("groupEdit.descriptionPlaceholder")}
             />
           </div>
-          <Surface className="overflow-hidden border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(250,248,245,0.96))] shadow-[0_24px_60px_-40px_rgba(15,23,42,0.18)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(24,26,31,0.9),rgba(13,14,18,0.98))]" padding="none">
-            <div className="border-b border-[var(--glass-border-subtle)] px-5 py-4 sm:px-6 bg-[rgba(18,18,20,0.018)] dark:bg-white/[0.03]">
+          <Surface className="overflow-hidden border-[var(--glass-accent-border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(239,246,255,0.95))] shadow-[0_24px_60px_-40px_rgba(59,130,246,0.22)] dark:border-[var(--glass-accent-border)] dark:bg-[linear-gradient(180deg,rgba(12,22,42,0.92),rgba(8,15,28,0.98))]" padding="none">
+            <div className="border-b border-[var(--glass-accent-border)] px-5 py-4 sm:px-6 bg-[rgba(59,130,246,0.04)] dark:bg-white/[0.04]">
               <div className="text-sm font-semibold text-[var(--color-text-primary)]">
                 {t("groupEdit.projectRoot")}
               </div>
@@ -172,7 +172,7 @@ export function GroupEditModal({
           </Surface>
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <Button
-              className="min-w-[180px] flex-1 bg-[rgb(35,36,37)] text-white shadow-[0_18px_34px_-22px_rgba(15,23,42,0.52)] hover:bg-black dark:bg-white dark:text-[rgb(20,20,22)] dark:hover:bg-white/92"
+              className="min-w-[180px] flex-1 bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110 dark:text-[var(--color-text-inverse)]"
               size="lg"
               onClick={onSave}
               disabled={!title.trim() || busy === "group-update"}
@@ -182,7 +182,7 @@ export function GroupEditModal({
             <Button
               size="lg"
               variant="outline"
-              className="border-black/10 bg-white/82 text-[rgb(35,36,37)] shadow-[0_10px_24px_-22px_rgba(15,23,42,0.4)] hover:bg-white dark:border-white/12 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]"
+              className="border-[var(--glass-accent-border)] bg-white/90 text-[var(--color-accent-primary)] shadow-[0_10px_24px_-22px_rgba(59,130,246,0.35)] hover:bg-[var(--glass-accent-bg)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]"
               onClick={onCancel}
             >
               {t("common:cancel")}
