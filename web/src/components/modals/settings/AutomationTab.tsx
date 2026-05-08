@@ -25,7 +25,14 @@ import { AutomationPoliciesSection } from "./AutomationPoliciesSection";
 import { AutomationRuleEditorModal } from "./AutomationRuleEditorModal";
 import { AutomationRuleList } from "./AutomationRuleList";
 import { AutomationSnippetModal } from "./AutomationSnippetModal";
-import { cardClass, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from "./types";
+import {
+  dangerButtonClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+} from "./types";
 
 interface AutomationTabProps {
   isDark: boolean;
@@ -536,7 +543,7 @@ export function AutomationTab(props: AutomationTabProps) {
 
   if (!props.groupId) {
     return (
-      <div className={cardClass()}>
+      <div className={settingsWorkspacePanelClass(isDark)}>
         <div className="text-sm text-[var(--color-text-secondary)]">{t("automation.openFromGroup")}</div>
       </div>
     );
@@ -546,10 +553,14 @@ export function AutomationTab(props: AutomationTabProps) {
     editingRuleSourceId && status[editingRuleSourceId] ? status[editingRuleSourceId] : {};
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div>
-        <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t("automation.title")}</h3>
-        <p className="text-xs mt-1 text-[var(--color-text-muted)]">{t("automation.description")}</p>
+    <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className={settingsWorkspaceShellClass(isDark)}>
+        <div className={settingsWorkspaceHeaderClass(isDark)}>
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("automation.title")}</h3>
+            <p className="mt-1 max-w-3xl text-xs text-[var(--color-text-muted)]">{t("automation.description")}</p>
+          </div>
+        </div>
       </div>
 
       <AutomationPoliciesSection

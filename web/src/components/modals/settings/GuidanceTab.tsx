@@ -5,11 +5,16 @@ import type { Actor } from "../../../types";
 import { buildHelpMarkdown, parseHelpMarkdown, type HelpChangedBlock, type ParsedHelpMarkdown } from "../../../utils/helpMarkdown";
 import { BodyPortal } from "../../ui/BodyPortal";
 import {
-  cardClass,
   inputClass,
   labelClass,
   primaryButtonClass,
   secondaryButtonClass,
+  settingsWorkspaceActionBarClass,
+  settingsWorkspaceBodyClass,
+  settingsWorkspaceHeaderClass,
+  settingsWorkspacePanelClass,
+  settingsWorkspaceShellClass,
+  settingsWorkspaceSoftPanelClass,
   settingsDialogBodyClass,
   settingsDialogPanelClass,
 } from "./types";
@@ -215,8 +220,8 @@ export function GuidanceTab({ isDark, groupId }: {
 
   if (!groupId) {
     return (
-      <div className={cardClass(isDark)}>
-        <div className={`text-sm ${isDark ? "text-white/72" : "text-gray-700"}`}>{t("guidance.openFromGroup")}</div>
+      <div className={settingsWorkspacePanelClass(isDark)}>
+        <div className="text-sm text-[var(--color-text-secondary)]">{t("guidance.openFromGroup")}</div>
       </div>
     );
   }
@@ -225,49 +230,21 @@ export function GuidanceTab({ isDark, groupId }: {
   const helpSource = help?.source || "builtin";
   const helpBadge =
     helpSource === "home"
-      ? isDark
-        ? "bg-white/[0.07] text-white border border-white/10"
-        : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)] border border-black/10"
-      : isDark
-        ? "bg-white/[0.04] text-white/68 border border-white/8"
-        : "bg-gray-100 text-gray-700 border border-gray-200";
+      ? "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]"
+      : "border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]";
 
   const settingsScrollAreaClass = "overflow-y-auto scrollbar-subtle pr-2 pb-2 [scrollbar-gutter:stable]";
-  const promptShellClass = `overflow-hidden rounded-[22px] border backdrop-blur-xl ${
-    isDark
-      ? "border-white/10 bg-[linear-gradient(180deg,rgba(19,20,24,0.88),rgba(10,11,14,0.96))] shadow-[0_28px_100px_rgba(0,0,0,0.36)]"
-      : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(246,248,251,0.96))] shadow-[0_28px_100px_rgba(15,23,42,0.06)]"
-  }`;
-  const promptHeaderClass = `flex items-start justify-between gap-4 px-4 py-4 sm:px-5 sm:py-4 ${
-    isDark ? "border-b border-white/8 bg-white/[0.025]" : "border-b border-black/6 bg-[rgba(18,18,20,0.018)]"
-  }`;
-  const promptHeaderTextClass = isDark ? "text-white" : "text-[rgb(22,24,29)]";
-  const promptBodyClass = (expanded = false) => `px-4 py-4 sm:px-5 sm:py-5 ${expanded ? "min-h-0 flex flex-1 flex-col" : "space-y-4"}`;
-  const editorSurfaceSoftClass = `rounded-[18px] border px-4 py-3 sm:px-4 sm:py-4 ${
-    isDark
-      ? "border-white/8 bg-white/[0.025]"
-      : "border-black/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(246,248,251,0.88))]"
-  }`;
+  const promptShellClass = settingsWorkspaceShellClass(isDark);
+  const promptHeaderClass = settingsWorkspaceHeaderClass(isDark);
+  const promptHeaderTextClass = "text-[var(--color-text-primary)]";
+  const promptBodyClass = (expanded = false) => `${settingsWorkspaceBodyClass} ${expanded ? "min-h-0 flex flex-1 flex-col" : ""}`;
+  const editorSurfaceSoftClass = settingsWorkspaceSoftPanelClass(isDark);
   const editorTextareaClass = `${inputClass(isDark)} min-h-[320px] resize-y border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0`;
-  const editorMetaBadgeClass = `inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium ${
-    isDark ? "bg-white/[0.05] text-white/66" : "bg-black/[0.05] text-gray-600"
-  }`;
-  const segmentedControlClass = `inline-flex rounded-full border p-1 ${
-    isDark ? "border-white/8 bg-white/[0.025]" : "border-black/8 bg-black/[0.03]"
-  }`;
-  const navigationPanelClass = `rounded-[18px] border p-3 ${
-    isDark
-      ? "border-white/10 bg-[linear-gradient(180deg,rgba(24,26,31,0.86),rgba(14,15,19,0.96))]"
-      : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,251,0.92))]"
-  }`;
-  const workspacePanelClass = `rounded-[18px] border p-3.5 sm:p-4 ${
-    isDark
-      ? "border-white/10 bg-[linear-gradient(180deg,rgba(24,26,31,0.9),rgba(13,14,18,0.98))]"
-      : "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(246,248,251,0.96))]"
-  }`;
-  const navSectionTitleClass = `mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] ${
-    isDark ? "text-white/36" : "text-gray-500"
-  }`;
+  const editorMetaBadgeClass = "inline-flex items-center rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--color-text-secondary)]";
+  const segmentedControlClass = "inline-flex rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] p-1";
+  const navigationPanelClass = settingsWorkspacePanelClass(isDark);
+  const workspacePanelClass = settingsWorkspacePanelClass(isDark);
+  const navSectionTitleClass = "mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]";
 
   const renderSourceBadge = () => {
     return (
@@ -283,9 +260,7 @@ export function GuidanceTab({ isDark, groupId }: {
         className={
           expanded
             ? "mt-4 flex flex-wrap items-center gap-2"
-            : `mt-0 flex flex-wrap items-center gap-2 border-t px-4 py-3 sm:px-5 ${
-                isDark ? "border-white/8 bg-white/[0.02]" : "border-black/6 bg-black/[0.015]"
-              }`
+            : settingsWorkspaceActionBarClass(isDark)
         }
       >
         <button className={primaryButtonClass(busy)} onClick={() => void saveHelp()} disabled={busy}>
@@ -389,19 +364,15 @@ export function GuidanceTab({ isDark, groupId }: {
         type="button"
         className={`w-full text-left rounded-2xl border px-3 py-2.5 transition-colors ${
           active
-            ? isDark
-              ? "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
-              : "border-black/10 bg-white text-[rgb(35,36,37)] shadow-[0_8px_30px_rgba(15,23,42,0.08)]"
-            : isDark
-              ? "border-white/6 bg-white/[0.018] text-white/70 hover:bg-white/[0.04]"
-              : "border-black/6 bg-black/[0.02] text-gray-800 hover:bg-black/[0.03]"
+            ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] shadow-[var(--glass-accent-shadow)]"
+            : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--color-text-primary)]"
         }`}
         onClick={() => setSelectedHelpScope(item.id)}
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="font-medium truncate">{item.title}</span>
           {item.roleLabel ? (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${isDark ? "bg-white/[0.05] text-white/62" : "bg-gray-100 text-gray-600"}`}>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
               {item.roleLabel}
             </span>
           ) : null}
@@ -436,7 +407,7 @@ export function GuidanceTab({ isDark, groupId }: {
         <div className={`${expanded ? "min-h-0 flex flex-1 flex-col" : ""}`}>
           <div className={`flex items-start justify-between gap-4 ${expanded ? "pb-4" : "mb-4"}`}>
             <div className="min-w-0">
-              <div className={`max-w-[54ch] text-[11px] leading-5 ${isDark ? "text-white/40" : "text-gray-500"}`}>
+              <div className="max-w-[54ch] text-[11px] leading-5 text-[var(--color-text-muted)]">
                 {t("guidance.helpEditorHint", "Structured mode edits common, role, and actor notes; raw mode keeps full-file control.")}
               </div>
             </div>
@@ -445,10 +416,8 @@ export function GuidanceTab({ isDark, groupId }: {
                 type="button"
                 className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
                   helpViewMode === "structured"
-                    ? isDark ? "bg-white text-[rgb(35,36,37)]" : "bg-[rgb(35,36,37)] text-white"
-                    : isDark
-                      ? "text-white/68 hover:bg-white/[0.05]"
-                      : "text-gray-700 hover:bg-white"
+                    ? "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]"
+                    : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--color-text-primary)]"
                 }`}
                 onClick={() => setHelpViewMode("structured")}
               >
@@ -458,10 +427,8 @@ export function GuidanceTab({ isDark, groupId }: {
                 type="button"
                 className={`px-3 py-1.5 text-xs rounded-full transition-colors ${
                   helpViewMode === "raw"
-                    ? isDark ? "bg-white text-[rgb(35,36,37)]" : "bg-[rgb(35,36,37)] text-white"
-                    : isDark
-                      ? "text-white/68 hover:bg-white/[0.05]"
-                      : "text-gray-700 hover:bg-white"
+                    ? "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]"
+                    : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--color-text-primary)]"
                 }`}
                 onClick={() => setHelpViewMode("raw")}
               >
@@ -486,7 +453,7 @@ export function GuidanceTab({ isDark, groupId }: {
                     {renderHelpScopeButton(peerScope)}
                   </div>
 
-                  <div className={`pt-3 border-t ${isDark ? "border-white/8" : "border-gray-200"}`}>
+                  <div className="pt-3 border-t border-[var(--glass-border-subtle)]">
                     <div className={navSectionTitleClass}>
                       {t("guidance.actorNotesTitle", "Actor Notes")}
                     </div>
@@ -495,14 +462,14 @@ export function GuidanceTab({ isDark, groupId }: {
                         {actorScopes.map((item) => renderHelpScopeButton(item))}
                       </div>
                     ) : (
-                      <div className={`rounded-lg border border-dashed px-3 py-4 text-sm ${isDark ? "border-white/8 text-white/36" : "border-gray-200 text-gray-400"}`}>
+                      <div className="rounded-lg border border-dashed border-[var(--glass-border-subtle)] px-3 py-4 text-sm text-[var(--color-text-muted)]">
                         {t("guidance.noActorsForStructuredHelp", "No actors available in this group yet.")}
                       </div>
                     )}
                   </div>
 
                   {orphanActorScopes.length ? (
-                    <div className={`pt-3 border-t ${isDark ? "border-white/8" : "border-gray-200"}`}>
+                    <div className="pt-3 border-t border-[var(--glass-border-subtle)]">
                       <div className={navSectionTitleClass}>
                         {t("guidance.orphanActorNotesTitle", "Other actor notes")}
                       </div>
@@ -517,18 +484,18 @@ export function GuidanceTab({ isDark, groupId }: {
               <div className={`${workspacePanelClass} ${expanded ? "min-h-0 flex flex-col" : ""}`}>
                 <div className="mb-4 flex items-start gap-4">
                   <div className="min-w-0">
-                    <div className={`text-[11px] font-medium uppercase tracking-[0.16em] ${isDark ? "text-white/44" : "text-gray-500"}`}>
+                    <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
                       {t("guidance.editKind", { kind: selectedHelpScopeItem.title })}
                     </div>
-                    <div className={`mt-1 text-sm font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>
+                    <div className="mt-1 text-sm font-semibold text-[var(--color-text-primary)]">
                       {selectedHelpScopeItem.title}
                     </div>
-                    <div className={`mt-1 text-[11px] ${isDark ? "text-white/40" : "text-gray-500"}`}>
+                    <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
                       {selectedHelpScopeItem.hint}
                     </div>
                   </div>
                   {selectedHelpScopeItem.roleLabel ? (
-                    <div className={`ml-auto shrink-0 rounded-full px-2.5 py-1 text-[10px] ${isDark ? "bg-white/[0.05] text-white/62" : "bg-black/[0.05] text-gray-600"}`}>
+                    <div className="ml-auto shrink-0 rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] px-2.5 py-1 text-[10px] text-[var(--color-text-secondary)]">
                       {selectedHelpScopeItem.roleLabel}
                     </div>
                   ) : null}

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import type { AutomationRule, AutomationRuleAction } from "../../../types";
 import { BellIcon as AppBellIcon, SparklesIcon } from "../../Icons";
-import { cardClass, inputClass, labelClass } from "./types";
+import { inputClass, labelClass, settingsWorkspacePanelClass } from "./types";
 
 export const BellIcon = ({ className }: { className?: string }) => <AppBellIcon className={className} />;
 export const SparkIcon = ({ className }: { className?: string }) => <SparklesIcon className={className} />;
@@ -44,9 +44,9 @@ export const Section = ({
   description: string;
   children: React.ReactNode;
 }) => (
-  <div className={cardClass(isDark)}>
+  <div className={settingsWorkspacePanelClass(isDark)}>
     <div className="flex items-center gap-2 mb-1">
-      <div className="rounded-md border border-black/8 bg-[rgb(245,245,245)] p-1.5 text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white">
+      <div className="rounded-md border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] p-1.5 text-[var(--color-accent-primary)]">
         <Icon className="w-4 h-4" />
       </div>
       <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</h3>
