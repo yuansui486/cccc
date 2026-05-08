@@ -90,7 +90,7 @@ function modeButtonClass(selected: boolean): string {
   return [
     "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
     selected
-      ? "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white dark:border-white dark:bg-white dark:text-[rgb(35,36,37)]"
+      ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white"
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
@@ -288,7 +288,7 @@ export function AddActorModal({
                       className={classNames(
                         "h-auto justify-start whitespace-normal border text-sm font-medium transition-all",
                         newActorRole === "peer"
-                          ? "border-[rgb(35,36,37)] bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white"
+                          ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white"
                           : !hasForeman
                             ? "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)] cursor-not-allowed"
                             : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"

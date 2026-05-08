@@ -19,9 +19,9 @@ export const primaryButtonClass = (_busy?: boolean) =>
   `glass-btn-accent inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm min-h-[44px] font-medium text-[var(--color-accent-primary)] transition-[background-color,border-color,color,box-shadow] disabled:opacity-50 disabled:cursor-not-allowed`;
 
 export const secondaryButtonClass = (size: "sm" | "md" = "md") =>
-  `inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] hover:bg-[var(--glass-bg-hover)] active:bg-[var(--glass-bg-active)] ${
+  `inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] hover:bg-[var(--glass-accent-bg-hover)] active:bg-[var(--glass-accent-bg-hover)] ${
     size === "sm" ? "px-2.5 py-1.5 text-xs min-h-[36px]" : "px-3.5 py-2.5 text-sm min-h-[44px]"
-  } cursor-pointer font-medium text-[rgb(35,36,37)] dark:text-white shadow-sm transition-[background-color,border-color,box-shadow,color] disabled:opacity-50 disabled:cursor-not-allowed`;
+  } cursor-pointer font-medium text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1] shadow-sm transition-[background-color,border-color,box-shadow,color] disabled:opacity-50 disabled:cursor-not-allowed`;
 
 export const dangerButtonClass = (size: "sm" | "md" = "md") =>
   `inline-flex items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/15 hover:bg-rose-500/22 active:bg-rose-500/28 ${

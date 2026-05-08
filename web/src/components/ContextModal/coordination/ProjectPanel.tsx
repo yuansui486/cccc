@@ -3,6 +3,7 @@ import { LazyMarkdownRenderer } from "../../LazyMarkdownRenderer";
 import { classNames } from "../../../utils/classNames";
 import type { ContextTranslator } from "../model";
 import type { ContextModalUi } from "../ui";
+import { ExpandIcon } from "../../Icons";
 
 interface ProjectPanelProps {
   expanded?: boolean;
@@ -73,9 +74,10 @@ export function ProjectPanel({
               type="button"
               onClick={onExpand}
               disabled={projectBusy}
-              className={ui.buttonSecondaryClass}
+              className={classNames(ui.buttonSecondaryClass, "min-w-[5.5rem]")}
             >
-              {tr("context.expand", "Expand")}
+              <ExpandIcon size={14} aria-hidden="true" />
+              <span>{tr("context.expand", "Expand")}</span>
             </button>
           ) : null}
           {editingProject ? (

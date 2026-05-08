@@ -79,7 +79,7 @@ export function SteeringPanel({
   const tabButtonClass = (active: boolean) => classNames(
     "rounded-xl px-3 py-2 text-sm font-medium transition-colors",
     active
-      ? "border border-black/10 bg-[rgb(35,36,37)] text-white shadow-[0_10px_24px_-20px_rgba(15,23,42,0.34)] dark:border-white/12 dark:bg-white dark:text-[rgb(20,20,22)]"
+      ? "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] shadow-[var(--glass-accent-shadow)] dark:border-[var(--glass-accent-border)] dark:bg-white dark:text-[rgb(20,20,22)]"
       : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
   );
   const notesCardClass = classNames("rounded-xl border p-3 text-sm", "glass-card");
@@ -99,7 +99,7 @@ export function SteeringPanel({
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 xl:max-w-[18rem] xl:justify-end">
-            <span className={classNames("rounded-full px-2.5 py-1 text-xs", "border border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white")}>{tr("context.active", "Active")} · {Number(tasksSummary.active || 0)}</span>
+            <span className={classNames("rounded-full px-2.5 py-1 text-xs", "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-white/12 dark:bg-white/[0.08] dark:text-white")}>{tr("context.active", "Active")} · {Number(tasksSummary.active || 0)}</span>
             <span className={classNames("rounded-full px-2.5 py-1 text-xs", "bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{tr("context.blocked", "Blocked")} · {attentionCounts.blocked}</span>
             <span className={classNames("rounded-full px-2.5 py-1 text-xs", "bg-amber-500/15 text-amber-600 dark:text-amber-400")}>{tr("context.waitingUser", "Waiting user")} · {attentionCounts.waitingUser}</span>
             <span className={classNames("rounded-full px-2.5 py-1 text-xs", "glass-panel text-[var(--color-text-secondary)]")}>{tr("context.unassigned", "Unassigned")} · {unassignedCount}</span>

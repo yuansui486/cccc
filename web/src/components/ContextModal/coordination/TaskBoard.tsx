@@ -384,18 +384,18 @@ export function TaskBoard({
               ["handoff", tr("context.pendingHandoffs", "Pending handoffs"), attentionCounts.pendingHandoffs],
               ["unassigned", tr("context.unassigned", "Unassigned"), unassignedCount],
             ].map(([value, label, count]) => (
-              <button
-                key={String(value)}
-                type="button"
-                onClick={() => onTaskFilterChange(value as TaskFilterValue)}
-                className={classNames(
-                  ui.chipBaseClass,
-                  taskFilter === value
-                    ? "border-black/10 bg-[rgb(35,36,37)] text-white shadow-[0_10px_24px_-20px_rgba(15,23,42,0.3)] dark:border-white/12 dark:bg-white dark:text-[rgb(20,20,22)]"
+                <button
+                  key={String(value)}
+                  type="button"
+                  onClick={() => onTaskFilterChange(value as TaskFilterValue)}
+                  className={classNames(
+                    ui.chipBaseClass,
+                    taskFilter === value
+                    ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] shadow-[var(--glass-accent-shadow)] dark:border-white/12 dark:bg-white dark:text-[rgb(20,20,22)]"
                     : ""
-                )}
-              >
-                {label} · {count}
+                  )}
+                >
+                  {label} · {count}
               </button>
             ))}
             {hasArchivedTasks ? (

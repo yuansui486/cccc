@@ -113,7 +113,7 @@ function modeButtonClass(selected: boolean): string {
   return [
     "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
     selected
-      ? "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white dark:border-white dark:bg-white dark:text-[rgb(35,36,37)]"
+      ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white"
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
@@ -988,7 +988,7 @@ export function EditActorModal({
             </Button>
             <Button
               type="button"
-              className="w-full md:flex-1 border-[rgb(35,36,37)] bg-[rgb(35,36,37)] font-semibold text-white hover:border-black hover:bg-black dark:border-white dark:bg-white dark:text-[rgb(35,36,37)] dark:hover:border-white dark:hover:bg-white/92"
+              className="w-full md:flex-1 border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] font-semibold text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]"
               onClick={() => void submit(true)}
               disabled={saveDisabled}
             >
