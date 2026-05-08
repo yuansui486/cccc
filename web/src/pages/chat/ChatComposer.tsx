@@ -3,14 +3,12 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Actor, GroupMeta, LedgerEvent, PresentationMessageRef, ReplyTarget } from "../../types";
 import { classNames } from "../../utils/classNames";
-import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon, PetIcon } from "../../components/Icons";
+import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon } from "../../components/Icons";
 import { ScrollFade } from "../../components/ScrollFade";
 import { getPresentationRefChipLabel } from "../../utils/presentationRefs";
 import { useTranslation } from 'react-i18next';
 import { VoiceSecretaryComposerControl, type VoiceSecretaryCaptureMode } from "./VoiceSecretaryComposerControl";
 import { GroupCombobox } from "../../components/GroupCombobox";
-import { updateSettings } from "../../services/api";
-import { useBuiltInAssistantStore, useGroupStore, useUIStore } from "../../stores";
 
 function cleanVoicePromptContextText(value: unknown, maxLen = 240): string {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -133,14 +131,6 @@ export function ChatComposer({
   const [voiceCaptureMode, setVoiceCaptureMode] = useState<VoiceSecretaryCaptureMode>("prompt");
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const { t } = useTranslation('chat');
-  const groupSettings = useGroupStore((state) => state.groupSettings);
-  const refreshSettings = useGroupStore((state) => state.refreshSettings);
-  const refreshInternalRuntimeActors = useGroupStore((state) => state.refreshInternalRuntimeActors);
-  const requestAssistantOpen = useBuiltInAssistantStore((state) => state.requestOpen);
-  const showError = useUIStore((state) => state.showError);
-  const showNotice = useUIStore((state) => state.showNotice);
-  const [petBusy, setPetBusy] = useState(false);
-  const petEnabled = Boolean(groupSettings?.desktop_pet_enabled);
 
   const readRootFontScale = () => {
     if (typeof document === "undefined") return 1;
@@ -220,49 +210,6 @@ export function ChatComposer({
       document.removeEventListener("touchstart", onPointerDown);
     };
   }, [showModeMenu]);
-
-  useEffect(() => {
-    if (!selectedGroupId || groupSettings) return;
-    void refreshSettings(selectedGroupId);
-  }, [groupSettings, refreshSettings, selectedGroupId]);
-
-  const activatePet = useCallback(async () => {
-    const gid = String(selectedGroupId || "").trim();
-    if (!gid || busy === "send" || petBusy) return;
-    if (petEnabled) {
-      requestAssistantOpen(gid, "pet");
-      return;
-    }
-    setPetBusy(true);
-    try {
-      const resp = await updateSettings(gid, { desktop_pet_enabled: true });
-      if (!resp.ok) {
-        showError(resp.error.message);
-        return;
-      }
-      await refreshSettings(gid);
-      await refreshInternalRuntimeActors(gid);
-      showNotice({
-        message: t("builtInAssistantPetEnabled", { defaultValue: "PET enabled for this group." }),
-      });
-      requestAssistantOpen(gid, "pet");
-    } catch {
-      showError(t("builtInAssistantPetToggleFailed", { defaultValue: "Failed to update PET." }));
-    } finally {
-      setPetBusy(false);
-    }
-  }, [
-    busy,
-    petBusy,
-    petEnabled,
-    refreshInternalRuntimeActors,
-    refreshSettings,
-    requestAssistantOpen,
-    selectedGroupId,
-    showError,
-    showNotice,
-    t,
-  ]);
 
   const chipBaseClass =
     "flex h-6 flex-shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2 text-[10px] font-medium leading-none transition-all sm:px-2.5 sm:text-[11px]";
@@ -899,43 +846,6 @@ export function ChatComposer({
                   title={fileDisabledReason}
                 >
                   <AttachmentIcon size={18} />
-                </button>
-
-                <button
-                  type="button"
-                  className={classNames(
-                    "relative flex h-9 w-9 items-center justify-center rounded-lg border text-[var(--color-text-secondary)] transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                    petEnabled
-                      ? isDark
-                        ? "border-amber-300/25 bg-amber-300/12 text-amber-100 hover:bg-amber-300/18"
-                        : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                      : isDark
-                        ? "border-white/[0.08] bg-white/[0.04] hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-                        : "border-black/[0.06] bg-white hover:bg-black/5 hover:text-gray-800",
-                  )}
-                  onClick={() => void activatePet()}
-                  disabled={!selectedGroupId || busy === "send" || petBusy}
-                  aria-label={
-                    petEnabled
-                      ? t("builtInAssistantPetOpen", { defaultValue: "Open PET" })
-                      : t("builtInAssistantPetTurnOn", { defaultValue: "Turn PET on" })
-                  }
-                  title={
-                    petEnabled
-                      ? t("builtInAssistantPetOpen", { defaultValue: "Open PET" })
-                      : t("builtInAssistantPetTurnOn", { defaultValue: "Turn PET on" })
-                  }
-                >
-                  <PetIcon size={17} aria-hidden="true" />
-                  <span
-                    className={classNames(
-                      "absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full",
-                      petEnabled
-                        ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]"
-                        : isDark ? "bg-white/20" : "bg-gray-300",
-                    )}
-                    aria-hidden="true"
-                  />
                 </button>
 
                 <VoiceSecretaryComposerControl
