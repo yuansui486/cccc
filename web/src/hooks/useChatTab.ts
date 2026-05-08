@@ -1228,6 +1228,9 @@ export function useChatTab({
     }
 
     applyImmediateComposerFeedback();
+    // User-initiated sends should snap the conversation to the latest message
+    // immediately, even if the user was browsing older history.
+    onMessageSent?.();
     sendInFlightRef.current = true;
     try {
       const to = toTokens;
@@ -1314,7 +1317,6 @@ export function useChatTab({
         setChatFilter(selectedGroupId, "all");
         setChatMobileSurface(selectedGroupId, "messages");
       }
-      onMessageSent?.();
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "send failed";

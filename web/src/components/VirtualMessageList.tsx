@@ -13,6 +13,7 @@ import type { ChatFollowMode } from "../stores/useUIStore";
 import {
   getAutoFollowTrigger,
   getStableMessageKey,
+  shouldAutoScrollToBottom,
   shouldUseVirtualizedMessageList,
 } from "./virtualMessageListHelpers";
 
@@ -697,7 +698,16 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     prevTailMutationSnapshotRef.current = nextSnapshot;
     if (!didInitialScrollRef.current) return;
     if (isLoadingHistory) return;
-    if (!shouldForceStickToBottom()) return;
+    const forceStickToBottom = shouldForceStickToBottom();
+    if (
+      !shouldAutoScrollToBottom({
+        followMode: followModeRef.current,
+        isAtBottom: isAtBottomRef.current,
+        forceStickToBottom,
+      })
+    ) {
+      return;
+    }
     if (
       !getAutoFollowTrigger({
         previousTailSnapshot: prevTailSnapshot,
@@ -710,7 +720,15 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     }
 
     scheduleScroll(() => {
-      if (!shouldForceStickToBottom()) return;
+      if (
+        !shouldAutoScrollToBottom({
+          followMode: followModeRef.current,
+          isAtBottom: isAtBottomRef.current,
+          forceStickToBottom: shouldForceStickToBottom(),
+        })
+      ) {
+        return;
+      }
       scrollToBottom();
     });
   }, [displayMessages, isLoadingHistory, scheduleScroll, scrollToBottom, shouldForceStickToBottom, tailMutationSignature]);
@@ -729,9 +747,23 @@ const VirtualMessageListInner = function VirtualMessageListInner({
       isContainerResizingRef.current = true;
       lastScrollTopRef.current = scrollEl.scrollTop;
 
-      if (shouldForceStickToBottom()) {
+      if (
+        shouldAutoScrollToBottom({
+          followMode: followModeRef.current,
+          isAtBottom: isAtBottomRef.current,
+          forceStickToBottom: shouldForceStickToBottom(),
+        })
+      ) {
         scheduleScroll(() => {
-          if (!shouldForceStickToBottom()) return;
+          if (
+            !shouldAutoScrollToBottom({
+              followMode: followModeRef.current,
+              isAtBottom: isAtBottomRef.current,
+              forceStickToBottom: shouldForceStickToBottom(),
+            })
+          ) {
+            return;
+          }
           scrollToBottom();
         });
       }

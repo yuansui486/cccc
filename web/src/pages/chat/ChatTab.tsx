@@ -103,6 +103,12 @@ export function ChatTab({
   setMentionSelectedIndex,
   setMentionFilter,
 }: ChatTabProps) {
+  const [forceStickToBottomToken, setForceStickToBottomToken] = useState(0);
+
+  const handleMessageSent = useCallback(() => {
+    setForceStickToBottomToken((value) => value + 1);
+  }, []);
+
   // Use the refactored hook for business logic
   const {
     // Chat state
@@ -181,6 +187,7 @@ export function ChatTab({
     fileInputRef,
     chatAtBottomRef,
     scrollRef,
+    onMessageSent: handleMessageSent,
   });
 
   const { t } = useTranslation('chat');
@@ -670,6 +677,7 @@ export function ChatTab({
                   chatUnreadCount={chatUnreadCount}
                   onScrollChange={handleScrollChange}
                   onScrollSnapshot={handleScrollSnapshot}
+                  forceStickToBottomToken={forceStickToBottomToken}
                   isLoadingHistory={listIsLoadingHistory}
                   hasMoreHistory={listHasMoreHistory}
                   onLoadMore={loadMoreHistory}
