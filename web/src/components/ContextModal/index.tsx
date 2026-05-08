@@ -966,6 +966,7 @@ export function ContextModal({
       projectText={projectText}
       notifyAgents={notifyAgents}
       onExpand={() => setProjectExpanded(true)}
+      onCollapse={() => {}}
       onCancelEdit={() => {
         setEditingProject(false);
         setProjectText(String(projectMd?.content || ""));
@@ -1188,6 +1189,7 @@ export function ContextModal({
                     projectText={projectText}
                     notifyAgents={notifyAgents}
                     onExpand={() => {}}
+                    onCollapse={() => setProjectExpanded(false)}
                     onCancelEdit={() => {
                       setEditingProject(false);
                       setProjectText(String(projectMd?.content || ""));

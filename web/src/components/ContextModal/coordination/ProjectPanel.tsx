@@ -3,7 +3,7 @@ import { LazyMarkdownRenderer } from "../../LazyMarkdownRenderer";
 import { classNames } from "../../../utils/classNames";
 import type { ContextTranslator } from "../model";
 import type { ContextModalUi } from "../ui";
-import { ExpandIcon } from "../../Icons";
+import { CollapseIcon, ExpandIcon } from "../../Icons";
 
 interface ProjectPanelProps {
   expanded?: boolean;
@@ -20,6 +20,7 @@ interface ProjectPanelProps {
   projectText: string;
   notifyAgents: boolean;
   onExpand: () => void;
+  onCollapse: () => void;
   onCancelEdit: () => void;
   onEditProject: () => void;
   onProjectTextChange: (value: string) => void;
@@ -42,6 +43,7 @@ export function ProjectPanel({
   projectText,
   notifyAgents,
   onExpand,
+  onCollapse,
   onCancelEdit,
   onEditProject,
   onProjectTextChange,
@@ -79,7 +81,17 @@ export function ProjectPanel({
               <ExpandIcon size={14} aria-hidden="true" />
               <span>{tr("context.expand", "Expand")}</span>
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={onCollapse}
+              disabled={projectBusy}
+              className={classNames(ui.buttonSecondaryClass, "min-w-[5.5rem]")}
+            >
+              <CollapseIcon size={14} aria-hidden="true" />
+              <span>{tr("context.collapse", "Collapse")}</span>
+            </button>
+          )}
           {editingProject ? (
             <button
               type="button"
