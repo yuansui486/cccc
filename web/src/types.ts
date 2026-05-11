@@ -41,9 +41,6 @@ export type EventAttachment = {
   bytes?: number;
   mime_type?: string;
   local_preview_url?: string;
-  download_url?: string;
-  decryption_key?: string;
-  aeskey?: string;
 };
 
 // Local-only preview attachment used by optimistic messages before upload confirmation.
@@ -54,9 +51,6 @@ export type OptimisticAttachment = {
   bytes?: number;
   mime_type?: string;
   local_preview_url: string;
-  download_url?: string;
-  decryption_key?: string;
-  aeskey?: string;
 };
 
 export type MessageAttachment = EventAttachment | OptimisticAttachment;
@@ -194,6 +188,7 @@ export type LedgerEvent = {
   _read_status?: Record<string, boolean>;
   _ack_status?: Record<string, boolean>;
   _obligation_status?: Record<string, ObligationStatus>;
+  _web_model_delivery_status?: WebModelDeliveryStatusPayload;
 };
 
 export type HeadlessStreamEvent = {
@@ -209,6 +204,15 @@ export type LedgerEventStatusPayload = {
   read_status?: Record<string, boolean>;
   ack_status?: Record<string, boolean>;
   obligation_status?: Record<string, ObligationStatus>;
+  web_model_delivery_status?: WebModelDeliveryStatusPayload;
+};
+
+export type WebModelDeliveryStatusPayload = {
+  state?: "submitting" | "submitted" | "pending" | "ambiguous" | "failed" | string;
+  actor_id?: string;
+  delivery_id?: string;
+  updated_at?: string;
+  detail?: string;
 };
 
 export type Actor = {
@@ -228,6 +232,7 @@ export type Actor = {
   command?: string[];
   env?: Record<string, string>;
   capability_autoload?: string[];
+  capability_hidden?: string[];
   runner?: string;
   runner_effective?: string;
   runtime?: string;
@@ -238,6 +243,10 @@ export type Actor = {
   profile_revision_applied?: number;
   updated_at?: string;
   unread_count?: number;
+  web_model_queued_count?: number;
+  web_model_queued_after_event_id?: string;
+  web_model_queued_latest_event_id?: string;
+  web_model_queued_latest_ts?: string;
 };
 
 export type ActorProfile = {
@@ -345,38 +354,15 @@ export type CapabilitySourceState = {
   error?: string;
 };
 
-export type OneColleagueCapabilitySource = {
+export type CapabilitySourceInstance = {
+  source_instance_key: string;
   source_id: string;
-  enabled: boolean;
-  base_url?: string;
+  label?: string;
+  source_uri?: string;
+  record_count?: number;
+  capability_ids?: string[];
   last_synced_at?: string;
-  last_success_at?: string;
-  last_error?: string;
-  last_cursor?: string;
-  updated_since?: string;
-  last_summary?: Record<string, number>;
-};
-
-export type OneColleaguePendingCapability = {
-  pending_id: string;
-  source_id?: string;
-  capability_id: string;
-  kind?: string;
-  name?: string;
-  status?: string;
-  old_version?: string;
-  new_version?: string;
-  checksum?: string;
-  risk_level?: string;
-  risk_reasons?: string[];
-  requires_confirmation?: boolean;
-  diff?: Array<Record<string, unknown>>;
-  created_at?: string;
-  updated_at?: string;
-  imported_at?: string;
-  record?: CapabilityImportRecord | null;
-  import_result?: Record<string, unknown>;
-  probe_result?: Record<string, unknown>;
+  sync_state?: string;
 };
 
 export type CapabilityBlockEntry = {
@@ -403,13 +389,15 @@ export type CapabilityEnabledEntry = {
 export type CapabilityStateResult = {
   group_id: string;
   actor_id: string;
-  autoload_capabilities?: string[];
-  group_autoload_capabilities?: string[];
-  actor_autoload_capabilities?: string[];
-  profile_autoload_capabilities?: string[];
   enabled: CapabilityEnabledEntry[];
   enabled_capabilities?: string[];
-  dynamic_tools?: Array<{ name: string; capability_id: string; description?: string }>;
+  dynamic_tools?: Array<{
+    name: string;
+    capability_id: string;
+    description?: string;
+    real_tool_name?: string;
+    inputSchema?: Record<string, unknown>;
+  }>;
   active_capsule_skills?: Array<{
     capability_id: string;
     name?: string;
@@ -420,6 +408,7 @@ export type CapabilityStateResult = {
     source_uri?: string;
     policy_level?: string;
   }>;
+  actor_hidden_capabilities?: string[];
   capability_usage?: CapabilityUsageSummary;
 };
 
@@ -444,6 +433,7 @@ export type CapabilityUsageSummary = {
   session_enabled?: CapabilityUsageActorEntry[];
   actor_autoload?: CapabilityUsageActorEntry[];
   profile_autoload?: CapabilityUsageActorEntry[];
+  actor_hidden?: CapabilityUsageActorEntry[];
   blocked?: boolean;
   blocked_scope?: string;
   blocked_reason?: string;
@@ -644,6 +634,14 @@ export type PresentationBrowserSurfaceState = {
   last_frame_seq?: number;
   last_frame_at?: string | null;
   controller_attached?: boolean;
+  viewer?: {
+    kind?: string | null;
+    vnc?: {
+      available?: boolean;
+      error?: string | null;
+      started_at?: string | null;
+    } | null;
+  } | null;
 };
 
 export type ContextAttention = {
@@ -709,12 +707,6 @@ export type GroupSettings = {
   terminal_transcript_notify_tail: boolean;
   terminal_transcript_notify_lines: number;
 
-  capability_defaults?: {
-    autoload_capabilities?: string[];
-    default_scope?: "actor" | "session";
-    session_ttl_seconds?: number;
-  };
-  panorama_enabled?: boolean;
   desktop_pet_enabled: boolean;
 };
 
@@ -735,6 +727,53 @@ export type BuiltinAssistant = {
   ui?: Record<string, unknown>;
 };
 
+export type AssistantServiceModel = {
+  model_id: string;
+  kind?: string;
+  runtime_id?: string;
+  title?: string;
+  description?: string;
+  status?: "not_installed" | "downloading" | "installing" | "ready" | "failed" | "unknown" | string;
+  available?: boolean;
+  installed?: boolean;
+  install_dir?: string;
+  installed_at?: string;
+  updated_at?: string;
+  command_ready?: boolean;
+  offline_ready?: boolean;
+  streaming_ready?: boolean;
+  diarization_ready?: boolean;
+  offline?: Record<string, unknown>;
+  streaming?: Record<string, unknown>;
+  diarization?: Record<string, unknown>;
+  manifest_sha256?: string;
+  downloaded_bytes?: number;
+  total_size_bytes?: number;
+  disk_usage_bytes?: number;
+  progress_percent?: number;
+  current_artifact_path?: string;
+  artifact_index?: number;
+  artifact_count?: number;
+  error?: Record<string, unknown>;
+  artifacts?: Array<{ path?: string; size_bytes?: number }>;
+};
+
+export type AssistantServiceRuntime = {
+  runtime_id: string;
+  status?: "not_installed" | "installing" | "ready" | "failed" | string;
+  available?: boolean;
+  installed?: boolean;
+  install_dir?: string;
+  python?: string;
+  packages?: string[];
+  modules?: Record<string, boolean>;
+  missing_modules?: string[];
+  installed_at?: string;
+  updated_at?: string;
+  disk_usage_bytes?: number;
+  error?: Record<string, unknown>;
+};
+
 export type AssistantStateResult = {
   group_id: string;
   assistants?: BuiltinAssistant[];
@@ -751,6 +790,11 @@ export type AssistantStateResult = {
   prompt_draft?: AssistantVoicePromptDraft;
   ask_requests?: AssistantVoiceAskFeedback[];
   latest_ask_request?: AssistantVoiceAskFeedback;
+  service_models?: AssistantServiceModel[];
+  service_models_by_id?: Record<string, AssistantServiceModel>;
+  service_runtime?: AssistantServiceRuntime;
+  service_runtimes?: AssistantServiceRuntime[];
+  service_runtimes_by_id?: Record<string, AssistantServiceRuntime>;
 };
 
 export type AssistantVoiceTrigger = {
@@ -810,6 +854,32 @@ export type AssistantVoiceTranscriptSegmentResult = {
   input_event?: Record<string, unknown>;
   input_event_created?: boolean;
   input_notify_emitted?: boolean;
+  input_notify_error?: string;
+  actor_woken?: boolean;
+  actor_wake_error?: string;
+  actor_notify_delivered?: boolean;
+  actor_notify_delivery_error?: string;
+};
+
+export type AssistantVoiceMeetingSession = {
+  schema?: number;
+  group_id?: string;
+  session_id: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+  sample_rate?: number;
+  audio_duration_ms?: number;
+  language?: string;
+  capture_mode?: string;
+  document_path?: string;
+  latest_partial?: string;
+  last_final_text?: string;
+  diarization_ready?: boolean;
+  diarization_artifact_path?: string;
+  segments?: Record<string, unknown>[];
+  diarization?: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
 };
 
 export type AssistantVoiceDocumentMutationResult = {
@@ -819,6 +889,11 @@ export type AssistantVoiceDocumentMutationResult = {
   input_event?: Record<string, unknown>;
   input_event_created?: boolean;
   input_notify_emitted?: boolean;
+  input_notify_error?: string;
+  actor_woken?: boolean;
+  actor_wake_error?: string;
+  actor_notify_delivered?: boolean;
+  actor_notify_delivery_error?: string;
   event?: unknown;
   request_id?: string;
 };
@@ -864,6 +939,11 @@ export type AssistantVoiceInputResult = {
   input_event?: Record<string, unknown>;
   input_event_created?: boolean;
   input_notify_emitted?: boolean;
+  input_notify_error?: string;
+  actor_woken?: boolean;
+  actor_wake_error?: string;
+  actor_notify_delivered?: boolean;
+  actor_notify_delivery_error?: string;
   event?: unknown;
   request_id?: string;
 };
@@ -944,32 +1024,6 @@ export type WebAccessSession = {
     peer_runtime?: "hidden" | "visible" | string;
     pet_runtime?: "hidden" | "visible" | string;
   };
-};
-
-export type DoneHubStatus =
-  | "idle"
-  | "authenticating"
-  | "connected"
-  | "refreshing"
-  | "error";
-
-export type DoneHubSession = {
-  base_url: string;
-  access_token: string;
-  username: string;
-  display_name: string;
-  group: string;
-  quota: number;
-  used_quota: number;
-  role: number;
-  status: number;
-};
-
-export type DoneHubSavedLogin = {
-  base_url: string;
-  username: string;
-  password: string;
-  remember_password: boolean;
 };
 
 export type WebBranding = {
@@ -1304,6 +1358,7 @@ export const SUPPORTED_RUNTIMES = [
   "neovate",
   "gemini",
   "kimi",
+  "web_model",
   "custom",
 ] as const;
 
@@ -1318,6 +1373,7 @@ export const RUNTIME_INFO: Record<string, { label: string; desc: string }> = {
   gemini: { label: "Gemini CLI", desc: "" },
   kimi: { label: "Kimi CLI", desc: "" },
   neovate: { label: "Neovate Code", desc: "" },
+  web_model: { label: "ChatGPT Web Model", desc: "ChatGPT browser delivery + remote MCP connector" },
   custom: { label: "Custom", desc: "Manual MCP installation needed" },
 };
 
@@ -1367,6 +1423,10 @@ export const RUNTIME_COLORS: Record<string, {
   neovate: {
     bg: "bg-fuchsia-900/30", text: "text-fuchsia-300", border: "border-fuchsia-600/50", dot: "bg-fuchsia-400",
     bgLight: "bg-fuchsia-50", textLight: "text-fuchsia-700", borderLight: "border-fuchsia-300", dotLight: "bg-fuchsia-500"
+  },
+  web_model: {
+    bg: "bg-indigo-900/30", text: "text-indigo-300", border: "border-indigo-600/50", dot: "bg-indigo-400",
+    bgLight: "bg-indigo-50", textLight: "text-indigo-700", borderLight: "border-indigo-300", dotLight: "bg-indigo-500"
   },
   custom: {
     bg: "bg-zinc-800/50", text: "text-zinc-300", border: "border-zinc-500/50", dot: "bg-zinc-400",

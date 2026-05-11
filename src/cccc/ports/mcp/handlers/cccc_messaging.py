@@ -13,6 +13,14 @@ from ....kernel.group import load_group
 from ....util.conv import coerce_bool
 from ..common import MCPError, _call_daemon_or_raise
 
+_MAX_BLOB_READ_BYTES = 1_000_000
+_DEFAULT_BLOB_READ_BYTES = 200_000
+
+
+def _mcp_error(code: str, message: str, recommended_action: str = "") -> MCPError:
+    details = {"recommended_action": recommended_action} if str(recommended_action or "").strip() else None
+    return MCPError(code=code, message=message, details=details)
+
 
 def _find_target_actor(*, group_id: str, actor_id: str) -> Optional[Dict[str, Any]]:
     group = load_group(str(group_id or "").strip())
@@ -159,7 +167,11 @@ def message_reply(
 ) -> Dict[str, Any]:
     """Reply to a message."""
     if not str(reply_to or "").strip():
-        raise MCPError(code="missing_event_id", message="missing event_id (reply target)")
+        raise _mcp_error(
+            code="missing_event_id",
+            message="missing event_id (reply target)",
+            recommended_action="Use the event_id/reply_to from the message or delivered turn envelope; if unsure, inspect cccc_inbox_list or the current turn events.",
+        )
     text = _normalize_runtime_escaped_text(group_id=group_id, actor_id=actor_id, text=text)
     prio = str(priority or "normal").strip() or "normal"
     if prio not in ("normal", "attention"):
@@ -190,12 +202,67 @@ def blob_path(*, group_id: str, rel_path: str) -> Dict[str, Any]:
         raise MCPError(code="group_not_found", message=f"group not found: {group_id}")
     rp = str(rel_path or "").strip()
     if not rp:
-        raise MCPError(code="missing_rel_path", message="missing rel_path")
+        raise _mcp_error(
+            code="missing_rel_path",
+            message="missing rel_path",
+            recommended_action="Use the rel_path from the CCCC attachment, usually state/blobs/<sha256>_<name>.",
+        )
     # Auto-prefix state/blobs/ when caller provides just the blob filename.
     if not rp.startswith("state/blobs/"):
         rp = f"state/blobs/{rp}"
     full = resolve_blob_attachment_path(group, rel_path=rp)
     return {"path": str(full)}
+
+
+def blob_info(*, group_id: str, rel_path: str) -> Dict[str, Any]:
+    """Return metadata for a blob attachment."""
+
+    resolved = blob_path(group_id=group_id, rel_path=rel_path)
+    path = Path(str(resolved.get("path") or ""))
+    if not path.exists() or not path.is_file():
+        raise _mcp_error(
+            code="not_found",
+            message=f"blob not found: {rel_path}",
+            recommended_action="Check the exact attachment rel_path from the inbox/turn payload; pass the full state/blobs/... path or the blob filename.",
+        )
+    try:
+        size = int(path.stat().st_size)
+    except Exception:
+        size = 0
+    mt, _ = mimetypes.guess_type(path.name)
+    return {
+        "path": str(path),
+        "rel_path": str(rel_path or "").strip(),
+        "title": path.name,
+        "mime_type": str(mt or ""),
+        "bytes": size,
+    }
+
+
+def blob_read(*, group_id: str, rel_path: str, max_bytes: Any = _DEFAULT_BLOB_READ_BYTES) -> Dict[str, Any]:
+    """Read a text blob attachment by relative path."""
+
+    info = blob_info(group_id=group_id, rel_path=rel_path)
+    path = Path(str(info.get("path") or ""))
+    try:
+        limit = int(max_bytes if max_bytes is not None else _DEFAULT_BLOB_READ_BYTES)
+    except Exception:
+        limit = _DEFAULT_BLOB_READ_BYTES
+    limit = max(1, min(limit, _MAX_BLOB_READ_BYTES))
+    try:
+        with path.open("rb") as fh:
+            data = fh.read(limit + 1)
+    except Exception as exc:
+        raise MCPError(code="read_failed", message=str(exc))
+    truncated = len(data) > limit
+    raw = data[:limit]
+    text = raw.decode("utf-8", errors="replace")
+    return {
+        **info,
+        "text": text,
+        "truncated": truncated,
+        "max_bytes": limit,
+    }
 
 
 def file_send(
@@ -241,9 +308,17 @@ def file_send(
     try:
         src.relative_to(root)
     except ValueError:
-        raise MCPError(code="invalid_path", message="path must be under the group's active scope root")
+        raise _mcp_error(
+            code="invalid_path",
+            message="path must be under the group's active scope root",
+            recommended_action="Write or move the file under the active workspace scope first, then call cccc_file(action='send', path=...).",
+        )
     if not src.exists() or not src.is_file():
-        raise MCPError(code="not_found", message=f"file not found: {src}")
+        raise _mcp_error(
+            code="not_found",
+            message=f"file not found: {src}",
+            recommended_action="Verify the active scope and file path with cccc_repo(action='list_dir') or cccc_shell('ls ...'), then retry cccc_file(action='send').",
+        )
 
     try:
         raw = src.read_bytes()

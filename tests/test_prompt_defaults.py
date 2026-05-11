@@ -9,17 +9,19 @@ class TestPromptDefaults(unittest.TestCase):
 
         body = str(DEFAULT_PREAMBLE_BODY or "")
         self.assertIn("Startup routes:", body)
-        self.assertIn("Working stance:", body)
+        self.assertIn("Execution default:", body)
         self.assertIn("cccc_bootstrap", body)
         self.assertIn("context_hygiene", body)
         self.assertIn("cccc_help", body)
         self.assertIn("cccc_context_get", body)
         self.assertIn("cccc_project_info", body)
         self.assertIn("Reuse working paths first.", body)
-        self.assertIn("Prefer silence over low-signal chatter", body)
-        self.assertIn("routine `@all` updates", body)
-        self.assertIn("finish it end-to-end", body)
-        self.assertIn("intent is not progress", body)
+        self.assertNotIn("Working stance:", body)
+        self.assertNotIn("Work like a teammate, not a script.", body)
+        self.assertNotIn("Prefer silence over low-signal chatter", body)
+        self.assertNotIn("routine `@all` updates", body)
+        self.assertNotIn("finish it end-to-end", body)
+        self.assertNotIn("intent is not progress", body)
         self.assertLessEqual(len(body.split()), 90)
 
     def test_default_preamble_avoids_long_rule_duplication(self) -> None:
@@ -45,6 +47,8 @@ class TestPromptDefaults(unittest.TestCase):
         self.assertIn("## Control Plane", body)
         self.assertIn("## Memory and Recall", body)
         self.assertIn("## Capability", body)
+        self.assertIn("search capability before inventing a new workflow", body)
+        self.assertIn('`enable_hint="enable_now"`', body)
         self.assertIn("### Skill Evolution Proposals", body)
         self.assertIn("## Role Notes", body)
         self.assertIn("## Appendix", body)
@@ -81,7 +85,12 @@ class TestPromptDefaults(unittest.TestCase):
         from cccc.daemon.messaging.delivery import MCP_REMINDER_LINE
 
         self.assertIn("use MCP", MCP_REMINDER_LINE)
-        self.assertIn("Terminal output isn't delivered.", MCP_REMINDER_LINE)
+        self.assertIn("terminal output isn't delivered.", MCP_REMINDER_LINE)
+        self.assertIn("Verify reply_to/to", MCP_REMINDER_LINE)
+        self.assertIn("avoid routine @all", MCP_REMINDER_LINE)
+        self.assertIn("communication obligation, not the whole job", MCP_REMINDER_LINE)
+        self.assertIn("resume active work unless priority changed", MCP_REMINDER_LINE)
+        self.assertIn("use MCP tool cccc_help", MCP_REMINDER_LINE)
         self.assertNotIn("Help: cccc_help", MCP_REMINDER_LINE)
 
     def test_default_standup_stays_short_ritual(self) -> None:

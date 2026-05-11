@@ -17,11 +17,17 @@ def voice_composer_context_lines(value: Any) -> list[str]:
             lines.append(f"Recipients: {recipient_text[:240]}")
     recent_context = str(context.get("recent_chat_excerpt") or context.get("conversation_tail_summary") or "").strip()
     if recent_context:
-        lines.append(f"Recent conversation:\n{recent_context[:1000]}")
+        lines.append(f"Recent context:\n{recent_context[:800]}")
+    message_mode = str(context.get("message_mode") or "").strip()
+    if message_mode and message_mode.lower() != "normal":
+        lines.append(f"Message mode: {message_mode[:240]}")
+    priority = str(context.get("priority") or "").strip()
+    if priority and priority.lower() != "normal":
+        lines.append(f"Priority: {priority[:240]}")
+    reply_required = context.get("reply_required")
+    if str(reply_required).strip().lower() in {"1", "true", "yes"}:
+        lines.append("Reply required: true")
     for label, key in (
-        ("Message mode", "message_mode"),
-        ("Priority", "priority"),
-        ("Reply required", "reply_required"),
         ("Reply target", "reply_target"),
         ("Quoted reference", "quoted_reference"),
     ):
@@ -47,49 +53,32 @@ def build_voice_prompt_refine_input_text(
     clean_operation = str(operation or "append_to_composer_end").strip() or "append_to_composer_end"
     clean_voice_transcript = str(voice_transcript or "").strip()
     replace_operation = is_prompt_refine_replace_operation(clean_operation)
-    parts = [
-        "Task: refine spoken input into composer-ready prompt text.",
-        f"Operation: {clean_operation}",
-        "",
-        "Execution rules:",
-        "- Output only text that should be inserted into the composer.",
-        "- This is prompt optimization only. Do not execute the task, answer the question, fetch live facts, or turn this into document work.",
-        "- Latency matters. Produce a strong composer-ready result promptly instead of exploring.",
-    ]
-    if replace_operation:
-        parts.extend([
-            "- This operation replaces the composer. Return a complete ready-to-send prompt.",
-            "- Preserve and improve useful current composer text; integrate the spoken input naturally.",
-            "- Do not return only an incremental addition.",
-        ])
-    else:
-        parts.extend([
-            "- This operation appends to the composer. If the current composer draft is non-empty, return only an append-ready addition and do not repeat useful existing draft text.",
-            "- If the current composer draft is empty, return a complete ready-to-send prompt.",
-        ])
-    parts.extend([
-        "- Do not describe what the user said, do not narrate your edits, and do not mention these instructions.",
-        "- Do not write meta lead-ins such as 'Please help me', 'The user wants', '根据以下要求', or 'Here is the refined prompt'.",
-        "- Preserve the user's intent, constraints, tone, and any explicit asks.",
-        "- Improve clarity, structure, completeness, and actionability.",
-        "- If the spoken input adds missing constraints or corrections, integrate them into the final prompt naturally.",
-        "- If there is no spoken input, optimize the current composer draft directly without inventing new requirements.",
-        "- If the composer already contains useful structure, keep and improve it instead of rewriting into a different task.",
-        "- Use recent conversation only to recover missing context; do not assume current recipients or message mode are final.",
-    ])
-    context_lines = voice_composer_context_lines(composer_context)
-    if context_lines:
-        parts.extend(["", "Composer context:", *context_lines])
+    parts: list[str] = []
     parts.extend(
         [
+            "Task:",
+            "Refine the composer draft using the spoken input. Do not answer or execute the task.",
             "",
+            "Inputs:",
             "Current composer draft:",
             composer_text or "(empty)",
             "",
             "Spoken input:",
-            clean_voice_transcript or "(none; optimize the current composer draft directly)",
+            clean_voice_transcript or "(none; optimize current composer draft directly)",
             "",
-            "Return only the composer text to insert.",
         ]
     )
+    context_lines = voice_composer_context_lines(composer_context)
+    if context_lines:
+        parts.extend(["Context (not task):", *context_lines, ""])
+    parts.extend(
+        [
+            "draft_text rule:",
+            "Put only composer text in the cccc_voice_secretary_composer draft_text argument; do not print the draft in chat or console.",
+        ]
+    )
+    if replace_operation:
+        parts.append("Replacement mode: draft_text must contain the complete replacement prompt.")
+    else:
+        parts.append("Append mode: draft_text must contain only the text to add; do not repeat useful existing draft text.")
     return "\n".join(parts)

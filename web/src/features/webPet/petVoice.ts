@@ -19,13 +19,13 @@ export function buildPetVoiceReminderSummary(input: {
   if (reminder.source.suggestionKind === "reply_required") {
     return tr(
       "reminderSummary.replyRequiredVoice",
-      "{{petName}}把 {{actor}} 的回复草稿叼到你手边了。",
+      "{{petName}} has a reply draft from {{actor}} ready for you.",
       { petName, actor: actorLabel },
     );
   }
   return tr(
     "reminderSummary.mentionVoice",
-    "{{petName}}留意到 {{actor}} 刚准备好一条草稿。",
+    "{{petName}} noticed that {{actor}} has a draft ready.",
     { petName, actor: actorLabel },
   );
 }
@@ -43,29 +43,29 @@ export function buildPetVoiceHint(input: {
   const petName = getPetVoiceName(companion);
   const trimmedSummary = clean(summary);
   if (trimmedSummary) {
-    return tr("hint.voiceReminder", "{{petName}}轻轻戳你一下：{{summary}}", {
+    return tr("hint.voiceReminder", "{{petName}} has a reminder: {{summary}}", {
       petName,
       summary: trimmedSummary,
     });
   }
   if (status === "loading") {
-    return tr("hint.voiceLoading", "{{petName}}正在整理现场…", { petName });
+    return tr("hint.voiceLoading", "{{petName}} is checking the current context...", { petName });
   }
   if (status === "error") {
-    return tr("hint.voiceUnavailable", "{{petName}}暂时没拿到最新线索。", { petName });
+    return tr("hint.voiceUnavailable", "{{petName}} could not load the latest context.", { petName });
   }
   if (status === "progress" && typeof done === "number" && typeof total === "number") {
-    return tr("hint.voiceProgress", "{{petName}}守着进度：{{done}}/{{total}} 已完成", {
+    return tr("hint.voiceProgress", "{{petName}} is tracking progress: {{done}}/{{total}} done", {
       petName,
       done,
       total,
     });
   }
   if (clean(fallback)) {
-    return tr("hint.voiceIdle", "{{petName}}正在旁边看着：{{fallback}}", {
+    return tr("hint.voiceIdle", "{{petName}} is watching: {{fallback}}", {
       petName,
       fallback: clean(fallback),
     });
   }
-  return tr("hint.voiceResting", "{{petName}}在旁边安静看着。", { petName });
+  return tr("hint.voiceResting", "{{petName}} is standing by.", { petName });
 }

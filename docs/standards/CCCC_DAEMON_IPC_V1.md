@@ -164,9 +164,10 @@ Rules:
 - `heartbeat` items MUST NOT be appended to the group ledger; they are transport-level keepalives.
 - Streams are best-effort: clients MUST tolerate disconnects, duplicates, and gaps (use `inbox_list` or a ledger read to reconcile).
 
-### 4.6 Streaming Upgrade: `presentation_browser_attach` (Optional)
+### 4.6 Streaming Upgrade: `presentation_browser_attach` / VNC attach (Optional)
 
 `presentation_browser_attach` upgrades the connection into a daemon-local **browser-surface control stream** for a slot-scoped Presentation browser session.
+The same stream envelope is reused by other projected browser attach operations, including provider-auth and Web Model browser surfaces.
 
 1) Client sends a normal request line with `op="presentation_browser_attach"`.
 2) Daemon sends a normal response line.
@@ -176,6 +177,7 @@ After upgrade:
 - The daemon pushes `state` and `frame` items for the active browser surface session.
 - The client MAY send browser-control commands such as navigation, click, scroll, key, text, resize, and close.
 - Only one active controller MAY be attached at a time for a given slot browser surface session.
+- If a matching `*_vnc_attach` operation succeeds, the connection upgrades into a raw RFB/VNC byte stream instead of NDJSON. VNC attach is an optional viewer transport; browser control and delivery semantics remain owned by the daemon runtime.
 
 Recommended daemon-to-client items (CCCC v0.4.x behavior):
 ```ts
@@ -715,7 +717,7 @@ Result:
 
 Quota notes:
 
-1. `CCCC_CAPABILITY_MAX_ENABLED_PER_ACTOR` (default `12`) limits actor/session enabled capability count.
+1. `CCCC_CAPABILITY_MAX_ENABLED_PER_ACTOR` (default `20`) limits actor/session enabled non-skill capability count.
 2. `CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP` (default `24`) limits group-scope enabled capability count.
 3. `CCCC_CAPABILITY_MAX_INSTALLATIONS_TOTAL` (default `128`) limits total cached external artifacts.
 4. Quota failures return `ok=true` with `state="failed"` and deterministic `reason` code.
@@ -829,6 +831,7 @@ Result:
   autoload_capabilities?: string[]
   actor_autoload_capabilities?: string[]
   profile_autoload_capabilities?: string[]
+  actor_hidden_capabilities?: string[] // actor-level UI/menu hide preferences, including Web user slash menu; does not disable the capability
   hidden_capabilities: Array<{
     capability_id: string
     reason: string
@@ -921,6 +924,36 @@ Operational notes:
    - packaged default: `cccc.resources/capability-allowlist.default.yaml`
    - user overlay: `CCCC_HOME/config/capability-allowlist.user.yaml`
    - effective policy: deterministic merge (`default <- overlay`).
+
+#### `capability_visibility`
+
+Hide or show a capability for one actor's UI/menu surfaces without changing enabled bindings.
+The Web UI uses `actor_id="user"` to control whether an enabled capsule skill appears in the `/` command menu.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  actor_id?: string // default: by or "user"
+  capability_id: string
+  hidden: boolean
+  reason?: string
+}
+```
+
+Result:
+```ts
+{
+  action_id: string
+  group_id: string
+  actor_id: string
+  capability_id: string
+  hidden: boolean
+  actor_hidden_capabilities: string[]
+  state: "hidden" | "visible"
+}
+```
 
 #### `capability_import`
 
@@ -1193,6 +1226,7 @@ Result:
   state: "ready"
   removed_record: boolean
   removed_bindings: number
+  removed_blocked?: number
   removed_installation: boolean
   removed_runtime_bindings?: number
   removed_actor_autoload: number
@@ -1403,6 +1437,7 @@ Args:
       auto_document_quiet_ms?: number
       auto_document_min_chars?: number
       auto_document_max_window_seconds?: number
+      service_model_id?: string
       tts_enabled?: boolean
     }
   }
@@ -1411,11 +1446,12 @@ Args:
 
 `browser_asr` means browser-managed speech recognition and does not guarantee
 browser-device-local model execution. `assistant_service_local_asr` means ASR
-runs on the daemon host through the first-party Voice Secretary service and
-requires `CCCC_VOICE_SECRETARY_ASR_COMMAND` unless an explicit test/mock env is
-configured. The returned assistant health may include `health.service` with
-`status`, `alive`, `asr_command_configured`, `asr_mock_configured`, and
-`last_error` so Web can show whether service-local ASR is actually usable.
+runs on the daemon host through the first-party Voice Secretary service and uses
+an installed local ASR model. The returned assistant health may include `health.service` with
+`status`, `alive`, `asr_command_configured`, `asr_mock_configured`,
+`selected_model_id`, `managed_model`, and `last_error` so Web can show whether
+service-local ASR is actually usable. `service_model_id` is optional and
+selects a daemon-managed local ASR model for on-demand install/use.
 `recognition_language="auto"` means the browser/client chooses the best language
 hint; otherwise callers should pass a BCP-47-like tag such as `zh-CN`, `en-US`,
 or `ja-JP`. `auto_document_enabled=true` is the default path: stable transcript
@@ -1450,6 +1486,39 @@ Result:
 { group_id: string; assistant: Record<string, unknown>; event: CCCSEventV1 }
 ```
 
+#### `assistant_voice_model_install`
+
+Download and verify a daemon-managed local Voice Secretary ASR model into
+CCCC-owned cache storage. Built-in releases include a default model manifest;
+tests and local development may add a local overlay at
+`CCCC_HOME/config/voice-models.json`. Each artifact entry must include a fixed
+URL and `sha256`.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  model_id: string
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  assistant: Record<string, unknown>
+  model: {
+    model_id: string
+    status: "not_installed" | "downloading" | "ready" | "failed" | "unknown"
+    install_dir?: string
+    installed_at?: string
+    updated_at?: string
+    error?: Record<string, unknown>
+  }
+}
+```
+
 #### `assistant_voice_transcribe`
 
 Transcribe a push-to-talk audio payload through the daemon-managed first-party
@@ -1473,11 +1542,9 @@ Args:
 Preconditions:
 - `voice_secretary` is enabled for the group.
 - `recognition_backend` is `assistant_service_local_asr`.
-- The daemon host has `CCCC_VOICE_SECRETARY_ASR_COMMAND` configured. The command
-  receives the audio path as the final argument unless it includes
-  `{audio_path}` / `{input_path}` / `{input}`. It may also use
-  `CCCC_VOICE_AUDIO_PATH`, `CCCC_VOICE_MIME_TYPE`, and
-  `CCCC_VOICE_LANGUAGE`.
+- The selected `service_model_id` is installed and exposes a managed command via
+  the manifest. The effective command receives the audio path as the final
+  argument unless it includes `{audio_path}` / `{input_path}` / `{input}`.
 
 Result:
 ```ts
@@ -1504,10 +1571,16 @@ by default appends a semantic input event for the current Voice Secretary
 markdown working document. The working document is a user-facing repo artifact;
 raw transcript/source/revision sidecars remain in CCCC_HOME. When new input is
 available, the daemon emits a targeted `system.notify` to `voice-secretary` with
-`context.kind="voice_secretary_input"`. The notify is only a lightweight pointer;
-the runtime actor pulls unread text through
+`context.kind="voice_secretary_input"` and a daemon-owned `input_envelope`. The
+envelope is the canonical work item delivered to both PTY and headless runtimes;
 `assistant_voice_document_input_read` /
-`cccc_voice_secretary_document(action="read_new_input")`.
+`cccc_voice_secretary_document(action="read_new_input")` remains a legacy,
+recovery, and debugging entrypoint. Input append is durable before runtime actor
+wake-up; if wake-up fails, the input remains readable and the API reports the
+best-effort wake error separately. If wake-up succeeds after the notify was
+created while the actor was stopped, the daemon re-dispatches that same notify:
+headless runtimes receive it as a control turn, and PTY runtimes receive it
+through the pending delivery queue so lazy preamble delivery is triggered.
 
 The public document identity for Voice Secretary APIs is `document_path`, a
 repository-relative markdown path. `document_id` may exist in daemon sidecar
@@ -1551,6 +1624,11 @@ Result:
   input_event?: Record<string, unknown>
   input_event_created: boolean
   input_notify_emitted: boolean
+  input_notify_error?: string
+  actor_woken?: boolean
+  actor_wake_error?: string
+  actor_notify_delivered?: boolean
+  actor_notify_delivery_error?: string
 }
 ```
 
@@ -1643,7 +1721,7 @@ Result:
 
 Append a user instruction into the same Voice Secretary input stream used for
 ASR transcript. The daemon emits a targeted `voice_secretary_input` notify; the
-runtime actor pulls it with `read_new_input` and saves the full revised markdown.
+runtime actor works from the inline `input_envelope` and saves the full revised markdown.
 The daemon does not directly append the instruction to the document. Cross-peer
 handoff is intentionally handled only by `assistant_voice_request`, and only when
 the Voice Secretary decides the work belongs to foreman or one concrete peer.
@@ -1669,6 +1747,11 @@ Result:
   input_event?: Record<string, unknown>
   input_event_created?: boolean
   input_notify_emitted?: boolean
+  input_notify_error?: string
+  actor_woken?: boolean
+  actor_wake_error?: string
+  actor_notify_delivered?: boolean
+  actor_notify_delivery_error?: string
   event?: CCCSEventV1
 }
 ```
@@ -1929,6 +2012,7 @@ Args:
   command?: string[]
   env?: Record<string, string>
   capability_autoload?: string[] // actor startup autoload capability ids
+  capability_hidden?: string[] // actor-level skill menu hide preferences; does not disable capabilities
   env_private?: Record<string, string> // write-only secrets (stored under CCCC_HOME/state; never persisted into ledger)
   profile_id?: string            // optional Actor Profile link (runtime/runner/command/submit/env + secrets)
   default_scope_key?: string
@@ -2938,70 +3022,38 @@ Args:
 
 Result: implementation-defined compaction report.
 
-### 8.13 Group Templates
-
-Templates use the portable schema in `src/cccc/contracts/v1/group_template.py`.
-
-#### `group_template_export`
-
-Args:
-```ts
-{ group_id: string }
-```
-
-Result:
-```ts
-{ template: string; filename: string } // YAML text
-```
-
-#### `group_template_preview`
-
-Args:
-```ts
-{ group_id: string; by?: string; template: string }
-```
-
-Result:
-```ts
-{ template: Record<string, unknown>; diff: Record<string, unknown> }
-```
-
-#### `group_template_import_replace`
-
-Destructive replace of actors/settings/group prompt overrides (does not delete ledger history).
-
-Args:
-```ts
-{ group_id: string; by?: string; confirm: string; template: string }
-```
-
-Rules:
-- `confirm` MUST equal `group_id` (prevents accidental destructive import).
-
-Result:
-```ts
-{ group_id: string; applied: true; removed: string[]; added: string[]; updated: string[]; settings_patch: Record<string, unknown>; prompt_paths: string[] }
-```
-
-#### `group_create_from_template`
-
-Create a new group attached to `path`, then apply a template (no confirmation).
-
-Args:
-```ts
-{ path: string; by?: string; title?: string; topic?: string; template: string }
-```
-
-Result:
-```ts
-{ group_id: string; applied: true }
-```
-
 ### 8.14 Presentation Browser Surface (Optional)
 
 #### `presentation_browser_attach`
 
 Attach to the currently active slot browser-surface session over a dedicated bidirectional NDJSON stream.
+
+Args:
+```ts
+{
+  group_id: string
+  slot: "slot-1" | "slot-2" | "slot-3" | "slot-4"
+  by?: string
+  viewer_mode?: "auto" | "screencast" | "vnc"
+}
+```
+
+Handshake result:
+```ts
+{ group_id: string; slot_id: string }
+```
+
+Streaming mode:
+- After a successful handshake, the connection upgrades into the browser-surface stream described in §4.6.
+- The daemon emits `state` items when runtime/session status changes and `frame` items for captured browser frames.
+- The client MAY send browser-control commands (`navigate`, `back`, `refresh`, `click`, `scroll`, `key`, `text`, `resize`, `close`, `disconnect`).
+- At most one active controller MAY be attached at a time; a second attach attempt SHOULD fail with a busy-style error.
+- If no active browser-surface session exists for the slot, attach SHOULD fail with `browser_surface_not_found`.
+- If the underlying browser runtime is no longer active, attach SHOULD fail with `browser_surface_not_active`.
+
+#### `presentation_browser_vnc_attach`
+
+Attach to the currently active slot browser-surface session over a raw RFB/VNC stream.
 
 Args:
 ```ts
@@ -3018,12 +3070,8 @@ Handshake result:
 ```
 
 Streaming mode:
-- After a successful handshake, the connection upgrades into the browser-surface stream described in §4.6.
-- The daemon emits `state` items when runtime/session status changes and `frame` items for captured browser frames.
-- The client MAY send browser-control commands (`navigate`, `back`, `refresh`, `click`, `scroll`, `key`, `text`, `resize`, `close`, `disconnect`).
-- At most one active controller MAY be attached at a time; a second attach attempt SHOULD fail with a busy-style error.
-- If no active browser-surface session exists for the slot, attach SHOULD fail with `browser_surface_not_found`.
-- If the underlying browser runtime is no longer active, attach SHOULD fail with `browser_surface_not_active`.
+- After a successful handshake, the connection upgrades into a raw VNC/RFB byte stream.
+- The operation SHOULD fail with `browser_vnc_unavailable` when the browser surface is not backed by a local VNC projection.
 
 ### 8.15 Event Streaming (Optional)
 
@@ -3857,6 +3905,7 @@ Args:
 {
   provider: "notebooklm"
   by?: string // user-only
+  viewer_mode?: "auto" | "screencast" | "vnc"
 }
 ```
 
@@ -3872,6 +3921,191 @@ Streaming mode:
 - At most one active controller MAY be attached at a time; a second attach attempt SHOULD fail with a busy-style error.
 - If no active projected auth browser exists, attach SHOULD fail with `browser_surface_not_found`.
 - If the underlying browser runtime is no longer active, attach SHOULD fail with `browser_surface_not_active`.
+
+#### `space_provider_auth_browser_vnc_attach`
+
+Attach to the currently active projected provider-auth browser surface over a raw RFB/VNC stream.
+
+Args:
+```ts
+{
+  provider: "notebooklm"
+  by?: string // user-only
+}
+```
+
+Handshake result:
+```ts
+{ provider: "notebooklm" }
+```
+
+Streaming mode:
+- After a successful handshake, the connection upgrades into a raw VNC/RFB byte stream.
+- The operation SHOULD fail with `browser_vnc_unavailable` when the browser surface is not backed by a local VNC projection.
+
+### 8.19 ChatGPT Web Model Browser Surface (Optional)
+
+#### `web_model_browser_attach`
+
+Attach to the currently active daemon-owned ChatGPT Web Model browser surface over a dedicated bidirectional NDJSON stream.
+
+Args:
+```ts
+{
+  group_id?: string
+  actor_id?: string
+  by?: string
+  viewer_mode?: "auto" | "screencast" | "vnc"
+}
+```
+
+Handshake result:
+```ts
+{ group_id: string; actor_id: string }
+```
+
+Streaming mode:
+- After a successful handshake, the connection upgrades into the browser-surface stream described in §4.6.
+- The daemon emits `state` items when runtime/session status changes and `frame` items for captured browser frames.
+- The client MAY send browser-control commands (`navigate`, `back`, `refresh`, `click`, `scroll`, `key`, `text`, `resize`, `close`, `disconnect`).
+- The daemon owns the browser runtime; Web clients are surface proxies and MUST NOT create a separate ChatGPT browser runtime for the same actor.
+- When `group_id` or `actor_id` is supplied, the actor MUST exist and use `runtime=web_model`.
+- If no active Web Model browser surface exists, attach SHOULD fail with `browser_surface_not_found`.
+- If the underlying browser runtime is no longer active, attach SHOULD fail with `browser_surface_not_active`.
+
+#### `web_model_browser_vnc_attach`
+
+Attach to the currently active daemon-owned ChatGPT Web Model browser surface over a raw RFB/VNC stream.
+
+Args:
+```ts
+{
+  group_id?: string
+  actor_id?: string
+  by?: string
+}
+```
+
+Handshake result:
+```ts
+{ group_id: string; actor_id: string }
+```
+
+Streaming mode:
+- After a successful handshake, the connection upgrades into a raw VNC/RFB byte stream.
+- The operation SHOULD fail with `browser_vnc_unavailable` when the browser surface is not backed by a local VNC projection.
+
+### 8.20 Copy Groups
+
+Copy Groups operations export/import durable CCCC group state as a zip package. Copy packages contain CCCC group state only; workspace repository files are not included.
+
+#### `group_copy_export`
+
+Export one group as a base64-encoded zip package.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  package_b64: string
+  filename: string
+  manifest: {
+    kind: "cccc.group_copy"
+    version: number
+    source_group_id: string
+    source_title?: string
+    exported_at: string
+    cccc_version?: string
+    source_platform?: string
+    export_mode: "group_state_only"
+    workspace_included: false
+    contains_secrets: false
+    content_digest?: string
+    content?: Record<string, unknown>
+  }
+}
+```
+
+Notes:
+- Export MUST exclude live runtime state, browser profiles, credentials, connector secrets, lock files, and rebuildable caches.
+- Export MUST scrub actor environment secrets from packaged `group.yaml`.
+- `contains_secrets: false` means CCCC-managed live credentials and auth sessions are excluded. The package can still contain user-provided sensitive content such as ledger history, memory, blobs, and attachments.
+
+#### `group_copy_preview_import`
+
+Validate a copy package and return an import preview without writing group state.
+
+Args:
+```ts
+{
+  package_b64: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  preview: {
+    manifest: Record<string, unknown>
+    source_group_id: string
+    source_title: string
+    actor_count: number
+    actors: Array<Record<string, unknown>>
+    source_workspace_root: string
+    workspace_root_exists: boolean
+    group_id_conflict: boolean
+    target_default_scope_conflict?: boolean
+    requires_reconnect?: Record<string, boolean>
+    workspace_included: false
+    contains_secrets: false
+    runtime_reset?: Record<string, unknown>
+  }
+}
+```
+
+Errors:
+- `invalid_group_copy` when the payload is not a valid supported CCCC group copy.
+- `contains_secrets: false` in the preview has the same meaning as export: system credentials are excluded, but user content in ledger history, memory, blobs, and attachments can still be sensitive.
+
+#### `group_copy_import`
+
+Import a group copy into the current `CCCC_HOME`.
+
+Args:
+```ts
+{
+  package_b64: string
+  workspace_root?: string
+  title?: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  source_group_id: string
+  group_id_conflict: boolean
+  workspace_root: string
+  active_scope_key: string
+}
+```
+
+Notes:
+- Import MUST stage and validate copy package contents before moving them into `groups/<group_id>`.
+- If the source `group_id` conflicts in the target home, import MUST allocate a new group id.
+- Imported groups MUST start stopped: `running=false`, `state="idle"`.
+- `workspace_root`, when supplied, remaps the active workspace root during import.
+- Import MUST reject unsupported copy package schema versions, workspace-including copy packages, secret-containing copy packages, path traversal, symlinks, duplicate entries, and unsafe package paths.
 
 ## 9. Appendix: Example Lines
 

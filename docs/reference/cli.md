@@ -98,14 +98,17 @@ Add a new actor to the group.
 ```bash
 cccc actor add <actor_id> --runtime claude
 cccc actor add <actor_id> --runtime codex
+cccc actor add <actor_id> --runtime web_model
 cccc actor add <actor_id> --runtime custom --command "my-agent"
 ```
 
 Options:
-- `--runtime`: Agent runtime (claude, codex, droid, etc.)
+- `--runtime`: Agent runtime (claude, codex, web_model, droid, etc.)
 - `--command`: Custom command (for custom runtime)
-- `--runner`: Runner type (pty or headless)
+- `--runner`: Runner type (pty or headless; web_model is headless-only)
 - `--title`: Display title
+
+For the ChatGPT Web Model actor, create the actor first, then finish MCP URL and chat binding in `Settings > Global > ChatGPT Web Model`.
 
 ### `cccc actor`
 
@@ -290,4 +293,5 @@ cccc mcp                           # Start MCP server (stdio mode)
 | `CCCC_HOME` | `~/.cccc` | Runtime home directory |
 | `CCCC_WEB_HOST` | `127.0.0.1` | Web UI bind address |
 | `CCCC_WEB_PORT` | `8848` | Web UI port |
+| `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Supervised Web child readiness timeout before CCCC treats startup as failed |
 | `CCCC_LOG_LEVEL` | `INFO` | Log level |

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ....contracts.v1 import DaemonError, DaemonResponse
 from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS
+from ....kernel.events import publish_event
 from ....util.time import parse_utc_iso, utc_now_iso
 
 from ._common import (
@@ -46,6 +47,7 @@ from ._runtime import (
     _record_runtime_recent_success,
     _append_audit_event,
 )
+from ._removed import _set_removed_capability
 from ._policy import (
     _policy_level_visible,
     _allowlist_policy,
@@ -61,6 +63,37 @@ from ._install import (
 def _pkg():
     """Get parent package module for mock-compatible function lookups."""
     return sys.modules[__name__.rsplit(".", 1)[0]]
+
+
+def _publish_capability_changed_result(result: Dict[str, Any]) -> str:
+    group_id = str(result.get("group_id") or "").strip()
+    capability_id = str(result.get("capability_id") or "").strip()
+    if not group_id or not capability_id:
+        return ""
+    try:
+        publish_event(
+            "capability.changed",
+            {
+                "group_id": group_id,
+                "actor_id": str(result.get("actor_id") or "").strip(),
+                "capability_id": capability_id,
+                "scope": str(result.get("scope") or "").strip(),
+                "enabled": bool(result.get("enabled")),
+                "action_id": str(result.get("action_id") or "").strip(),
+                "state": str(result.get("state") or "").strip(),
+            },
+        )
+    except Exception as e:
+        message = str(e).strip() or type(e).__name__
+        return message[:500]
+    return ""
+
+
+def _changed_response(result: Dict[str, Any]) -> DaemonResponse:
+    event_publish_error = _publish_capability_changed_result(result)
+    if event_publish_error:
+        result = {**result, "event_publish_error": event_publish_error}
+    return DaemonResponse(ok=True, result=result)
 
 
 def _binding_state_allows_external_tool(state: Any) -> bool:
@@ -154,6 +187,8 @@ def _set_enabled_capability(
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()
     cap_id = str(capability_id or "").strip()
+    if enabled:
+        _set_removed_capability(state_doc, group_id=gid, capability_id=cap_id, removed=False)
     if scope == "group":
         group_enabled = state_doc.setdefault("group_enabled", {})
         items = set(group_enabled.get(gid) or [])
@@ -201,28 +236,49 @@ def _set_enabled_capability(
         session_enabled.pop(gid, None)
 
 
-def _sync_group_capability_default(group: Any, *, capability_id: str, enabled: bool) -> None:
-    """Mirror group-scope capability toggles into the group's default autoload list."""
-    cap_id = str(capability_id or "").strip()
-    if not cap_id or group is None or not hasattr(group, "doc"):
-        return
-    try:
-        from ....kernel.group import normalize_group_capability_defaults
+def _collect_hidden_capabilities(state_doc: Dict[str, Any], *, group_id: str, actor_id: str) -> List[str]:
+    gid = str(group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    actor_hidden = state_doc.get("actor_hidden") if isinstance(state_doc.get("actor_hidden"), dict) else {}
+    per_group = actor_hidden.get(gid) if isinstance(actor_hidden.get(gid), dict) else {}
+    items = per_group.get(aid) if isinstance(per_group.get(aid), list) else []
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in items:
+        cap_id = str(item or "").strip()
+        if not cap_id or cap_id in seen:
+            continue
+        seen.add(cap_id)
+        out.append(cap_id)
+    return out
 
-        defaults = normalize_group_capability_defaults(group.doc.get("capability_defaults"))
-        items = [str(x or "").strip() for x in defaults.get("autoload_capabilities", []) if str(x or "").strip()]
-        before = list(items)
-        if enabled and cap_id not in items:
-            items.append(cap_id)
-        elif not enabled:
-            items = [item for item in items if item != cap_id]
-        if items == before:
-            return
-        defaults["autoload_capabilities"] = items
-        group.doc["capability_defaults"] = defaults
-        group.save()
-    except Exception:
+
+def _set_hidden_capability(
+    state_doc: Dict[str, Any],
+    *,
+    group_id: str,
+    actor_id: str,
+    capability_id: str,
+    hidden: bool,
+) -> None:
+    gid = str(group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    cap_id = str(capability_id or "").strip()
+    if not gid or not aid or not cap_id:
         return
+    actor_hidden = state_doc.setdefault("actor_hidden", {})
+    group_map = actor_hidden.setdefault(gid, {})
+    items = set(group_map.get(aid) or [])
+    if hidden:
+        items.add(cap_id)
+    else:
+        items.discard(cap_id)
+    if items:
+        group_map[aid] = sorted(items)
+    else:
+        group_map.pop(aid, None)
+    if not group_map:
+        actor_hidden.pop(gid, None)
 
 
 def _remove_capability_bindings(
@@ -393,6 +449,35 @@ def _unset_blocked_capability(
     return removed
 
 
+def _remove_blocked_capability_all_scopes(
+    state_doc: Dict[str, Any],
+    *,
+    capability_id: str,
+) -> int:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id:
+        return 0
+    removed = 0
+    global_blocked = state_doc.get("global_blocked") if isinstance(state_doc.get("global_blocked"), dict) else {}
+    if cap_id in global_blocked:
+        global_blocked.pop(cap_id, None)
+        removed += 1
+    state_doc["global_blocked"] = global_blocked
+
+    group_blocked = state_doc.get("group_blocked") if isinstance(state_doc.get("group_blocked"), dict) else {}
+    for gid in list(group_blocked.keys()):
+        per_group = group_blocked.get(gid) if isinstance(group_blocked.get(gid), dict) else {}
+        if cap_id in per_group:
+            per_group.pop(cap_id, None)
+            removed += 1
+        if per_group:
+            group_blocked[gid] = per_group
+        else:
+            group_blocked.pop(gid, None)
+    state_doc["group_blocked"] = group_blocked
+    return removed
+
+
 def _collect_blocked_capabilities(
     state_doc: Dict[str, Any],
     *,
@@ -507,7 +592,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
         reason = reason[:280]
     action_id = f"cact_{uuid.uuid4().hex[:16]}"
     scope_for_audit = str(args.get("scope") or "session").strip().lower() or "session"
-    max_enabled_per_actor = _quota_limit("CCCC_CAPABILITY_MAX_ENABLED_PER_ACTOR", 12, minimum=1, maximum=500)
+    max_enabled_per_actor = _quota_limit("CCCC_CAPABILITY_MAX_ENABLED_PER_ACTOR", 20, minimum=1, maximum=500)
     max_enabled_per_group = _quota_limit("CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP", 24, minimum=1, maximum=2000)
     max_installations_total = _quota_limit("CCCC_CAPABILITY_MAX_INSTALLATIONS_TOTAL", 128, minimum=1, maximum=5000)
 
@@ -545,7 +630,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
     def _check_enable_quota(*, scope: str, group_id: str, actor_id: str, capability_id: str) -> str:
         with _STATE_LOCK:
             _, state_doc = _load_state_doc()
-            if scope in {"actor", "session"}:
+            if scope in {"actor", "session"} and not capability_id.startswith("skill:"):
                 enabled_caps, _ = _collect_enabled_capabilities(
                     state_doc,
                     group_id=group_id,
@@ -704,8 +789,6 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     ttl_seconds=ttl_seconds,
                 )
                 _save_state_doc(state_path, state_doc)
-            if scope == "group":
-                _sync_group_capability_default(group, capability_id=capability_id, enabled=enabled)
             if enabled:
                 with _RUNTIME_LOCK:
                     runtime_path, runtime_doc = _load_runtime_doc()
@@ -719,9 +802,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     _save_runtime_doc(runtime_path, runtime_doc)
             result_state = "activation_pending" if enabled else "disabled"
             _audit("ready", state=result_state, details={"builtin": True, "enabled": bool(enabled)})
-            return DaemonResponse(
-                ok=True,
-                result={
+            return _changed_response(
+                {
                     "action_id": action_id,
                     "group_id": group_id,
                     "actor_id": actor_id,
@@ -733,7 +815,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     "wait": "relist_or_reconnect",
                     "refresh_mode": "relist_or_reconnect",
                     "policy_level": policy_level,
-                },
+                }
             )
 
         # External capability path (M2): supports remote_only + package + command.
@@ -760,8 +842,6 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     )
                     has_remaining_binding = _has_any_binding_for_capability(state_doc, capability_id=capability_id)
                     _save_state_doc(state_path, state_doc)
-                if scope == "group":
-                    _sync_group_capability_default(group, capability_id=capability_id, enabled=False)
                 removed_binding_count = 0
                 with _RUNTIME_LOCK:
                     runtime_path, runtime_doc = _load_runtime_doc()
@@ -821,7 +901,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 }
                 if cleanup_skipped_reason:
                     result["cleanup_skipped_reason"] = cleanup_skipped_reason
-                return DaemonResponse(ok=True, result=result)
+                return _changed_response(result)
             if capability_id.startswith("mcp:") and _env_bool("CCCC_CAPABILITY_SOURCE_MCP_REGISTRY_ENABLED", True):
                 server_name = capability_id.split(":", 1)[1]
                 fetched: Optional[Dict[str, Any]] = None
@@ -907,8 +987,6 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 )
                 has_remaining_binding = _has_any_binding_for_capability(state_doc, capability_id=capability_id)
                 _save_state_doc(state_path, state_doc)
-            if scope == "group":
-                _sync_group_capability_default(group, capability_id=capability_id, enabled=False)
             removed_binding_count = 0
             with _RUNTIME_LOCK:
                 runtime_path, runtime_doc = _load_runtime_doc()
@@ -960,10 +1038,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
             }
             if cleanup_skipped_reason:
                 result["cleanup_skipped_reason"] = cleanup_skipped_reason
-            return DaemonResponse(
-                ok=True,
-                result=result,
-            )
+            return _changed_response(result)
 
         qualification = str(rec.get("qualification_status") or _QUAL_QUALIFIED).strip().lower()
         unsupported_reason = _pkg()._record_enable_unsupported_reason(rec, capability_id=capability_id)
@@ -1068,8 +1143,6 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     )
                     applied_dependencies.append(dep_cap_id)
                 _save_state_doc(state_path, state_doc)
-            if scope == "group":
-                _sync_group_capability_default(group, capability_id=capability_id, enabled=True)
 
             refresh_required = bool(applied_dependencies)
             result_state = "activation_pending" if refresh_required else "runnable"
@@ -1130,7 +1203,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
             if refresh_required:
                 result["wait"] = "relist_or_reconnect"
                 result["refresh_mode"] = "relist_or_reconnect"
-            return DaemonResponse(ok=True, result=result)
+            return _changed_response(result)
 
         supported, unsupported_reason = _supported_external_install_record(rec)
         if not supported:
@@ -1352,8 +1425,6 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 ttl_seconds=ttl_seconds,
             )
             _save_state_doc(state_path, state_doc)
-        if scope == "group":
-            _sync_group_capability_default(group, capability_id=capability_id, enabled=True)
         with _RUNTIME_LOCK:
             runtime_path, runtime_doc = _load_runtime_doc()
             _record_runtime_recent_success(
@@ -1403,10 +1474,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
             result["degraded_call_hint"] = (
                 "tools_not_listed_call_capability_use_with_capability_id_and_real_tool_name"
             )
-        return DaemonResponse(
-            ok=True,
-            result=result,
-        )
+        return _changed_response(result)
     except LookupError as e:
         _audit("failed", state="failed", error_code="group_not_found", details={"error": str(e)})
         return _error("group_not_found", str(e), details={"action_id": action_id})
@@ -1420,6 +1488,107 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
     except Exception as e:
         _audit("failed", state="failed", error_code="capability_enable_failed", details={"error": str(e)})
         return _error("capability_enable_failed", str(e), details={"action_id": action_id})
+
+
+def handle_capability_visibility(args: Dict[str, Any]) -> DaemonResponse:
+    group_id = str(args.get("group_id") or "").strip()
+    by = str(args.get("by") or args.get("actor_id") or "").strip()
+    actor_id = str(args.get("actor_id") or by or "user").strip() or "user"
+    capability_id = str(args.get("capability_id") or "").strip()
+    hidden = bool(args.get("hidden", True))
+    reason = str(args.get("reason") or "").strip()
+    if len(reason) > 280:
+        reason = reason[:280]
+    action_id = f"cvis_{uuid.uuid4().hex[:16]}"
+
+    def _audit(
+        outcome: str,
+        *,
+        state: str = "",
+        error_code: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        payload = dict(details) if isinstance(details, dict) else {}
+        if state:
+            payload["state"] = state
+        if error_code:
+            payload["error_code"] = error_code
+        if reason:
+            payload["reason"] = reason
+        try:
+            _append_audit_event(
+                action_id=action_id,
+                op="capability_visibility",
+                group_id=group_id,
+                actor_id=actor_id,
+                by=by,
+                capability_id=capability_id,
+                scope="actor",
+                enabled=not hidden,
+                outcome=outcome,
+                details=payload,
+            )
+        except Exception:
+            pass
+
+    try:
+        group = _ensure_group(group_id)
+        if not capability_id:
+            _audit("denied", state="denied", error_code="missing_capability_id")
+            return _error("missing_capability_id", "missing capability_id", details={"action_id": action_id})
+        if by != "user":
+            if not by:
+                _audit("denied", state="denied", error_code="missing_actor_id")
+                return _error("missing_actor_id", "missing actor identity (by)", details={"action_id": action_id})
+            if actor_id != by:
+                _audit("denied", state="denied", error_code="permission_denied")
+                return _error("permission_denied", "actor can change only its own capability visibility", details={"action_id": action_id})
+
+        if actor_id != "user":
+            from ....kernel.actors import find_actor
+
+            if find_actor(group, actor_id) is None:
+                _audit("denied", state="denied", error_code="actor_not_found")
+                return _error("actor_not_found", f"actor not found in group: {actor_id}", details={"action_id": action_id})
+
+        with _STATE_LOCK:
+            state_path, state_doc = _load_state_doc()
+            _set_hidden_capability(
+                state_doc,
+                group_id=group_id,
+                actor_id=actor_id,
+                capability_id=capability_id,
+                hidden=hidden,
+            )
+            hidden_caps = _collect_hidden_capabilities(state_doc, group_id=group_id, actor_id=actor_id)
+            _save_state_doc(state_path, state_doc)
+
+        result = {
+            "action_id": action_id,
+            "group_id": group_id,
+            "actor_id": actor_id,
+            "capability_id": capability_id,
+            "hidden": hidden,
+            "actor_hidden_capabilities": hidden_caps,
+            "state": "hidden" if hidden else "visible",
+        }
+        _audit("updated", state=str(result["state"]))
+        event_publish_error = _publish_capability_changed_result(
+            {
+                **result,
+                "scope": "actor",
+                "enabled": not hidden,
+            }
+        )
+        if event_publish_error:
+            result["event_publish_error"] = event_publish_error
+        return DaemonResponse(ok=True, result=result)
+    except LookupError as e:
+        _audit("failed", state="failed", error_code="group_not_found", details={"error": str(e)})
+        return _error("group_not_found", str(e), details={"action_id": action_id})
+    except Exception as e:
+        _audit("failed", state="failed", error_code="capability_visibility_failed", details={"error": str(e)})
+        return _error("capability_visibility_failed", str(e), details={"action_id": action_id})
 
 
 def handle_capability_block(args: Dict[str, Any]) -> DaemonResponse:

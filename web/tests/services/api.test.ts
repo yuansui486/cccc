@@ -683,6 +683,187 @@ describe("api.fetchPresentation", () => {
   });
 });
 
+describe("api assistant voice model helpers", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    fetchMock.mockReset();
+    sessionStorageMock.clear();
+  });
+
+  afterEach(async () => {
+    const api = await import("../../src/services/api");
+    api.clearAuthToken();
+  });
+
+  it("normalizes assistant state service models", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        result: {
+          group_id: "g-demo",
+          assistant: {
+            assistant_id: "voice_secretary",
+            kind: "voice_secretary",
+            enabled: true,
+            lifecycle: "idle",
+            health: {
+              service: {
+                selected_model_id: "mock_asr",
+                managed_model: {
+                  model_id: "mock_asr",
+                  status: "ready",
+                  command_ready: true,
+                },
+              },
+            },
+            config: {
+              recognition_backend: "assistant_service_local_asr",
+              service_model_id: "mock_asr",
+            },
+          },
+          service_models: [
+            {
+              model_id: "mock_asr",
+              title: "Mock ASR",
+              status: "ready",
+              command_ready: true,
+              artifacts: [{ path: "adapter.py", size_bytes: 1234 }],
+            },
+          ],
+        },
+      }),
+    });
+
+    const api = await import("../../src/services/api");
+    const resp = await api.fetchAssistant("g-demo", "voice_secretary");
+
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) throw new Error("expected ok response");
+    expect(resp.result.service_models_by_id?.mock_asr?.status).toBe("ready");
+    expect(resp.result.service_models?.[0]?.artifacts?.[0]?.size_bytes).toBe(1234);
+    expect((resp.result.assistant?.health?.service as Record<string, unknown>)?.selected_model_id).toBe("mock_asr");
+  });
+
+  it("requests a matching voice prompt draft", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        result: {
+          group_id: "g-demo",
+          assistant: {
+            assistant_id: "voice_secretary",
+            kind: "voice_secretary",
+            enabled: true,
+            lifecycle: "idle",
+          },
+          prompt_draft: {
+            request_id: "voice-prompt-1",
+            status: "pending",
+            operation: "replace_with_refined_prompt",
+            draft_text: "请审查当前代码优化方案，并按风险优先级给出可执行修改建议。",
+            composer_snapshot_hash: "snapshot-1",
+          },
+        },
+      }),
+    });
+
+    const api = await import("../../src/services/api");
+    const resp = await api.fetchAssistant("g-demo", "voice_secretary", {
+      promptRequestId: "voice-prompt-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/groups/g-demo/assistants/voice_secretary?prompt_request_id=voice-prompt-1",
+      expect.anything(),
+    );
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) throw new Error("expected ok response");
+    expect(resp.result.prompt_draft).toMatchObject({
+      request_id: "voice-prompt-1",
+      operation: "replace_with_refined_prompt",
+    });
+  });
+
+  it("calls the install model endpoint and clears assistant cache", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        result: {
+          group_id: "g-demo",
+          assistant: {
+            assistant_id: "voice_secretary",
+            kind: "voice_secretary",
+            enabled: true,
+            lifecycle: "idle",
+          },
+          model: {
+            model_id: "mock_asr",
+            status: "ready",
+          },
+        },
+      }),
+    });
+
+    const api = await import("../../src/services/api");
+    const resp = await api.installVoiceAssistantModel("g-demo", { modelId: "mock_asr", by: "user" });
+
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) throw new Error("expected ok response");
+    expect(resp.result.model?.model_id).toBe("mock_asr");
+    expect(resp.result.model?.status).toBe("ready");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/groups/g-demo/assistants/voice_secretary/models/install",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ model_id: "mock_asr", by: "user", background: false }),
+      }),
+    );
+  });
+
+  it("preserves offline ASR model metadata in assistant state", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        result: {
+          group_id: "g-demo",
+          assistant: {
+            assistant_id: "voice_secretary",
+            kind: "voice_secretary",
+            enabled: true,
+            lifecycle: "idle",
+          },
+          service_models: [
+            {
+              model_id: "sherpa_onnx_sense_voice_zh_en_ja_ko_yue_int8",
+              kind: "asr",
+              status: "not_installed",
+              offline_ready: false,
+              offline: { engine: "sense_voice" },
+            },
+          ],
+        },
+      }),
+    });
+
+    const api = await import("../../src/services/api");
+    const resp = await api.fetchAssistant("g-demo", "voice_secretary");
+
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) throw new Error("expected ok response");
+    const model = resp.result.service_models_by_id?.sherpa_onnx_sense_voice_zh_en_ja_ko_yue_int8;
+    expect(model?.offline_ready).toBe(false);
+    expect(model?.offline).toEqual({ engine: "sense_voice" });
+  });
+});
+
 describe("api.message refs", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -796,7 +977,40 @@ describe("api.message refs", () => {
   });
 });
 
-describe("blueprint api entrypoints", () => {
+describe("api.capability overview", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    fetchMock.mockReset();
+    sessionStorageMock.clear();
+  });
+
+  it("can request capability overview without source instance aggregation", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        result: { items: [], count: 0, total_count: 0, offset: 0, limit: 1, has_more: false },
+      }),
+    });
+
+    const api = await import("../../src/services/api");
+    await api.fetchCapabilityOverview({
+      includeIndexed: true,
+      includeSourceInstances: false,
+      limit: 1,
+      kind: "skill",
+      groupId: "g-demo",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/capabilities/overview?limit=1&include_indexed=true&include_source_instances=false&kind=skill&group_id=g-demo",
+      expect.any(Object),
+    );
+  });
+});
+
+describe("copy groups api entrypoints", () => {
   beforeEach(() => {
     vi.resetModules();
     fetchMock.mockReset();
@@ -808,28 +1022,25 @@ describe("blueprint api entrypoints", () => {
     api.clearAuthToken();
   });
 
-  it("keeps create-group blueprint import on the form endpoint", async () => {
+  it("exports group copies from the group-scoped zip endpoint", async () => {
+    const blob = new Blob(["zip"], { type: "application/zip" });
     fetchMock.mockResolvedValue({
       status: 200,
       ok: true,
-      text: async () => JSON.stringify({ ok: true, result: { group_id: "g-new" } }),
+      headers: { get: (name: string) => (name.toLowerCase() === "content-disposition" ? 'attachment; filename="copy.zip"' : null) },
+      blob: async () => blob,
     });
 
     const api = await import("../../src/services/api");
-    const file = new File(["title: demo"], "group-template.yaml", { type: "text/yaml" });
-    const resp = await api.createGroupFromTemplate("/tmp/demo", "Demo", "", file);
+    const resp = await api.exportGroupCopy("g-demo");
 
     expect(resp.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/groups/from_template",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.any(FormData),
-      }),
+      "/api/v1/groups/g-demo/copy/export",
     );
   });
 
-  it("keeps settings blueprint preview/import endpoints wired", async () => {
+  it("keeps copy preview/import endpoints wired", async () => {
     fetchMock.mockResolvedValue({
       status: 200,
       ok: true,
@@ -837,30 +1048,22 @@ describe("blueprint api entrypoints", () => {
     });
 
     const api = await import("../../src/services/api");
-    const file = new File(["title: demo"], "group-template.yaml", { type: "text/yaml" });
+    const file = new File(["zip"], "copy.zip", { type: "application/zip" });
 
-    await api.exportGroupTemplate("g-demo");
-    await api.previewGroupTemplate("g-demo", file);
-    await api.importGroupTemplateReplace("g-demo", file);
+    await api.previewGroupCopy(file);
+    await api.importGroupCopy(file, "/tmp/demo", "Demo");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/api/v1/groups/g-demo/template/export",
-      expect.objectContaining({
-        headers: expect.objectContaining({ "content-type": "application/json" }),
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/v1/groups/g-demo/template/preview_upload",
+      "/api/v1/groups/copy/preview_import",
       expect.objectContaining({
         method: "POST",
         body: expect.any(FormData),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      "/api/v1/groups/g-demo/template/import_replace",
+      2,
+      "/api/v1/groups/copy/import",
       expect.objectContaining({
         method: "POST",
         body: expect.any(FormData),

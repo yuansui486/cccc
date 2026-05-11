@@ -11,6 +11,134 @@
   mix-blend-mode: normal;
 }
 
+@keyframes runtime-flow-rotate {
+  from {
+    transform: rotate(0deg) scale(0.985);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.018);
+  }
+  to {
+    transform: rotate(360deg) scale(0.985);
+  }
+}
+
+@keyframes runtime-flow-revolve {
+  from {
+    transform: rotate(0deg) scale(1.04);
+  }
+  50% {
+    transform: rotate(-180deg) scale(0.992);
+  }
+  to {
+    transform: rotate(-360deg) scale(1.04);
+  }
+}
+
+@keyframes runtime-flow-breathe {
+  0%, 100% {
+    transform: scale(0.985);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.045);
+    opacity: 1;
+  }
+}
+
+@keyframes runtime-flow-halo {
+  0%, 100% {
+    opacity: 0.36;
+    transform: scale(0.96);
+    filter: blur(7px);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(1.08);
+    filter: blur(10px);
+  }
+}
+
+.runtime-flow-ring {
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.runtime-flow-ring__base,
+.runtime-flow-ring__stream,
+.runtime-flow-ring__glow,
+.runtime-flow-ring__shine {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.runtime-flow-ring__base,
+.runtime-flow-ring__stream,
+.runtime-flow-ring__glow {
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+}
+
+.runtime-flow-ring__base {
+  background:
+    radial-gradient(circle at 50% 50%, transparent 63%, var(--runtime-flow-base, rgba(160, 124, 254, 0.18)) 72%, transparent 84%);
+  opacity: 0.82;
+  animation: runtime-flow-breathe 3.4s ease-in-out infinite;
+}
+
+.runtime-flow-ring__stream {
+  inset: -1px;
+  mix-blend-mode: screen;
+}
+
+.runtime-flow-ring__stream--primary {
+  background:
+    conic-gradient(
+      from 18deg,
+      transparent 0deg,
+      var(--runtime-flow-a, rgba(160, 124, 254, 0.82)) 56deg,
+      var(--runtime-flow-b, rgba(254, 143, 181, 0.72)) 138deg,
+      transparent 220deg,
+      var(--runtime-flow-c, rgba(255, 190, 123, 0.48)) 282deg,
+      transparent 360deg
+    );
+  filter: blur(1.8px) saturate(1.08);
+  opacity: 0.94;
+  animation: runtime-flow-rotate 4.6s linear infinite;
+}
+
+.runtime-flow-ring__stream--secondary {
+  inset: -2px;
+  background:
+    conic-gradient(
+      from 220deg,
+      transparent 0deg,
+      rgba(255, 255, 255, 0.02) 42deg,
+      var(--runtime-flow-c, rgba(255, 190, 123, 0.5)) 104deg,
+      transparent 174deg,
+      var(--runtime-flow-a, rgba(160, 124, 254, 0.72)) 250deg,
+      var(--runtime-flow-b, rgba(254, 143, 181, 0.58)) 320deg,
+      transparent 360deg
+    );
+  filter: blur(3.2px);
+  opacity: 0.72;
+  animation: runtime-flow-revolve 7.4s linear infinite;
+}
+
+.runtime-flow-ring__glow {
+  inset: -4px;
+  background:
+    radial-gradient(circle, transparent 58%, var(--runtime-flow-glow, rgba(254, 143, 181, 0.24)) 74%, transparent 83%);
+  opacity: 0.44;
+  filter: blur(10px);
+  animation: runtime-flow-halo 2.8s ease-in-out infinite;
+}
+
+.runtime-flow-ring__shine {
+  z-index: 2;
+}
+
 /* ============================================
    CCCC Web UI - Theme System with Liquid Glass
    ============================================ */
@@ -1056,6 +1184,19 @@ select {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+@media (max-width: 767px) {
+  .glass-header {
+    background: transparent;
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+
+  .dark .glass-header {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 /* Liquid shimmer animation */
 @keyframes liquid-shimmer {
   0% {
@@ -1383,6 +1524,59 @@ select {
 
 .pulse-indicator {
   animation: subtle-pulse 2s ease-in-out infinite;
+}
+
+@keyframes stream-text-blur-in-up {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(0.35em);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes voice-transcript-level {
+  from {
+    opacity: 0.48;
+    transform: scaleY(0.42);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+.stream-text-animate {
+  display: inline;
+}
+
+.stream-text-animate-segment {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(0.35em);
+  filter: blur(7px);
+  animation: stream-text-blur-in-up var(--stream-text-duration, 260ms) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: var(--stream-text-delay, 0ms);
+  will-change: opacity, filter, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="voice-transcript-level"] {
+    animation: none !important;
+    opacity: 0.72;
+    transform: scaleY(0.72);
+  }
+
+  .stream-text-animate-segment {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    animation: none;
+  }
 }
 
 @keyframes presentation-slot-attention-light {

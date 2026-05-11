@@ -100,6 +100,48 @@ describe("buildHeadlessPreviewTimelineEntries", () => {
     expect(entries.every((entry) => entry.live === false)).toBe(true);
   });
 
+  it("suppresses reasoning activity rows that duplicate commentary transcript text", () => {
+    const entries = buildHeadlessPreviewTimelineEntries({
+      previewSessions: [
+        {
+          actorId: "coder",
+          pendingEventId: "evt-1",
+          currentStreamId: "commentary-1",
+          phase: "streaming",
+          streamPhase: "commentary",
+          updatedAt: "2025-01-01T00:00:04Z",
+          latestText: "I will inspect the runtime output first",
+          transcriptBlocks: [
+            {
+              id: "commentary-1::commentary",
+              streamId: "commentary-1",
+              streamPhase: "commentary",
+              text: "I will inspect the runtime output first",
+              updatedAt: "2025-01-01T00:00:04Z",
+              completed: false,
+              transient: true,
+            },
+          ],
+          activities: [
+            {
+              id: "reasoning-1",
+              kind: "thinking",
+              status: "completed",
+              summary: "I will inspect the runtime output first",
+              raw_item_type: "reasoning",
+              ts: "2025-01-01T00:00:03Z",
+            },
+            { id: "tool-1", kind: "tool", status: "completed", summary: "rg -n runtime", ts: "2025-01-01T00:00:02Z" },
+          ],
+        },
+      ],
+    });
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["activity", "message"]);
+    expect(entries[0]).toMatchObject({ kind: "activity", activity: { id: "tool-1" } });
+    expect(entries[1]).toMatchObject({ kind: "message", text: "I will inspect the runtime output first" });
+  });
+
   it("groups contiguous activity rows into compact activity bands", () => {
     const entries = buildHeadlessPreviewTimelineEntries({
       previewSessions: [

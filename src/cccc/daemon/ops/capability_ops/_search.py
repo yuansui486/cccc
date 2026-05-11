@@ -525,6 +525,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
     kind_filter = str(args.get("kind") or "").strip().lower()
     policy_filter = str(args.get("policy") or "").strip().lower()
     source_filter = str(args.get("source_id") or "").strip()
+    query_tokens = _tokenize_search_text(query) if query else []
 
     try:
         with _POLICY_LOCK:
@@ -730,7 +731,8 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
         if source_filter:
             rows = [row for row in rows if str(row.get("source_id") or "").strip() == source_filter]
 
-        def _rank(row: Dict[str, Any]) -> Tuple[int, int, int, str]:
+        def _rank(row: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
+            query_score = _score_item_tokens(row, query_tokens) if query_tokens else 0
             blocked_penalty = 1 if bool(row.get("blocked_global")) else 0
             recent = row.get("recent_success") if isinstance(row.get("recent_success"), dict) else {}
             recent_count = int(recent.get("success_count") or 0)
@@ -738,6 +740,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
             cap_id = str(row.get("capability_id") or "")
             builtin_bias = 0 if _is_builtin_search_record(row) else 1
             return (
+                -query_score,
                 blocked_penalty,
                 builtin_bias,
                 -recent_count,

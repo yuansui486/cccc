@@ -3,6 +3,7 @@ import type {
   CapabilityBlockEntry,
   CapabilityImportRecord,
   CapabilityOverviewItem,
+  CapabilitySourceInstance,
   CapabilitySourceState,
   CapabilityStateResult,
   ContextDetailLevel,
@@ -150,21 +151,53 @@ export async function fetchSettings(groupId: string, init?: RequestInit & { noCa
   return apiJson<{ settings: GroupSettings }>(`/api/v1/groups/${encodeURIComponent(groupId)}/settings`, init);
 }
 
-export async function fetchCapabilityOverview(opts?: { query?: string; limit?: number; includeIndexed?: boolean }) {
+export async function fetchCapabilityOverview(opts?: {
+  query?: string;
+  limit?: number;
+  offset?: number;
+  includeIndexed?: boolean;
+  kind?: "all" | "pack" | "mcp" | "skill";
+  policy?: "all" | "actionable" | "blocked" | "indexed";
+  sourceId?: string;
+  groupId?: string;
+  includeSourceInstances?: boolean;
+}) {
   const params = new URLSearchParams();
   if (String(opts?.query || "").trim()) params.set("query", String(opts?.query || "").trim());
   if (typeof opts?.limit === "number" && Number.isFinite(opts.limit)) {
     params.set("limit", String(Math.max(1, Math.trunc(opts.limit))));
   }
+  if (typeof opts?.offset === "number" && Number.isFinite(opts.offset)) {
+    params.set("offset", String(Math.max(0, Math.trunc(opts.offset))));
+  }
   if (typeof opts?.includeIndexed === "boolean") {
     params.set("include_indexed", opts.includeIndexed ? "true" : "false");
+  }
+  if (typeof opts?.includeSourceInstances === "boolean") {
+    params.set("include_source_instances", opts.includeSourceInstances ? "true" : "false");
+  }
+  if (String(opts?.kind || "").trim() && String(opts?.kind || "").trim() !== "all") {
+    params.set("kind", String(opts?.kind || "").trim());
+  }
+  if (String(opts?.policy || "").trim() && String(opts?.policy || "").trim() !== "all") {
+    params.set("policy", String(opts?.policy || "").trim());
+  }
+  if (String(opts?.sourceId || "").trim() && String(opts?.sourceId || "").trim() !== "all") {
+    params.set("source_id", String(opts?.sourceId || "").trim());
+  }
+  if (String(opts?.groupId || "").trim()) {
+    params.set("group_id", String(opts?.groupId || "").trim());
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiJson<{
     items: CapabilityOverviewItem[];
     count: number;
+    total_count?: number;
+    has_more?: boolean;
     query?: string;
+    kind_counts?: { skill?: number; mcp?: number; pack?: number };
     sources?: Record<string, CapabilitySourceState>;
+    source_instances?: CapabilitySourceInstance[];
     blocked_capabilities?: CapabilityBlockEntry[];
     allowlist_revision?: string;
   }>(`/api/v1/capabilities/overview${suffix}`);

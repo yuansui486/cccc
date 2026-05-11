@@ -11,6 +11,18 @@ class TestActorProfilesOps(unittest.TestCase):
         os.environ["CCCC_HOME"] = td
 
         def cleanup() -> None:
+            try:
+                from cccc.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from cccc.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from cccc.runners import headless as headless_runner
+                from cccc.runners import pty as pty_runner
+
+                codex_app_supervisor.stop_all()
+                claude_app_supervisor.stop_all()
+                headless_runner.SUPERVISOR.stop_all()
+                pty_runner.SUPERVISOR.stop_all()
+            except Exception:
+                pass
             td_ctx.__exit__(None, None, None)
             if old_home is None:
                 os.environ.pop("CCCC_HOME", None)
@@ -785,6 +797,32 @@ class TestActorProfilesOps(unittest.TestCase):
             assert isinstance(actor, dict)
             self.assertEqual(str(actor.get("profile_id") or ""), "")
             self.assertEqual(str(actor.get("runtime") or ""), "custom")
+        finally:
+            cleanup()
+
+    def test_web_model_profile_upsert_forces_headless_runner(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            upsert, _ = self._call(
+                "actor_profile_upsert",
+                {
+                    "by": "user",
+                    "profile": {
+                        "id": "web-profile",
+                        "name": "ChatGPT Web",
+                        "runtime": "web_model",
+                        "runner": "pty",
+                        "command": ["codex"],
+                    },
+                },
+            )
+            self.assertTrue(upsert.ok, getattr(upsert, "error", None))
+            profile = (upsert.result or {}).get("profile") if isinstance(upsert.result, dict) else {}
+            self.assertIsInstance(profile, dict)
+            assert isinstance(profile, dict)
+            self.assertEqual(profile.get("runtime"), "web_model")
+            self.assertEqual(profile.get("runner"), "headless")
+            self.assertEqual(profile.get("command"), [])
         finally:
             cleanup()
 

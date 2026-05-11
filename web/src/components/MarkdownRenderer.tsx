@@ -25,28 +25,32 @@ export function MarkdownRenderer({ content, isDark, className, invertText }: Mar
             linkify: true,
             typographer: true,
             breaks: true,
-            highlight: (str: string, lang: string): string => {
-                const finalLang = lang?.toLowerCase().trim() || 'code';
-                const escaped = instance.utils.escapeHtml(str);
-
-                // 代码块带 Copy 按钮，无语法高亮
-                // 使用 CSS 类切换显示状态，避免直接修改 innerHTML 与 React reconciliation 冲突
-                return (
-                    '<div class="code-block-wrapper relative group">' +
-                    '<div class="code-block-header flex items-center justify-between">' +
-                    '<span class="uppercase">' + finalLang + '</span>' +
-                    '<button class="copy-button flex items-center gap-1 select-none" data-code="' + encodeURIComponent(str) + '">' +
-                    '<span class="copy-icon pointer-events-none">' + copyIconMarkup + '</span>' +
-                    '<span class="copy-text pointer-events-none">Copy</span>' +
-                    '<span class="copied-icon pointer-events-none hidden text-green-500 dark:text-emerald-400">' + copiedIconMarkup + '</span>' +
-                    '<span class="copied-text pointer-events-none hidden text-green-500 dark:text-emerald-400">Copied!</span>' +
-                    '</button>' +
-                    '</div>' +
-                    '<pre><code class="language-' + finalLang + '">' + escaped + '</code></pre>' +
-                    '</div>'
-                );
-            },
         });
+        instance.renderer.rules.fence = (tokens, idx) => {
+            const token = tokens[idx];
+            const info = String(token.info || "").trim();
+            const rawLang = info.split(/\s+/)[0] || "";
+            const finalLang = rawLang.toLowerCase().trim() || "text";
+            const escapedLang = instance.utils.escapeHtml(finalLang);
+            const escaped = instance.utils.escapeHtml(token.content || "");
+            const encodedCode = encodeURIComponent(token.content || "");
+
+            // Render the full fence here so markdown-it does not wrap custom markup in another pre/code pair.
+            return (
+                '<div class="code-block-wrapper relative group">' +
+                '<div class="code-block-header flex items-center justify-between">' +
+                '<span class="code-block-lang uppercase">' + escapedLang + '</span>' +
+                '<button class="copy-button flex items-center gap-1 select-none" data-code="' + encodedCode + '">' +
+                '<span class="copy-icon pointer-events-none">' + copyIconMarkup + '</span>' +
+                '<span class="copy-text pointer-events-none">Copy</span>' +
+                '<span class="copied-icon pointer-events-none hidden text-green-500 dark:text-emerald-400">' + copiedIconMarkup + '</span>' +
+                '<span class="copied-text pointer-events-none hidden text-green-500 dark:text-emerald-400">Copied!</span>' +
+                '</button>' +
+                '</div>' +
+                '<pre><code class="language-' + escapedLang + '">' + escaped + '</code></pre>' +
+                '</div>'
+            );
+        };
         return instance;
     }, []);
 
@@ -54,7 +58,7 @@ export function MarkdownRenderer({ content, isDark, className, invertText }: Mar
         return md.render(content || "");
     }, [md, content]);
 
-    // 使用事件委托处理复制逻辑
+    // Use event delegation for copy handling.
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
@@ -74,7 +78,7 @@ export function MarkdownRenderer({ content, isDark, className, invertText }: Mar
             try {
                 const copied = await copyTextToClipboard(code);
                 if (!copied) throw new Error('copy failed');
-                // 使用 CSS 类切换显示状态，避免修改 innerHTML 导致 React DOM 同步错误
+                // Toggle state through CSS classes to avoid React DOM sync issues from innerHTML edits.
                 button.classList.add('copied', 'pointer-events-none');
                 const copyIcon = button.querySelector('.copy-icon');
                 const copyText = button.querySelector('.copy-text');

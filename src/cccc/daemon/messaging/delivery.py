@@ -534,8 +534,10 @@ THROTTLE = DeliveryThrottle()
 
 REMINDER_EVERY_N_MESSAGES = 1
 MCP_REMINDER_LINE = (
-    "[cccc] If you respond: use MCP (cccc_message_send / cccc_message_reply). "
-    "Terminal output isn't delivered."
+    "[cccc] If you respond: use MCP (cccc_message_send / cccc_message_reply); "
+    "terminal output isn't delivered. Verify reply_to/to; avoid routine @all. "
+    "A reply handles the communication obligation, not the whole job; "
+    "resume active work unless priority changed. If unsure, use MCP tool cccc_help."
 )
 
 
@@ -596,9 +598,15 @@ def _render_system_notify_message_for_delivery(*, notify: SystemNotifyData, grou
         return "\n\n".join(blocks).strip()
     if context_kind == "voice_secretary_input":
         reason = str(context.get("reason") or "").strip()
+        envelope = context.get("input_envelope") if isinstance(context.get("input_envelope"), dict) else {}
+        if envelope:
+            input_text = str(envelope.get("input_text") or "").strip()
+            if input_text:
+                return input_text
+            return "Voice Secretary input is available in the daemon-delivered input_envelope."
         blocks = [
             "Secretary input ready.",
-            "First action: cccc_voice_secretary_document(action=\"read_new_input\").",
+            "Legacy pointer notification: call MCP tool cccc_voice_secretary_document(action=\"read_new_input\") before doing other work.",
             "Pointer only; fetch the input text through read_new_input.",
         ]
         if reason:
@@ -900,13 +908,108 @@ def queue_system_notify(
     )
 
 
+def dispatch_system_notify_event_to_actor(
+    group: Group,
+    *,
+    event: Dict[str, Any],
+    actor_id: str,
+    async_flush: bool = False,
+) -> bool:
+    """Deliver an existing system.notify event to a currently running actor."""
+    aid = str(actor_id or "").strip()
+    event_id = str((event or {}).get("id") or "").strip()
+    event_ts = str((event or {}).get("ts") or "").strip()
+    if not aid or not event_id or str((event or {}).get("kind") or "") != "system.notify":
+        return False
+
+    raw_data = event.get("data") if isinstance(event, dict) else {}
+    if not isinstance(raw_data, dict):
+        return False
+    try:
+        notify = SystemNotifyData.model_validate(raw_data)
+    except Exception:
+        return False
+
+    actor = find_actor(group, aid)
+    if not isinstance(actor, dict):
+        return False
+    runtime = str(actor.get("runtime") or "").strip().lower()
+    runner_kind = str(actor.get("runner") or "pty").strip()
+
+    if runner_kind == "headless":
+        headless_control_text = render_headless_control_text(
+            control_kind="system_notify",
+            body=render_system_notify_delivery_text(notify=notify, group=group),
+        )
+        if not headless_control_text:
+            return False
+        try:
+            if runtime == "codex":
+                from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
+
+                if not codex_app_supervisor.actor_running(group.group_id, aid):
+                    return False
+                return bool(
+                    codex_app_supervisor.submit_control_message(
+                        group_id=group.group_id,
+                        actor_id=aid,
+                        text=headless_control_text,
+                        control_kind="system_notify",
+                        event_id=event_id,
+                        ts=event_ts,
+                    )
+                )
+            if runtime == "claude":
+                from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
+
+                if not claude_app_supervisor.actor_running(group.group_id, aid):
+                    return False
+                return bool(
+                    claude_app_supervisor.submit_control_message(
+                        group_id=group.group_id,
+                        actor_id=aid,
+                        text=headless_control_text,
+                        control_kind="system_notify",
+                        event_id=event_id,
+                        ts=event_ts,
+                    )
+                )
+        except Exception:
+            logger.exception(
+                "failed to dispatch headless system.notify group=%s actor=%s event=%s",
+                group.group_id,
+                aid,
+                event_id,
+            )
+        return False
+
+    if runner_kind != "pty":
+        return False
+    if not pty_runner.SUPERVISOR.actor_running(group.group_id, aid):
+        return False
+
+    queue_system_notify(
+        group,
+        actor_id=aid,
+        event_id=event_id,
+        notify_kind=str(notify.kind),
+        title=str(notify.title),
+        message=_render_system_notify_message_for_delivery(notify=notify, group=group),
+        ts=event_ts,
+    )
+    if async_flush:
+        request_flush_pending_messages(group, actor_id=aid)
+        return True
+    return bool(flush_pending_messages(group, actor_id=aid))
+
+
 def emit_system_notify(
     group: Group,
     *,
     by: str,
     notify: SystemNotifyData,
 ) -> Dict[str, Any]:
-    """Append a system.notify event and dispatch it to running PTY targets."""
+    """Append a system.notify event and dispatch it to running runtime targets."""
     event = append_event(
         group.ledger_path,
         kind="system.notify",
@@ -936,66 +1039,8 @@ def emit_system_notify(
     if not event_id:
         return event
 
-    headless_control_text = render_headless_control_text(
-        control_kind="system_notify",
-        body=render_system_notify_delivery_text(notify=notify, group=group),
-    )
-
     for aid in target_actor_ids:
-        actor = find_actor(group, aid)
-        if not isinstance(actor, dict):
-            continue
-        runtime = str(actor.get("runtime") or "").strip().lower()
-        runner_kind = str(actor.get("runner") or "pty").strip()
-        if runner_kind == "headless" and headless_control_text:
-            delivered = False
-            try:
-                if runtime == "codex":
-                    from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
-
-                    if codex_app_supervisor.actor_running(group.group_id, aid):
-                        delivered = bool(
-                            codex_app_supervisor.submit_control_message(
-                                group_id=group.group_id,
-                                actor_id=aid,
-                                text=headless_control_text,
-                                control_kind="system_notify",
-                                event_id=event_id,
-                                ts=event_ts,
-                            )
-                        )
-                elif runtime == "claude":
-                    from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
-
-                    if claude_app_supervisor.actor_running(group.group_id, aid):
-                        delivered = bool(
-                            claude_app_supervisor.submit_control_message(
-                                group_id=group.group_id,
-                                actor_id=aid,
-                                text=headless_control_text,
-                                control_kind="system_notify",
-                                event_id=event_id,
-                                ts=event_ts,
-                            )
-                        )
-            except Exception:
-                delivered = False
-            if delivered:
-                continue
-        if runner_kind != "pty":
-            continue
-        if not pty_runner.SUPERVISOR.actor_running(group.group_id, aid):
-            continue
-        queue_system_notify(
-            group,
-            actor_id=aid,
-            event_id=event_id,
-            notify_kind=str(notify.kind),
-            title=str(notify.title),
-            message=_render_system_notify_message_for_delivery(notify=notify, group=group),
-            ts=event_ts,
-        )
-        flush_pending_messages(group, actor_id=aid)
+        dispatch_system_notify_event_to_actor(group, event=event, actor_id=aid)
 
     return event
 

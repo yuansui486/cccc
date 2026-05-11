@@ -37,10 +37,10 @@ export function getPetReminderPreviewLabel(
   if (!reminder) return "";
   const petName = String(companion?.name || "").trim();
   if (reminder.action.type === "draft_message") {
-    return petName ? `${petName} 准备替你发出的消息` : "准备发送的消息";
+    return petName ? `${petName}'s message draft` : "Message draft";
   }
   if (reminder.action.type === "task_proposal") {
-    return petName ? `${petName} 准备好的任务建议` : "准备好的任务建议";
+    return petName ? `${petName}'s task proposal` : "Task proposal";
   }
   return "";
 }

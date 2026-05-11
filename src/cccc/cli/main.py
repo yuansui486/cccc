@@ -222,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_send = sub.add_parser("send", help="Append a chat message into the active group ledger (or --group)")
     p_send.add_argument("text", help="Message text")
     p_send.add_argument("--group", default="", help="Target group_id (default: active group)")
-    p_send.add_argument("--by", default="user", help="Sender label (default: user)")
+    p_send.add_argument("--by", default=None, help="Sender label (default: CCCC_ACTOR_ID in actor runtime, otherwise user)")
     p_send.add_argument(
         "--to",
         action="append",
@@ -238,7 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_tracked_send.add_argument("text", help="Visible message text")
     p_tracked_send.add_argument("--title", required=True, help="Task title")
     p_tracked_send.add_argument("--group", default="", help="Target group_id (default: active group)")
-    p_tracked_send.add_argument("--by", default="user", help="Sender label (default: user)")
+    p_tracked_send.add_argument("--by", default=None, help="Sender label (default: CCCC_ACTOR_ID in actor runtime, otherwise user)")
     p_tracked_send.add_argument(
         "--to",
         action="append",
@@ -260,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_reply.add_argument("event_id", help="Event ID of the message to reply to")
     p_reply.add_argument("text", help="Reply text")
     p_reply.add_argument("--group", default="", help="Target group_id (default: active group)")
-    p_reply.add_argument("--by", default="user", help="Sender label (default: user)")
+    p_reply.add_argument("--by", default=None, help="Sender label (default: CCCC_ACTOR_ID in actor runtime, otherwise user)")
     p_reply.add_argument(
         "--to",
         action="append",

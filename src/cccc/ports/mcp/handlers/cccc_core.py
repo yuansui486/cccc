@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ....kernel.agent_state_hygiene import build_mind_context_mini, evaluate_agent_state_hygiene
+from ....kernel.actors import find_actor
 from ....kernel.group import load_group
 from ....kernel.group_space import get_group_space_prompt_state
 from ....kernel.prompt_files import load_builtin_help_markdown as _load_builtin_help_markdown
@@ -21,7 +22,9 @@ _CCCC_HELP_BUILTIN = _load_builtin_help_markdown().strip()
 _RUNTIME_HELP_SECTION_HEADERS = {
     "## Active Skills (Runtime)",
     "## Group Space (Runtime)",
+    "## Web Model Transport (Runtime)",
 }
+
 
 def _trim_text(value: Any, *, max_chars: int) -> str:
     text = str(value or "").strip()
@@ -86,6 +89,21 @@ def _strip_reserved_runtime_help_sections(markdown: str) -> str:
     if keep_trailing_newline:
         result += "\n"
     return result
+
+
+def _actor_runtime_for_help(*, group_id: str, actor_id: str) -> str:
+    gid = str(group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    if not gid or not aid or aid == "user":
+        return ""
+    try:
+        group = load_group(gid)
+        actor = find_actor(group, aid) if group is not None else None
+    except Exception:
+        actor = None
+    if not isinstance(actor, dict):
+        return ""
+    return str(actor.get("runtime") or "").strip().lower()
 
 
 def _find_actor_state(*, context: Dict[str, Any], actor_id: str) -> Optional[Dict[str, Any]]:
@@ -548,20 +566,61 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
     aid = str(actor_id or "").strip()
     if not gid or not aid:
         return base
+    sections: List[str] = []
+    if _actor_runtime_for_help(group_id=gid, actor_id=aid) == "web_model":
+        sections.append(
+            "\n".join(
+                [
+                    "## Web Model Transport (Runtime)",
+                    "- You are still a normal CCCC agent; follow the same "
+                    "bootstrap/help/message/coordination/capability rules as other actors.",
+                    "- If a turn was injected into the web chat, work from that envelope and do not call "
+                    "`cccc_runtime_wait_next_turn` first for that turn.",
+                    "- If no turn was injected and you are operating by remote MCP pull, call "
+                    "`cccc_runtime_wait_next_turn` to get work.",
+                    "- Web chat text alone is not a visible CCCC reply. Use `cccc_message_send` or "
+                    "`cccc_message_reply` for peer/user-visible communication.",
+                    "- If CCCC MCP tools are not visible in the selected ChatGPT model, you do not have CCCC local access "
+                    "in this chat. Do not claim local execution; tell the user to switch to a GPT-5.x ChatGPT session "
+                    "that can see the CCCC connector.",
+                    "- For non-trivial local workspace work, default to `cccc_code_exec`: use JavaScript `tools.*` "
+                    "calls to compose repo reads, patches, shell/test commands, git diff, and visible reports in one focused flow.",
+                    "- Use direct repo/shell/git tools for simple one-step actions; use `cccc_code_exec` when the work needs "
+                    "more than one local operation or when patch/test/diff feedback should stay together.",
+                    "- Direct tools remain available for simple steps: `cccc_repo`, `cccc_apply_patch`, `cccc_repo_edit`, "
+                    "`cccc_exec_command`, `cccc_write_stdin`, `cccc_shell`, and `cccc_git`.",
+                    "- Delivered CCCC attachments are blob references, not browser uploads. Read text attachments with "
+                    "`cccc_file(action=\"read\", rel_path=...)`; use `blob_path` for binary files or local inspection.",
+                    "- When you create a file that the user or a peer should receive, keep it under the active scope and "
+                    "send it back with `cccc_file(action=\"send\", path=..., text=...)` instead of only mentioning a path.",
+                    "- Inside `cccc_code_exec`, call nested tools as `await tools.cccc_repo({...})`, "
+                    "`await tools.cccc_apply_patch({...})`; inspect `COMMON_WORK_LOOPS`, `tool_names(\"repo\")`, "
+                    "`list_tools(\"repo\")`, or `tool_help(\"repo\")` if a tool name or loop is unclear; "
+                    "use `tool_help(\"repo\", {detail:\"schema\"})` only when needed.",
+                    "- Prefer the Codex-style loop: read with line ranges, patch, run focused validation, then inspect `cccc_git(action=\"diff\")`.",
+                    "- For exact small edits, use `cccc_repo_edit(action=\"replace\"|\"multi_replace\", "
+                    "expected_sha256=...)`; use `write` only for deliberate full-file writes.",
+                    "- Prefer `cccc_exec_command`/`cccc_write_stdin` for long-running commands; `cccc_shell` is for short one-shot commands.",
+                    "- Finish each processed turn with `cccc_runtime_complete_turn` for status/evidence. "
+                    "Browser-injected turns are already delivery-committed, so missing completion should not block later turns.",
+                ]
+            ).rstrip()
+        )
     try:
         state = _call_daemon_or_raise(
             {"op": "capability_state", "args": {"group_id": gid, "actor_id": aid, "by": aid}},
             timeout_s=3.0,
         )
     except Exception:
-        return base
+        if not sections:
+            return base
+        return base.rstrip() + "\n\n" + "\n\n".join(sections).rstrip() + "\n"
     enabled_caps = state.get("enabled_capabilities") if isinstance(state, dict) else []
     active = state.get("active_capsule_skills") if isinstance(state, dict) else []
     autoload = state.get("autoload_skills") if isinstance(state, dict) else []
     enabled_list = enabled_caps if isinstance(enabled_caps, list) else []
     active_list = active if isinstance(active, list) else []
     autoload_list = autoload if isinstance(autoload, list) else []
-    sections: List[str] = []
     enabled_pack_ids = {
         str(item).strip()
         for item in enabled_list
@@ -671,7 +730,7 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             [
                 "- Capsule skill is runtime capsule activation, not a full local skill-package install.",
                 "- Runtime success is mainly visible via `capability_state.active_capsule_skills`; `dynamic_tools` may stay unchanged.",
-                "- If you need full local skill scripts or assets, install a normal skill package into Codex's skills directory (`$CODEX_HOME/skills` if `CODEX_HOME` is explicitly set).",
+                "- Install repository, URL, and local `SKILL.md` sources through `cccc_capability_install` so they remain CCCC capability records.",
             ]
         )
         sections.append("\n".join(lines).rstrip())
@@ -690,7 +749,11 @@ def inbox_list(*, group_id: str, actor_id: str, limit: int = 50, kind_filter: st
 def inbox_mark_read(*, group_id: str, actor_id: str, event_id: str) -> Dict[str, Any]:
     eid = str(event_id or "").strip()
     if not eid:
-        raise MCPError(code="missing_event_id", message="missing event_id")
+        raise MCPError(
+            code="missing_event_id",
+            message="missing event_id",
+            details={"recommended_action": "Use cccc_inbox_list to get the unread event id, then mark that exact id read."},
+        )
     return _call_daemon_or_raise(
         {"op": "inbox_mark_read", "args": {"group_id": group_id, "actor_id": actor_id, "event_id": eid, "by": actor_id}},
     )

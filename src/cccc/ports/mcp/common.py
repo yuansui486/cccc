@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -32,6 +35,26 @@ class _RuntimeContext:
     home: str
     group_id: str
     actor_id: str
+
+
+_RUNTIME_CONTEXT_OVERRIDE: ContextVar[Optional[_RuntimeContext]] = ContextVar(
+    "cccc_mcp_runtime_context_override",
+    default=None,
+)
+
+
+@contextmanager
+def runtime_context_override(*, home: str = "", group_id: str = "", actor_id: str = "") -> Iterable[None]:
+    ctx = _RuntimeContext(
+        home=str(home or "").strip(),
+        group_id=str(group_id or "").strip(),
+        actor_id=str(actor_id or "").strip(),
+    )
+    token = _RUNTIME_CONTEXT_OVERRIDE.set(ctx)
+    try:
+        yield
+    finally:
+        _RUNTIME_CONTEXT_OVERRIDE.reset(token)
 
 
 def _proc_parent_pid_windows(pid: int) -> int:
@@ -101,6 +124,18 @@ def _proc_parent_pid(pid: int) -> int:
         for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
             if line.startswith("PPid:"):
                 return int(str(line.split(":", 1)[1] or "").strip() or "0")
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "ppid=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if result.returncode != 0:
+            return 0
+        return int(str(result.stdout or "").strip() or "0")
     except Exception:
         return 0
     return 0
@@ -206,19 +241,25 @@ def _find_runtime_binding_from_pty_state(home: str, ancestor_pids: Iterable[int]
 
 
 def _runtime_context() -> _RuntimeContext:
-    home_explicit = "CCCC_HOME" in os.environ
-    gid_explicit = "CCCC_GROUP_ID" in os.environ
-    aid_explicit = "CCCC_ACTOR_ID" in os.environ
+    override = _RUNTIME_CONTEXT_OVERRIDE.get()
+    if override is not None and (override.group_id or override.actor_id or override.home):
+        default_home = _normalize_home(str(cccc_home()))
+        return _RuntimeContext(
+            home=override.home or default_home,
+            group_id=override.group_id,
+            actor_id=override.actor_id,
+        )
+
     home = _normalize_home(_env_str("CCCC_HOME"))
     gid = _env_str("CCCC_GROUP_ID")
     aid = _env_str("CCCC_ACTOR_ID")
 
     ancestor_pids = _iter_ancestor_pids()
-    if not home and not home_explicit:
+    if not home:
         home = _normalize_home(_first_ancestor_env_value(ancestor_pids, "CCCC_HOME"))
-    if not gid and not gid_explicit:
+    if not gid:
         gid = _first_ancestor_env_value(ancestor_pids, "CCCC_GROUP_ID")
-    if not aid and not aid_explicit:
+    if not aid:
         aid = _first_ancestor_env_value(ancestor_pids, "CCCC_ACTOR_ID")
 
     default_home = _normalize_home(str(cccc_home()))
@@ -227,15 +268,13 @@ def _runtime_context() -> _RuntimeContext:
         if item and item not in candidate_homes:
             candidate_homes.append(item)
 
-    if (not gid and not gid_explicit) or (not aid and not aid_explicit):
+    if not gid or not aid:
         for candidate in candidate_homes:
             recovered = _find_runtime_binding_from_pty_state(candidate, ancestor_pids)
             if not recovered:
                 continue
-            if not gid and not gid_explicit:
-                gid = recovered[0]
-            if not aid and not aid_explicit:
-                aid = recovered[1]
+            gid = gid or recovered[0]
+            aid = aid or recovered[1]
             home = home or candidate
             if gid and aid:
                 break

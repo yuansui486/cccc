@@ -79,6 +79,7 @@ from ._runtime import (  # noqa: F401
     _runtime_actor_bindings,
     _runtime_recent_success,
     _record_runtime_recent_success,
+    _remove_runtime_recent_success,
     _set_runtime_capability_artifact,
     _runtime_install_for_capability,
     _remove_runtime_capability_artifact,
@@ -93,15 +94,27 @@ from ._state import (  # noqa: F401
     _binding_state_allows_external_tool,
     _install_state_allows_external_tool,
     _collect_enabled_capabilities,
+    _collect_hidden_capabilities,
     _set_enabled_capability,
+    _set_hidden_capability,
     _remove_capability_bindings,
     _remove_capability_bindings_all_groups,
     _set_blocked_capability,
     _unset_blocked_capability,
+    _remove_blocked_capability_all_scopes,
     _collect_blocked_capabilities,
     _has_any_binding_for_capability,
     handle_capability_enable,
+    handle_capability_visibility,
     handle_capability_block,
+)
+from ._removed import (  # noqa: F401
+    _collect_removed_capabilities,
+    _set_removed_capability,
+)
+from ._source_instances import (  # noqa: F401
+    capability_record_matches_source_instance,
+    capability_source_instances,
 )
 
 from ._policy import (  # noqa: F401
@@ -175,6 +188,19 @@ from ._remote import (  # noqa: F401
     _sync_anthropic_skills_source,
     _mark_source_disabled,
 )
+from ._skillsmp import (  # noqa: F401
+    _skillsmp_capability_id_for_record_key,
+    _normalize_skillsmp_source_uri,
+    _skillsmp_record_display_name,
+    _skillsmp_record_is_canonical,
+    _skillsmp_record_key,
+    _skillsmp_skill_name_from_slug,
+)
+from ._github_skills import (  # noqa: F401
+    _parse_github_owner_repo_ref,
+    _discover_github_skill_repository_records,
+)
+from ._import_sources import _handle_capability_source_uri_import  # noqa: F401
 
 from ._install import (  # noqa: F401
     _install_spec_ready,
@@ -250,6 +276,8 @@ from ._handlers import (  # noqa: F401
     apply_actor_profile_capability_defaults,
     apply_actor_capability_autoload,
     handle_capability_import,
+    handle_capability_install_target,
+    handle_capability_source_delete,
     handle_capability_uninstall,
     handle_capability_tool_call,
 )
@@ -282,12 +310,18 @@ def try_handle_capability_op(op: str, args: Dict[str, Any]) -> Optional[DaemonRe
         return handle_capability_search(args)
     if op == "capability_enable":
         return handle_capability_enable(args)
+    if op == "capability_visibility":
+        return handle_capability_visibility(args)
     if op == "capability_block":
         return handle_capability_block(args)
     if op == "capability_state":
         return handle_capability_state(args)
     if op == "capability_import":
         return handle_capability_import(args)
+    if op == "capability_install_target":
+        return handle_capability_install_target(args)
+    if op == "capability_source_delete":
+        return handle_capability_source_delete(args)
     if op == "capability_uninstall":
         return handle_capability_uninstall(args)
     if op == "capability_tool_call":

@@ -12,10 +12,11 @@ from ...kernel.group import load_group
 from ...kernel.runtime import runtime_start_preflight_error
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
+from ..runner_state_ops import web_model_group_running
 from ...util.conv import coerce_bool
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
-from ..actors.actor_runtime_ops import resolve_actor_launch_spec
+from ..actors.actor_runtime_ops import model_from_runtime_command, resolve_actor_launch_spec
 from ..assistants.voice_secretary_runtime_ops import (
     capture_voice_secretary_actor_state,
     restore_voice_secretary_actor_state,
@@ -193,12 +194,28 @@ def autostart_running_groups(
                     str(launch_spec["runner"]),
                     effective_runner,
                 )
-                if runtime == "codex" and effective_runner == "headless":
+                if runtime == "web_model" and effective_runner == "headless":
+                    write_headless_state(group.group_id, actor_id)
+                    try:
+                        from ..actors.web_model_browser_delivery import web_model_browser_delivery_enabled
+                        from ..actors.web_model_browser_session import schedule_web_model_chatgpt_browser_session_warmup
+
+                        if web_model_browser_delivery_enabled(group.group_id, actor):
+                            schedule_web_model_chatgpt_browser_session_warmup(
+                                group_id=group.group_id,
+                                actor_id=actor_id,
+                                reason="daemon_autostart",
+                                retry_seconds=0.0,
+                            )
+                    except Exception:
+                        pass
+                elif runtime == "codex" and effective_runner == "headless":
                     codex_app_supervisor.start_actor(
                         group_id=group.group_id,
                         actor_id=actor_id,
                         cwd=cwd,
                         env=dict(inject_actor_context_env(effective_env, group.group_id, actor_id)),
+                        model=model_from_runtime_command(launch_spec["effective_command"]),
                     )
                 elif runtime == "claude" and effective_runner == "headless":
                     claude_app_supervisor.start_actor(
@@ -206,6 +223,7 @@ def autostart_running_groups(
                         actor_id=actor_id,
                         cwd=cwd,
                         env=dict(inject_actor_context_env(effective_env, group.group_id, actor_id)),
+                        model=model_from_runtime_command(launch_spec["effective_command"]),
                     )
                 elif effective_runner == "headless":
                     headless_runner.SUPERVISOR.start_actor(
@@ -236,7 +254,9 @@ def autostart_running_groups(
                 continue
 
             try:
-                if runtime == "codex" and effective_runner == "headless":
+                if runtime == "web_model" and effective_runner == "headless":
+                    pass
+                elif runtime == "codex" and effective_runner == "headless":
                     pass
                 elif runtime == "claude" and effective_runner == "headless":
                     pass
@@ -264,6 +284,7 @@ def autostart_running_groups(
                     or
                     pty_runner.SUPERVISOR.group_running(group.group_id)
                     or headless_runner.SUPERVISOR.group_running(group.group_id)
+                    or web_model_group_running(group.group_id)
                 )
             ):
                 automation_on_resume(group)

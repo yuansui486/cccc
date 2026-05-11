@@ -84,7 +84,7 @@ export function RolePresetPicker({ draftValue, disabled = false, onChangeDraft }
           }}
           placeholder={t("rolePresetSelectPlaceholder")}
           searchPlaceholder={t("rolePresetSelectPlaceholder")}
-          emptyText={t("common:noResults", { defaultValue: "没有匹配结果" })}
+          emptyText={t("common:noResults", { defaultValue: "No matching results" })}
           ariaLabel={t("rolePreset")}
           triggerClassName="glass-input w-full flex-1 min-h-[44px] px-3 py-2.5 text-sm"
           contentClassName="p-0"

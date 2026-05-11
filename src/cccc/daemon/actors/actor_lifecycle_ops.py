@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from ...contracts.v1 import DaemonError, DaemonResponse
-from ...kernel.actors import list_actors, update_actor
+from ...kernel.actors import find_actor, is_internal_actor, list_actors, update_actor
 from ...kernel.context import ContextStorage
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
@@ -16,13 +16,28 @@ from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
-from .actor_runtime_ops import resolve_actor_launch_spec
+from .actor_runtime_ops import model_from_runtime_command, resolve_actor_launch_spec
 from .actor_profile_runtime import ActorProfileAccessDeniedError, resolve_linked_actor_before_start
 from ..pet.review_scheduler import request_pet_review
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
+
+
+def _stop_actor_runtime_handles(
+    group_id: str,
+    actor_id: str,
+    *,
+    remove_headless_state: Callable[[str, str], None],
+    remove_pty_state_if_pid: Callable[..., None],
+) -> None:
+    codex_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
+    claude_app_supervisor.stop_actor(group_id=group_id, actor_id=actor_id)
+    headless_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+    pty_runner.SUPERVISOR.stop_actor(group_id=group_id, actor_id=actor_id)
+    remove_headless_state(group_id, actor_id)
+    remove_pty_state_if_pid(group_id, actor_id, pid=0)
 
 
 def handle_actor_start(
@@ -113,11 +128,18 @@ def handle_actor_stop(
     before_foreman = foreman_id(group)
     try:
         require_actor_permission(group, by=by, action="actor.stop", target_actor_id=actor_id)
-        actor = update_actor(group, actor_id, {"enabled": False})
+        current_actor = find_actor(group, actor_id)
+        if isinstance(current_actor, dict) and is_internal_actor(current_actor):
+            actor = dict(current_actor)
+        else:
+            actor = update_actor(group, actor_id, {"enabled": False})
         runner_kind = str(actor.get("runner") or "pty").strip()
         runner_effective = effective_runner_kind(runner_kind)
         runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-        if runtime == "codex" and runner_effective == "headless":
+        if runtime == "web_model" and runner_effective == "headless":
+            remove_headless_state(group.group_id, actor_id)
+            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+        elif runtime == "codex" and runner_effective == "headless":
             codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
             remove_headless_state(group.group_id, actor_id)
             remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
@@ -221,24 +243,12 @@ def handle_actor_restart(
             caller_id=caller_id,
             is_admin=is_admin,
         )
-        runner_kind = str(actor.get("runner") or "pty").strip()
-        runtime = str(actor.get("runtime") or "codex").strip() or "codex"
-        if runtime == "codex" and effective_runner_kind(runner_kind) == "headless":
-            codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        elif runtime == "claude" and effective_runner_kind(runner_kind) == "headless":
-            claude_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        elif effective_runner_kind(runner_kind) == "headless":
-            headless_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_headless_state(group.group_id, actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-        else:
-            pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
-            remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
-            remove_headless_state(group.group_id, actor_id)
+        _stop_actor_runtime_handles(
+            group.group_id,
+            actor_id,
+            remove_headless_state=remove_headless_state,
+            remove_pty_state_if_pid=remove_pty_state_if_pid,
+        )
         clear_preamble_sent(group, actor_id)
         throttle_reset_actor(group.group_id, actor_id, keep_pending=True)
     except Exception as e:
@@ -343,12 +353,18 @@ def handle_actor_restart(
             if not mcp_ready:
                 return _error("actor_restart_failed", f"failed to install MCP for runtime: {runtime}")
 
-        if runtime == "codex" and runner_effective == "headless":
+        if runtime == "web_model" and runner_effective == "headless":
+            try:
+                write_headless_state(group.group_id, actor_id)
+            except Exception:
+                pass
+        elif runtime == "codex" and runner_effective == "headless":
             codex_app_supervisor.start_actor(
                 group_id=group.group_id,
                 actor_id=actor_id,
                 cwd=cwd,
                 env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                model=model_from_runtime_command(launch_spec["effective_command"]),
             )
         elif runtime == "claude" and runner_effective == "headless":
             claude_app_supervisor.start_actor(
@@ -356,6 +372,7 @@ def handle_actor_restart(
                 actor_id=actor_id,
                 cwd=cwd,
                 env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                model=model_from_runtime_command(launch_spec["effective_command"]),
             )
         elif runner_effective == "headless":
             headless_runner.SUPERVISOR.start_actor(

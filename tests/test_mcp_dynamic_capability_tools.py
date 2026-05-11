@@ -405,6 +405,33 @@ class TestMcpDynamicCapabilityTools(unittest.TestCase):
         self.assertNotIn("cccc_message_send", names)
         self.assertNotIn("cccc_message_reply", names)
 
+    def test_list_tools_for_caller_fallback_uses_voice_secretary_env_without_actor_doc(self) -> None:
+        from cccc.contracts.v1 import DaemonRequest
+        from cccc.daemon.server import handle_request
+        from cccc.ports.mcp.server import list_tools_for_caller
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            create_resp, _ = handle_request(
+                DaemonRequest.model_validate({"op": "group_create", "args": {"title": "mcp-voice-env", "topic": "", "by": "user"}})
+            )
+            self.assertTrue(create_resp.ok, getattr(create_resp, "error", None))
+            group_id = str((create_resp.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            with patch.dict(os.environ, {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "voice-secretary"}, clear=False), patch(
+                "cccc.ports.mcp.server._call_daemon_or_raise",
+                side_effect=RuntimeError("daemon unavailable"),
+            ):
+                tools = list_tools_for_caller()
+
+        names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
+        self.assertIn("cccc_help", names)
+        self.assertIn("cccc_voice_secretary_document", names)
+        self.assertIn("cccc_voice_secretary_composer", names)
+        self.assertIn("cccc_voice_secretary_request", names)
+        self.assertNotIn("cccc_message_send", names)
+        self.assertNotIn("cccc_message_reply", names)
+
 
 if __name__ == "__main__":
     unittest.main()

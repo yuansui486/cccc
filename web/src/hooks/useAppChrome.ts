@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import * as api from "../services/api";
 import { useGroupStore, useObservabilityStore } from "../stores";
 import type { DirSuggestion } from "../types";
+import { MOBILE_VIEWPORT_MEDIA_QUERY } from "../utils/responsiveLayout";
 
 type UseAppChromeOptions = {
   parseUrlDeepLink: () => void;
@@ -56,7 +57,8 @@ export function useAppChrome({
     return () => window.removeEventListener("focus", handleFocus);
   }, [refreshWebAccessSession]);
 
-  // 首屏引导和基础能力探测保持一次性执行，避免函数引用变化导致重放。
+  // Run first-screen routing and capability probing once; function reference
+  // changes should not replay this bootstrap work.
   useEffect(() => {
     parseUrlDeepLink();
     refreshGroups();
@@ -74,7 +76,7 @@ export function useAppChrome({
   }, []);
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 639px)");
+    const mq = window.matchMedia(MOBILE_VIEWPORT_MEDIA_QUERY);
     const update = () => setSmallScreen(mq.matches);
     update();
     mq.addEventListener("change", update);

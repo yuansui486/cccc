@@ -35,6 +35,7 @@ vi.stubGlobal("localStorage", localStorageMock);
 vi.stubGlobal("window", { setTimeout, clearTimeout });
 
 let useGroupStore: typeof import("../../src/stores/useGroupStore").useGroupStore;
+let useComposerStore: typeof import("../../src/stores/useComposerStore").useComposerStore;
 let api: typeof import("../../src/services/api");
 let groupStoreCore: typeof import("../../src/stores/groupStoreCore");
 const SELECTED_GROUP_ID_KEY = "cccc-selected-group-id";
@@ -50,6 +51,7 @@ async function importFreshStore() {
   vi.resetModules();
   api = await import("../../src/services/api");
   groupStoreCore = await import("../../src/stores/groupStoreCore");
+  ({ useComposerStore } = await import("../../src/stores/useComposerStore"));
   const mod = await import("../../src/stores/useGroupStore");
   useGroupStore = mod.useGroupStore;
   return mod;
@@ -58,6 +60,7 @@ async function importFreshStore() {
 beforeAll(async () => {
   api = await import("../../src/services/api");
   groupStoreCore = await import("../../src/stores/groupStoreCore");
+  ({ useComposerStore } = await import("../../src/stores/useComposerStore"));
   ({ useGroupStore } = await import("../../src/stores/useGroupStore"));
 });
 
@@ -66,6 +69,19 @@ describe("useGroupStore selection and archive persistence", () => {
     vi.clearAllMocks();
     localStorageMock.clear();
     groupStoreCore.groupViewCache.clear();
+    useComposerStore?.setState({
+      activeGroupId: "",
+      composerText: "",
+      composerFiles: [],
+      toText: "",
+      replyTarget: null,
+      quotedPresentationRef: null,
+      priority: "normal",
+      replyRequired: false,
+      destGroupId: "",
+      drafts: {},
+      normalToTextByGroup: {},
+    });
   });
 
   it("initializes selectedGroupId from localStorage", async () => {
@@ -74,11 +90,40 @@ describe("useGroupStore selection and archive persistence", () => {
     expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-2");
   });
 
+  it("initializes composer ownership from persisted selected group before refresh succeeds", async () => {
+    localStorageMock.setItem(SELECTED_GROUP_ID_KEY, "g-2");
+    const mod = await importFreshStore();
+
+    expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-2");
+    expect(useComposerStore.getState().activeGroupId).toBe("g-2");
+    expect(useComposerStore.getState().destGroupId).toBe("g-2");
+  });
+
   it("persists explicit group selection changes", async () => {
     const mod = await importFreshStore();
     mod.useGroupStore.getState().setSelectedGroupId("g-9");
     expect(localStorageMock.getItem(SELECTED_GROUP_ID_KEY)).toBe("g-9");
     expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-9");
+  });
+
+  it("switches composer state synchronously with selected group changes", async () => {
+    const mod = await importFreshStore();
+    useComposerStore.getState().switchGroup(null, "g-a");
+    useComposerStore.getState().setToText("@all");
+    useComposerStore.getState().setComposerText("draft for a");
+    mod.useGroupStore.setState({ selectedGroupId: "g-a" });
+
+    mod.useGroupStore.getState().setSelectedGroupId("g-b");
+
+    const composerState = useComposerStore.getState();
+    expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-b");
+    expect(composerState.activeGroupId).toBe("g-b");
+    expect(composerState.destGroupId).toBe("g-b");
+    expect(composerState.toText).toBe("");
+    expect(composerState.drafts["g-a"]).toMatchObject({
+      composerText: "draft for a",
+      toText: "@all",
+    });
   });
 
   it("refreshGroups prefers the persisted selection when current state is empty", async () => {
@@ -97,6 +142,50 @@ describe("useGroupStore selection and archive persistence", () => {
     mod.useGroupStore.setState({ selectedGroupId: "" });
     await mod.useGroupStore.getState().refreshGroups();
     expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-2");
+  });
+
+  it("refreshGroups synchronizes composer state when it auto-selects a persisted group", async () => {
+    localStorageMock.setItem(SELECTED_GROUP_ID_KEY, "g-2");
+    vi.mocked(api.fetchGroups).mockResolvedValue({
+      ok: true,
+      result: {
+        groups: [
+          { group_id: "g-1", title: "One", state: "idle", topic: "" },
+          { group_id: "g-2", title: "Two", state: "active", topic: "" },
+        ],
+      },
+    } as Awaited<ReturnType<typeof api.fetchGroups>>);
+
+    const mod = await importFreshStore();
+    mod.useGroupStore.setState({ selectedGroupId: "" });
+    await mod.useGroupStore.getState().refreshGroups();
+
+    expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-2");
+    expect(useComposerStore.getState().activeGroupId).toBe("g-2");
+    expect(useComposerStore.getState().destGroupId).toBe("g-2");
+  });
+
+  it("refreshGroups synchronizes composer state when persisted selection already exists", async () => {
+    localStorageMock.setItem(SELECTED_GROUP_ID_KEY, "g-2");
+    vi.mocked(api.fetchGroups).mockResolvedValue({
+      ok: true,
+      result: {
+        groups: [
+          { group_id: "g-1", title: "One", state: "idle", topic: "" },
+          { group_id: "g-2", title: "Two", state: "active", topic: "" },
+        ],
+      },
+    } as Awaited<ReturnType<typeof api.fetchGroups>>);
+
+    const mod = await importFreshStore();
+    expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-2");
+    expect(useComposerStore.getState().activeGroupId).toBe("g-2");
+
+    await mod.useGroupStore.getState().refreshGroups();
+
+    expect(mod.useGroupStore.getState().selectedGroupId).toBe("g-2");
+    expect(useComposerStore.getState().activeGroupId).toBe("g-2");
+    expect(useComposerStore.getState().destGroupId).toBe("g-2");
   });
 
   it("refreshGroups falls back to the first group when the persisted one no longer exists", async () => {
@@ -128,6 +217,26 @@ describe("useGroupStore selection and archive persistence", () => {
     await mod.useGroupStore.getState().refreshGroups();
     expect(mod.useGroupStore.getState().selectedGroupId).toBe("");
     expect(localStorageMock.getItem(SELECTED_GROUP_ID_KEY)).toBeNull();
+  });
+
+  it("refreshGroups clears composer ownership when no groups remain", async () => {
+    localStorageMock.setItem(SELECTED_GROUP_ID_KEY, "g-1");
+    vi.mocked(api.fetchGroups).mockResolvedValue({
+      ok: true,
+      result: { groups: [] },
+    } as Awaited<ReturnType<typeof api.fetchGroups>>);
+
+    const mod = await importFreshStore();
+    mod.useGroupStore.setState({ selectedGroupId: "g-1" });
+    useComposerStore.getState().switchGroup(null, "g-1");
+    useComposerStore.getState().setToText("@all");
+    useComposerStore.getState().setComposerText("draft");
+
+    await mod.useGroupStore.getState().refreshGroups();
+
+    expect(mod.useGroupStore.getState().selectedGroupId).toBe("");
+    expect(useComposerStore.getState().activeGroupId).toBe("");
+    expect(useComposerStore.getState().destGroupId).toBe("");
   });
 
   it("initializes archivedGroupIds from localStorage", async () => {

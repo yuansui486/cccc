@@ -3,9 +3,6 @@ import { getRecipientDisplayName } from "../../hooks/useActorDisplayName";
 
 export function buildToLabel({
     hasDestination,
-    dstGroupId,
-    dstTo,
-    groupLabelById,
     recipients,
     displayNameMap,
 }: {
@@ -17,9 +14,7 @@ export function buildToLabel({
     displayNameMap: Map<string, string>;
 }): string {
     if (hasDestination) {
-        const dstLabel = String(groupLabelById?.[dstGroupId] || "").trim() || dstGroupId;
-        const dstToLabel = dstTo.length > 0 ? dstTo.join(", ") : "@all";
-        return `group: ${dstLabel} · ${dstToLabel}`;
+        return "";
     }
     if (!recipients || recipients.length === 0) return "@all";
     return recipients

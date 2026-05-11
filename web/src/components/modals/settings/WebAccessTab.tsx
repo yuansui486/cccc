@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { GroupMeta, RemoteAccessState, WebAccessSession } from "../../../types";
 import { InfoIcon } from "../../Icons";
 import { BodyPortal } from "../../ui/BodyPortal";
+import { SelectCombobox } from "../../SelectCombobox";
 import { InfoPopover } from "./InfoPopover";
 import * as api from "../../../services/api";
 import {
@@ -158,6 +159,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
   const knownAccessTokenCount = typeof session?.access_token_count === "number" ? session.access_token_count : accessTokenCount;
   const loginActive = Boolean(session?.login_active ?? (knownAccessTokenCount > 0));
   const canAccessGlobalSettings = Boolean(session?.can_access_global_settings ?? !loginActive);
+  const publicAccessTokenConfigured = knownAccessTokenCount > 0 || Boolean(remoteState?.config?.access_token_configured || remoteState?.diagnostics?.access_token_present);
 
   const pushHint = (value: string) => {
     setHint(value);
@@ -260,12 +262,12 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
   }, [hasAdminToken, isAdmin]);
 
   useEffect(() => {
-    if (!canAccessGlobalSettings) {
+    if (!canAccessGlobalSettings && !newToken) {
       setCreateDialogOpen(false);
       setNewToken(null);
       setCopiedNewToken(false);
     }
-  }, [canAccessGlobalSettings]);
+  }, [canAccessGlobalSettings, newToken]);
 
   const restartRequired = Boolean(remoteState?.restart_required);
   const applySupported = Boolean(remoteState?.apply_supported ?? remoteState?.diagnostics?.apply_supported);
@@ -694,6 +696,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
       setNewTokenAutoBound(shouldAdoptCreatedToken);
       if (created.token) {
         setNewToken(created.token);
+        setCreateDialogOpen(true);
       }
       if (shouldAdoptCreatedToken && created.token) {
         api.setAuthToken(created.token);
@@ -823,7 +826,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
             : t(`webAccess.status.${remoteState?.status || "stopped"}`);
 
   const createDialog =
-    canAccessGlobalSettings && createDialogOpen ? (
+    (canAccessGlobalSettings || Boolean(newToken)) && createDialogOpen ? (
       <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 animate-fade-in">
         <button type="button" aria-label={t("webAccess.close")} onClick={() => closeCreateDialog()} className="absolute inset-0 glass-overlay" />
         <div
@@ -1399,8 +1402,19 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
               <div className="mt-1 text-sm font-medium text-[var(--color-text-primary)]">{t(`webAccess.goals.${accessGoal}.title`)}</div>
               <div className="mt-1 text-xs leading-6 text-[var(--color-text-muted)]">{t(`webAccess.goals.${accessGoal}.editorHint`)}</div>
             </div>
-            <div className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(isDark, accessGoal === "public" ? "warn" : "neutral")}`}>
-              {accessGoal === "public" ? t("webAccess.publicTokenRequiredBadge") : accessGoal === "lan" ? t("webAccess.lanGoalBadge") : t("webAccess.localGoalBadge")}
+            <div
+              className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${statusChipClass(
+                isDark,
+                accessGoal === "public" ? (publicAccessTokenConfigured ? "good" : "warn") : "neutral",
+              )}`}
+            >
+              {accessGoal === "public"
+                ? publicAccessTokenConfigured
+                  ? t("webAccess.publicTokenProtectedBadge")
+                  : t("webAccess.publicTokenRequiredBadge")
+                : accessGoal === "lan"
+                  ? t("webAccess.lanGoalBadge")
+                  : t("webAccess.localGoalBadge")}
             </div>
           </div>
 
@@ -1417,17 +1431,19 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
               <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,240px)_minmax(0,240px)]">
                 <div>
                   <label className={labelClass()}>{t("webAccess.providerLabel")}</label>
-                  <select
+                  <SelectCombobox
+                    items={[
+                      { value: "manual", label: t("webAccess.providers.manual") },
+                      { value: "tailscale", label: t("webAccess.providers.tailscale") },
+                    ]}
                     value={remoteMethodValue}
-                    onChange={(e) => {
-                      const nextProvider = (e.target.value as "manual" | "tailscale") || "manual";
+                    onChange={(value) => {
+                      const nextProvider = (value as "manual" | "tailscale") || "manual";
                       setProvider(nextProvider);
                     }}
+                    ariaLabel={t("webAccess.providerLabel")}
                     className={inputClass()}
-                  >
-                    <option value="manual">{t("webAccess.providers.manual")}</option>
-                    <option value="tailscale">{t("webAccess.providers.tailscale")}</option>
-                  </select>
+                  />
                   <div className="mt-1 text-xs leading-6 text-[var(--color-text-muted)]">
                     {remoteMethodValue === "tailscale" ? t("webAccess.modeHintTailscale") : t("webAccess.remoteMethodLanHint")}
                   </div>
@@ -1483,9 +1499,27 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
                 />
                 <div className="mt-1 text-xs leading-6 text-[var(--color-text-muted)]">{t("webAccess.goalPublicUrlHint")}</div>
               </div>
-              <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/12 px-3 py-3">
-                <div className="text-sm font-medium text-amber-700 dark:text-amber-300">{t("webAccess.publicTokenRequiredTitle")}</div>
-                <div className="mt-1 text-xs leading-6 text-amber-700 dark:text-amber-300">{t("webAccess.publicTokenRequiredHint")}</div>
+              <div
+                className={`mt-3 rounded-lg border px-3 py-3 ${
+                  publicAccessTokenConfigured
+                    ? "border-emerald-500/30 bg-emerald-500/12"
+                    : "border-amber-500/30 bg-amber-500/12"
+                }`}
+              >
+                <div
+                  className={`text-sm font-medium ${
+                    publicAccessTokenConfigured ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
+                  }`}
+                >
+                  {publicAccessTokenConfigured ? t("webAccess.publicTokenProtectedTitle") : t("webAccess.publicTokenRequiredTitle")}
+                </div>
+                <div
+                  className={`mt-1 text-xs leading-6 ${
+                    publicAccessTokenConfigured ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
+                  }`}
+                >
+                  {publicAccessTokenConfigured ? t("webAccess.publicTokenProtectedHint") : t("webAccess.publicTokenRequiredHint")}
+                </div>
               </div>
             </>
           ) : null}

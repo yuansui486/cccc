@@ -65,7 +65,7 @@ function ensureLink(rel: string): HTMLLinkElement {
 export function applyBrandingToDocument(value: Partial<WebBranding> | null | undefined): WebBranding {
   const branding = normalizeWebBranding(value);
   document.title = resolveDocumentTitle(branding.product_name);
-  const isDark = document.documentElement.classList.contains("dark");
+  const isDark = Boolean(document.documentElement?.classList?.contains("dark"));
   const iconHref = resolveThemeAwareFaviconUrl(branding.favicon_url, isDark);
   ensureLink("icon").href = iconHref;
   ensureLink("apple-touch-icon").href = iconHref;
@@ -75,7 +75,7 @@ export function applyBrandingToDocument(value: Partial<WebBranding> | null | und
 export function syncDocumentBrandingTheme(): void {
   const icon = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
   const apple = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement | null;
-  const isDark = document.documentElement.classList.contains("dark");
+  const isDark = Boolean(document.documentElement?.classList?.contains("dark"));
   if (icon) {
     icon.href = resolveThemeAwareFaviconUrl(icon.getAttribute("href"), isDark);
   }

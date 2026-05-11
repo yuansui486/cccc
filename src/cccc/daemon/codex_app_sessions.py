@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -15,17 +16,31 @@ from ..kernel.actors import find_actor
 from ..kernel.blobs import resolve_blob_attachment_path
 from ..kernel.headless_events import append_headless_event
 from ..kernel.group import load_group
-from ..kernel.inbox import find_event
 from ..kernel.system_prompt import render_system_prompt
 from ..paths import ensure_home
 from .actors.actor_exit_ops import persist_actor_process_exit_stopped
+from .mcp_install import ensure_mcp_installed
 from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
 from .runner_state_ops import headless_state_path, remove_headless_state
-from ..util.fs import atomic_write_json, read_json
+from ..util.fs import atomic_write_json
+from ..util.node_env import with_node_deprecation_warnings_suppressed
 from ..util.process import pid_is_alive
 from ..util.time import utc_now_iso
+from .voice_secretary_control_turns import (
+    control_completion_state as _shared_voice_secretary_control_completion_state,
+    control_consumed_input as _voice_secretary_control_consumed_input,
+    control_consumption_diagnostics as _voice_secretary_control_consumption_diagnostics,
+    control_failure_reason as _voice_secretary_control_failure_reason,
+    control_snapshot as _voice_secretary_control_snapshot,
+    prepare_control_turn as _shared_voice_secretary_prepare_control_turn,
+    prepare_repair_retry as _voice_secretary_prepare_repair_retry,
+    retryable_control_failure as _voice_secretary_retryable_control_failure,
+)
 
 logger = logging.getLogger(__name__)
+
+_TURN_STALL_SECONDS = 45.0
+_TURN_WAIT_POLL_SECONDS = 5.0
 
 
 def _is_missing_codex_cli_error(exc: BaseException) -> bool:
@@ -35,6 +50,10 @@ def _is_missing_codex_cli_error(exc: BaseException) -> bool:
             return True
     message = str(exc or "").strip().lower()
     return "no such file or directory" in message and "codex" in message
+
+
+def _codex_cli_available(env: Dict[str, str]) -> bool:
+    return bool(shutil.which("codex", path=str((env or {}).get("PATH") or os.environ.get("PATH") or "")))
 
 
 def _is_closed_stream_logging_error(exc: BaseException) -> bool:
@@ -68,198 +87,30 @@ def _jsonrpc_request(request_id: int, method: str, params: Dict[str, Any]) -> Di
     return {"jsonrpc": "2.0", "id": int(request_id), "method": method, "params": params}
 
 
-def _voice_secretary_input_state(group_id: str) -> Dict[str, int]:
-    path = ensure_home() / "voice-secretary" / str(group_id or "").strip() / "input_state.json"
-    payload = read_json(path)
-    if not isinstance(payload, dict):
-        return {"latest_seq": 0, "secretary_read_cursor": 0}
-    return {
-        "latest_seq": max(0, int(payload.get("latest_seq") or 0)),
-        "secretary_read_cursor": max(0, int(payload.get("secretary_read_cursor") or 0)),
-    }
+def _voice_secretary_prepare_control_turn(
+    *,
+    group_id: str,
+    actor_id: str,
+    text: str,
+    event_id: str,
+    control_kind: str,
+) -> tuple[str, Dict[str, Any]]:
+    return _shared_voice_secretary_prepare_control_turn(
+        group_id=group_id,
+        actor_id=actor_id,
+        text=text,
+        event_id=event_id,
+        control_kind=control_kind,
+        snapshot_fn=_voice_secretary_control_snapshot,
+    )
 
 
-def _voice_secretary_prompt_draft_state(group_id: str, *, request_ids: list[str]) -> Dict[str, Dict[str, Any]]:
-    if not request_ids:
-        return {}
-    group = load_group(group_id)
-    if group is None:
-        return {}
-    payload = read_json(group.path / "state" / "assistants.json")
-    if not isinstance(payload, dict):
-        return {}
-    drafts = payload.get("voice_prompt_drafts") if isinstance(payload.get("voice_prompt_drafts"), dict) else {}
-    out: Dict[str, Dict[str, Any]] = {}
-    for request_id in request_ids:
-        normalized = str(request_id or "").strip()
-        if not normalized:
-            continue
-        draft = drafts.get(normalized) if isinstance(drafts.get(normalized), dict) else {}
-        out[normalized] = {
-            "updated_at": str(draft.get("updated_at") or "").strip(),
-            "draft_text": str(draft.get("draft_text") or ""),
-            "status": str(draft.get("status") or "").strip(),
-        }
-    return out
-
-
-def _voice_secretary_ask_request_state(group_id: str, *, request_ids: list[str]) -> Dict[str, Dict[str, Any]]:
-    if not request_ids:
-        return {}
-    group = load_group(group_id)
-    if group is None:
-        return {}
-    payload = read_json(group.path / "state" / "assistants.json")
-    if not isinstance(payload, dict):
-        return {}
-    requests = payload.get("voice_ask_requests") if isinstance(payload.get("voice_ask_requests"), dict) else {}
-    out: Dict[str, Dict[str, Any]] = {}
-    for request_id in request_ids:
-        normalized = str(request_id or "").strip()
-        if not normalized:
-            continue
-        request = requests.get(normalized) if isinstance(requests.get(normalized), dict) else {}
-        out[normalized] = {
-            "updated_at": str(request.get("updated_at") or "").strip(),
-            "reply_text": str(request.get("reply_text") or ""),
-            "status": str(request.get("status") or "").strip(),
-        }
-    return out
-
-
-def _voice_secretary_control_snapshot(*, group_id: str, actor_id: str, event_id: str, control_kind: str) -> Dict[str, Any]:
-    if str(actor_id or "").strip() != "voice-secretary":
-        return {}
-    if str(control_kind or "").strip().lower() != "system_notify":
-        return {}
-    group = load_group(group_id)
-    if group is None:
-        return {}
-    event = find_event(group, str(event_id or "").strip())
-    if not isinstance(event, dict):
-        return {}
-    if str(event.get("kind") or "").strip() != "system.notify":
-        return {}
-    data = event.get("data") if isinstance(event.get("data"), dict) else {}
-    context = data.get("context") if isinstance(data.get("context"), dict) else {}
-    if str(context.get("kind") or "").strip() != "voice_secretary_input":
-        return {}
-    state = _voice_secretary_input_state(group.group_id)
-    composer_request_ids: list[str] = []
-    secretary_request_ids: list[str] = []
-    try:
-        from .assistants.assistant_ops import _peek_voice_input_batch
-
-        preview = _peek_voice_input_batch(group)
-        input_batches = preview.get("input_batches") if isinstance(preview.get("input_batches"), list) else []
-        composer_request_ids = [
-            str(item).strip()
-            for item in ((preview or {}).get("composer_request_ids") if isinstance((preview or {}).get("composer_request_ids"), list) else [])
-            if str(item).strip()
-        ]
-        secretary_request_ids = [
-            str(item).strip()
-            for item in ((preview or {}).get("secretary_request_ids") if isinstance((preview or {}).get("secretary_request_ids"), list) else [])
-            if str(item).strip()
-        ]
-        input_target_kinds = [
-            str(item.get("target_kind") or "").strip().lower()
-            for item in input_batches
-            if isinstance(item, dict) and str(item.get("target_kind") or "").strip()
-        ]
-    except Exception:
-        composer_request_ids = []
-        secretary_request_ids = []
-        input_target_kinds = []
-    return {
-        "kind": "voice_secretary_input",
-        "event_id": str(event_id or "").strip(),
-        "before_latest_seq": int(state.get("latest_seq") or 0),
-        "before_secretary_read_cursor": int(state.get("secretary_read_cursor") or 0),
-        "composer_request_ids": composer_request_ids,
-        "secretary_request_ids": secretary_request_ids,
-        "input_target_kinds": input_target_kinds,
-        "before_prompt_drafts": _voice_secretary_prompt_draft_state(group.group_id, request_ids=composer_request_ids),
-        "before_ask_requests": _voice_secretary_ask_request_state(group.group_id, request_ids=secretary_request_ids),
-    }
-
-
-def _voice_secretary_control_consumed_input(*, group_id: str, snapshot: Dict[str, Any]) -> bool:
-    if str((snapshot or {}).get("kind") or "").strip() != "voice_secretary_input":
-        return True
-    diagnostics = _voice_secretary_control_consumption_diagnostics(group_id=group_id, snapshot=snapshot)
-    return not bool(diagnostics.get("missing") if isinstance(diagnostics, dict) else [])
-
-
-def _voice_secretary_control_consumption_diagnostics(*, group_id: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    if str((snapshot or {}).get("kind") or "").strip() != "voice_secretary_input":
-        return {}
-    before_latest = int((snapshot or {}).get("before_latest_seq") or 0)
-    before_cursor = int((snapshot or {}).get("before_secretary_read_cursor") or 0)
-    state = _voice_secretary_input_state(group_id)
-    current_cursor = int(state.get("secretary_read_cursor") or 0)
-    cursor_advanced = current_cursor > before_cursor
-    if before_latest <= before_cursor:
-        return {
-            "before_latest_seq": before_latest,
-            "before_secretary_read_cursor": before_cursor,
-            "current_secretary_read_cursor": current_cursor,
-            "cursor_advanced": cursor_advanced,
-            "missing": [],
-        }
-    composer_request_ids = [
-        str(item).strip()
-        for item in ((snapshot or {}).get("composer_request_ids") if isinstance((snapshot or {}).get("composer_request_ids"), list) else [])
-        if str(item).strip()
-    ]
-    secretary_request_ids = [
-        str(item).strip()
-        for item in ((snapshot or {}).get("secretary_request_ids") if isinstance((snapshot or {}).get("secretary_request_ids"), list) else [])
-        if str(item).strip()
-    ]
-    input_target_kinds = [
-        str(item).strip().lower()
-        for item in ((snapshot or {}).get("input_target_kinds") if isinstance((snapshot or {}).get("input_target_kinds"), list) else [])
-        if str(item).strip()
-    ]
-    missing: list[str] = []
-    if not cursor_advanced:
-        missing.append("read_new_input")
-    if secretary_request_ids:
-        before_ask_requests = (snapshot or {}).get("before_ask_requests") if isinstance((snapshot or {}).get("before_ask_requests"), dict) else {}
-        current_ask_requests = _voice_secretary_ask_request_state(group_id, request_ids=secretary_request_ids)
-        for request_id in secretary_request_ids:
-            current = current_ask_requests.get(request_id) if isinstance(current_ask_requests.get(request_id), dict) else {}
-            before = before_ask_requests.get(request_id) if isinstance(before_ask_requests.get(request_id), dict) else {}
-            if str(current.get("status") or "").strip() not in {"done", "needs_user", "failed", "handed_off"}:
-                missing.append(f"secretary_report:{request_id}")
-                continue
-            if not str(current.get("reply_text") or "").strip():
-                missing.append(f"secretary_reply_text:{request_id}")
-                continue
-            if str(current.get("updated_at") or "").strip() == str(before.get("updated_at") or "").strip():
-                missing.append(f"secretary_report_updated_at:{request_id}")
-    if composer_request_ids:
-        before_prompt_drafts = (snapshot or {}).get("before_prompt_drafts") if isinstance((snapshot or {}).get("before_prompt_drafts"), dict) else {}
-        current_prompt_drafts = _voice_secretary_prompt_draft_state(group_id, request_ids=composer_request_ids)
-        for request_id in composer_request_ids:
-            current = current_prompt_drafts.get(request_id) if isinstance(current_prompt_drafts.get(request_id), dict) else {}
-            before = before_prompt_drafts.get(request_id) if isinstance(before_prompt_drafts.get(request_id), dict) else {}
-            if not str(current.get("draft_text") or "").strip():
-                missing.append(f"composer_draft:{request_id}")
-                continue
-            if str(current.get("updated_at") or "").strip() == str(before.get("updated_at") or "").strip():
-                missing.append(f"composer_draft_updated_at:{request_id}")
-    return {
-        "before_latest_seq": before_latest,
-        "before_secretary_read_cursor": before_cursor,
-        "current_secretary_read_cursor": current_cursor,
-        "cursor_advanced": cursor_advanced,
-        "input_target_kinds": input_target_kinds,
-        "composer_request_ids": composer_request_ids,
-        "secretary_request_ids": secretary_request_ids,
-        "missing": sorted(set(missing)),
-    }
+def _voice_secretary_control_completion_state(*, group_id: str, snapshot: Dict[str, Any]) -> tuple[bool, Dict[str, Any]]:
+    return _shared_voice_secretary_control_completion_state(
+        group_id=group_id,
+        snapshot=snapshot,
+        diagnostics_fn=_voice_secretary_control_consumption_diagnostics,
+    )
 
 
 @dataclass
@@ -292,12 +143,12 @@ class CodexSessionState:
 
 
 class CodexAppSession:
-    def __init__(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "gpt-5.4") -> None:
+    def __init__(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "") -> None:
         self.group_id = str(group_id or "").strip()
         self.actor_id = str(actor_id or "").strip()
         self.cwd = cwd
         self.env = dict(env or {})
-        self.model = str(model or "gpt-5.4").strip() or "gpt-5.4"
+        self.model = str(model or "").strip()
         self._proc: Optional[subprocess.Popen[str]] = None
         self._lock = threading.Lock()
         self._pending: Dict[int, "queue.Queue[Dict[str, Any]]"] = {}
@@ -317,6 +168,8 @@ class CodexAppSession:
         self._item_snapshots_by_id: Dict[str, Dict[str, Any]] = {}
         self._active_control_kind = ""
         self._active_payload: Optional[_PendingTurn] = None
+        self._last_turn_event_monotonic = 0.0
+        self._active_stalled_emitted = False
 
     def _agent_message_phase(self, item_id: str, item: Optional[Dict[str, Any]] = None) -> str:
         stream_id = str(item_id or "").strip()
@@ -563,6 +416,12 @@ class CodexAppSession:
             self._stop_requested = False
             env = os.environ.copy()
             env.update(self.env)
+            env.setdefault("CCCC_HOME", str(ensure_home()))
+            env.setdefault("CCCC_GROUP_ID", self.group_id)
+            env.setdefault("CCCC_ACTOR_ID", self.actor_id)
+            env = with_node_deprecation_warnings_suppressed(env)
+            if not ensure_mcp_installed("codex", self.cwd, auto_mcp_runtimes=("codex",), env=env):
+                raise RuntimeError("failed to install MCP for runtime: codex")
             self._proc = subprocess.Popen(
                 ["codex", "app-server", "--listen", "stdio://"],
                 stdin=subprocess.PIPE,
@@ -589,15 +448,17 @@ class CodexAppSession:
                 },
                 timeout=10.0,
             )
+            thread_params: Dict[str, Any] = {
+                "cwd": str(self.cwd),
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
+                "personality": "pragmatic",
+            }
+            if self.model:
+                thread_params["model"] = self.model
             thread_resp = self._request(
                 "thread/start",
-                {
-                    "cwd": str(self.cwd),
-                    "approvalPolicy": "never",
-                    "sandbox": "danger-full-access",
-                    "model": self.model,
-                    "personality": "pragmatic",
-                },
+                thread_params,
                 timeout=20.0,
             )
             thread = thread_resp.get("thread") if isinstance(thread_resp, dict) else {}
@@ -680,17 +541,19 @@ class CodexAppSession:
             return False
         normalized_control_kind = str(control_kind or "").strip().lower()
         normalized_event_id = str(event_id or "").strip()
+        payload_text, validation_snapshot = _voice_secretary_prepare_control_turn(
+            group_id=self.group_id,
+            actor_id=self.actor_id,
+            text=text,
+            event_id=normalized_event_id,
+            control_kind=normalized_control_kind,
+        )
         payload = _PendingTurn(
-            text=str(text or ""),
+            text=payload_text,
             event_id=normalized_event_id,
             ts=str(ts or "").strip(),
             control_kind=normalized_control_kind,
-            validation_snapshot=_voice_secretary_control_snapshot(
-                group_id=self.group_id,
-                actor_id=self.actor_id,
-                event_id=normalized_event_id,
-                control_kind=normalized_control_kind,
-            ),
+            validation_snapshot=validation_snapshot,
         )
         if not payload.text.strip() or not payload.control_kind:
             return False
@@ -857,6 +720,31 @@ class CodexAppSession:
             items.append({"type": "text", "text": text})
         return items
 
+    def _maybe_emit_turn_stalled(self, *, payload: _PendingTurn, turn_id: str) -> None:
+        with self._lock:
+            if self._active_stalled_emitted:
+                return
+            last_event = float(self._last_turn_event_monotonic or 0.0)
+            elapsed = time.monotonic() - last_event if last_event > 0 else 0.0
+            if elapsed < _TURN_STALL_SECONDS:
+                return
+            self._active_stalled_emitted = True
+            self._session_state.status = "waiting"
+            self._session_state.updated_at = utc_now_iso()
+        self._persist_state()
+        event_type = "headless.control.stalled" if payload.control_kind else "headless.turn.stalled"
+        self._emit(
+            event_type,
+            {
+                "turn_id": turn_id,
+                "event_id": payload.event_id,
+                "control_kind": payload.control_kind or None,
+                "seconds_since_last_event": round(elapsed, 3),
+                "threshold_seconds": _TURN_STALL_SECONDS,
+                "reason": "runtime_no_events_after_turn_started",
+            },
+        )
+
     def _turn_loop(self) -> None:
         while self.is_running():
             try:
@@ -933,10 +821,11 @@ class CodexAppSession:
                 with self._lock:
                     self._active_turn_id = turn_id
                     self._active_event_id = payload.event_id
-                    if not payload.control_kind:
-                        self._session_state.status = "working"
+                    self._session_state.status = "working"
                     self._session_state.current_task_id = turn_id or payload.event_id or None
                     self._session_state.updated_at = utc_now_iso()
+                    self._last_turn_event_monotonic = time.monotonic()
+                    self._active_stalled_emitted = False
                 self._persist_state()
                 if payload.control_kind:
                     self._emit(
@@ -982,13 +871,21 @@ class CodexAppSession:
                     },
                 )
                 continue
-            self._turn_done.wait()
+            while self.is_running():
+                if self._turn_done.wait(timeout=_TURN_WAIT_POLL_SECONDS):
+                    break
+                self._maybe_emit_turn_stalled(payload=payload, turn_id=turn_id)
 
     def _handle_notification(self, method: str, params: Dict[str, Any]) -> None:
         now = utc_now_iso()
         with self._lock:
             active_event_id = str(self._active_event_id or "").strip()
             control_kind = str(self._active_control_kind or "").strip().lower()
+            if self._active_turn_id or active_event_id:
+                self._last_turn_event_monotonic = time.monotonic()
+                if self._active_stalled_emitted and self._session_state.status == "waiting":
+                    self._session_state.status = "working"
+                    self._session_state.updated_at = now
         if method == "turn/started":
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
             turn_id = str(turn.get("id") or "").strip()
@@ -1017,14 +914,11 @@ class CodexAppSession:
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
             turn_id = str(turn.get("id") or "").strip()
             status = str(turn.get("status") or "completed").strip() or "completed"
-            error = turn.get("error") if isinstance(turn.get("error"), dict) else None
+            raw_error = turn.get("error")
+            error = raw_error if isinstance(raw_error, dict) else ({"message": str(raw_error)} if raw_error else None)
             with self._lock:
                 active_payload = self._active_payload
-            should_complete = _voice_secretary_control_consumed_input(
-                group_id=self.group_id,
-                snapshot=(active_payload.validation_snapshot if isinstance(active_payload, _PendingTurn) else {}),
-            )
-            consumption_diagnostics = _voice_secretary_control_consumption_diagnostics(
+            should_complete, consumption_diagnostics = _voice_secretary_control_completion_state(
                 group_id=self.group_id,
                 snapshot=(active_payload.validation_snapshot if isinstance(active_payload, _PendingTurn) else {}),
             )
@@ -1042,9 +936,16 @@ class CodexAppSession:
             self._plan_activity_id = ""
             if not should_complete:
                 retry_count = int(active_payload.retry_count or 0) if isinstance(active_payload, _PendingTurn) else 0
-                if isinstance(active_payload, _PendingTurn) and retry_count < 1:
-                    retry_payload = _PendingTurn(
+                should_retry = _voice_secretary_retryable_control_failure(consumption_diagnostics)
+                failure_reason = _voice_secretary_control_failure_reason(consumption_diagnostics)
+                if isinstance(active_payload, _PendingTurn) and retry_count < 1 and should_retry:
+                    retry_text, retry_diagnostics = _voice_secretary_prepare_repair_retry(
                         text=active_payload.text,
+                        diagnostics=consumption_diagnostics,
+                    )
+                    retry_reason = _voice_secretary_control_failure_reason(retry_diagnostics)
+                    retry_payload = _PendingTurn(
+                        text=retry_text,
                         event_id=active_payload.event_id,
                         ts=active_payload.ts,
                         reply_to=active_payload.reply_to,
@@ -1061,10 +962,10 @@ class CodexAppSession:
                                 "turn_id": turn_id,
                                 "event_id": active_event_id,
                                 "control_kind": control_kind,
-                                "status": status,
-                                "reason": "voice_secretary_input_not_consumed",
+                                "status": "requeued",
+                                "reason": retry_reason,
                                 "retry_count": retry_payload.retry_count,
-                                "diagnostics": consumption_diagnostics,
+                                "diagnostics": retry_diagnostics,
                             },
                         )
                     except Exception as exc:
@@ -1074,9 +975,9 @@ class CodexAppSession:
                                 "turn_id": turn_id,
                                 "event_id": active_event_id,
                                 "control_kind": control_kind,
-                                "status": status,
+                                "status": "failed",
                                 "error": {
-                                    "message": f"voice_secretary_input_not_consumed; requeue failed: {exc}",
+                                    "message": f"{retry_reason}; requeue failed: {exc}",
                                 },
                                 "diagnostics": consumption_diagnostics,
                             },
@@ -1089,9 +990,22 @@ class CodexAppSession:
                         "turn_id": turn_id,
                         "event_id": active_event_id,
                         "control_kind": control_kind,
-                        "status": status,
-                        "error": error or {"message": "voice_secretary_input_not_consumed"},
+                        "status": "failed",
+                        "error": error or {"message": failure_reason},
                         "diagnostics": consumption_diagnostics,
+                    },
+                )
+                self._turn_done.set()
+                return
+            if status.lower() in {"failed", "error", "cancelled"} or error:
+                self._emit(
+                    "headless.control.failed",
+                    {
+                        "turn_id": turn_id,
+                        "event_id": active_event_id,
+                        "control_kind": control_kind,
+                        "status": status,
+                        "error": error or {"message": status},
                     },
                 )
                 self._turn_done.set()
@@ -1107,9 +1021,6 @@ class CodexAppSession:
                 },
             )
             self._turn_done.set()
-            return
-
-        if control_kind:
             return
 
         if method == "turn/plan/updated":
@@ -1338,7 +1249,9 @@ class CodexAppSession:
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
             turn_id = str(turn.get("id") or "").strip()
             status = str(turn.get("status") or "completed").strip() or "completed"
-            error = turn.get("error") if isinstance(turn.get("error"), dict) else None
+            raw_error = turn.get("error")
+            error = raw_error if isinstance(raw_error, dict) else ({"message": str(raw_error)} if raw_error else None)
+            failed = status.lower() in {"failed", "error", "cancelled"} or error is not None
             with self._lock:
                 self._active_turn_id = ""
                 self._active_event_id = ""
@@ -1358,7 +1271,7 @@ class CodexAppSession:
                 )
                 self._plan_activity_id = ""
             self._emit(
-                "headless.turn.completed",
+                "headless.turn.failed" if failed else "headless.turn.completed",
                 {
                     "turn_id": turn_id,
                     "event_id": active_event_id,
@@ -1386,12 +1299,12 @@ class CodexAppSession:
 
 
 class _FallbackCodexAppSession:
-    def __init__(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "gpt-5.4", reason: str = "") -> None:
+    def __init__(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "", reason: str = "") -> None:
         self.group_id = str(group_id or "").strip()
         self.actor_id = str(actor_id or "").strip()
         self.cwd = cwd
         self.env = dict(env or {})
-        self.model = str(model or "gpt-5.4").strip() or "gpt-5.4"
+        self.model = str(model or "").strip()
         self._reason = str(reason or "").strip() or "codex CLI is unavailable"
         self._running = False
         self._session_state = CodexSessionState(status="idle")
@@ -1504,7 +1417,7 @@ class CodexAppSessionManager:
         self._lock = threading.Lock()
         self._sessions: Dict[tuple[str, str], CodexAppSession] = {}
 
-    def start_actor(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "gpt-5.4") -> CodexAppSession:
+    def start_actor(self, *, group_id: str, actor_id: str, cwd: Path, env: Dict[str, str], model: str = "") -> CodexAppSession:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
         if not key[0] or not key[1]:
             raise ValueError("missing group_id/actor_id")
@@ -1512,7 +1425,17 @@ class CodexAppSessionManager:
             session = self._sessions.get(key)
             if session is not None and session.is_running():
                 return session
-            session = CodexAppSession(group_id=key[0], actor_id=key[1], cwd=cwd, env=env, model=model)
+            if _codex_cli_available(env):
+                session = CodexAppSession(group_id=key[0], actor_id=key[1], cwd=cwd, env=env, model=model)
+            else:
+                session = _FallbackCodexAppSession(
+                    group_id=key[0],
+                    actor_id=key[1],
+                    cwd=cwd,
+                    env=env,
+                    model=model,
+                    reason="codex CLI not found",
+                )
             self._sessions[key] = session
         try:
             session.start()

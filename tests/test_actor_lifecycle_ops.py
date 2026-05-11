@@ -112,6 +112,61 @@ class TestActorLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_actor_stop_keeps_internal_voice_secretary_enabled(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "voice-secretary-stop", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            lead, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "lead",
+                    "title": "Lead",
+                    "runtime": "codex",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(lead.ok, getattr(lead, "error", None))
+
+            enable, _ = self._call(
+                "assistant_settings_update",
+                {
+                    "group_id": group_id,
+                    "by": "user",
+                    "assistant_id": "voice_secretary",
+                    "patch": {"enabled": True},
+                },
+            )
+            self.assertTrue(enable.ok, getattr(enable, "error", None))
+
+            stop, _ = self._call("actor_stop", {"group_id": group_id, "actor_id": "voice-secretary", "by": "user"})
+            self.assertTrue(stop.ok, getattr(stop, "error", None))
+            actor_after_stop = (stop.result or {}).get("actor") if isinstance(stop.result, dict) else {}
+            self.assertIsInstance(actor_after_stop, dict)
+            assert isinstance(actor_after_stop, dict)
+            self.assertTrue(bool(actor_after_stop.get("enabled", False)))
+
+            from cccc.kernel.actors import find_actor
+            from cccc.kernel.group import load_group
+
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            stored_actor = find_actor(group, "voice-secretary")
+            self.assertIsInstance(stored_actor, dict)
+            assert isinstance(stored_actor, dict)
+            self.assertTrue(bool(stored_actor.get("enabled", False)))
+        finally:
+            cleanup()
+
     def test_actor_restart_keeps_actor_enabled(self) -> None:
         _, cleanup = self._with_home()
         try:
@@ -147,6 +202,47 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertIsInstance(event, dict)
             assert isinstance(event, dict)
             self.assertEqual(str(event.get("kind") or ""), "actor.restart")
+        finally:
+            cleanup()
+
+    def test_actor_restart_after_runtime_change_stops_stale_codex_headless_session(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "runner-change-restart", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            with patch("cccc.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
+                add, _ = self._call(
+                    "actor_add",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "title": "Peer 1",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "by": "user",
+                    },
+                )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            update, _ = self._call(
+                "actor_update",
+                {"group_id": group_id, "actor_id": "peer1", "patch": {"runtime": "claude"}, "by": "user"},
+            )
+            self.assertTrue(update.ok, getattr(update, "error", None))
+
+            with patch("cccc.daemon.actors.actor_lifecycle_ops.codex_app_supervisor.stop_actor") as stop_codex, patch(
+                "cccc.daemon.actors.actor_lifecycle_ops.claude_app_supervisor.start_actor"
+            ):
+                restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+
+            self.assertTrue(restart.ok, getattr(restart, "error", None))
+            stop_codex.assert_called_once_with(group_id=group_id, actor_id="peer1")
         finally:
             cleanup()
 
@@ -290,17 +386,18 @@ class TestActorLifecycleOps(unittest.TestCase):
             attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
-            add, _ = self._call(
-                "actor_add",
-                {
-                    "group_id": group_id,
-                    "actor_id": "peer1",
-                    "title": "Peer 1",
-                    "runtime": "codex",
-                    "runner": "headless",
-                    "by": "user",
-                },
-            )
+            with patch("cccc.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
+                add, _ = self._call(
+                    "actor_add",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "title": "Peer 1",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "by": "user",
+                    },
+                )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
             with patch("cccc.daemon.actors.actor_membership_ops.codex_app_supervisor.stop_actor") as stop_actor:
@@ -308,6 +405,83 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertTrue(remove.ok, getattr(remove, "error", None))
             stop_actor.assert_called_once_with(group_id=group_id, actor_id="peer1")
             self.assertIn("actor.remove", self._global_event_kinds(home))
+        finally:
+            cleanup()
+
+    def test_web_model_actor_recreate_resets_browser_binding_state(self) -> None:
+        from cccc.ports.web_model_browser_sidecar import (
+            chatgpt_browser_profile_dir,
+            read_chatgpt_browser_state,
+            record_chatgpt_browser_state,
+        )
+
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "web-model-recreate", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            profile_dir = chatgpt_browser_profile_dir(group_id, "peer1")
+            marker = profile_dir / "login-marker"
+            marker.write_text("keep login profile", encoding="utf-8")
+            record_chatgpt_browser_state(
+                group_id,
+                "peer1",
+                {
+                    "conversation_url": "https://chatgpt.com/c/old-chat",
+                    "bootstrap_seed_delivered_at": "2026-04-29T00:00:00Z",
+                    "bootstrap_seed_version": "old",
+                    "bootstrap_seed_digest": "old-digest",
+                    "bootstrap_seed_conversation_url": "https://chatgpt.com/c/old-chat",
+                    "last_turn_id": "old-turn",
+                    "last_event_ids": ["old-event"],
+                },
+            )
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Web Model",
+                    "runtime": "web_model",
+                    "runner": "headless",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+            state_after_add = read_chatgpt_browser_state(group_id, "peer1")
+            self.assertEqual(state_after_add.get("conversation_url"), "")
+            self.assertEqual(state_after_add.get("bootstrap_seed_delivered_at"), "")
+            self.assertEqual(state_after_add.get("bootstrap_seed_digest"), "")
+            self.assertEqual(state_after_add.get("last_turn_id"), "")
+            self.assertEqual(state_after_add.get("last_event_ids"), [])
+            self.assertTrue(marker.exists())
+
+            record_chatgpt_browser_state(
+                group_id,
+                "peer1",
+                {
+                    "conversation_url": "https://chatgpt.com/c/current-chat",
+                    "bootstrap_seed_delivered_at": "2026-04-29T01:00:00Z",
+                    "bootstrap_seed_version": "current",
+                    "bootstrap_seed_digest": "current-digest",
+                    "bootstrap_seed_conversation_url": "https://chatgpt.com/c/current-chat",
+                    "last_turn_id": "current-turn",
+                    "last_event_ids": ["current-event"],
+                },
+            )
+
+            remove, _ = self._call("actor_remove", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(remove.ok, getattr(remove, "error", None))
+            state_after_remove = read_chatgpt_browser_state(group_id, "peer1")
+            self.assertEqual(state_after_remove.get("conversation_url"), "")
+            self.assertEqual(state_after_remove.get("bootstrap_seed_delivered_at"), "")
+            self.assertEqual(state_after_remove.get("bootstrap_seed_digest"), "")
+            self.assertEqual(state_after_remove.get("last_turn_id"), "")
+            self.assertEqual(state_after_remove.get("last_event_ids"), [])
+            self.assertTrue(marker.exists())
         finally:
             cleanup()
 

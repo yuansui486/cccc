@@ -1,18 +1,19 @@
 """
 CCCC MCP Server - IM-style Agent Collaboration Tools
 
-Static MCP surface:
+Static MCP surface (role and capability-pack visibility may hide some tools):
 - cccc_help / cccc_bootstrap / cccc_project_info
 - cccc_inbox_list / cccc_inbox_mark_read
 - cccc_message_send / cccc_message_reply
-- cccc_file / cccc_voice_secretary_document / cccc_voice_secretary_request / cccc_group / cccc_actor / cccc_runtime_list
-- cccc_capability_search / cccc_capability_enable / cccc_capability_block / cccc_capability_state / cccc_capability_import / cccc_capability_uninstall / cccc_capability_use
+- cccc_file / cccc_repo / cccc_repo_edit / cccc_apply_patch / cccc_shell / cccc_exec_command / cccc_write_stdin / cccc_git / cccc_voice_secretary_document / cccc_voice_secretary_request / cccc_group / cccc_actor / cccc_runtime_list
+- cccc_capability_search / cccc_capability_enable / cccc_capability_state / cccc_capability_install / cccc_capability_use
 - cccc_space / cccc_automation
 - cccc_context_get / cccc_coordination / cccc_task / cccc_agent_state
 - cccc_context_sync (advanced batch op)
 - cccc_memory / cccc_memory_admin
 - cccc_headless / cccc_notify / cccc_terminal / cccc_debug
 - cccc_im_bind
+- cccc_code_exec / cccc_code_wait (ChatGPT Web Model code-mode orchestration)
 
 All operations go through daemon IPC to ensure single-writer principle.
 """
@@ -21,13 +22,22 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 # Kernel/util imports needed by routing
 from ...kernel.actors import find_actor, get_effective_role, is_pet_actor, is_voice_secretary_actor
 from ...kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ...kernel.group import load_group
-from ...kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_ADMIN_TOOLS, resolve_visible_tool_names
+from ...kernel.capabilities import (
+    BUILTIN_CAPABILITY_PACKS,
+    CAPABILITY_ADMIN_TOOLS,
+    CORE_ADMIN_TOOLS,
+    WEB_MODEL_CORE_TOOLS,
+    resolve_visible_tool_names,
+    web_model_advertised_tool_names,
+)
 from ...kernel.memory_guide import build_memory_guide
 from ...kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
 from ...kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID
@@ -59,11 +69,27 @@ from .handlers.cccc_core import (  # noqa: F401
     project_info,
 )
 from .handlers.cccc_messaging import (  # noqa: F401
+    blob_info,
     blob_path,
+    blob_read,
     file_send,
     message_reply,
     message_send,
     tracked_send,
+)
+from .handlers.cccc_repo import (  # noqa: F401
+    apply_codex_patch_tool,
+    exec_command_tool,
+    git_tool,
+    repo_tool,
+    shell_tool,
+    write_stdin_tool,
+)
+from .handlers.code_mode import (  # noqa: F401
+    CODE_MODE_TOOL_NAMES,
+    code_exec_tool,
+    code_mode_enabled,
+    code_wait_tool,
 )
 from .handlers.presentation import (  # noqa: F401
     presentation_clear,
@@ -89,6 +115,7 @@ from .handlers.cccc_capability import (  # noqa: F401
     capability_block,
     capability_enable,
     capability_import,
+    capability_install,
     capability_search,
     capability_state,
     capability_uninstall,
@@ -184,12 +211,125 @@ def _normalize_to_arg(raw: Any) -> Optional[List[str]]:
     return None
 
 
+_BUILTIN_MCP_TOOL_NAMES = frozenset(str(spec.get("name") or "") for spec in MCP_TOOLS if isinstance(spec, dict))
+_WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES = frozenset(
+    web_model_advertised_tool_names(_BUILTIN_MCP_TOOL_NAMES, actor_role="peer")
+)
+_WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES = frozenset(
+    web_model_advertised_tool_names(_BUILTIN_MCP_TOOL_NAMES, actor_role="foreman")
+)
+_WEB_MODEL_PACK_TOOL_NAMES = frozenset(
+    str(name or "").strip()
+    for name in set().union(*(set(pack.get("tool_names") or ()) for pack in BUILTIN_CAPABILITY_PACKS.values()))
+    if str(name or "").strip() in _BUILTIN_MCP_TOOL_NAMES
+)
+_WEB_MODEL_PEER_ALLOWED_TOOL_NAMES = frozenset(WEB_MODEL_CORE_TOOLS)
+_CAPABILITY_USE_NESTED_BUILTIN_CALL: ContextVar[bool] = ContextVar(
+    "cccc_capability_use_nested_builtin_call",
+    default=False,
+)
+
+
+@contextmanager
+def capability_use_nested_builtin_call_scope():
+    token = _CAPABILITY_USE_NESTED_BUILTIN_CALL.set(True)
+    try:
+        yield
+    finally:
+        _CAPABILITY_USE_NESTED_BUILTIN_CALL.reset(token)
+
+
+def _argument_or_default(arguments: Dict[str, Any], key: str, default: Any) -> Any:
+    value = arguments.get(key)
+    return default if value is None else value
+
+
 # =============================================================================
 # Tool Call Routing
 # =============================================================================
 
 
+def _require_web_model_actor(group_id: str, actor_id: str) -> None:
+    gid = str(group_id or "").strip()
+    aid = str(actor_id or "").strip()
+    if not gid or not aid:
+        raise MCPError(code="missing_runtime_context", message="web-model local-power tools require group_id and actor_id")
+    group = load_group(gid)
+    if group is None:
+        raise MCPError(code="group_not_found", message=f"group not found: {gid}")
+    actor = find_actor(group, aid)
+    if not isinstance(actor, dict):
+        raise MCPError(code="actor_not_found", message=f"actor not found: {aid}")
+    if str(actor.get("runtime") or "").strip().lower() != "web_model":
+        raise MCPError(code="invalid_actor_runtime", message="local-power MCP tools are only available to web_model actors")
+
+
+def _authorize_web_model_builtin_tool_call(name: str) -> None:
+    """Keep Web Model schema stable while enforcing actor role at call time."""
+    tool_name = str(name or "").strip()
+    if tool_name in CODE_MODE_TOOL_NAMES and not code_mode_enabled():
+        raise MCPError(
+            code="code_mode_disabled",
+            message=f"{tool_name} is disabled by CCCC_WEB_MODEL_CODE_MODE=0",
+        )
+    if tool_name not in _BUILTIN_MCP_TOOL_NAMES:
+        return
+    runtime_ctx = _runtime_context()
+    gid = str(runtime_ctx.group_id or "").strip()
+    aid = str(runtime_ctx.actor_id or "").strip()
+    if not gid or not aid or aid == "user":
+        return
+    group = load_group(gid)
+    if group is None:
+        return
+    try:
+        actor = find_actor(group, aid)
+    except Exception:
+        return
+    if not isinstance(actor, dict):
+        return
+    if str(actor.get("runtime") or "").strip().lower() != "web_model":
+        return
+    try:
+        role = str(get_effective_role(group, aid) or "").strip().lower()
+    except Exception:
+        role = "peer"
+    if (
+        role == "foreman"
+        and bool(_CAPABILITY_USE_NESTED_BUILTIN_CALL.get())
+        and tool_name in _WEB_MODEL_PACK_TOOL_NAMES
+    ):
+        return
+    if role == "foreman" and tool_name in _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES:
+        return
+    if tool_name in _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES:
+        return
+    if role == "foreman":
+        raise MCPError(
+            code="permission_denied",
+            message=f"{tool_name} is not available to Web Model actors",
+            details={"group_id": gid, "actor_id": aid, "tool_name": tool_name},
+        )
+    raise MCPError(
+        code="permission_denied",
+        message=f"{tool_name} requires a Web Model foreman actor",
+        details={"group_id": gid, "actor_id": aid, "role": role or "peer", "tool_name": tool_name},
+    )
+
+
 def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if name == "cccc_code_exec":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return code_exec_tool(arguments, nested_tool_caller=handle_tool_call, list_tools=list_tools_for_caller)
+
+    if name == "cccc_code_wait":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return code_wait_tool(arguments, nested_tool_caller=handle_tool_call)
+
     # --- Help ---
     if name == "cccc_help":
         runtime_ctx = _runtime_context()
@@ -217,7 +357,7 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
                         role = None
                 actor = _safe_find_actor(g, aid)
                 actor_is_pet = bool(isinstance(actor, dict) and is_pet_actor(actor))
-                actor_is_voice_secretary = bool(isinstance(actor, dict) and is_voice_secretary_actor(actor))
+                actor_is_voice_secretary = aid == "voice-secretary" or bool(isinstance(actor, dict) and is_voice_secretary_actor(actor))
                 if actor_is_voice_secretary:
                     role = "voice_secretary"
                 pf = read_group_prompt_file(g, HELP_FILENAME)
@@ -552,11 +692,19 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
 
     if name == "cccc_file":
         gid = _resolve_group_id(arguments)
-        aid = _resolve_self_actor_id(arguments)
         action = str(arguments.get("action") or "send").strip().lower()
         if action == "blob_path":
             return blob_path(group_id=gid, rel_path=str(arguments.get("rel_path") or ""))
+        if action == "info":
+            return blob_info(group_id=gid, rel_path=str(arguments.get("rel_path") or arguments.get("path") or ""))
+        if action == "read":
+            return blob_read(
+                group_id=gid,
+                rel_path=str(arguments.get("rel_path") or arguments.get("path") or ""),
+                max_bytes=arguments.get("max_bytes") or 200000,
+            )
         if action == "send":
+            aid = _resolve_self_actor_id(arguments)
             to_raw = arguments.get("to")
             if isinstance(to_raw, list):
                 to_val_file: Optional[List[str]] = [str(x).strip() for x in to_raw if str(x).strip()]
@@ -573,7 +721,118 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
                 priority=str(arguments.get("priority") or "normal"),
                 reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             )
-        raise MCPError(code="invalid_request", message="cccc_file action must be 'send' or 'blob_path'")
+        raise MCPError(code="invalid_request", message="cccc_file action must be send|blob_path|info|read")
+
+    if name == "cccc_repo":
+        gid = _resolve_group_id(arguments)
+        action = str(arguments.get("action") or "info").strip().lower()
+        if action not in {"info", "list", "list_dir", "read"}:
+            raise MCPError(code="invalid_action", message="cccc_repo is read-only; use cccc_repo_edit/cccc_apply_patch for writes")
+        return repo_tool(
+            group_id=gid,
+            action=action,
+            path=str(arguments.get("path") or arguments.get("file_path") or ""),
+            max_bytes=arguments.get("max_bytes") or 200000,
+            limit=arguments.get("limit") or 200,
+            offset=arguments.get("offset") or 1,
+            depth=arguments.get("depth") or 2,
+            start_line=arguments.get("start_line"),
+            end_line=arguments.get("end_line"),
+            include_hidden=coerce_bool(arguments.get("include_hidden"), default=False),
+        )
+
+    if name == "cccc_repo_edit":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        action = str(arguments.get("action") or "").strip().lower()
+        if not action:
+            if isinstance(arguments.get("replacements"), list):
+                action = "multi_replace"
+            elif str(arguments.get("content") or ""):
+                action = "write"
+            else:
+                action = "replace"
+        if action not in {"replace", "multi_replace", "write", "mkdir", "delete", "move"}:
+            raise MCPError(
+                code="invalid_action",
+                message="cccc_repo_edit action must be replace|multi_replace|write|mkdir|delete|move; use cccc_apply_patch for Codex patches",
+            )
+        return repo_tool(
+            group_id=gid,
+            action=action,
+            path=str(arguments.get("path") or arguments.get("file_path") or ""),
+            dest_path=str(arguments.get("dest_path") or arguments.get("to_path") or ""),
+            content=arguments.get("replacements") if action == "multi_replace" else str(arguments.get("content") or ""),
+            old_text=str(arguments.get("old_text") or ""),
+            new_text=str(arguments.get("new_text") or ""),
+            expected_sha256=str(arguments.get("expected_sha256") or arguments.get("expected_hash") or ""),
+            expected_replacements=arguments.get("expected_replacements"),
+            replace_all=coerce_bool(arguments.get("replace_all"), default=False),
+            recursive=coerce_bool(arguments.get("recursive"), default=False),
+            exist_ok=coerce_bool(arguments.get("exist_ok"), default=True),
+        )
+
+    if name == "cccc_apply_patch":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return apply_codex_patch_tool(group_id=gid, patch=str(arguments.get("patch") or arguments.get("input") or ""))
+
+    if name == "cccc_shell":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return shell_tool(
+            group_id=gid,
+            command=str(arguments.get("command") or ""),
+            cwd=str(arguments.get("cwd") or "."),
+            timeout_s=arguments.get("timeout_s") or 60,
+            max_output_bytes=arguments.get("max_output_bytes") or 200000,
+            env=arguments.get("env") if isinstance(arguments.get("env"), dict) else None,
+        )
+
+    if name == "cccc_exec_command":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return exec_command_tool(
+            group_id=gid,
+            command=str(arguments.get("command") or arguments.get("cmd") or ""),
+            cwd=str(arguments.get("cwd") or arguments.get("workdir") or "."),
+            yield_time_ms=_argument_or_default(arguments, "yield_time_ms", 1000),
+            max_output_bytes=arguments.get("max_output_bytes") or 200000,
+            timeout_s=arguments.get("timeout_s") or 600,
+            env=arguments.get("env") if isinstance(arguments.get("env"), dict) else None,
+        )
+
+    if name == "cccc_write_stdin":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return write_stdin_tool(
+            session_id=str(arguments.get("session_id") or ""),
+            chars=str(arguments.get("chars") or ""),
+            yield_time_ms=_argument_or_default(arguments, "yield_time_ms", 1000),
+            max_output_bytes=arguments.get("max_output_bytes") or 200000,
+            terminate=coerce_bool(arguments.get("terminate"), default=False),
+        )
+
+    if name == "cccc_git":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        _require_web_model_actor(gid, aid)
+        return git_tool(
+            group_id=gid,
+            action=str(arguments.get("action") or "status"),
+            paths=arguments.get("paths"),
+            path=str(arguments.get("path") or ""),
+            message=str(arguments.get("message") or ""),
+            staged=coerce_bool(arguments.get("staged"), default=False),
+            count=arguments.get("count") or 20,
+            all_changes=coerce_bool(arguments.get("all_changes"), default=False),
+            max_output_bytes=arguments.get("max_output_bytes") or 200000,
+        )
 
     if name == "cccc_presentation":
         gid = _resolve_group_id(arguments)
@@ -677,6 +936,49 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
     if name == "cccc_runtime_list":
         return runtime_list()
 
+    if name == "cccc_runtime_wait_next_turn":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        try:
+            limit = int(arguments.get("limit") or 20)
+        except Exception:
+            limit = 20
+        return _call_daemon_or_raise(
+            {
+                "op": "web_model_runtime_wait_next_turn",
+                "args": {
+                    "group_id": gid,
+                    "actor_id": aid,
+                    "by": aid,
+                    "limit": min(max(limit, 1), 20),
+                    "kind_filter": str(arguments.get("kind_filter") or "all"),
+                },
+            },
+            timeout_s=120.0,
+        )
+
+    if name == "cccc_runtime_complete_turn":
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        raw_event_ids = arguments.get("event_ids")
+        event_ids = [str(item or "").strip() for item in raw_event_ids] if isinstance(raw_event_ids, list) else []
+        return _call_daemon_or_raise(
+            {
+                "op": "web_model_runtime_complete_turn",
+                "args": {
+                    "group_id": gid,
+                    "actor_id": aid,
+                    "by": aid,
+                    "turn_id": str(arguments.get("turn_id") or ""),
+                    "event_ids": event_ids,
+                    "latest_event_id": str(arguments.get("latest_event_id") or ""),
+                    "status": str(arguments.get("status") or "done"),
+                    "summary": str(arguments.get("summary") or ""),
+                },
+            },
+            timeout_s=120.0,
+        )
+
     # --- Capability ---
     if name == "cccc_capability_search":
         gid = _resolve_group_id(arguments)
@@ -690,7 +992,7 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             trust_tier=str(arguments.get("trust_tier") or ""),
             qualification_status=str(arguments.get("qualification_status") or ""),
             limit=min(max(int(arguments.get("limit") or 30), 1), 200),
-            include_external=coerce_bool(arguments.get("include_external"), default=True),
+            include_external=coerce_bool(arguments.get("include_external"), default=False),
         )
 
     if name == "cccc_capability_enable":
@@ -750,10 +1052,25 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
             by=by,
             actor_id=actor_id,
             record=record,
+            source_uri=str(arguments.get("source_uri") or arguments.get("url") or ""),
             dry_run=coerce_bool(arguments.get("dry_run"), default=False),
             probe=coerce_bool(arguments.get("probe"), default=True),
             enable_after_import=coerce_bool(arguments.get("enable_after_import"), default=False),
             scope=str(arguments.get("scope") or "session"),
+            ttl_seconds=min(max(int(arguments.get("ttl_seconds") or 3600), 60), 24 * 3600),
+            reason=str(arguments.get("reason") or ""),
+        )
+
+    if name == "cccc_capability_install":
+        gid = _resolve_group_id(arguments)
+        by = _resolve_caller_actor_id(arguments)
+        actor_id = str(arguments.get("actor_id") or by).strip()
+        return capability_install(
+            group_id=gid,
+            by=by,
+            actor_id=actor_id,
+            target=str(arguments.get("target") or arguments.get("source_uri") or arguments.get("capability_id") or ""),
+            scope=str(arguments.get("scope") or "actor"),
             ttl_seconds=min(max(int(arguments.get("ttl_seconds") or 3600), 60), 24 * 3600),
             reason=str(arguments.get("reason") or ""),
         )
@@ -1067,6 +1384,7 @@ def _handle_debug_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Di
 
 def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Handle MCP tool call."""
+    _authorize_web_model_builtin_tool_call(name)
     for handler in (
         _handle_cccc_namespace,
         _handle_context_namespace,
@@ -1133,15 +1451,18 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
     actor_role = ""
     actor_is_pet = False
     actor_is_voice_secretary = False
+    actor_is_web_model = False
     builtin_enabled_fallback: List[str] = []
     if gid and aid and aid != "user":
+        actor_is_voice_secretary = aid == VOICE_SECRETARY_ACTOR_ID
         try:
             group = load_group(gid)
             actor_role = str(get_effective_role(group, aid) or "").strip().lower()
             actor = find_actor(group, aid)
             if isinstance(actor, dict):
                 actor_is_pet = is_pet_actor(actor)
-                actor_is_voice_secretary = is_voice_secretary_actor(actor)
+                actor_is_voice_secretary = actor_is_voice_secretary or is_voice_secretary_actor(actor)
+                actor_is_web_model = str(actor.get("runtime") or "").strip().lower() == "web_model"
                 autoload = actor.get("capability_autoload") if isinstance(actor.get("capability_autoload"), list) else []
                 builtin_enabled_fallback = [
                     str(cap_id or "").strip()
@@ -1150,7 +1471,17 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                 ]
         except Exception:
             pass
-    admin_excluded = set(CORE_ADMIN_TOOLS) if actor_role == "peer" else set()
+    admin_excluded = (set(CORE_ADMIN_TOOLS) | set(CAPABILITY_ADMIN_TOOLS)) if actor_role == "peer" else set()
+
+    if actor_is_web_model:
+        names = (
+            set(_WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES)
+            if actor_role == "foreman"
+            else set(_WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES)
+        )
+        if not code_mode_enabled():
+            names -= CODE_MODE_TOOL_NAMES
+        return [spec for spec in MCP_TOOLS if str(spec.get("name") or "") in names]
 
     if profile == "full":
         visible = {str(spec.get("name") or "").strip() for spec in MCP_TOOLS if isinstance(spec, dict)}
@@ -1167,6 +1498,7 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                     actor_role=actor_role,
                     is_pet=actor_is_pet,
                     is_voice_secretary=actor_is_voice_secretary,
+                    is_web_model=actor_is_web_model,
                 )
             ) - admin_excluded
 

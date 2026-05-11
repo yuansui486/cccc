@@ -4,6 +4,70 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow SemVer/PEP 440.
 
+## [0.4.15] — 2026-05-10
+
+### Added
+- **Copy Groups** export/import for durable group duplication, migration, and backup. Copy packages include group ledger, actors, memory, attachments, automation, and durable settings while excluding workspace files, live credentials, browser sessions, caches, and runtime state.
+- **Capability Center lifecycle management** for discovering, importing, enabling, hiding, removing, and inspecting skills, MCP toolpacks, and capability packs from one Web surface.
+- **Slash command support for capability workflows**, including `/install` routing through the CCCC capability registry and capability-backed slash command discovery in chat.
+- **VNC-backed projected browser viewing** for CCCC-owned Xvfb browser sessions, with noVNC integration and CDP screencast fallback when VNC is unavailable.
+
+### Changed
+- **Group blueprints/templates were replaced by Copy Groups** as the supported group copy/migration path.
+- **ChatGPT Web Model delivery** now distinguishes submitted, ambiguous, pending, and failed delivery states more explicitly, avoids automatically resending previously failed batches, and exposes clearer user-message delivery status.
+- **Projected browser surfaces** now separate visual viewing from CDP automation more cleanly. VNC is used only for CCCC-owned displays, while inherited host desktops stay on the safer CDP fallback path.
+- **Capability overview and source management** were optimized with lighter overview requests, kind counts, source-instance deletion, SkillsMP deduplication, and fewer expensive aggregation calls from list-only UI surfaces.
+- **Web composer and settings behavior** were tightened around slash commands, group selection, recipient persistence, markdown code block rendering, and settings initialization.
+
+### Fixed
+- Fixed capability mutation APIs so a failed `capability.changed` notification no longer makes an already persisted enable/visibility change appear to fail.
+- Fixed install/reinstall flows where a capability could remain hidden from slash surfaces after being installed again.
+- Fixed GitHub capability source instance grouping so root-level skills from different refs remain distinct.
+- Fixed Web readiness timeouts on slower machines by making the Web child readiness window less brittle.
+- Fixed projected browser VNC safety so CCCC does not expose an inherited local desktop display through noVNC.
+- Fixed Markdown code block rendering that could wrap CCCC's code block UI inside redundant nested `<pre><code>` containers.
+
+## [0.4.14] — 2026-05-07
+
+### Added
+- **Session-scoped No-MCP advisory groundwork** for future web agents that cannot attach a CCCC MCP connector, with read-only project context, bounded resource access, and idempotent advisory-message return.
+- **Localized ChatGPT Web Model settings** in English, Simplified Chinese, and Japanese, under a provider-scoped Web Models i18n structure that leaves room for future web-model providers.
+
+### Changed
+- **ChatGPT Web Model setup documentation** now follows the current ChatGPT Apps/Connectors flow, including public HTTPS tunnel guidance, the fields to fill, the `No Auth` MCP configuration, and a note that exact ChatGPT menu names may vary by plan and workspace.
+- **GPT-5.x / GPT-5.x Pro messaging** now clearly positions MCP-capable GPT-5.x ChatGPT sessions as the supported local-development path, while documenting GPT-5.x Pro as advisory-only because it cannot reliably access CCCC MCP or local resources.
+- **ChatGPT Web Model browser status handling** now uses cheaper cached status for routine reads and reserves live browser inspection for explicit actions such as opening the surface or binding the current ChatGPT tab.
+- **Composer recipients** are preserved per group for normal sends and restored after reply flows, reducing repeated recipient selection without leaking recipients across groups.
+
+### Fixed
+- Fixed ChatGPT Web Model setup/open/bind flows that could show stale or inactive browser state after opening the global setup surface or binding the current tab.
+- Fixed Web Model settings copy and i18n structure that treated all future Web Model providers as if they were ChatGPT-specific.
+- Fixed release and setup documentation that still implied a No-MCP fallback could make GPT-5.x Pro a reliable local runtime.
+
+## [0.4.13] — 2026-05-04
+
+### Added
+- **ChatGPT Web Model runtime** for GPT-5.x ChatGPT web sessions, including connector setup, browser delivery, target-chat binding, and runtime panel visibility.
+- **Remote CCCC MCP local-development tools** for ChatGPT Web Model actors: repo reads/edits, Codex-style patching, shell/exec, git, and file attachment send/read paths.
+- **`cccc_code_exec` code mode** for higher-throughput Web Model work loops, with nested MCP tool orchestration, tool discovery helpers, common work loops, and actor-scoped cells.
+- **Voice Secretary local ASR stack** with Sherpa ONNX streaming/final recognition, speaker diarization, model manifest handling, and local cache controls.
+- **ChatGPT Web Model health snapshot** exposing derived browser, target, delivery, and recommended next-action state to Web UI and API callers.
+
+### Changed
+- **ChatGPT browser delivery** now uses the daemon-managed projected browser session by default, records stronger submission evidence, avoids duplicate pending new-chat delivery, and keeps setup/runtime surfaces on one shared ChatGPT browser profile.
+- **Web Model setup** was simplified around one ChatGPT Web Model actor per CCCC instance, a single MCP URL, and clearer ChatGPT account/target-chat controls.
+- **MCP help and toolspecs** now better explain common Web Model loops, attachments, turn completion, and when to use `cccc_code_exec` versus direct tools.
+- **Voice Secretary Ask/Document/Prompt flows** were tightened after the ASR work so live transcript previews, document transcripts, Ask replies, and composer draft submissions stay separated.
+- **README and docs** now describe GPT-5.x ChatGPT Web Model as the full local-development path, while GPT-5.x Pro is documented as review/advice-only because current ChatGPT Pro sessions cannot use third-party MCP with full local access.
+
+### Fixed
+- Fixed ChatGPT prompt submission cases where inserted text could be mistaken for successful delivery without proof that ChatGPT actually accepted the prompt.
+- Fixed pending new-chat binding so already-submitted events are not resent while waiting for ChatGPT to expose the `/c/...` conversation URL.
+- Fixed stale Web Model auto-confirm watchers and tightened connector/runtime gating for local-power MCP tools.
+- Fixed internal actors, including Voice Secretary, from accidentally being counted as or converted into ChatGPT Web Model actors.
+- Fixed Docker Node.js installation so image builds include `npm`, and suppressed noisy managed-node deprecation warnings.
+- Fixed Voice Secretary ASR model/status cache edge cases and transcript display regressions.
+
 ## [0.4.12] — 2026-04-23
 
 ### Added

@@ -14,10 +14,12 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
+from starlette.routing import Match, Mount
+from starlette.types import Scope
 
 from ... import __version__
 from ...daemon.server import call_daemon
@@ -37,6 +39,13 @@ logger = logging.getLogger("cccc.web")
 _WEB_LOG_FH: Optional[Any] = None
 _WEB_LOG_PATH: Optional[Path] = None
 _SIGNED_OUT_COOKIE = "cccc_signed_out"
+
+
+class HttpOnlyMount(Mount):
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        if scope.get("type") != "http":
+            return Match.NONE, {}
+        return super().matches(scope)
 
 
 @dataclass(frozen=True)
@@ -109,7 +118,13 @@ def _is_public_ui_path(request: Request) -> bool:
 def _is_public_path(request: Request) -> bool:
     """Routes that bypass token authentication (UI assets + health check)."""
     path = str(request.url.path or "")
-    return _is_public_ui_path(request) or path in _PUBLIC_API_PATHS or path.startswith("/api/v1/branding/assets/")
+    return (
+        _is_public_ui_path(request)
+        or path in _PUBLIC_API_PATHS
+        or path.startswith("/api/v1/branding/assets/")
+        or path.startswith("/mcp/web-model/")
+        or path.startswith("/nomcp/s/")
+    )
 
 
 def _request_token_parts(request: Request) -> tuple[str, Literal["", "header", "cookie", "query"]]:
@@ -371,7 +386,14 @@ def create_app() -> FastAPI:
             except Exception:
                 dist_dir = None
     if dist_dir is not None:
-        app.mount("/ui", StaticFiles(directory=str(dist_dir), html=True), name="ui")
+        @app.get("/ui/capabilities/", include_in_schema=False)
+        @app.get("/ui/capabilities", include_in_schema=False)
+        async def _capability_center_page() -> FileResponse:
+            return FileResponse(str(dist_dir / "index.html"))
+
+        app.router.routes.append(
+            HttpOnlyMount("/ui", app=StaticFiles(directory=str(dist_dir), html=True), name="ui")
+        )
 
     cors = str(os.environ.get("CCCC_WEB_CORS_ORIGINS") or "").strip()
     if cors:
@@ -448,6 +470,7 @@ def create_app() -> FastAPI:
     from .routes.done_hub import create_routers as create_done_hub_routers
     from .routes.im import register_im_routes
     from .routes.access_tokens import create_routers as create_access_token_routers
+    from .routes.nomcp import create_routers as create_nomcp_routers
 
     route_ctx = RouteContext(
         home=home,
@@ -474,6 +497,8 @@ def create_app() -> FastAPI:
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)
     for router in create_access_token_routers(route_ctx):
+        app.include_router(router)
+    for router in create_nomcp_routers(route_ctx):
         app.include_router(router)
 
     return app

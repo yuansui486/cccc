@@ -166,6 +166,7 @@ Access at http://127.0.0.1:8848/
 |----------|---------|-------------|
 | `CCCC_HOME` | `~/.cccc` | Runtime directory |
 | `CCCC_WEB_PORT` | `8848` | Web UI port |
+| `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Web startup readiness timeout for slower machines |
 | `CCCC_LOG_LEVEL` | `INFO` | Log verbosity |
 
 ## Example Workflow
@@ -179,7 +180,11 @@ cccc actor add dev --runtime claude
 
 # Work
 cccc group start
-cccc send "Please implement user authentication"
+cccc send "Please plan the smallest safe authentication task." --to @foreman
+cccc tracked-send "Please implement the first authentication task and reply with validation evidence." \
+  --to dev \
+  --title "Implement first authentication slice" \
+  --outcome "Implementation is complete and validation evidence is reported"
 
 # Monitor
 cccc tail -f

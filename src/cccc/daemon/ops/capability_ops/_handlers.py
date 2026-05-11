@@ -20,6 +20,8 @@ from ._common import (
     _CATALOG_LOCK,
     _STATE_LOCK,
     _RUNTIME_LOCK,
+    _POLICY_LOCK,
+    _LEVEL_INDEXED,
     _LEVEL_MOUNTED,
     _QUAL_QUALIFIED,
     _QUAL_BLOCKED,
@@ -29,6 +31,7 @@ from ._common import (
     _ensure_group,
     _is_foreman,
     _normalize_scope,
+    _env_bool,
     _quota_limit,
 )
 from ._documents import (
@@ -43,6 +46,7 @@ from ._runtime import (
     _runtime_capability_artifacts,
     _runtime_actor_bindings,
     _record_runtime_recent_success,
+    _remove_runtime_recent_success,
     _set_runtime_actor_binding,
     _remove_runtime_group_capability_bindings,
     _remove_runtime_capability_bindings_all_groups,
@@ -52,13 +56,23 @@ from ._runtime import (
 )
 from ._install import (
     _catalog_staleness_seconds,
+    _needs_registry_hydration,
     _supported_external_install_record,
     _tool_name_aliases,
     _build_synthetic_tool_name,
     _invoke_installed_external_tool_with_aliases,
 )
-from ._policy import _normalize_policy_level
+from ._install_visibility import clear_hidden_capability_after_install
 from ._skill_packages import normalize_codex_skill_package_spec
+from ._import_sources import (
+    _build_skill_record_from_markdown,
+    _handle_capability_source_uri_import,
+    _read_local_skill_markdown,
+    _source_uri_for_import_expansion,
+    _url_skill_dir_name,
+)
+from ._policy import _allowlist_effective_snapshot, _clear_policy_cache, _normalize_policy_level, _write_allowlist_overlay_doc
+from ._remote import _mark_source_disabled
 from ._state import (
     _binding_state_allows_external_tool,
     _install_state_allows_external_tool,
@@ -66,6 +80,7 @@ from ._state import (
     _collect_blocked_capabilities,
     _remove_capability_bindings,
     _remove_capability_bindings_all_groups,
+    _remove_blocked_capability_all_scopes,
     _has_any_binding_for_capability,
     handle_capability_enable,
 )
@@ -171,12 +186,96 @@ def _build_import_readiness_preview(
 # ---------------------------------------------------------------------------
 
 def _curated_install_metadata(install_mode_preference: str) -> Tuple[str, Dict[str, Any]]:
+    pref = str(install_mode_preference or "").strip().lower()
+    if pref == "remote_only":
+        return "remote_only", {"transport": "http", "url": ""}
+    if pref == "package:npm":
+        return "package", {"registry_type": "npm", "runtime_hint": "npx", "identifier": "", "version": ""}
+    if pref.startswith("package:"):
+        return "package", {"registry_type": pref.split(":", 1)[1], "runtime_hint": "", "identifier": "", "version": ""}
     return "", {}
 
 
 def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     now_iso = utc_now_iso()
     out: Dict[str, Dict[str, Any]] = {}
+    mcp_rows = policy.get("curated_mcp_entries") if isinstance(policy.get("curated_mcp_entries"), list) else []
+    for raw in mcp_rows:
+        if not isinstance(raw, dict):
+            continue
+        cap_id = str(raw.get("capability_id") or "").strip()
+        if not cap_id.startswith("mcp:"):
+            continue
+        level = _normalize_policy_level(raw.get("level"), default=_LEVEL_MOUNTED)
+        trust = str(raw.get("trust") or "").strip().lower()
+        notes = str(raw.get("notes") or "").strip()
+        name = str(raw.get("name") or "").strip()
+        description_short = str(raw.get("description_short") or "").strip()
+        source_uri = str(raw.get("source_uri") or "").strip()
+        source_record_id = str(raw.get("source_record_id") or "").strip()
+        source_record_version = str(raw.get("source_record_version") or "").strip()
+        license_text = str(raw.get("license") or "").strip()
+        risk_tags_raw = raw.get("risk_tags")
+        risk_tags = [str(x).strip() for x in risk_tags_raw if str(x).strip()] if isinstance(risk_tags_raw, list) else []
+        tags_raw = raw.get("tags")
+        tags = [str(x).strip() for x in tags_raw if str(x).strip()] if isinstance(tags_raw, list) else []
+        required_secrets_raw = raw.get("required_secrets")
+        required_secrets = (
+            [str(x).strip() for x in required_secrets_raw if str(x).strip()]
+            if isinstance(required_secrets_raw, list)
+            else []
+        )
+        install_mode = str(raw.get("install_mode") or "").strip().lower()
+        install_spec = dict(raw.get("install_spec") or {}) if isinstance(raw.get("install_spec"), dict) else {}
+        if not install_mode:
+            install_mode, install_spec = _curated_install_metadata(str(raw.get("install_mode_preference") or ""))
+        supported, unsupported_reason = _supported_external_install_record(
+            {"install_mode": install_mode, "install_spec": install_spec}
+        )
+        hydration_needed = _needs_registry_hydration(
+            cap_id,
+            {"capability_id": cap_id, "kind": "mcp_toolpack", "install_mode": install_mode, "install_spec": install_spec},
+        )
+        qualification = _QUAL_QUALIFIED if (supported or hydration_needed) else _QUAL_UNAVAILABLE
+        reasons: List[str] = []
+        if level == _LEVEL_INDEXED:
+            reasons.append("curated_indexed_default")
+        if risk_tags:
+            reasons.append("risk_tags_present")
+        if unsupported_reason:
+            reasons.append(unsupported_reason)
+        for reason in raw.get("qualification_reasons") if isinstance(raw.get("qualification_reasons"), list) else []:
+            reason_text = str(reason or "").strip()
+            if reason_text and reason_text not in reasons:
+                reasons.append(reason_text)
+        qualification = str(raw.get("qualification_status") or "").strip().lower()
+        if qualification not in _QUAL_STATES:
+            qualification = _QUAL_QUALIFIED if (supported or hydration_needed) else _QUAL_UNAVAILABLE
+        out[cap_id] = {
+            "capability_id": cap_id,
+            "kind": "mcp_toolpack",
+            "name": name or _display_name_from_capability_id(cap_id),
+            "description_short": description_short or notes or f"Curated MCP capability {cap_id}",
+            "tags": ["mcp", "external", "curated", *tags, *risk_tags],
+            "source_id": "mcp_registry_official",
+            "source_tier": "tier1",
+            "source_uri": source_uri,
+            "source_record_id": source_record_id or cap_id.split(":", 1)[1],
+            "source_record_version": source_record_version,
+            "updated_at_source": now_iso,
+            "last_synced_at": now_iso,
+            "sync_state": "curated",
+            "install_mode": install_mode,
+            "install_spec": install_spec,
+            "requirements": {"required_secrets": required_secrets} if required_secrets else {},
+            "license": license_text,
+            "trust_tier": trust or "tier1",
+            "qualification_status": qualification,
+            "qualification_reasons": reasons,
+            "health_status": "curated",
+            "enable_supported": bool(supported or hydration_needed),
+        }
+
     skill_rows = policy.get("curated_skill_entries") if isinstance(policy.get("curated_skill_entries"), list) else []
     for raw in skill_rows:
         if not isinstance(raw, dict):
@@ -188,14 +287,14 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
         level = _normalize_policy_level(raw.get("level"), default=_LEVEL_MOUNTED)
         trust = str(raw.get("trust") or "").strip().lower()
         notes = str(raw.get("notes") or "").strip()
-        source_id = str(raw.get("source_id") or "onecolleague_skill_library").strip() or "onecolleague_skill_library"
-        if source_id not in _SOURCE_IDS:
-            continue
+        source_id = str(raw.get("source_id") or "anthropic_skills").strip() or "anthropic_skills"
         source_uri = str(raw.get("source_uri") or "").strip()
         description_short = str(raw.get("description_short") or "").strip()
         license_text = str(raw.get("license") or "").strip()
         tags_raw = raw.get("tags")
         tags = [str(x).strip() for x in tags_raw if str(x).strip()] if isinstance(tags_raw, list) else []
+        if source_id == "anthropic_skills" and "anthropic" not in {t.lower() for t in tags}:
+            tags.append("anthropic")
         requires_raw = raw.get("requires_capabilities")
         requires_capabilities = (
             [str(x).strip() for x in requires_raw if str(x).strip()]
@@ -214,6 +313,8 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
         )
         if not reasons and qualification != _QUAL_QUALIFIED:
             reasons = [f"curated_{qualification}"]
+        if not source_uri and source_id == "anthropic_skills":
+            source_uri = f"https://github.com/anthropics/skills/tree/main/skills/{name}"
         if not description_short:
             description_short = notes or f"Curated skill {name}"
         if not capsule_text:
@@ -226,7 +327,7 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
             "description_short": description_short,
             "tags": ["skill", "external", "curated", *tags],
             "source_id": source_id,
-            "source_tier": "tier2",
+            "source_tier": "tier1" if source_id == "anthropic_skills" else "tier2",
             "source_uri": source_uri,
             "source_record_id": name,
             "source_record_version": "",
@@ -237,7 +338,7 @@ def _build_curated_records_from_policy(policy: Dict[str, Any]) -> Dict[str, Dict
             "install_spec": {},
             "requirements": {},
             "license": license_text,
-            "trust_tier": trust or "tier2",
+            "trust_tier": trust or ("tier1" if source_id == "anthropic_skills" else "tier2"),
             "qualification_status": qualification,
             "qualification_reasons": reasons,
             "health_status": "curated",
@@ -328,7 +429,7 @@ def _ensure_curated_catalog_records(catalog_doc: Dict[str, Any], *, policy: Dict
     sources = catalog_doc.get("sources") if isinstance(catalog_doc.get("sources"), dict) else {}
     now_iso = utc_now_iso()
     for source_id in touched_sources:
-        if not source_id or source_id not in _SOURCE_IDS:
+        if not source_id:
             continue
         state = sources.get(source_id) if isinstance(sources.get(source_id), dict) else _source_state_template("never")
         if str(state.get("sync_state") or "").strip() in {"", "never", "disabled"}:
@@ -429,14 +530,6 @@ def _refresh_source_record_counts(catalog: Dict[str, Any]) -> None:
         sid = str(rec.get("source_id") or "").strip()
         if sid in counts:
             counts[sid] += 1
-    sources = {
-        source_id: (
-            sources.get(source_id)
-            if isinstance(sources.get(source_id), dict)
-            else _source_state_template("never")
-        )
-        for source_id in _SOURCE_IDS
-    }
     for source_id in _SOURCE_IDS:
         state = sources.get(source_id) if isinstance(sources.get(source_id), dict) else _source_state_template("never")
         state["record_count"] = int(counts.get(source_id) or 0)
@@ -446,7 +539,19 @@ def _refresh_source_record_counts(catalog: Dict[str, Any]) -> None:
 
 def _sync_catalog(catalog_doc: Dict[str, Any], *, force: bool) -> Dict[str, Any]:
     before = json.dumps(catalog_doc, ensure_ascii=False, sort_keys=True)
-    upserted: Dict[str, int] = {source_id: 0 for source_id in _SOURCE_IDS}
+    upserted: Dict[str, int] = {}
+
+    if _env_bool("CCCC_CAPABILITY_SOURCE_MCP_REGISTRY_ENABLED", True):
+        upserted["mcp_registry_official"] = int(_pkg()._sync_mcp_registry_source(catalog_doc, force=force))
+    else:
+        _mark_source_disabled(catalog_doc, "mcp_registry_official")
+        upserted["mcp_registry_official"] = 0
+
+    if _env_bool("CCCC_CAPABILITY_SOURCE_ANTHROPIC_SKILLS_ENABLED", True):
+        upserted["anthropic_skills"] = int(_pkg()._sync_anthropic_skills_source(catalog_doc, force=force))
+    else:
+        _mark_source_disabled(catalog_doc, "anthropic_skills")
+        upserted["anthropic_skills"] = 0
 
     pruned = _prune_catalog_records(catalog_doc)
     _refresh_source_record_counts(catalog_doc)
@@ -664,11 +769,9 @@ def _normalize_import_kind(raw_kind: Any) -> str:
 
 def _coerce_import_source_id(kind: str, raw_source_id: Any) -> str:
     source_id = str(raw_source_id or "").strip()
-    if not source_id:
-        raise ValueError("record.source_id is required")
-    if source_id not in _SOURCE_IDS:
-        raise ValueError("record.source_id must be one of: cccc_builtin, onecolleague_skill_library")
-    return source_id
+    if source_id:
+        return source_id if source_id in _SOURCE_IDS else "manual_import"
+    return "manual_import"
 
 
 def _normalize_import_tags(raw: Any, *, kind: str) -> List[str]:
@@ -1138,6 +1241,19 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                     details={"action_id": action_id},
                 )
         raw_record_arg = args.get("record")
+        source_uri_arg = _source_uri_for_import_expansion(args)
+        if source_uri_arg:
+            return _handle_capability_source_uri_import(
+                args,
+                action_id=action_id,
+                group_id=group_id,
+                actor_id=actor_id,
+                source_uri=source_uri_arg,
+                dry_run=dry_run,
+                enable_after_import=enable_after_import,
+                scope=scope,
+                import_record=handle_capability_import,
+            )
         raw_has_updated_at_source = (
             isinstance(raw_record_arg, dict)
             and bool(str(raw_record_arg.get("updated_at_source") or "").strip())
@@ -1295,6 +1411,7 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
 
         enable_result: Dict[str, Any] = {}
         refresh_required = False
+        cleared_hidden_after_import = False
         state = str(readiness_preview.get("preview_status") or "needs_inspect")
         result_reason = ""
         if enable_after_import:
@@ -1315,6 +1432,17 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
                 refresh_required = bool(enable_result.get("refresh_required"))
                 state = str(enable_result.get("state") or "runnable").strip().lower() or "runnable"
                 result_reason = str(enable_result.get("reason") or "").strip()
+                if state in {"runnable", "verified", "activation_pending", "ready"}:
+                    with _STATE_LOCK:
+                        state_path, state_doc = _load_state_doc()
+                        cleared_hidden_after_import = clear_hidden_capability_after_install(
+                            state_doc,
+                            group_id=group_id,
+                            actor_id=actor_id or by,
+                            capability_id=cap_id,
+                        )
+                        if cleared_hidden_after_import:
+                            _save_state_doc(state_path, state_doc)
             else:
                 state = "blocked"
                 result_reason = str((enable_resp.error.message if enable_resp.error else "enable_failed") or "enable_failed")
@@ -1377,6 +1505,7 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
             "enable_block_reason": enable_block_reason,
             "refresh_required": bool(refresh_required),
             "enable_after_import": bool(enable_after_import),
+            "cleared_hidden_after_import": bool(cleared_hidden_after_import),
             "state": final_state,
             "readiness_preview": readiness_preview,
         }
@@ -1402,8 +1531,435 @@ def handle_capability_import(args: Dict[str, Any]) -> DaemonResponse:
 
 
 # ---------------------------------------------------------------------------
+# handle_capability_install_target
+# ---------------------------------------------------------------------------
+
+def _classify_install_target(target: str) -> str:
+    value = str(target or "").strip()
+    lower = value.lower()
+    if not value:
+        return "unspecified"
+    if lower.startswith(("skill:", "mcp:", "pack:")):
+        return "capability_id"
+    parsed = _pkg()._parse_github_owner_repo_ref(value)
+    if parsed is not None:
+        return "github"
+    if lower.startswith(("http://", "https://")):
+        return "url"
+    if lower.startswith(("ssh://", "git+", "git@")):
+        return "unsupported_url"
+    if lower.startswith(("file://", "./", "../", "/", "~")):
+        return "local_path"
+    return "unsupported"
+
+
+def _install_single_skill_record(
+    *,
+    group_id: str,
+    by: str,
+    actor_id: str,
+    target: str,
+    target_kind: str,
+    source_id: str,
+    record: Dict[str, Any],
+    scope: str,
+    ttl_seconds: int,
+    reason: str,
+    action_id: str,
+) -> DaemonResponse:
+    import_resp = handle_capability_import(
+        {
+            "group_id": group_id,
+            "by": by,
+            "actor_id": actor_id,
+            "record": record,
+            "source_id": source_id,
+            "dry_run": False,
+            "probe": True,
+            "enable_after_import": True,
+            "scope": scope,
+            "ttl_seconds": ttl_seconds,
+            "reason": reason or "capability_install_target",
+        }
+    )
+    if not import_resp.ok:
+        return import_resp
+    import_result = import_resp.result if isinstance(import_resp.result, dict) else {}
+    cap_id = str(import_result.get("capability_id") or record.get("capability_id") or "").strip()
+    active = bool(import_result.get("active_after_import"))
+    result = {
+        "action_id": action_id,
+        "group_id": group_id,
+        "actor_id": actor_id,
+        "target": target,
+        "target_kind": target_kind,
+        "scope": scope,
+        "source_id": source_id,
+        "installed_capability_ids": [cap_id] if cap_id else [],
+        "enabled_capability_ids": [cap_id] if active and cap_id else [],
+        "use_ready_capability_ids": [cap_id] if active and cap_id else [],
+        "requires_setup": not active,
+        "refresh_required": bool(import_result.get("refresh_required")),
+        "import_result": import_result,
+        "state": "ready" if active else str(import_result.get("state") or "needs_setup"),
+    }
+    if reason:
+        result["reason"] = reason
+    return DaemonResponse(ok=True, result=result)
+
+
+def handle_capability_install_target(args: Dict[str, Any]) -> DaemonResponse:
+    group_id = str(args.get("group_id") or "").strip()
+    by = str(args.get("by") or args.get("actor_id") or "").strip()
+    actor_id = str(args.get("actor_id") or by).strip()
+    target = str(args.get("target") or args.get("source_uri") or args.get("capability_id") or "").strip()
+    scope = _normalize_scope(args.get("scope") or "actor")
+    ttl_seconds_raw = args.get("ttl_seconds")
+    try:
+        ttl_seconds = int(ttl_seconds_raw if ttl_seconds_raw is not None else 3600)
+    except Exception:
+        raise ValueError("invalid ttl_seconds")
+    reason = str(args.get("reason") or "").strip()
+    action_id = f"cins_{uuid.uuid4().hex[:16]}"
+    target_kind = _classify_install_target(target)
+
+    try:
+        _ensure_group(group_id)
+        if not by:
+            return _error("missing_actor_id", "missing actor identity (by)", details={"action_id": action_id})
+        if not target:
+            return _error("missing_install_target", "missing install target", details={"action_id": action_id})
+
+        if target_kind == "capability_id":
+            enable_resp = handle_capability_enable(
+                {
+                    "group_id": group_id,
+                    "by": by,
+                    "actor_id": actor_id,
+                    "capability_id": target,
+                    "scope": scope,
+                    "enabled": True,
+                    "ttl_seconds": ttl_seconds,
+                    "reason": reason or "capability_install_target_enable",
+                }
+            )
+            if not enable_resp.ok:
+                return enable_resp
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            state = str(enable_result.get("state") or "").strip().lower()
+            use_ready = state in {"runnable", "verified", "activation_pending", "ready"}
+            cleared_hidden_after_install = False
+            if use_ready:
+                with _STATE_LOCK:
+                    state_path, state_doc = _load_state_doc()
+                    cleared_hidden_after_install = clear_hidden_capability_after_install(
+                        state_doc,
+                        group_id=group_id,
+                        actor_id=actor_id,
+                        capability_id=target,
+                    )
+                    if cleared_hidden_after_install:
+                        _save_state_doc(state_path, state_doc)
+            return DaemonResponse(
+                ok=True,
+                result={
+                    "action_id": action_id,
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "target": target,
+                    "target_kind": target_kind,
+                    "scope": scope,
+                    "installed_capability_ids": [target],
+                    "enabled_capability_ids": [target] if use_ready else [],
+                    "use_ready_capability_ids": [target] if use_ready else [],
+                    "requires_setup": not use_ready,
+                    "refresh_required": bool(enable_result.get("refresh_required")),
+                    "cleared_hidden_after_install": bool(cleared_hidden_after_install),
+                    "enable_result": enable_result,
+                    "state": state or ("ready" if use_ready else "blocked"),
+                },
+            )
+
+        if target_kind == "github":
+            import_resp = handle_capability_import(
+                {
+                    "group_id": group_id,
+                    "by": by,
+                    "actor_id": actor_id,
+                    "source_uri": target,
+                    "source_id": "github_import",
+                    "dry_run": False,
+                    "probe": True,
+                    "enable_after_import": True,
+                    "scope": scope,
+                    "ttl_seconds": ttl_seconds,
+                    "reason": reason or "capability_install_target",
+                }
+            )
+            if not import_resp.ok:
+                return import_resp
+            import_result = import_resp.result if isinstance(import_resp.result, dict) else {}
+            imported = import_result.get("imported_capabilities") if isinstance(import_result.get("imported_capabilities"), list) else []
+            installed_ids = [
+                str(item.get("capability_id") or "").strip()
+                for item in imported
+                if isinstance(item, dict) and str(item.get("capability_id") or "").strip()
+            ]
+            enabled_ids = [
+                str(item.get("capability_id") or "").strip()
+                for item in imported
+                if isinstance(item, dict) and bool(item.get("active_after_import")) and str(item.get("capability_id") or "").strip()
+            ]
+            result = {
+                "action_id": action_id,
+                "group_id": group_id,
+                "actor_id": actor_id,
+                "target": target,
+                "target_kind": target_kind,
+                "scope": scope,
+                "source_id": "github_import",
+                "installed_capability_ids": installed_ids,
+                "enabled_capability_ids": enabled_ids,
+                "use_ready_capability_ids": enabled_ids,
+                "requires_setup": len(enabled_ids) < len(installed_ids),
+                "refresh_required": bool(import_result.get("refresh_required")),
+                "import_result": import_result,
+                "state": "ready" if installed_ids and len(enabled_ids) == len(installed_ids) else "needs_setup",
+            }
+            if reason:
+                result["reason"] = reason
+            return DaemonResponse(ok=True, result=result)
+
+        if target_kind == "url":
+            markdown = _pkg()._http_get_text(target, timeout=12.0)
+            record = _build_skill_record_from_markdown(
+                markdown=markdown,
+                source_id="url_import",
+                source_uri=target,
+                namespace="url",
+                dir_name=_url_skill_dir_name(target),
+            )
+            return _install_single_skill_record(
+                group_id=group_id,
+                by=by,
+                actor_id=actor_id,
+                target=target,
+                target_kind=target_kind,
+                source_id="url_import",
+                record=record,
+                scope=scope,
+                ttl_seconds=ttl_seconds,
+                reason=reason,
+                action_id=action_id,
+            )
+
+        if target_kind == "local_path":
+            skill_path, markdown = _read_local_skill_markdown(target)
+            record = _build_skill_record_from_markdown(
+                markdown=markdown,
+                source_id="local_import",
+                source_uri=str(skill_path),
+                namespace="local",
+                dir_name=skill_path.parent.name,
+            )
+            return _install_single_skill_record(
+                group_id=group_id,
+                by=by,
+                actor_id=actor_id,
+                target=target,
+                target_kind=target_kind,
+                source_id="local_import",
+                record=record,
+                scope=scope,
+                ttl_seconds=ttl_seconds,
+                reason=reason,
+                action_id=action_id,
+            )
+
+        return _error(
+            "unsupported_install_target",
+            f"unsupported install target: {target_kind}",
+            details={"action_id": action_id, "target": target, "target_kind": target_kind},
+        )
+    except LookupError as e:
+        return _error("group_not_found", str(e), details={"action_id": action_id})
+    except ValueError as e:
+        msg = str(e)
+        code = "capability_install_invalid"
+        if msg == "missing_group_id":
+            code = "missing_group_id"
+            msg = "missing group_id"
+        return _error(code, msg, details={"action_id": action_id})
+    except Exception as e:
+        return _error("capability_install_failed", str(e), details={"action_id": action_id})
+
+
+# ---------------------------------------------------------------------------
 # handle_capability_uninstall
 # ---------------------------------------------------------------------------
+
+_REMOVABLE_SOURCE_IDS = {"manual_import", "agent_self_proposed", "github_import", "url_import", "local_import"}
+
+
+def _remove_source_from_allowlist_overlay(source_id: str) -> bool:
+    snapshot = _allowlist_effective_snapshot()
+    overlay = snapshot.get("overlay") if isinstance(snapshot.get("overlay"), dict) else {}
+    sources = overlay.get("sources") if isinstance(overlay.get("sources"), list) else []
+    next_sources = [
+        row
+        for row in sources
+        if not (isinstance(row, dict) and str(row.get("source_id") or "").strip() == source_id)
+    ]
+    if len(next_sources) == len(sources):
+        return False
+    next_overlay = dict(overlay)
+    if next_sources:
+        next_overlay["sources"] = next_sources
+    else:
+        next_overlay.pop("sources", None)
+    _write_allowlist_overlay_doc(next_overlay)
+    _clear_policy_cache()
+    return True
+
+
+def handle_capability_source_delete(args: Dict[str, Any]) -> DaemonResponse:
+    group_id = str(args.get("group_id") or "").strip()
+    by = str(args.get("by") or args.get("actor_id") or "").strip()
+    actor_id = str(args.get("actor_id") or by).strip()
+    source_id = str(args.get("source_id") or "").strip()
+    source_instance_key = str(args.get("source_instance_key") or "").strip()
+    reason = str(args.get("reason") or "").strip()
+    if len(reason) > 280:
+        reason = reason[:280]
+    action_id = f"csrc_{uuid.uuid4().hex[:16]}"
+
+    try:
+        group = _ensure_group(group_id)
+        if not source_id:
+            return _error("missing_source_id", "missing source_id", details={"action_id": action_id})
+        if source_id not in _REMOVABLE_SOURCE_IDS:
+            return _error(
+                "protected_capability_source",
+                "this capability source cannot be deleted; disable it instead",
+                details={"action_id": action_id, "source_id": source_id},
+            )
+        if by != "user" and (not _is_foreman(group, by)):
+            return _error(
+                "permission_denied",
+                "only user or foreman can delete capability sources",
+                details={"action_id": action_id},
+            )
+
+        removed_capability_ids: List[str] = []
+        source_state_reset = False
+        with _CATALOG_LOCK:
+            catalog_path, catalog_doc = _pkg()._load_catalog_doc()
+            rows = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
+            for capability_id, rec in list(rows.items()):
+                if not (isinstance(rec, dict) and str(rec.get("source_id") or "").strip() == source_id):
+                    continue
+                if source_instance_key and not _pkg().capability_record_matches_source_instance(rec, source_instance_key):
+                    continue
+                rows.pop(str(capability_id), None)
+                removed_capability_ids.append(str(capability_id))
+            catalog_doc["records"] = rows
+            sources = catalog_doc.get("sources") if isinstance(catalog_doc.get("sources"), dict) else {}
+            if source_id in sources and not source_instance_key:
+                sources[source_id] = _source_state_template("never")
+                catalog_doc["sources"] = sources
+                source_state_reset = True
+            _pkg()._refresh_source_record_counts(catalog_doc)
+            if removed_capability_ids or source_state_reset:
+                _pkg()._save_catalog_doc(catalog_path, catalog_doc)
+
+        removed_bindings = 0
+        removed_blocked = 0
+        with _STATE_LOCK:
+            state_path, state_doc = _load_state_doc()
+            for capability_id in removed_capability_ids:
+                removed_bindings += _remove_capability_bindings_all_groups(state_doc, capability_id=capability_id)
+                removed_blocked += _remove_blocked_capability_all_scopes(state_doc, capability_id=capability_id)
+            if removed_bindings > 0 or removed_blocked > 0:
+                _save_state_doc(state_path, state_doc)
+
+        removed_runtime_bindings = 0
+        removed_installations = 0
+        with _RUNTIME_LOCK:
+            runtime_path, runtime_doc = _load_runtime_doc()
+            runtime_changed = False
+            for capability_id in removed_capability_ids:
+                removed_runtime_bindings += _remove_runtime_capability_bindings_all_groups(
+                    runtime_doc,
+                    capability_id=capability_id,
+                )
+                removed_artifact_id = _remove_runtime_capability_artifact(runtime_doc, capability_id=capability_id)
+                if removed_artifact_id:
+                    if _remove_runtime_artifact_if_unreferenced(runtime_doc, artifact_id=removed_artifact_id):
+                        removed_installations += 1
+                    runtime_changed = True
+                if _remove_runtime_recent_success(runtime_doc, capability_id=capability_id):
+                    runtime_changed = True
+            if removed_runtime_bindings > 0:
+                runtime_changed = True
+            if runtime_changed:
+                _save_runtime_doc(runtime_path, runtime_doc)
+
+        removed_actor_autoload = 0
+        removed_profile_autoload = 0
+        for capability_id in removed_capability_ids:
+            removed_actor_autoload += _remove_actor_autoload_references_all_groups(capability_id)
+            removed_profile_autoload += _remove_profile_autoload_references(capability_id)
+
+        allowlist_changed = False
+        if not source_instance_key:
+            with _POLICY_LOCK:
+                allowlist_changed = _remove_source_from_allowlist_overlay(source_id)
+
+        refresh_required = bool(
+            removed_capability_ids
+            or removed_bindings > 0
+            or removed_blocked > 0
+            or removed_runtime_bindings > 0
+            or removed_installations > 0
+            or removed_actor_autoload > 0
+            or removed_profile_autoload > 0
+            or allowlist_changed
+            or source_state_reset
+        )
+        result: Dict[str, Any] = {
+            "action_id": action_id,
+            "group_id": group_id,
+            "actor_id": actor_id,
+            "source_id": source_id,
+            "source_instance_key": source_instance_key,
+            "state": "ready",
+            "removed_records": len(removed_capability_ids),
+            "removed_capability_ids": removed_capability_ids,
+            "removed_bindings": removed_bindings,
+            "removed_blocked": removed_blocked,
+            "removed_runtime_bindings": removed_runtime_bindings,
+            "removed_installations": removed_installations,
+            "removed_actor_autoload": removed_actor_autoload,
+            "removed_profile_autoload": removed_profile_autoload,
+            "removed_allowlist_source": allowlist_changed,
+            "refresh_required": refresh_required,
+        }
+        if reason:
+            result["reason"] = reason
+        if refresh_required:
+            result["wait"] = "relist_or_reconnect"
+            result["refresh_mode"] = "relist_or_reconnect"
+        return DaemonResponse(ok=True, result=result)
+    except LookupError as e:
+        return _error("group_not_found", str(e), details={"action_id": action_id})
+    except ValueError as e:
+        message = str(e)
+        if message == "missing_group_id":
+            return _error("missing_group_id", "missing group_id", details={"action_id": action_id})
+        return _error("capability_source_delete_invalid", message, details={"action_id": action_id})
+    except Exception as e:
+        return _error("capability_source_delete_failed", str(e), details={"action_id": action_id})
+
 
 def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
@@ -1467,11 +2023,17 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
                 removed_record = True
 
         removed_bindings = 0
+        removed_blocked = 0
+        removed_group_marker = False
         has_remaining_binding = False
         with _STATE_LOCK:
             state_path, state_doc = _load_state_doc()
             if remove_generated_record:
                 removed_bindings = _remove_capability_bindings_all_groups(
+                    state_doc,
+                    capability_id=capability_id,
+                )
+                removed_blocked = _remove_blocked_capability_all_scopes(
                     state_doc,
                     capability_id=capability_id,
                 )
@@ -1481,12 +2043,19 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
                     group_id=group_id,
                     capability_id=capability_id,
                 )
+                removed_group_marker = _pkg()._set_removed_capability(
+                    state_doc,
+                    group_id=group_id,
+                    capability_id=capability_id,
+                    removed=True,
+                )
             has_remaining_binding = _has_any_binding_for_capability(state_doc, capability_id=capability_id)
-            if removed_bindings > 0:
+            if removed_bindings > 0 or removed_blocked > 0 or removed_group_marker:
                 _save_state_doc(state_path, state_doc)
 
         removed_installation = False
         removed_runtime_bindings = 0
+        removed_recent_success = False
         cleanup_skipped_reason = ""
         with _RUNTIME_LOCK:
             runtime_path, runtime_doc = _load_runtime_doc()
@@ -1515,6 +2084,12 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
                         artifact_id=removed_artifact_id,
                     )
                     runtime_changed = True
+                if _remove_runtime_recent_success(
+                    runtime_doc,
+                    capability_id=capability_id,
+                ):
+                    removed_recent_success = True
+                    runtime_changed = True
             if runtime_changed:
                 _save_runtime_doc(runtime_path, runtime_doc)
 
@@ -1532,8 +2107,11 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
         refresh_required = bool(
             removed_record
             or removed_bindings > 0
+            or removed_blocked > 0
+            or removed_group_marker
             or removed_installation
             or removed_runtime_bindings > 0
+            or removed_recent_success
             or removed_actor_autoload > 0
             or removed_profile_autoload > 0
         )
@@ -1543,8 +2121,11 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
             details={
                 "removed_record": bool(removed_record),
                 "removed_bindings": int(removed_bindings),
+                "removed_blocked": int(removed_blocked),
+                "removed_group_marker": bool(removed_group_marker),
                 "removed_installation": bool(removed_installation),
                 "removed_runtime_bindings": int(removed_runtime_bindings),
+                "removed_recent_success": bool(removed_recent_success),
                 "removed_actor_autoload": int(removed_actor_autoload),
                 "removed_profile_autoload": int(removed_profile_autoload),
                 "cleanup_skipped_reason": cleanup_skipped_reason,
@@ -1558,8 +2139,11 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
             "state": "ready",
             "removed_record": bool(removed_record),
             "removed_bindings": int(removed_bindings),
+            "removed_blocked": int(removed_blocked),
+            "removed_group_marker": bool(removed_group_marker),
             "removed_installation": bool(removed_installation),
             "removed_runtime_bindings": int(removed_runtime_bindings),
+            "removed_recent_success": bool(removed_recent_success),
             "removed_actor_autoload": int(removed_actor_autoload),
             "removed_profile_autoload": int(removed_profile_autoload),
             "refresh_required": refresh_required,

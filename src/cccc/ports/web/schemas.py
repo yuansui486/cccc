@@ -94,7 +94,7 @@ class GroupTemplatePreviewRequest(BaseModel):
 
 WEB_MAX_FILE_MB = 20
 WEB_MAX_FILE_BYTES = WEB_MAX_FILE_MB * 1024 * 1024
-WEB_MAX_TEMPLATE_BYTES = 2 * 1024 * 1024  # safety bound for template uploads
+WEB_MAX_TEMPLATE_BYTES = 2 * 1024 * 1024
 
 
 class ActorCreateRequest(BaseModel):
@@ -106,6 +106,7 @@ class ActorCreateRequest(BaseModel):
     command: Union[str, list[str]] = Field(default="")
     env: Dict[str, str] = Field(default_factory=dict)
     capability_autoload: list[str] = Field(default_factory=list)
+    capability_hidden: list[str] = Field(default_factory=list)
     # Write-only runtime-only secrets (stored under CCCC_HOME/state; never persisted into ledger).
     # Values are never returned by the daemon; only keys can be listed via the dedicated endpoints.
     env_private: Optional[Dict[str, str]] = None
@@ -125,6 +126,7 @@ class ActorUpdateRequest(BaseModel):
     command: Optional[Union[str, list[str]]] = None
     env: Optional[Dict[str, str]] = None
     capability_autoload: Optional[list[str]] = None
+    capability_hidden: Optional[list[str]] = None
     default_scope_key: Optional[str] = None
     submit: Optional[ActorSubmit] = None
     runner: Optional[RunnerKind] = None
@@ -250,6 +252,28 @@ class AssistantVoiceTranscriptionRequest(BaseModel):
     by: str = Field(default="user")
 
 
+class AssistantVoiceModelInstallRequest(BaseModel):
+    model_id: str = Field(default="")
+    by: str = Field(default="user")
+    background: bool = Field(default=False)
+
+
+class AssistantVoiceModelRemoveRequest(BaseModel):
+    model_id: str = Field(default="")
+    by: str = Field(default="user")
+
+
+class AssistantVoiceRuntimeInstallRequest(BaseModel):
+    runtime_id: str = Field(default="")
+    by: str = Field(default="user")
+    background: bool = Field(default=True)
+
+
+class AssistantVoiceRuntimeRemoveRequest(BaseModel):
+    runtime_id: str = Field(default="")
+    by: str = Field(default="user")
+
+
 class AssistantVoiceTranscriptSegmentRequest(BaseModel):
     session_id: str = Field(default="")
     segment_id: str = Field(default="")
@@ -258,7 +282,15 @@ class AssistantVoiceTranscriptSegmentRequest(BaseModel):
     language: str = Field(default="")
     is_final: bool = Field(default=True)
     flush: bool = Field(default=False)
+    start_ms: Optional[int] = None
+    end_ms: Optional[int] = None
+    speaker_label: str = Field(default="")
     trigger: Dict[str, Any] = Field(default_factory=dict)
+    by: str = Field(default="user")
+
+
+class AssistantVoiceTranscriptClearRequest(BaseModel):
+    document_path: str = Field(default="")
     by: str = Field(default="user")
 
 

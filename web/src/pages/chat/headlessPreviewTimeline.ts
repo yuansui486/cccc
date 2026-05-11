@@ -111,6 +111,35 @@ function compareTimelineEntries(left: SortableTimelineEntry, right: SortableTime
   return left.order - right.order;
 }
 
+function normalizeComparableText(value: string | undefined): string {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function isPlainReasoningActivity(activity: StreamingActivity): boolean {
+  const kind = String(activity?.kind || "").trim().toLowerCase();
+  const rawItemType = String(activity?.raw_item_type || "").trim().toLowerCase();
+  const hasActionMetadata = Boolean(
+    String(activity?.tool_name || "").trim()
+    || String(activity?.server_name || "").trim()
+    || String(activity?.command || "").trim()
+    || String(activity?.cwd || "").trim()
+    || String(activity?.query || "").trim()
+    || (Array.isArray(activity?.file_paths) && activity.file_paths.some((path) => String(path || "").trim()))
+  );
+  if (hasActionMetadata) return false;
+  return rawItemType === "reasoning" || (kind === "thinking" && (!rawItemType || rawItemType === "reasoning"));
+}
+
+function duplicatesTranscriptText(activity: StreamingActivity, transcriptTexts: string[]): boolean {
+  if (!isPlainReasoningActivity(activity)) return false;
+  const summary = normalizeComparableText(activity?.summary);
+  if (summary.length < 8) return false;
+  return transcriptTexts.some((text) => {
+    if (text.length < 8) return false;
+    return text === summary || text.startsWith(summary) || summary.startsWith(text);
+  });
+}
+
 export function buildHeadlessPreviewTimelineEntries(args: BuildHeadlessPreviewTimelineArgs): HeadlessPreviewTimelineEntry[] {
   const previewSessions = normalizeTimelineSessions(args);
   if (previewSessions.length <= 0) return [];
@@ -123,6 +152,10 @@ export function buildHeadlessPreviewTimelineEntries(args: BuildHeadlessPreviewTi
     const pendingEventId = String(session.pendingEventId || "").trim();
     const liveSession = latestPendingEventId === pendingEventId
       && !["completed", "failed"].includes(String(session.phase || "").trim().toLowerCase());
+    const narrativeTranscriptTexts = (Array.isArray(session.transcriptBlocks) ? session.transcriptBlocks : [])
+      .filter((block) => String(block?.streamPhase || "").trim().toLowerCase() !== "final_answer")
+      .map((block) => normalizeComparableText(block?.text))
+      .filter(Boolean);
 
     for (const block of Array.isArray(session.transcriptBlocks) ? session.transcriptBlocks : []) {
       const text = String(block?.text || "").trim();
@@ -144,6 +177,7 @@ export function buildHeadlessPreviewTimelineEntries(args: BuildHeadlessPreviewTi
     for (const activity of dedupeStreamingActivities(session.activities || [])) {
       const summary = String(activity?.summary || "").trim();
       if (!summary) continue;
+      if (duplicatesTranscriptText(activity, narrativeTranscriptTexts)) continue;
       entries.push({
         id: `activity:${pendingEventId}:${String(activity.id || "").trim() || order}`,
         kind: "activity",

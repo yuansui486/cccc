@@ -4,6 +4,7 @@ import type {
   GroupMeta,
   GroupDoc,
   GroupRuntimeStatus,
+  HeadlessStreamEvent,
 } from "../types";
 import {
   normalizeReplySessionTimestamp,
@@ -16,6 +17,7 @@ import {
   getCachedGroupView,
   getGroupChatBucket,
   GroupChatBucket,
+  HEADLESS_RAW_EVENT_LIMIT,
   loadArchivedGroupIds,
   loadGroupOrder,
   loadSelectedGroupId,
@@ -41,6 +43,7 @@ import {
 } from "./groupStoreCore";
 import { createGroupStoreAsyncActions } from "./groupStoreAsyncActions";
 import type { GroupState } from "./groupStoreTypes";
+import { useComposerStore } from "./useComposerStore";
 import {
   clearEmptyStreamingEventsForActorPatch,
   clearStreamingEventsForActorPatch,
@@ -59,13 +62,40 @@ import {
 } from "./groupStreamingReducers";
 import { computeGroupRuntimePatch } from "../utils/groupRuntimeProjection";
 
+function stableSerialize(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(",")}}`;
+}
+
+function buildHeadlessEventSignature(event: HeadlessStreamEvent): string {
+  return [
+    String(event.id || "").trim(),
+    String(event.ts || "").trim(),
+    String(event.actor_id || "").trim(),
+    String(event.type || "").trim(),
+    stableSerialize(event.data || {}),
+  ].join("|");
+}
+
+function syncComposerToSelectedGroup(groupId: string): void {
+  const gid = String(groupId || "").trim();
+  const composerActiveGid = String(useComposerStore.getState().activeGroupId || "").trim();
+  if (composerActiveGid === gid) return;
+  useComposerStore.getState().switchGroup(composerActiveGid || null, gid || null);
+}
+
+const initialSelectedGroupId = loadSelectedGroupId();
+syncComposerToSelectedGroup(initialSelectedGroupId);
 
 export const useGroupStore = create<GroupState>((set, get) => ({
   // Initial state
   groups: [],
   groupOrder: loadGroupOrder(),
   archivedGroupIds: loadArchivedGroupIds(),
-  selectedGroupId: loadSelectedGroupId(),
+  selectedGroupId: initialSelectedGroupId,
   chatByGroup: {},
   groupDoc: null,
   events: [],
@@ -150,13 +180,32 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   },
   setSelectedGroupId: (id) => {
     const gid = String(id || "").trim();
+    syncComposerToSelectedGroup(gid);
     saveSelectedGroupId(gid);
     set((state) => {
-      const prevGid = String(state.selectedGroupId || "").trim();
+      const statePrevGid = String(state.selectedGroupId || "").trim();
 
-      // 切组前先把当前视图快照落到缓存，回切时才能做到秒开。
-      if (prevGid && prevGid !== gid) {
-        saveCurrentViewSnapshot(prevGid, state);
+      // Cache the current view before switching groups so returning to it is instant.
+      if (statePrevGid && statePrevGid !== gid) {
+        saveCurrentViewSnapshot(statePrevGid, state);
+      }
+
+      if (!gid) {
+        return {
+          selectedGroupId: "",
+          chatByGroup: {},
+          groupDoc: null,
+          events: [],
+          actors: [],
+          groupContext: null,
+          groupSettings: null,
+          groupPresentation: null,
+          selectedGroupActorsHydrating: false,
+          chatWindow: null,
+          hasMoreHistory: false,
+          isLoadingHistory: false,
+          isChatWindowLoading: false,
+        };
       }
 
       const nextChatByGroup = ensureGroupChatBucket(state.chatByGroup, gid);
@@ -257,6 +306,29 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         }
       }
       return buildChatBucketPatch(state, gid, patch) ?? state;
+    }),
+  appendHeadlessEvent: (event, groupId) =>
+    set((state) => {
+      const gid = resolveChatGroupId(state, groupId);
+      if (!gid) return state;
+      const actorId = String(event.actor_id || "").trim();
+      const eventType = String(event.type || "").trim();
+      if (!actorId || !eventType) return state;
+      const bucket = getGroupChatBucket(state.chatByGroup, gid);
+      const currentByActor = bucket.rawHeadlessEventsByActorId || {};
+      const currentEvents = Array.isArray(currentByActor[actorId]) ? currentByActor[actorId] : [];
+      const nextSignature = buildHeadlessEventSignature(event);
+      const exists = currentEvents.some((candidate) => buildHeadlessEventSignature(candidate) === nextSignature);
+      if (exists) return state;
+      const nextEvents = currentEvents.concat([event]);
+      return buildChatBucketPatch(state, gid, {
+        rawHeadlessEventsByActorId: {
+          ...currentByActor,
+          [actorId]: nextEvents.length > HEADLESS_RAW_EVENT_LIMIT
+            ? nextEvents.slice(nextEvents.length - HEADLESS_RAW_EVENT_LIMIT)
+            : nextEvents,
+        },
+      }) ?? state;
     }),
   upsertStreamingEvent: (event, groupId) =>
     set((state) => {
@@ -437,9 +509,15 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         const actorId = String(actor.id || "").trim();
         if (!targets.has(actorId)) return actor;
         changed = true;
+        const runtime = String(actor.runtime || "").trim().toLowerCase();
+        const workingState = String(actor.effective_working_state || "").trim().toLowerCase();
+        const webModelQueuedCount = runtime === "web_model" && workingState === "working"
+          ? Math.max(0, Number(actor.web_model_queued_count || 0)) + 1
+          : actor.web_model_queued_count;
         return {
           ...actor,
           unread_count: Math.max(0, Number(actor.unread_count || 0)) + 1,
+          web_model_queued_count: webModelQueuedCount,
         };
       });
 
@@ -476,6 +554,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             effective_working_reason: u.effective_working_reason,
             effective_working_updated_at: u.effective_working_updated_at ?? null,
             effective_active_task_id: u.effective_active_task_id ?? null,
+            web_model_queued_count: String(a.runtime || "").trim().toLowerCase() === "web_model"
+              && String(u.effective_working_state || "").trim().toLowerCase() !== "working"
+                ? 0
+                : a.web_model_queued_count,
           };
         }
         return a;

@@ -17,6 +17,8 @@ from ..context.context_ops import _schedule_summary_snapshot_rebuild
 from .actor_runtime_ops import resolve_actor_launch_config
 from .actor_profile_runtime import actor_profile_ref, apply_profile_link_to_actor
 from .actor_profile_store import ProfileResolver, get_actor_profile_by_ref, normalize_actor_profile_ref
+from .web_model_actor_policy import require_no_other_chatgpt_web_model_actor
+from .web_model_browser_session import clear_web_model_chatgpt_browser_actor_runtime
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -50,6 +52,7 @@ def handle_actor_add(
     command_raw = args.get("command")
     env_raw = args.get("env")
     capability_autoload_raw = args.get("capability_autoload")
+    capability_hidden_raw = args.get("capability_hidden")
     env_private_raw = args.get("env_private")
     default_scope_key = str(args.get("default_scope_key") or "").strip()
     profile_id = str(args.get("profile_id") or "").strip()
@@ -110,6 +113,8 @@ def handle_actor_add(
                 raise ValueError("too many profile private env keys configured")
 
         runner = requested_runner or "pty"
+        if runtime == "web_model":
+            runner = "headless"
         if runner not in ("pty", "headless"):
             raise ValueError("invalid runner (must be 'pty' or 'headless')")
         if runtime not in supported_runtimes:
@@ -205,6 +210,10 @@ def handle_actor_add(
         else:
             if not command:
                 command = get_runtime_command_with_flags(runtime)
+        if runtime == "web_model":
+            require_no_other_chatgpt_web_model_actor(group_id=group.group_id)
+            runner = "headless"
+            command = []
 
         if runtime == "custom" and runner != "headless" and not command:
             raise ValueError("custom runtime requires a command (PTY runner)")
@@ -218,11 +227,18 @@ def handle_actor_add(
             default_scope_key=default_scope_key,
             submit=submit or "enter",
             capability_autoload=list(capability_autoload_raw) if isinstance(capability_autoload_raw, list) else None,
+            capability_hidden=list(capability_hidden_raw) if isinstance(capability_hidden_raw, list) else None,
             runner=runner,  # type: ignore
             runtime=runtime,  # type: ignore
         )
 
         effective_actor_id = str(actor.get("id") or actor_id).strip() or actor_id
+
+        if runtime == "web_model":
+            try:
+                clear_web_model_chatgpt_browser_actor_runtime(group_id=group.group_id, actor_id=effective_actor_id)
+            except Exception:
+                pass
 
         if linked_profile_id and isinstance(linked_profile, dict):
             actor = apply_profile_link_to_actor(

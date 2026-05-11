@@ -4,8 +4,9 @@ This module owns the daemon-local Chromium session model:
 
 1. one Playwright runtime per session
 2. one active controller socket at a time
-3. JPEG frame projection over JSON-lines sockets
-4. input relay and lightweight inspection commands on the same runtime thread
+3. optional localhost VNC projection for Xvfb-backed sessions
+4. CDP screencast frame projection over JSON-lines sockets as fallback
+5. input relay and lightweight inspection commands on the same runtime thread
 """
 
 from __future__ import annotations
@@ -14,22 +15,36 @@ import base64
 import json
 import os
 import queue
+import select
 import selectors
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 from urllib.request import urlopen
 
+from ...util.process import terminate_pid
+from ...util.node_env import suppress_node_deprecation_warnings_in_process, with_node_deprecation_warnings_suppressed
 from ...util.time import utc_now_iso
 
-_FRAME_INTERVAL_SECONDS = 0.35
+_VIEWER_ACTIVE_FRAME_INTERVAL_SECONDS = 0.1
+_VIEWER_IDLE_FRAME_INTERVAL_SECONDS = 0.5
+_VIEWER_ACTIVITY_WINDOW_SECONDS = 3.0
+_IDLE_FRAME_POLL_SECONDS = 2.0
+_FRAME_CAPTURE_BACKOFF_SECONDS = 0.5
+_FRAME_CAPTURE_MAX_BACKOFF_SECONDS = 2.0
+_SCREENCAST_EVENT_PUMP_TIMEOUT_MS = 80
+# Keep the CDP producer unthrottled so a newly attached viewer gets a reliable
+# first frame; consumer-side cadence controls how often frames are sent to UI.
+_SCREENCAST_EVERY_NTH_FRAME = 1
 _SOCKET_READ_TIMEOUT_SECONDS = 0.2
 _START_WAIT_TIMEOUT_SECONDS = 20.0
+_VNC_START_TIMEOUT_SECONDS = 3.0
 
 
 def ensure_dir(path: Path, mode: int = 0o700) -> None:
@@ -74,6 +89,7 @@ def install_playwright_chromium() -> None:
         capture_output=True,
         text=True,
         timeout=600,
+        env=with_node_deprecation_warnings_suppressed(os.environ),
     )
     if proc.returncode != 0:
         detail = str(proc.stderr or "").strip() or str(proc.stdout or "").strip() or "playwright install chromium failed"
@@ -81,6 +97,7 @@ def install_playwright_chromium() -> None:
 
 
 def ensure_sync_playwright():
+    suppress_node_deprecation_warnings_in_process()
     try:
         from playwright.sync_api import sync_playwright
 
@@ -107,6 +124,10 @@ def _terminate_process(proc: Any) -> None:
                 proc.kill()
     except Exception:
         pass
+
+
+def _terminate_pid(pid: int) -> None:
+    terminate_pid(int(pid or 0), timeout_s=3.0, include_group=True, force=True)
 
 
 class _VirtualDisplay:
@@ -246,6 +267,157 @@ def _wait_cdp_endpoint(port: int, *, timeout_seconds: float) -> bool:
     return False
 
 
+def _browser_app_launch_args(url: str, *, width: int, height: int) -> list[str]:
+    args = [
+        f"--window-size={max(1024, int(width))},{max(768, int(height))}",
+        "--window-position=0,0",
+        "--force-device-scale-factor=1",
+    ]
+    target = str(url or "").strip()
+    if target:
+        args.append(f"--app={target}")
+    else:
+        args.append("about:blank")
+    return args
+
+
+def _wait_tcp_endpoint(port: int, *, timeout_seconds: float) -> bool:
+    deadline = time.time() + max(0.2, float(timeout_seconds))
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", int(port)), timeout=0.4):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def _vnc_viewer_enabled() -> bool:
+    value = str(os.environ.get("CCCC_PROJECTED_BROWSER_VNC", "1") or "").strip().lower()
+    return value not in {"0", "false", "no", "off", "disabled"}
+
+
+def _x11vnc_env(display: str) -> dict[str, str]:
+    env = dict(os.environ)
+    env["DISPLAY"] = str(display or "").strip()
+    env.pop("WAYLAND_DISPLAY", None)
+    env.pop("WAYLAND_SOCKET", None)
+    env["XDG_SESSION_TYPE"] = "x11"
+    return env
+
+
+def _read_temp_text(handle: Any) -> str:
+    if handle is None:
+        return ""
+    try:
+        handle.flush()
+        handle.seek(0)
+        return str(handle.read() or "")
+    except Exception:
+        return ""
+
+
+def _x11vnc_start_error(reason: str, output: str = "") -> str:
+    normalized_reason = str(reason or "x11vnc startup failed").strip() or "x11vnc startup failed"
+    compact_output = " ".join(str(output or "").replace("\r", "\n").split())
+    lower = f"{normalized_reason} {compact_output}".lower()
+    if "wayland" in lower:
+        return "x11vnc_wayland_env_detected: x11vnc saw a Wayland session instead of the Xvfb display"
+    if "endpoint did not become ready" in lower:
+        prefix = "x11vnc_startup_timeout: x11vnc endpoint did not become ready"
+    else:
+        prefix = normalized_reason
+    if compact_output:
+        return f"{prefix}; {compact_output[:220]}"
+    return prefix[:300]
+
+
+class _ProjectedVncServer:
+    def __init__(self, *, display: str, port: int, proc: subprocess.Popen[Any]) -> None:
+        self.display = str(display or "").strip()
+        self.port = int(port)
+        self.proc = proc
+        self.started_at = utc_now_iso()
+
+    @classmethod
+    def start(cls, *, display: str, display_owned: bool = False) -> tuple[Optional["_ProjectedVncServer"], str]:
+        display_value = str(display or "").strip()
+        if not _vnc_viewer_enabled():
+            return None, "disabled"
+        if os.name == "nt":
+            return None, "unsupported_platform"
+        if not display_value:
+            return None, "missing_display"
+        if not bool(display_owned):
+            return None, "display_not_cccc_owned"
+        x11vnc = shutil.which("x11vnc")
+        if not x11vnc:
+            return None, "x11vnc_not_found"
+        port = _pick_free_port()
+        proc: subprocess.Popen[Any] | None = None
+        stderr_log: Any = None
+        try:
+            stderr_log = tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace")
+            proc = subprocess.Popen(
+                [
+                    x11vnc,
+                    "-display",
+                    display_value,
+                    "-localhost",
+                    "-nopw",
+                    "-shared",
+                    "-forever",
+                    "-rfbport",
+                    str(int(port)),
+                    "-quiet",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_log,
+                env=_x11vnc_env(display_value),
+                text=True,
+                start_new_session=True,
+            )
+            if not _wait_tcp_endpoint(port, timeout_seconds=_VNC_START_TIMEOUT_SECONDS):
+                output = _read_temp_text(stderr_log)
+                _terminate_process(proc)
+                proc = None
+                return None, _x11vnc_start_error("x11vnc endpoint did not become ready", output)
+            try:
+                stderr_log.close()
+            except Exception:
+                pass
+            return cls(display=display_value, port=port, proc=proc), ""
+        except Exception as exc:
+            if proc is not None:
+                _terminate_process(proc)
+            return None, _x11vnc_start_error(str(exc or "x11vnc startup failed"), _read_temp_text(stderr_log))
+        finally:
+            try:
+                if stderr_log is not None and not stderr_log.closed:
+                    stderr_log.close()
+            except Exception:
+                pass
+
+    def alive(self) -> bool:
+        try:
+            return self.proc.poll() is None
+        except Exception:
+            return False
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "available": self.alive(),
+            "display": self.display,
+            "port": self.port,
+            "started_at": self.started_at,
+            "pid": int(getattr(self.proc, "pid", 0) or 0),
+        }
+
+    def close(self) -> None:
+        _terminate_process(self.proc)
+
+
 def _page_urls_from_context(context: Any) -> list[str]:
     urls: list[str] = []
     try:
@@ -342,6 +514,8 @@ class PlaywrightProjectedRuntime:
         height: int,
         strategy: str,
         cleanup_callbacks: Iterable[Any] = (),
+        metadata: dict[str, Any] | None = None,
+        close_context_on_close: bool = True,
     ) -> None:
         self._lock = threading.RLock()
         self._playwright_cm = playwright_cm
@@ -351,9 +525,18 @@ class PlaywrightProjectedRuntime:
         self.strategy = str(strategy or "playwright_chromium_cdp")
         self.width = int(width)
         self.height = int(height)
+        self.metadata = dict(metadata or {})
         self._cleanup_callbacks = list(cleanup_callbacks or [])
+        self._close_context_on_close = bool(close_context_on_close)
         self._page_history: list[Any] = []
         self._known_page_ids: set[int] = set()
+        self._screencast_active = False
+        self._screencast_seq = 0
+        self._screencast_consumed_seq = 0
+        self._screencast_last_frame = b""
+        self._page_domain_enabled = False
+        self._install_screencast_handler()
+        self._enable_page_domain()
         self._register_page(page)
         try:
             self._context.on("page", self._handle_new_page)
@@ -398,18 +581,110 @@ class PlaywrightProjectedRuntime:
         except Exception:
             pass
 
-    def _bind_cdp(self, page: Any) -> None:
-        old_cdp = self._cdp
-        self._page = page
-        self._cdp = self._context.new_cdp_session(page)
+    def _install_screencast_handler(self) -> None:
+        cdp = self._cdp
+        if cdp is None:
+            return
+
+        def _on_frame(event: dict[str, Any]) -> None:
+            data = str((event or {}).get("data") or "")
+            if data:
+                try:
+                    frame = base64.b64decode(data)
+                except Exception:
+                    frame = b""
+                if frame:
+                    with self._lock:
+                        self._screencast_seq += 1
+                        self._screencast_last_frame = bytes(frame)
+            session_id = (event or {}).get("sessionId")
+            if session_id is not None:
+                try:
+                    cdp.send("Page.screencastFrameAck", {"sessionId": session_id})
+                except Exception:
+                    pass
+
         try:
-            self._cdp.send("Page.enable")
+            cdp.on("Page.screencastFrame", _on_frame)
         except Exception:
             pass
+
+    def _enable_page_domain(self) -> None:
+        with self._lock:
+            if self._page_domain_enabled:
+                return
+            cdp = self._cdp
+        if cdp is None:
+            return
+        try:
+            cdp.send("Page.enable")
+        except Exception:
+            return
+        with self._lock:
+            if cdp is self._cdp:
+                self._page_domain_enabled = True
+
+    def _stop_screencast_session(self, cdp: Any | None = None) -> None:
+        target = cdp or self._cdp
+        if target is None:
+            return
+        try:
+            target.send("Page.stopScreencast")
+        except Exception:
+            pass
+
+    def _ensure_screencast(self) -> None:
+        with self._lock:
+            if self._screencast_active:
+                return
+            cdp = self._cdp
+            width = self.width
+            height = self.height
+        if cdp is None:
+            raise RuntimeError("CDP session is not available for browser screencast")
+        self._enable_page_domain()
+        cdp.send(
+            "Page.startScreencast",
+            {
+                "format": "jpeg",
+                "quality": 70,
+                "maxWidth": int(width),
+                "maxHeight": int(height),
+                "everyNthFrame": _SCREENCAST_EVERY_NTH_FRAME,
+            },
+        )
+        with self._lock:
+            if cdp is self._cdp:
+                self._screencast_active = True
+
+    def stop_screencast(self) -> None:
+        with self._lock:
+            if not self._screencast_active:
+                return
+            cdp = self._cdp
+            self._screencast_active = False
+        self._stop_screencast_session(cdp)
+
+    def _bind_cdp(self, page: Any) -> None:
+        old_cdp = self._cdp
+        old_screencast_active = self._screencast_active
+        if old_screencast_active:
+            self._stop_screencast_session(old_cdp)
+            self._screencast_active = False
+        self._page = page
+        self._cdp = self._context.new_cdp_session(page)
+        self._page_domain_enabled = False
+        self._install_screencast_handler()
+        self._enable_page_domain()
         try:
             page.set_viewport_size({"width": self.width, "height": self.height})
         except Exception:
             pass
+        if old_screencast_active:
+            try:
+                self._ensure_screencast()
+            except Exception:
+                pass
         if old_cdp is not None and old_cdp is not self._cdp:
             try:
                 old_cdp.detach()
@@ -470,19 +745,17 @@ class PlaywrightProjectedRuntime:
             return get_cookies_for_urls(self._context, urls)
 
     def capture_frame(self) -> bytes:
+        self._ensure_screencast()
+        page = self.page
+        try:
+            page.wait_for_timeout(_SCREENCAST_EVENT_PUMP_TIMEOUT_MS)
+        except Exception as exc:
+            raise RuntimeError(f"CDP screencast event pump failed: {exc}") from exc
         with self._lock:
-            cdp = self._cdp
-        payload = cdp.send(
-            "Page.captureScreenshot",
-            {
-                "format": "jpeg",
-                "quality": 60,
-                "captureBeyondViewport": False,
-                "fromSurface": True,
-            },
-        )
-        data = str((payload or {}).get("data") or "")
-        return base64.b64decode(data) if data else b""
+            if self._screencast_seq <= self._screencast_consumed_seq:
+                return b""
+            self._screencast_consumed_seq = self._screencast_seq
+            return bytes(self._screencast_last_frame or b"")
 
     def click(self, *, x: float, y: float, button: str = "left") -> None:
         self.page.mouse.click(float(x), float(y), button=str(button or "left"))
@@ -500,6 +773,11 @@ class PlaywrightProjectedRuntime:
         self.width = int(width)
         self.height = int(height)
         self.page.set_viewport_size({"width": self.width, "height": self.height})
+        with self._lock:
+            was_active = bool(self._screencast_active)
+        if was_active:
+            self.stop_screencast()
+            self._ensure_screencast()
 
     def navigate(self, *, url: str) -> None:
         self.page.goto(str(url or ""), wait_until="domcontentloaded", timeout=30000)
@@ -521,16 +799,18 @@ class PlaywrightProjectedRuntime:
             self._activate_page(fallback, remember_previous=False)
 
     def close(self) -> None:
+        self.stop_screencast()
         try:
             if self._cdp is not None:
                 self._cdp.detach()
         except Exception:
             pass
-        try:
-            if self._context is not None:
-                self._context.close()
-        except Exception:
-            pass
+        if self._close_context_on_close:
+            try:
+                if self._context is not None:
+                    self._context.close()
+            except Exception:
+                pass
         try:
             self._playwright_cm.__exit__(None, None, None)
         except Exception:
@@ -551,6 +831,11 @@ def launch_projected_browser_runtime(
     headless: bool = False,
     channel_candidates: Iterable[str | None] = (None,),
     seed_storage_state: dict[str, Any] | None = None,
+    system_profile_subdir: str | None = None,
+    require_system_browser_cdp: bool = False,
+    existing_cdp_port: int = 0,
+    existing_browser_metadata: dict[str, Any] | None = None,
+    startup_metadata_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> PlaywrightProjectedRuntime:
     sync_playwright = ensure_sync_playwright()
     playwright_cm = sync_playwright()
@@ -559,12 +844,84 @@ def launch_projected_browser_runtime(
     browser_env = {str(k): str(v) for k, v in os.environ.items()}
     cleanup_callbacks: list[Any] = []
     strategy_suffix = ""
+    display_owned = False
+
+    existing_port = int(existing_cdp_port or 0)
+    if existing_port > 0:
+        try:
+            if startup_metadata_callback is not None:
+                metadata = dict(existing_browser_metadata or {})
+                metadata.update(
+                    {
+                        "cdp_port": existing_port,
+                        "profile_dir": str(metadata.get("profile_dir") or profile_dir),
+                        "adopted": True,
+                        "display_owned": False,
+                        "display_owner": "",
+                    }
+                )
+                startup_metadata_callback(metadata)
+            if not _wait_cdp_endpoint(existing_port, timeout_seconds=1.0):
+                raise RuntimeError("existing CDP endpoint is not reachable")
+            browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{existing_port}", timeout=15000)
+            contexts = list(getattr(browser, "contexts", []) or [])
+            context = contexts[0] if contexts else None
+            if context is None:
+                raise RuntimeError("cdp connected but no browser context became available")
+            _ = seed_context_with_storage_state(context, seed_storage_state)
+            pages = list(getattr(context, "pages", []) or [])
+            target_url = str(url or "").strip()
+            page = None
+            if target_url:
+                page = next((item for item in pages if str(getattr(item, "url", "") or "").strip() == target_url), None)
+            if page is None:
+                page = pages[0] if pages else context.new_page()
+            page.set_viewport_size({"width": int(width), "height": int(height)})
+            if target_url and str(getattr(page, "url", "") or "").strip() != target_url:
+                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+            cdp_session = context.new_cdp_session(page)
+            try:
+                cdp_session.send("Page.enable")
+            except Exception:
+                pass
+            metadata = dict(existing_browser_metadata or {})
+            metadata.update(
+                {
+                    "cdp_port": existing_port,
+                    "profile_dir": str(metadata.get("profile_dir") or profile_dir),
+                    "adopted": True,
+                    "display_owned": False,
+                    "display_owner": "",
+                }
+            )
+            return PlaywrightProjectedRuntime(
+                playwright_cm=playwright_cm,
+                context=context,
+                page=page,
+                cdp_session=cdp_session,
+                width=width,
+                height=height,
+                strategy="system_browser_cdp:adopted",
+                metadata=metadata,
+                cleanup_callbacks=cleanup_callbacks,
+                close_context_on_close=False,
+            )
+        except Exception:
+            try:
+                playwright_cm.__exit__(None, None, None)
+            except Exception:
+                pass
+            raise
+
     if not bool(headless):
         virtual_display = _start_virtual_display(width=width, height=height)
         if virtual_display is not None:
             browser_env.update(virtual_display.env_overlay())
             cleanup_callbacks.append(virtual_display.close)
             strategy_suffix = "_xvfb"
+            display_owned = True
+    browser_display = str(browser_env.get("DISPLAY") or "").strip()
+    display_owner = "cccc_xvfb" if display_owned else ""
 
     def _launch_system_browser_once(channel: str) -> PlaywrightProjectedRuntime | None:
         if bool(headless):
@@ -574,7 +931,11 @@ def launch_projected_browser_runtime(
             return None
         for binary in binaries:
             port = _pick_free_port()
-            system_profile_dir = profile_dir / f"system_{channel}"
+            if system_profile_subdir is None:
+                system_profile_dir = profile_dir / f"system_{channel}"
+            else:
+                subdir = str(system_profile_subdir or "").strip()
+                system_profile_dir = profile_dir / subdir if subdir else profile_dir
             ensure_dir(system_profile_dir, 0o700)
             proc = None
             try:
@@ -585,17 +946,31 @@ def launch_projected_browser_runtime(
                         f"--user-data-dir={system_profile_dir}",
                         "--no-first-run",
                         "--no-default-browser-check",
-                        f"--window-size={max(1024, int(width))},{max(768, int(height))}",
-                        str(url).strip() or "about:blank",
+                        *_browser_app_launch_args(str(url or ""), width=width, height=height),
                     ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     text=True,
                     env=browser_env,
+                    start_new_session=True,
                 )
+                if startup_metadata_callback is not None:
+                    startup_metadata_callback(
+                        {
+                            "cdp_port": int(port),
+                            "pid": int(getattr(proc, "pid", 0) or 0),
+                            "profile_dir": str(system_profile_dir),
+                            "browser_binary": str(binary),
+                            "channel": str(channel),
+                            "display": browser_display,
+                            "display_owned": bool(display_owned),
+                            "display_owner": display_owner,
+                            "started_at": utc_now_iso(),
+                        }
+                    )
                 if not _wait_cdp_endpoint(port, timeout_seconds=12.0):
                     raise RuntimeError("cdp endpoint did not become ready")
-                browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}")
+                browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}", timeout=15000)
                 contexts = list(getattr(browser, "contexts", []) or [])
                 context = contexts[0] if contexts else None
                 if context is None:
@@ -618,6 +993,16 @@ def launch_projected_browser_runtime(
                     width=width,
                     height=height,
                     strategy=strategy,
+                    metadata={
+                        "cdp_port": int(port),
+                        "pid": int(getattr(proc, "pid", 0) or 0),
+                        "profile_dir": str(system_profile_dir),
+                        "browser_binary": str(binary),
+                        "channel": str(channel),
+                        "display": browser_display,
+                        "display_owned": bool(display_owned),
+                        "display_owner": display_owner,
+                    },
                     cleanup_callbacks=[lambda proc=proc: _terminate_process(proc), *cleanup_callbacks],
                 )
             except Exception:
@@ -630,12 +1015,21 @@ def launch_projected_browser_runtime(
             system_browser = _launch_system_browser_once(channel)
             if system_browser is not None:
                 return system_browser
+            if bool(require_system_browser_cdp):
+                raise RuntimeError(
+                    f"system browser CDP launch failed for channel {channel!r}; "
+                    "install Google Chrome or Microsoft Edge and close any existing CCCC ChatGPT browser using the same profile"
+                )
+        elif bool(require_system_browser_cdp):
+            raise RuntimeError("managed Playwright Chromium is not supported for this browser surface")
         launch_kwargs: dict[str, Any] = {
             "user_data_dir": str(profile_dir),
             "headless": bool(headless),
             "viewport": {"width": int(width), "height": int(height)},
             "env": browser_env,
         }
+        if not bool(headless):
+            launch_kwargs["args"] = _browser_app_launch_args(str(url or ""), width=width, height=height)
         if channel:
             launch_kwargs["channel"] = str(channel)
         context = pw.chromium.launch_persistent_context(**launch_kwargs)
@@ -662,6 +1056,16 @@ def launch_projected_browser_runtime(
             width=width,
             height=height,
             strategy=strategy,
+            metadata={
+                "cdp_port": 0,
+                "pid": 0,
+                "profile_dir": str(profile_dir),
+                "browser_binary": "",
+                "channel": str(channel or "playwright"),
+                "display": browser_display,
+                "display_owned": bool(display_owned),
+                "display_owner": display_owner,
+            },
             cleanup_callbacks=cleanup_callbacks,
         )
 
@@ -722,6 +1126,10 @@ class ProjectedBrowserSession:
         height: int,
         headless: bool,
         channel_candidates: Iterable[str | None],
+        system_profile_subdir: str | None = None,
+        require_system_browser_cdp: bool = False,
+        existing_cdp_port: int = 0,
+        existing_browser_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.session_key = str(session_key or "").strip()
         self.profile_dir = Path(profile_dir)
@@ -730,6 +1138,10 @@ class ProjectedBrowserSession:
         self.height = max(480, min(int(height), 1600))
         self.headless = bool(headless)
         self.channel_candidates = tuple(channel_candidates or (None,))
+        self.system_profile_subdir = system_profile_subdir
+        self.require_system_browser_cdp = bool(require_system_browser_cdp)
+        self.existing_cdp_port = int(existing_cdp_port or 0)
+        self.existing_browser_metadata = dict(existing_browser_metadata or {})
         self._lock = threading.Lock()
         self._frame_cond = threading.Condition(self._lock)
         self._commands: "queue.Queue[tuple[str, dict[str, Any], Optional[queue.Queue[dict[str, Any]]]]]" = queue.Queue()
@@ -739,8 +1151,8 @@ class ProjectedBrowserSession:
             daemon=True,
             name=f"cccc-browser-{self.session_key[:48]}",
         )
-        self._controller_attached = False
-        self._controller_socket: Optional[socket.socket] = None
+        self._controller_sockets: dict[int, socket.socket] = {}
+        self._controller_modes: dict[int, str] = {}
         self._controller_generation = 0
         self._state = "starting"
         self._message = "Preparing browser runtime..."
@@ -752,7 +1164,11 @@ class ProjectedBrowserSession:
         self._last_frame_seq = 0
         self._last_frame_at = ""
         self._last_frame_bytes = b""
+        self._viewer_active_until = 0.0
         self._seed_storage_state: dict[str, Any] | None = None
+        self._metadata: dict[str, Any] = {}
+        self._vnc_server: Optional[_ProjectedVncServer] = None
+        self._vnc_last_error = ""
 
     def set_seed_storage_state(self, storage_state: dict[str, Any] | None) -> None:
         self._seed_storage_state = dict(storage_state or {}) if isinstance(storage_state, dict) else None
@@ -768,14 +1184,33 @@ class ProjectedBrowserSession:
         except Exception:
             pass
         self._thread.join(timeout=5.0)
+        if self._thread.is_alive():
+            with self._lock:
+                pid = int((self._metadata or {}).get("pid") or 0)
+            _terminate_pid(pid)
+            self._thread.join(timeout=2.0)
         with self._lock:
-            self._controller_attached = False
-            self._controller_socket = None
+            vnc_server = self._vnc_server
+            self._vnc_server = None
+        if vnc_server is not None:
+            try:
+                vnc_server.close()
+            except Exception:
+                pass
+        with self._lock:
+            controller_sockets = list(self._controller_sockets.values())
+            self._controller_sockets.clear()
+            self._controller_modes.clear()
             if self._state not in {"failed", "closed"}:
                 self._state = "closed"
                 self._message = "Browser surface closed."
                 self._updated_at = utc_now_iso()
             self._frame_cond.notify_all()
+        for controller_sock in controller_sockets:
+            try:
+                controller_sock.close()
+            except Exception:
+                pass
 
     def wait_until_started(self, timeout: float = _START_WAIT_TIMEOUT_SECONDS) -> dict[str, Any]:
         deadline = time.time() + max(1.0, float(timeout))
@@ -784,10 +1219,20 @@ class ProjectedBrowserSession:
             if snapshot["state"] in {"ready", "failed"}:
                 return snapshot
             time.sleep(0.05)
+        self._set_state(
+            "failed",
+            message=f"Browser surface failed: startup timed out after {max(1.0, float(timeout)):.0f}s.",
+            error={
+                "code": "browser_surface_startup_timeout",
+                "message": "browser surface startup timed out",
+            },
+        )
+        self.close()
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            vnc_snapshot = self._vnc_snapshot_locked()
             return {
                 "active": self._state in {"starting", "ready", "failed"},
                 "state": self._state,
@@ -801,7 +1246,14 @@ class ProjectedBrowserSession:
                 "updated_at": self._updated_at,
                 "last_frame_seq": self._last_frame_seq,
                 "last_frame_at": self._last_frame_at,
-                "controller_attached": bool(self._controller_attached),
+                "viewer_active": bool(time.time() < self._viewer_active_until),
+                "frame_interval_seconds": self._viewer_frame_interval_locked(),
+                "controller_attached": bool(self._controller_sockets),
+                "metadata": dict(self._metadata),
+                "viewer": {
+                    "kind": "vnc" if bool(vnc_snapshot.get("available")) else "screencast",
+                    "vnc": vnc_snapshot,
+                },
             }
 
     def can_attach(self) -> tuple[bool, dict[str, Any]]:
@@ -811,28 +1263,75 @@ class ProjectedBrowserSession:
                 return False, {"code": "browser_surface_not_active", "message": message, "details": dict(self._error)}
             return True, {}
 
-    def attach_socket(self, sock: socket.socket) -> bool:
+    def _vnc_snapshot_locked(self) -> dict[str, Any]:
+        if self._vnc_server is None:
+            return {
+                "available": False,
+                "error": self._vnc_last_error,
+            }
+        snapshot = self._vnc_server.snapshot()
+        if not bool(snapshot.get("available")):
+            snapshot["error"] = self._vnc_last_error or "x11vnc_not_running"
+        return snapshot
+
+    def _vnc_available_locked(self) -> bool:
+        return bool(self._vnc_server is not None and self._vnc_server.alive())
+
+    def _controller_mode_uses_frame_locked(self, mode: str) -> bool:
+        normalized = str(mode or "auto").strip().lower() or "auto"
+        if normalized in {"auto", "vnc"} and self._vnc_available_locked():
+            return False
+        return True
+
+    def _has_frame_viewers(self) -> bool:
+        with self._lock:
+            for generation in self._controller_sockets:
+                if self._controller_mode_uses_frame_locked(self._controller_modes.get(generation, "auto")):
+                    return True
+            return False
+
+    def attach_socket(self, sock: socket.socket, *, viewer_mode: str = "auto") -> bool:
         with self._lock:
             if self._state not in {"starting", "ready"}:
                 return False
-            old_sock = self._controller_socket
             self._controller_generation += 1
             generation = self._controller_generation
-            self._controller_attached = True
-            self._controller_socket = sock
+            self._controller_sockets[generation] = sock
+            self._controller_modes[generation] = str(viewer_mode or "auto").strip().lower() or "auto"
+            self._viewer_active_until = max(self._viewer_active_until, time.time() + _VIEWER_ACTIVITY_WINDOW_SECONDS)
             self._updated_at = utc_now_iso()
-        # Evict old controller outside the lock to avoid deadlocks.
-        if old_sock is not None:
-            try:
-                old_sock.close()
-            except Exception:
-                pass
         threading.Thread(
             target=self._serve_socket,
             args=(sock, generation),
             daemon=True,
             name=f"cccc-browser-stream-{self.session_key[:48]}",
         ).start()
+        return True
+
+    def can_attach_vnc(self) -> tuple[bool, dict[str, Any]]:
+        with self._lock:
+            if self._state not in {"ready", "starting"}:
+                message = str(self._error.get("message") or self._message or "browser surface is not active")
+                return False, {"code": "browser_surface_not_active", "message": message, "details": dict(self._error)}
+            vnc = self._vnc_snapshot_locked()
+            if bool(vnc.get("available")):
+                return True, {}
+            return False, {
+                "code": "browser_vnc_unavailable",
+                "message": str(vnc.get("error") or "VNC viewer is not available for this browser surface."),
+                "details": {"viewer": {"vnc": vnc}},
+            }
+
+    def attach_vnc_socket(self, sock: socket.socket) -> bool:
+        with self._lock:
+            if not self._vnc_available_locked() or self._vnc_server is None:
+                return False
+            port = int(self._vnc_server.port)
+        try:
+            vnc_sock = socket.create_connection(("127.0.0.1", port), timeout=3.0)
+        except Exception:
+            return False
+        _bridge_raw_sockets(sock, vnc_sock)
         return True
 
     def wait_for_frame(self, *, after_seq: int, timeout: float) -> Optional[dict[str, Any]]:
@@ -873,6 +1372,14 @@ class ProjectedBrowserSession:
             self._updated_at = utc_now_iso()
             self._frame_cond.notify_all()
 
+    def _record_startup_metadata(self, metadata: dict[str, Any]) -> None:
+        if not isinstance(metadata, dict):
+            return
+        with self._lock:
+            self._metadata = {**self._metadata, **metadata}
+            self._updated_at = utc_now_iso()
+            self._frame_cond.notify_all()
+
     def _record_frame(self, frame_bytes: bytes) -> None:
         with self._frame_cond:
             self._last_frame_seq += 1
@@ -880,6 +1387,20 @@ class ProjectedBrowserSession:
             self._last_frame_at = utc_now_iso()
             self._updated_at = self._last_frame_at
             self._frame_cond.notify_all()
+
+    def _mark_viewer_active(self) -> None:
+        with self._lock:
+            self._viewer_active_until = max(self._viewer_active_until, time.time() + _VIEWER_ACTIVITY_WINDOW_SECONDS)
+            self._frame_cond.notify_all()
+
+    def _viewer_frame_interval_locked(self) -> float:
+        if time.time() < self._viewer_active_until:
+            return _VIEWER_ACTIVE_FRAME_INTERVAL_SECONDS
+        return _VIEWER_IDLE_FRAME_INTERVAL_SECONDS
+
+    def _viewer_frame_interval(self) -> float:
+        with self._lock:
+            return self._viewer_frame_interval_locked()
 
     def _apply_command(self, runtime: PlaywrightProjectedRuntime, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         if kind == "ping":
@@ -919,6 +1440,132 @@ class ProjectedBrowserSession:
             raw_urls = payload.get("urls")
             urls = raw_urls if isinstance(raw_urls, list) else []
             return {"ok": True, "cookies": runtime.cookies_for_urls(urls)}
+        elif kind == "chatgpt_submit_prompt":
+            from ...ports.web_model_browser_sidecar import (
+                CHATGPT_URL,
+                _conversation_url_from_tab,
+                _mark_page_pending_delivery,
+                _normalize_chatgpt_url,
+                _submit_prompt,
+                _wait_for_conversation_url,
+            )
+
+            prompt = str(payload.get("prompt") or "").strip()
+            if not prompt:
+                raise RuntimeError("payload.prompt is required")
+            target_url = _normalize_chatgpt_url(payload.get("target_url"))
+            auto_bind_new_chat = bool(payload.get("auto_bind_new_chat"))
+            delivery_id = str(payload.get("delivery_id") or "").strip()
+            page = runtime.page
+            current_url = _normalize_chatgpt_url(str(getattr(page, "url", "") or ""))
+            if target_url and current_url != target_url:
+                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+            elif not current_url:
+                page.goto(CHATGPT_URL, wait_until="domcontentloaded", timeout=30000)
+            current_chatgpt_url = _normalize_chatgpt_url(str(getattr(page, "url", "") or ""))
+            if not current_chatgpt_url:
+                raise RuntimeError(f"ChatGPT sign-in required before delivery; current page is {str(getattr(page, 'url', '') or '')[:200]}")
+            if auto_bind_new_chat:
+                _mark_page_pending_delivery(page, delivery_id)
+            command_timeout_seconds = float(payload.get("command_timeout_seconds") or payload.get("input_timeout_seconds") or 30.0)
+            command_deadline = time.time() + max(1.0, command_timeout_seconds) - 1.0
+            submit_timeout_seconds = max(1.0, command_deadline - time.time())
+            submit = _submit_prompt(
+                page,
+                prompt,
+                input_timeout_seconds=float(payload.get("input_timeout_seconds") or 30.0),
+                submit_timeout_seconds=submit_timeout_seconds,
+            )
+            conversation_url = _conversation_url_from_tab(str(getattr(page, "url", "") or ""))
+            if auto_bind_new_chat and not conversation_url:
+                bind_timeout = max(0.2, command_deadline - time.time())
+                conversation_url = _wait_for_conversation_url(
+                    page,
+                    timeout_seconds=min(float(payload.get("new_chat_bind_timeout_seconds") or 20.0), bind_timeout),
+                )
+            tab_url = str(getattr(page, "url", "") or "")
+            pending_conversation_url = bool(auto_bind_new_chat and not conversation_url)
+            conversation_url = conversation_url or ("" if pending_conversation_url else target_url)
+            with self._lock:
+                self._url = str(runtime.current_url() or tab_url or self._url)
+                self._updated_at = utc_now_iso()
+            return {
+                "ok": True,
+                "browser": {
+                    "provider": "chatgpt_web",
+                    "tab_url": tab_url,
+                    "conversation_url": conversation_url,
+                    "auto_bind_new_chat": auto_bind_new_chat,
+                    "pending_conversation_url": pending_conversation_url,
+                    "submitted_without_conversation_url": pending_conversation_url,
+                    "profile_dir": str((runtime.metadata or {}).get("profile_dir") or self.profile_dir),
+                    "cdp_port": int((runtime.metadata or {}).get("cdp_port") or 0),
+                    "pid": int((runtime.metadata or {}).get("pid") or 0),
+                    "reused": True,
+                    **submit,
+                },
+            }
+        elif kind == "chatgpt_auto_confirm_tools":
+            from ...ports.web_model_browser_sidecar import (
+                TOOL_CONFIRM_MAX_CLICKS,
+                _auto_confirm_page_tool_prompts,
+                _normalize_chatgpt_url,
+            )
+
+            target_url = _normalize_chatgpt_url(payload.get("target_url"))
+            page = runtime.page
+            page_url = str(getattr(page, "url", "") or "")
+            normalized_page_url = _normalize_chatgpt_url(page_url)
+            if not normalized_page_url:
+                return {
+                    "ok": True,
+                    "browser_active": True,
+                    "clicked": 0,
+                    "candidate_count": 0,
+                    "details": [],
+                    "errors": [],
+                    "pages_seen": 0,
+                    "page_url": page_url,
+                    "skipped": "non_chatgpt_page",
+                }
+            if target_url and normalized_page_url != target_url:
+                return {
+                    "ok": True,
+                    "browser_active": True,
+                    "clicked": 0,
+                    "candidate_count": 0,
+                    "details": [],
+                    "errors": [],
+                    "pages_seen": 0,
+                    "page_url": page_url,
+                    "skipped": "target_mismatch",
+                }
+            try:
+                max_clicks = int(payload.get("max_clicks") or TOOL_CONFIRM_MAX_CLICKS)
+            except Exception:
+                max_clicks = TOOL_CONFIRM_MAX_CLICKS
+            result = _auto_confirm_page_tool_prompts(
+                page,
+                max_clicks=max(1, min(max_clicks, TOOL_CONFIRM_MAX_CLICKS)),
+            )
+            if not isinstance(result, dict):
+                result = {"clicked": 0, "details": []}
+            errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+            if result.get("error"):
+                errors = [*errors, {"error": str(result.get("error") or "")[:300]}]
+            with self._lock:
+                self._url = str(runtime.current_url() or page_url or self._url)
+                self._updated_at = utc_now_iso()
+            return {
+                "ok": True,
+                "browser_active": True,
+                "clicked": max(0, int(result.get("clicked") or 0)),
+                "candidate_count": max(0, int(result.get("candidate_count") or 0)),
+                "details": result.get("details") if isinstance(result.get("details"), list) else [],
+                "errors": errors,
+                "pages_seen": 1,
+                "page_url": str(runtime.current_url() or page_url),
+            }
         elif kind == "close":
             self._stop_event.set()
             return {"ok": True}
@@ -940,22 +1587,49 @@ class ProjectedBrowserSession:
                 headless=self.headless,
                 channel_candidates=self.channel_candidates,
                 seed_storage_state=self._seed_storage_state,
+                system_profile_subdir=self.system_profile_subdir,
+                require_system_browser_cdp=self.require_system_browser_cdp,
+                existing_cdp_port=self.existing_cdp_port,
+                existing_browser_metadata=self.existing_browser_metadata,
+                startup_metadata_callback=self._record_startup_metadata,
             )
             with self._lock:
                 self._strategy = str(getattr(runtime, "strategy", "") or "")
+                self._metadata = dict(getattr(runtime, "metadata", {}) or {})
                 self._url = str(runtime.current_url() or self.initial_url)
+                self._updated_at = utc_now_iso()
+            runtime_metadata = dict((getattr(runtime, "metadata", {}) or {}))
+            vnc_server, vnc_error = _ProjectedVncServer.start(
+                display=str(runtime_metadata.get("display") or ""),
+                display_owned=bool(runtime_metadata.get("display_owned")),
+            )
+            with self._lock:
+                self._vnc_server = vnc_server
+                self._vnc_last_error = vnc_error
                 self._updated_at = utc_now_iso()
             self._set_state("ready", message=f"Browser surface ready ({self._strategy or 'chromium'}).")
             next_frame_at = 0.0
+            had_viewers = False
             consecutive_capture_failures = 0
+            capture_backoff_until = 0.0
             while not self._stop_event.is_set():
-                timeout = max(0.05, min(0.20, next_frame_at - time.time())) if next_frame_at else 0.05
+                has_viewers = self._has_frame_viewers()
+                if has_viewers and not had_viewers:
+                    next_frame_at = 0.0
+                    capture_backoff_until = 0.0
+                had_viewers = has_viewers
+                if has_viewers:
+                    timeout = max(0.05, min(0.20, next_frame_at - time.time())) if next_frame_at else 0.05
+                else:
+                    timeout = 0.20
                 try:
                     kind, payload, reply = self._commands.get(timeout=timeout)
                 except queue.Empty:
                     kind, payload, reply = "", {}, None
 
                 if kind:
+                    if kind not in {"ping", "inspect_page_urls", "inspect_storage_state", "inspect_cookies", "close"}:
+                        self._mark_viewer_active()
                     try:
                         result = self._apply_command(runtime, kind, payload)
                     except Exception as exc:
@@ -967,9 +1641,30 @@ class ProjectedBrowserSession:
                             pass
                     if kind == "close":
                         break
+                    # Controller and delivery commands are more important than
+                    # visual projection. Let queued commands drain before the
+                    # next screenshot attempt so a slow ChatGPT renderer cannot
+                    # turn the viewer into command latency.
+                    continue
 
                 now = time.time()
+                if not self._has_frame_viewers():
+                    try:
+                        runtime.stop_screencast()
+                    except Exception:
+                        pass
+                    if next_frame_at and now < next_frame_at:
+                        continue
+                    with self._lock:
+                        self._url = str(runtime.current_url() or self._url)
+                    next_frame_at = time.time() + _IDLE_FRAME_POLL_SECONDS
+                    continue
                 if next_frame_at and now < next_frame_at:
+                    continue
+                if not self._commands.empty():
+                    continue
+                if capture_backoff_until and now < capture_backoff_until:
+                    next_frame_at = capture_backoff_until
                     continue
                 with self._lock:
                     self._url = str(runtime.current_url() or self._url)
@@ -977,14 +1672,19 @@ class ProjectedBrowserSession:
                     frame = runtime.capture_frame()
                 except Exception:
                     consecutive_capture_failures += 1
-                    if consecutive_capture_failures >= 5:
-                        raise
-                    frame = None
+                    backoff = min(
+                        _FRAME_CAPTURE_BACKOFF_SECONDS * consecutive_capture_failures,
+                        _FRAME_CAPTURE_MAX_BACKOFF_SECONDS,
+                    )
+                    capture_backoff_until = time.time() + backoff
+                    next_frame_at = capture_backoff_until
+                    continue
                 else:
                     consecutive_capture_failures = 0
+                    capture_backoff_until = 0.0
                 if frame:
                     self._record_frame(frame)
-                next_frame_at = time.time() + _FRAME_INTERVAL_SECONDS
+                next_frame_at = time.time() + self._viewer_frame_interval()
         except Exception as exc:
             self._set_state(
                 "failed",
@@ -995,6 +1695,14 @@ class ProjectedBrowserSession:
             try:
                 if runtime is not None:
                     runtime.close()
+            except Exception:
+                pass
+            try:
+                with self._lock:
+                    vnc_server = self._vnc_server
+                    self._vnc_server = None
+                if vnc_server is not None:
+                    vnc_server.close()
             except Exception:
                 pass
             with self._lock:
@@ -1008,20 +1716,61 @@ class ProjectedBrowserSession:
         buffer = b""
         last_seq = 0
         sent_state_marker = ""
+
+        def _queue_controller_command(incoming: dict[str, Any]) -> bool:
+            kind = str(incoming.get("t") or "").strip().lower()
+            if kind in {"disconnect", "close"}:
+                return False
+            try:
+                # Controller input is best-effort. During login flows the page can
+                # briefly block Playwright commands while navigation or frame
+                # projection is in progress; waiting synchronously here turns that
+                # transient congestion into a user-visible error.
+                self._commands.put((kind, incoming, None))
+            except Exception as exc:
+                if not _send_json_line(
+                    sock,
+                    {
+                        "t": "error",
+                        "code": "browser_surface_command_failed",
+                        "message": str(exc),
+                    },
+                ):
+                    return False
+            return True
+
+        def _drain_controller_commands(max_messages: int = 64) -> bool:
+            nonlocal buffer
+            for _ in range(max(1, max_messages)):
+                incoming, buffer, disconnected = _recv_json_line_nonblocking(sock, buffer)
+                if disconnected:
+                    return False
+                if incoming is None:
+                    return True
+                if not _queue_controller_command(incoming):
+                    return False
+            return True
+
         try:
             sock.settimeout(_SOCKET_READ_TIMEOUT_SECONDS)
         except Exception:
             pass
         try:
             while not self._stop_event.is_set():
+                if not _drain_controller_commands():
+                    break
+
                 snapshot = self.snapshot()
                 state_marker = json.dumps(
                     {
                         "state": snapshot["state"],
                         "message": snapshot["message"],
+                        "error": snapshot["error"],
+                        "strategy": snapshot["strategy"],
                         "url": snapshot["url"],
-                        "seq": snapshot["last_frame_seq"],
-                        "updated_at": snapshot["updated_at"],
+                        "width": snapshot["width"],
+                        "height": snapshot["height"],
+                        "controller_attached": snapshot["controller_attached"],
                     },
                     sort_keys=True,
                 )
@@ -1038,7 +1787,24 @@ class ProjectedBrowserSession:
                     if snapshot["state"] == "failed":
                         break
 
-                frame = self.wait_for_frame(after_seq=last_seq, timeout=0.25)
+                if not _drain_controller_commands():
+                    break
+                if not self._commands.empty():
+                    time.sleep(0.01)
+                    continue
+                with self._lock:
+                    uses_frame_viewer = self._controller_mode_uses_frame_locked(
+                        self._controller_modes.get(generation, "auto")
+                    )
+                if not uses_frame_viewer:
+                    time.sleep(0.05)
+                    continue
+
+                frame = self.wait_for_frame(after_seq=last_seq, timeout=0.08)
+                if not _drain_controller_commands():
+                    break
+                if not self._commands.empty():
+                    continue
                 if frame is not None:
                     if not _send_json_line(
                         sock,
@@ -1055,32 +1821,11 @@ class ProjectedBrowserSession:
                     ):
                         break
                     last_seq = int(frame["seq"])
-
-                incoming, buffer, disconnected = _recv_json_line_nonblocking(sock, buffer)
-                if disconnected:
-                    break
-                if incoming is not None:
-                    kind = str(incoming.get("t") or "").strip().lower()
-                    if kind in {"disconnect", "close"}:
-                        break
-                    try:
-                        self.submit_command(kind, incoming, timeout=5.0)
-                    except Exception as exc:
-                        if not _send_json_line(
-                            sock,
-                            {
-                                "t": "error",
-                                "code": "browser_surface_command_failed",
-                                "message": str(exc),
-                            },
-                        ):
-                            break
         finally:
             with self._lock:
-                # Only reset if we are still the current controller (not evicted).
-                if self._controller_generation == generation:
-                    self._controller_attached = False
-                    self._controller_socket = None
+                if self._controller_sockets.get(generation) is sock:
+                    self._controller_sockets.pop(generation, None)
+                    self._controller_modes.pop(generation, None)
                     self._updated_at = utc_now_iso()
                 self._frame_cond.notify_all()
             try:
@@ -1109,8 +1854,15 @@ def _recv_json_line_nonblocking(
             return None, remainder, False
 
     try:
+        readable, _, _ = select.select([sock], [], [], 0.0)
+    except Exception:
+        return None, buffer, True
+    if not readable:
+        return None, buffer, False
+
+    try:
         chunk = sock.recv(65536)
-    except socket.timeout:
+    except (BlockingIOError, InterruptedError, socket.timeout):
         return None, buffer, False
     except Exception:
         return None, buffer, True
@@ -1130,6 +1882,44 @@ def _recv_json_line_nonblocking(
         return None, remainder, False
 
 
+def _bridge_raw_sockets(left: socket.socket, right: socket.socket) -> None:
+    closed = threading.Event()
+
+    def _close_both() -> None:
+        if closed.is_set():
+            return
+        closed.set()
+        for sock in (left, right):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    def _pipe(src: socket.socket, dst: socket.socket) -> None:
+        try:
+            while not closed.is_set():
+                chunk = src.recv(65536)
+                if not chunk:
+                    break
+                dst.sendall(chunk)
+        except Exception:
+            pass
+        finally:
+            _close_both()
+
+    try:
+        left.settimeout(None)
+        right.settimeout(None)
+    except Exception:
+        pass
+    threading.Thread(target=_pipe, args=(left, right), daemon=True, name="cccc-browser-vnc-left").start()
+    threading.Thread(target=_pipe, args=(right, left), daemon=True, name="cccc-browser-vnc-right").start()
+
+
 class ProjectedBrowserSessionManager:
     def __init__(self, *, idle_message: str) -> None:
         self._idle_message = str(idle_message or "No browser surface session is active.")
@@ -1147,6 +1937,10 @@ class ProjectedBrowserSessionManager:
         headless: bool = False,
         channel_candidates: Iterable[str | None] = (None,),
         seed_storage_state: dict[str, Any] | None = None,
+        system_profile_subdir: str | None = None,
+        require_system_browser_cdp: bool = False,
+        existing_cdp_port: int = 0,
+        existing_browser_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_key = str(key or "").strip()
         replacement = ProjectedBrowserSession(
@@ -1157,6 +1951,10 @@ class ProjectedBrowserSessionManager:
             height=height,
             headless=headless,
             channel_candidates=channel_candidates,
+            system_profile_subdir=system_profile_subdir,
+            require_system_browser_cdp=require_system_browser_cdp,
+            existing_cdp_port=existing_cdp_port,
+            existing_browser_metadata=existing_browser_metadata,
         )
         replacement.set_seed_storage_state(seed_storage_state)
         previous: Optional[ProjectedBrowserSession] = None
@@ -1222,12 +2020,35 @@ class ProjectedBrowserSessionManager:
         return session.can_attach()
 
     def attach_socket(self, *, key: str, sock: socket.socket) -> bool:
+        return self.attach_socket_with_mode(key=key, sock=sock, viewer_mode="auto")
+
+    def attach_socket_with_mode(self, *, key: str, sock: socket.socket, viewer_mode: str = "auto") -> bool:
         normalized_key = str(key or "").strip()
         with self._lock:
             session = self._sessions.get(normalized_key)
         if session is None:
             return False
-        return session.attach_socket(sock)
+        return session.attach_socket(sock, viewer_mode=viewer_mode)
+
+    def can_attach_vnc(self, *, key: str) -> tuple[bool, dict[str, Any]]:
+        normalized_key = str(key or "").strip()
+        with self._lock:
+            session = self._sessions.get(normalized_key)
+        if session is None:
+            return False, {
+                "code": "browser_surface_not_found",
+                "message": self._idle_message,
+                "details": {},
+            }
+        return session.can_attach_vnc()
+
+    def attach_vnc_socket(self, *, key: str, sock: socket.socket) -> bool:
+        normalized_key = str(key or "").strip()
+        with self._lock:
+            session = self._sessions.get(normalized_key)
+        if session is None:
+            return False
+        return session.attach_vnc_socket(sock)
 
     def execute(self, *, key: str, kind: str, payload: dict[str, Any], timeout: float = 10.0) -> dict[str, Any]:
         normalized_key = str(key or "").strip()

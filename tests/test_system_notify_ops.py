@@ -138,7 +138,7 @@ class TestSystemNotifyOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_voice_secretary_input_notify_delivery_is_lightweight(self) -> None:
+    def test_voice_secretary_input_notify_delivery_supports_legacy_pointer(self) -> None:
         from cccc.contracts.v1 import SystemNotifyData
         from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
 
@@ -147,7 +147,7 @@ class TestSystemNotifyOps(unittest.TestCase):
                 kind="info",
                 priority="normal",
                 title="Voice Secretary input available",
-                message='New Secretary input is waiting. Call cccc_voice_secretary_document(action="read_new_input").',
+                message='New Secretary input is waiting. Call MCP tool cccc_voice_secretary_document(action="read_new_input").',
                 target_actor_id="voice-secretary",
                 requires_ack=False,
                 context={
@@ -158,7 +158,7 @@ class TestSystemNotifyOps(unittest.TestCase):
         )
 
         self.assertIn("read_new_input", text)
-        self.assertIn("First action: cccc_voice_secretary_document(action=\"read_new_input\")", text)
+        self.assertIn("Legacy pointer notification", text)
         self.assertIn("Pointer only", text)
         self.assertIn("reason=new_input", text)
         self.assertNotIn("Do not bootstrap", text)
@@ -168,87 +168,41 @@ class TestSystemNotifyOps(unittest.TestCase):
         self.assertIn("cccc_voice_secretary_document", text)
         self.assertNotIn("source_chars", text)
 
-    def test_voice_secretary_input_notify_delivery_stays_pointer_only_when_group_available(self) -> None:
+    def test_voice_secretary_input_notify_delivery_uses_inline_envelope_when_available(self) -> None:
         from cccc.contracts.v1 import SystemNotifyData
-        from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
         from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
-        from cccc.kernel.group import load_group
 
-        home, cleanup = self._with_home()
-        try:
-            create, _ = self._call("group_create", {"title": "voice-inline-batch", "topic": "", "by": "user"})
-            self.assertTrue(create.ok, getattr(create, "error", None))
-            group_id = str((create.result or {}).get("group_id") or "").strip()
-            self.assertTrue(group_id)
-
-            add, _ = self._call(
-                "actor_add",
-                {
-                    "group_id": group_id,
-                    "actor_id": "voice-secretary",
-                    "title": "Voice Secretary",
-                    "runtime": "codex",
-                    "runner": "headless",
-                    "by": "user",
+        text = render_system_notify_delivery_text(
+            notify=SystemNotifyData(
+                kind="info",
+                priority="normal",
+                title="Voice Secretary input available",
+                message="Secretary input is ready in this notification's input_envelope.",
+                target_actor_id="voice-secretary",
+                requires_ack=False,
+                context={
+                    "kind": "voice_secretary_input",
+                    "reason": "new_input",
+                    "input_envelope": {
+                        "schema": 1,
+                        "delivery_id": "voice-input:g_test:1-1",
+                        "delivery_mode": "daemon_input_envelope",
+                        "seq_start": 1,
+                        "seq_end": 1,
+                        "input_text": "Target: composer\nRequest id: voice-prompt-inline\n\n把按钮文案改得更直接",
+                    },
                 },
             )
-            self.assertTrue(add.ok, getattr(add, "error", None))
+        )
 
-            group = load_group(group_id)
-            self.assertIsNotNone(group)
-            assert group is not None
-            group.doc.setdefault("assistants", {})
-            group.doc["assistants"]["voice_secretary"] = {
-                "enabled": True,
-                "config": {
-                    "capture_mode": "browser",
-                    "recognition_backend": "browser_asr",
-                    "recognition_language": "zh-CN",
-                    "retention_ttl_seconds": 900,
-                    "auto_document_enabled": True,
-                    "document_default_dir": "docs/voice-secretary",
-                    "auto_document_quiet_ms": 5000,
-                    "auto_document_min_chars": 700,
-                    "auto_document_max_window_seconds": 120,
-                    "tts_enabled": False,
-                },
-            }
-            group.save()
-
-            resp = handle_assistant_voice_input_append(
-                {
-                    "group_id": group_id,
-                    "by": "user",
-                    "kind": "prompt_refine",
-                    "request_id": "voice-prompt-inline",
-                    "composer_text": "",
-                    "voice_transcript": "把按钮文案改得更直接",
-                    "language": "zh-CN",
-                },
-            )
-            self.assertTrue(resp.ok, getattr(resp, "error", None))
-
-            text = render_system_notify_delivery_text(
-                notify=SystemNotifyData(
-                    kind="info",
-                    priority="normal",
-                    title="Voice Secretary input available",
-                    message='Secretary input is ready. Call cccc_voice_secretary_document(action="read_new_input").',
-                    target_actor_id="voice-secretary",
-                    requires_ack=False,
-                    context={"kind": "voice_secretary_input", "reason": "new_input"},
-                ),
-                group=group,
-            )
-
-            self.assertIn("Pointer only", text)
-            self.assertIn("read_new_input", text)
-            self.assertNotIn("Attached batch:", text)
-            self.assertNotIn("Secretary input batch:", text)
-            self.assertNotIn("voice-prompt-inline", text)
-            self.assertNotIn("把按钮文案改得更直接", text)
-        finally:
-            cleanup()
+        self.assertNotIn("daemon-delivered input_envelope", text)
+        self.assertNotIn("Input envelope:", text)
+        self.assertNotIn("delivery_id=", text)
+        self.assertNotIn("seq_range=", text)
+        self.assertIn("voice-prompt-inline", text)
+        self.assertIn("把按钮文案改得更直接", text)
+        self.assertNotIn("Pointer only", text)
+        self.assertNotIn("First action", text)
 
     def test_voice_secretary_action_request_notify_delivery_is_actionable(self) -> None:
         from cccc.contracts.v1 import SystemNotifyData

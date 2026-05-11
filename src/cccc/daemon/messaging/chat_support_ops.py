@@ -12,6 +12,18 @@ _HEADLESS_POST_WAKE_LOCK = threading.Lock()
 _HEADLESS_POST_WAKE_IN_FLIGHT: set[tuple[str, str, str]] = set()
 
 
+def _safe_log(logger: logging.Logger, level: str, message: str, *args: Any) -> None:
+    method = getattr(logger, level, None)
+    if not callable(method):
+        return
+    try:
+        method(message, *args)
+    except ValueError as exc:
+        if "closed" in str(exc).lower():
+            return
+        raise
+
+
 def auto_wake_recipients(
     group: Any,
     to: list[str],
@@ -233,7 +245,9 @@ def schedule_headless_post_wake_delivery(
                 if _actor_running() and _submit():
                     return
                 time.sleep(max(0.05, float(poll_seconds)))
-            logger.info(
+            _safe_log(
+                logger,
+                "info",
                 "[headless-post-wake] timed out group=%s actor=%s event=%s runtime=%s",
                 normalized_group_id,
                 normalized_actor_id,
@@ -241,7 +255,9 @@ def schedule_headless_post_wake_delivery(
                 normalized_runtime,
             )
         except Exception:
-            logger.exception(
+            _safe_log(
+                logger,
+                "exception",
                 "[headless-post-wake] failed group=%s actor=%s event=%s runtime=%s",
                 normalized_group_id,
                 normalized_actor_id,

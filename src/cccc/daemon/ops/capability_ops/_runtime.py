@@ -69,6 +69,21 @@ def _record_runtime_recent_success(
             mapping.pop(str(key), None)
     runtime_doc["recent_success"] = mapping
 
+def _remove_runtime_recent_success(
+    runtime_doc: Dict[str, Any],
+    *,
+    capability_id: str,
+) -> bool:
+    cap_id = str(capability_id or "").strip()
+    if not cap_id:
+        return False
+    mapping = _runtime_recent_success(runtime_doc)
+    if cap_id not in mapping:
+        return False
+    mapping.pop(cap_id, None)
+    runtime_doc["recent_success"] = mapping
+    return True
+
 def _set_runtime_capability_artifact(
     runtime_doc: Dict[str, Any],
     *,
@@ -293,4 +308,3 @@ def _append_audit_event(
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
-

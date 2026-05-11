@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Messaging/inbox/ledger CLI command handlers."""
 
+import os
+
 from .common import *  # noqa: F401,F403
 
 __all__ = [
@@ -28,6 +30,17 @@ def _to_tokens_from_args(args: argparse.Namespace) -> list[str]:
             to_tokens.extend(parts)
     return to_tokens
 
+
+def _resolve_cli_message_sender(args: argparse.Namespace) -> str:
+    explicit_by = str(getattr(args, "by", "") or "").strip()
+    if explicit_by:
+        return explicit_by
+    actor_id = str(os.environ.get("CCCC_ACTOR_ID") or "").strip()
+    if actor_id:
+        return actor_id
+    return "user"
+
+
 def cmd_send(args: argparse.Namespace) -> int:
     group_id = _resolve_group_id(getattr(args, "group", ""))
     if not group_id:
@@ -37,6 +50,7 @@ def cmd_send(args: argparse.Namespace) -> int:
     if group is None:
         _print_json({"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {group_id}"}})
         return 2
+    by = _resolve_cli_message_sender(args)
 
     to_tokens = _to_tokens_from_args(args)
     priority = str(getattr(args, "priority", "normal") or "normal").strip() or "normal"
@@ -52,7 +66,7 @@ def cmd_send(args: argparse.Namespace) -> int:
                 "args": {
                     "group_id": group_id,
                     "text": args.text,
-                    "by": str(args.by or "user"),
+                    "by": by,
                     "path": str(args.path or ""),
                     "to": to_tokens,
                     "priority": priority,
@@ -99,7 +113,7 @@ def cmd_send(args: argparse.Namespace) -> int:
         kind="chat.message",
         group_id=group.group_id,
         scope_key=scope_key,
-        by=str(args.by or "user"),
+        by=by,
         data=ChatMessageData(
             text=args.text,
             format="plain",
@@ -132,6 +146,7 @@ def cmd_tracked_send(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
         return 2
     checklist = [{"text": line.strip()} for line in str(getattr(args, "checklist", "") or "").splitlines() if line.strip()]
+    by = _resolve_cli_message_sender(args)
     if not _ensure_daemon_running():
         _print_json({"ok": False, "error": {"code": "daemon_unavailable", "message": "tracked-send requires the daemon"}})
         return 2
@@ -140,7 +155,7 @@ def cmd_tracked_send(args: argparse.Namespace) -> int:
             "op": "tracked_send",
             "args": {
                 "group_id": group_id,
-                "by": str(getattr(args, "by", "user") or "user"),
+                "by": by,
                 "title": str(getattr(args, "title", "") or ""),
                 "text": str(getattr(args, "text", "") or ""),
                 "to": _to_tokens_from_args(args),
@@ -171,6 +186,7 @@ def cmd_reply(args: argparse.Namespace) -> int:
     if group is None:
         _print_json({"ok": False, "error": {"code": "group_not_found", "message": f"group not found: {group_id}"}})
         return 2
+    by = _resolve_cli_message_sender(args)
 
     reply_to = str(args.event_id or "").strip()
     if not reply_to:
@@ -207,7 +223,7 @@ def cmd_reply(args: argparse.Namespace) -> int:
                 "args": {
                     "group_id": group_id,
                     "text": args.text,
-                    "by": str(args.by or "user"),
+                    "by": by,
                     "reply_to": reply_to,
                     "to": to_tokens,
                     "priority": priority,
@@ -223,7 +239,7 @@ def cmd_reply(args: argparse.Namespace) -> int:
 
     # Fallback: local execution
     if not to_tokens:
-        to_tokens = default_reply_recipients(group, by=str(args.by or "user"), original_event=original)
+        to_tokens = default_reply_recipients(group, by=by, original_event=original)
     try:
         to = resolve_recipient_tokens(group, to_tokens)
     except Exception as e:
@@ -236,7 +252,7 @@ def cmd_reply(args: argparse.Namespace) -> int:
         kind="chat.message",
         group_id=group.group_id,
         scope_key=scope_key,
-        by=str(args.by or "user"),
+        by=by,
         data=ChatMessageData(
             text=args.text,
             format="plain",

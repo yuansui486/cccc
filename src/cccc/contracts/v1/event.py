@@ -14,6 +14,7 @@ from .assistant import (
     AssistantVoiceInputData,
     AssistantVoicePromptDraftData,
     AssistantVoiceRequestData,
+    AssistantVoiceSessionData,
 )
 from .message import ChatMessageData, ChatReactionData, ChatStreamData
 from .notify import NotifyAckData, SystemNotifyData
@@ -53,6 +54,7 @@ EventKind = Literal[
     "assistant.voice.input",
     "assistant.voice.prompt_draft",
     "assistant.voice.request",
+    "assistant.voice.session",
     "presentation.publish",
     "presentation.clear",
 ]
@@ -148,6 +150,7 @@ class ActorUpdatePatch(BaseModel):
     default_scope_key: Optional[str] = None
     submit: Optional[ActorSubmit] = None
     capability_autoload: Optional[List[str]] = None
+    capability_hidden: Optional[List[str]] = None
     enabled: Optional[bool] = None
     runner: Optional[RunnerKind] = None
     runtime: Optional[AgentRuntime] = None
@@ -279,6 +282,7 @@ _KIND_TO_MODEL = {
     "assistant.voice.input": AssistantVoiceInputData,
     "assistant.voice.prompt_draft": AssistantVoicePromptDraftData,
     "assistant.voice.request": AssistantVoiceRequestData,
+    "assistant.voice.session": AssistantVoiceSessionData,
     "presentation.publish": PresentationPublishData,
     "presentation.clear": PresentationClearData,
 }

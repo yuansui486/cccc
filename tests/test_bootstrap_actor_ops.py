@@ -438,6 +438,9 @@ class TestBootstrapActorOps(unittest.TestCase):
             group = load_group(group_id)
             self.assertIsNotNone(group)
             assert group is not None
+            for actor in group.doc.get("actors", []):
+                if isinstance(actor, dict) and actor.get("id") == "peer1":
+                    actor["command"] = ["codex", "-m", "gpt-5.3-codex-spark"]
             group.doc["running"] = True
             group.doc["state"] = "active"
             group.save()
@@ -445,7 +448,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             captured: list[dict[str, object]] = []
             resumed: list[str] = []
 
-            def _fake_codex_start_actor(*, group_id: str, actor_id: str, cwd: Path, env: dict[str, str], model: str = "gpt-5.4"):
+            def _fake_codex_start_actor(*, group_id: str, actor_id: str, cwd: Path, env: dict[str, str], model: str = ""):
                 captured.append(
                     {
                         "group_id": group_id,
@@ -497,6 +500,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             assert isinstance(env, dict)
             self.assertEqual(str(env.get("OPENAI_API_KEY") or ""), "sk-test")
             self.assertNotIn("CODEX_HOME", env)
+            self.assertEqual(captured[0]["model"], "gpt-5.3-codex-spark")
             self.assertEqual(resumed, [group_id])
         finally:
             cleanup()

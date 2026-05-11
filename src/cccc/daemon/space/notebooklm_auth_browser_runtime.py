@@ -11,6 +11,7 @@ _MANAGER = ProjectedBrowserSessionManager(
     idle_message="No projected NotebookLM auth browser session is active.",
 )
 _SESSION_KEY = "notebooklm"
+_CHANNEL_CANDIDATES = ("chrome", "msedge")
 _GOOGLE_COOKIE_URLS = (
     "https://notebooklm.google.com",
     "https://accounts.google.com",
@@ -33,8 +34,9 @@ def open_notebooklm_auth_browser_session(
         width=width,
         height=height,
         headless=False,
-        channel_candidates=("chrome", "msedge", None),
+        channel_candidates=_CHANNEL_CANDIDATES,
         seed_storage_state=seed_storage_state,
+        require_system_browser_cdp=True,
     )
 
 
@@ -56,6 +58,18 @@ def can_attach_notebooklm_auth_browser_socket() -> tuple[bool, dict[str, Any]]:
 
 def attach_notebooklm_auth_browser_socket(*, sock) -> bool:
     return _MANAGER.attach_socket(key=_SESSION_KEY, sock=sock)
+
+
+def attach_notebooklm_auth_browser_socket_with_mode(*, sock, viewer_mode: str = "auto") -> bool:
+    return _MANAGER.attach_socket_with_mode(key=_SESSION_KEY, sock=sock, viewer_mode=viewer_mode)
+
+
+def can_attach_notebooklm_auth_browser_vnc_socket() -> tuple[bool, dict[str, Any]]:
+    return _MANAGER.can_attach_vnc(key=_SESSION_KEY)
+
+
+def attach_notebooklm_auth_browser_vnc_socket(*, sock) -> bool:
+    return _MANAGER.attach_vnc_socket(key=_SESSION_KEY, sock=sock)
 
 
 def notebooklm_auth_browser_page_urls() -> list[str]:

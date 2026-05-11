@@ -78,6 +78,8 @@ The `chat.stream` event type represents real-time streaming content from agents.
 | Discord | ✅ Complete | `token_env` |
 | Feishu/Lark | ✅ Complete | `feishu_app_id_env` + `feishu_app_secret_env` |
 | DingTalk | ✅ Complete | `dingtalk_app_key_env` + `dingtalk_app_secret_env` (+ optional `dingtalk_robot_code_env`) |
+| WeCom | ✅ Complete | Web-configured Bot ID / Secret flow |
+| Weixin / WeChat | ✅ Complete | Web-configured account/login flow |
 
 ### Configuration
 
@@ -111,6 +113,7 @@ im:
 
 Notes:
 - In direct chats and in group chats where the bot is @mentioned, plain text is treated as implicit send to the default recipient policy (default: foreman).
+- Reserve `/send @all <message>` for true broadcasts, announcements, or urgent shared constraints.
 - In channels (Slack/Discord), mention the bot and then use `/send` (to avoid platform slash-commands).
 - You can configure the default recipient behavior in Web UI: Settings → Messaging → Default Recipient.
 
@@ -223,7 +226,7 @@ CCCC supports per-actor private environment variables for runtime customization 
 
 - Stored in runtime state under `CCCC_HOME/state/secrets/actors/`
 - Not written into the group ledger
-- Not included in group templates/blueprints
+- Not included in Copy Groups packages
 - Visible as key metadata only (values are never returned by read APIs)
 
 CLI surface:
@@ -234,14 +237,15 @@ cccc actor secrets <actor_id> --unset KEY
 cccc actor secrets <actor_id> --keys
 ```
 
-## Blueprint / Group Template
+## Copy Groups
 
-CCCC Web supports blueprint export/import for portable group setup.
+CCCC Web supports Copy Groups export/import for durable group copy, migration, and backup.
 
-- Export captures actors, actor startup autoload baselines, group settings/feature toggles, automation rules/snippets, and guidance overrides.
-- Import uses replace semantics (applies the incoming configuration as the new group setup).
-- Ledger history is preserved (import does not rewrite historical events).
-- Environment secrets are intentionally excluded.
+- Export creates a zip package with durable CCCC group state: ledger history, actors, context, blobs, memory, assistants, automation, and settings.
+- Workspace repository/project files are not included. Users provide or remap the workspace root during import.
+- System credentials, browser profiles, provider auth, live runtime state, locks, and rebuildable caches are excluded. Copy packages still contain user content such as ledger history, memory, and attachments, so they should be handled as sensitive data.
+- Imported groups start idle with actors stopped. If the packaged group id already exists, import creates a new copy and does not steal the existing workspace default mapping.
+- Copy Groups replaces the former group-template Web path; durable group features should be carried by Copy Groups unless explicitly blacklisted as unsafe or runtime-only.
 
 ### MCP Management Surface
 
@@ -299,8 +303,8 @@ Recommended options:
 
 ### Supported Runtimes
 
-| Runtime | Command | Description |
-|---------|---------|-------------|
+| Runtime | Integration | Description |
+|---------|-------------|-------------|
 | amp | `amp` | Amp |
 | auggie | `auggie` | Auggie (Augment CLI) |
 | claude | `claude` | Claude Code |
@@ -309,9 +313,10 @@ Recommended options:
 | gemini | `gemini` | Gemini CLI |
 | kimi | `kimi --yolo` | Kimi CLI |
 | neovate | `neovate` | Neovate Code |
+| web_model | Remote MCP + browser delivery | ChatGPT Web conversation with an MCP-capable GPT-5.x session; GPT-5.x Pro is advisory-only and has no reliable CCCC local access |
 | custom | Custom | Any command |
 
-CCCC first-class runtime support is the eight named CLIs above. `custom` remains the manual fallback for any other command.
+CCCC first-class runtime support is the nine named runtimes above. `custom` remains the manual fallback for any other command.
 
 ### Setup Commands
 
@@ -326,6 +331,8 @@ cccc setup --runtime gemini
 cccc setup --runtime kimi
 cccc setup --runtime custom
 ```
+
+`web_model` does not use `cccc setup`; create the single `ChatGPT Web Model` actor, copy its remote MCP URL from Web Settings, and bind one specific ChatGPT conversation.
 
 ### Runtime Detection
 

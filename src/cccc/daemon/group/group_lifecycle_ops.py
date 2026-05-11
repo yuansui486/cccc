@@ -19,7 +19,7 @@ from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
 from ..actors.actor_profile_runtime import resolve_linked_actor_before_start
-from ..actors.actor_runtime_ops import resolve_actor_launch_spec
+from ..actors.actor_runtime_ops import model_from_runtime_command, resolve_actor_launch_spec
 from ..assistants.voice_secretary_runtime_ops import (
     capture_voice_secretary_actor_state,
     restore_voice_secretary_actor_state,
@@ -240,12 +240,18 @@ def handle_group_start(
                         },
                     )
 
-            if runtime == "codex" and runner_effective == "headless":
+            if runtime == "web_model" and runner_effective == "headless":
+                try:
+                    write_headless_state(group.group_id, aid)
+                except Exception:
+                    pass
+            elif runtime == "codex" and runner_effective == "headless":
                 codex_app_supervisor.start_actor(
                     group_id=group.group_id,
                     actor_id=aid,
                     cwd=cwd,
                     env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=aid)),
+                    model=model_from_runtime_command(launch_spec["effective_command"]),
                 )
             elif runtime == "claude" and runner_effective == "headless":
                 claude_app_supervisor.start_actor(
@@ -253,6 +259,7 @@ def handle_group_start(
                     actor_id=aid,
                     cwd=cwd,
                     env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=aid)),
+                    model=model_from_runtime_command(launch_spec["effective_command"]),
                 )
             elif runner_effective == "headless":
                 headless_runner.SUPERVISOR.start_actor(
