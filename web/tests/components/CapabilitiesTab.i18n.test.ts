@@ -19,6 +19,10 @@ describe("CapabilitiesTab i18n", () => {
         expect(locale.capabilities[key]).toBeTruthy();
       }
     }
+
+    for (const locale of [enSettings, zhSettings]) {
+      expect(locale.tabs.selfEvolvingSkills).toBeTruthy();
+    }
   });
 
   it("defines slash command labels in supported chat locales", () => {

@@ -9,7 +9,7 @@ import { classNames } from "../utils/classNames";
 import { getReplyEventId } from "../utils/chatReply";
 import { getPresentationMessageRefs, getPresentationRefChipLabel } from "../utils/presentationRefs";
 import { getTaskMessageRefs, getTaskRefChipLabel, getTaskRefStateKey, type TaskRefStateKey } from "../utils/taskRefs";
-import { isRedundantWecomImagePlaceholder } from "../utils/messageAttachments";
+import { hasRenderableAttachmentSource, isRedundantWecomImagePlaceholder, normalizeMessageAttachment } from "../utils/messageAttachments";
 import { MessageAttachments } from "./messageBubble/MessageAttachments";
 import { MessageFooter, MessageMetadataHeader } from "./messageBubble/MessageBubbleChrome";
 import { withAuthToken } from "../services/api/base";
@@ -28,7 +28,6 @@ import {
     mayContainMarkdown,
 } from "./messageBubble/helpers";
 import { LazyMarkdownRenderer } from "./LazyMarkdownRenderer";
-import { hasRenderableAttachmentSource } from "../utils/messageAttachments";
 
 const ANIMATED_MESSAGE_BUBBLE_KEYS = new Set<string>();
 const NEW_MESSAGE_ANIMATION_WINDOW_MS = 12000;
@@ -201,14 +200,7 @@ function MessageBubbleBody({
     taskById?: Map<string, Task>;
     messageText: string;
     shouldRenderMarkdown: boolean;
-    blobAttachments: Array<{
-        kind: string;
-        path: string;
-        title: string;
-        bytes: number;
-        mime_type: string;
-        local_preview_url: string;
-    }>;
+    blobAttachments: MessageAttachment[];
     blobGroupId: string;
     stableMessageAttachmentKey: string;
     onOpenSource?: (srcGroupId: string, srcEventId: string) => void;
@@ -643,15 +635,12 @@ export const MessageBubble = memo(function MessageBubble({
     const sourcePlatform = typeof msgData?.source_platform === "string" ? String(msgData.source_platform || "").trim() : "";
     const blobAttachments = rawAttachments
         .filter((a): a is MessageAttachment => a != null && typeof a === "object")
-        .map((a) => ({
-            kind: String(a.kind || "file"),
-            path: String(a.path || ""),
-            title: String(a.title || ""),
-            bytes: Number(a.bytes || 0),
-            mime_type: String(a.mime_type || ""),
-            local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
-        }))
-        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:") || hasRenderableAttachmentSource(a));
+        .map((a) => normalizeMessageAttachment(a))
+        .filter((a) =>
+            String(a.path || "").startsWith("state/blobs/")
+            || String(a.local_preview_url || "").startsWith("blob:")
+            || hasRenderableAttachmentSource(a)
+        );
     const displayMessageText = useMemo(() => {
         if (isRedundantWecomImagePlaceholder(messageText, blobAttachments, sourcePlatform)) {
             return "";
@@ -686,8 +675,8 @@ export const MessageBubble = memo(function MessageBubble({
                 presentationRefs,
                 taskRefs,
                 attachments: blobAttachments.map((attachment) => ({
-                    title: attachment.title,
-                    path: attachment.path || attachment.local_preview_url,
+                    title: String(attachment.title || ""),
+                    path: String(attachment.path || attachment.local_preview_url || ""),
                 })),
             }),
         [blobAttachments, displayMessageText, presentationRefs, quoteText, taskRefs]

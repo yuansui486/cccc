@@ -13,20 +13,30 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("CapabilitiesTab rendering", () => {
-  it("keeps the settings tab focused on self-proposed skills and links capability browsing to Capability Center", () => {
+  it("keeps the global capabilities tab focused on the OneColleague skill store and links browsing to Capability Center", () => {
     const html = renderToStaticMarkup(
       <CapabilitiesTab isDark={false} isActive={false} groupId="g-demo" />,
     );
 
     expect(html).toContain("capabilities.openCenter");
-    expect(html).toContain("capabilities.selfProposedTitle");
-    expect(html).not.toContain("capabilities.sourcesTitle");
-    expect(html).not.toContain("capabilities.libraryTitle");
+    expect(html).toContain("capabilities.store.title");
+    expect(html).toContain("capabilities.libraryTitle");
+    expect(html).not.toContain("capabilities.selfProposedTitle");
     expect(html).not.toContain("capabilities.safetyModeTitle");
-    expect(html).not.toContain("capabilities.blockedListTitle");
-    expect(enSettings.capabilities.subtitle).toContain("Capability Center");
-    expect(enSettings.capabilities.pageGuide).toContain("Capability Center");
+    expect(enSettings.capabilities.subtitle).toContain("OneColleague skill store");
+    expect(enSettings.capabilities.pageGuide).toContain("OneColleague skill store");
     expect(enSettings.capabilities.pageGuide).not.toContain("Configure external policy");
+  });
+
+  it("keeps the self-evolving surface available for self-proposed skills", () => {
+    const html = renderToStaticMarkup(
+      <CapabilitiesTab isDark={false} isActive={false} groupId="g-demo" surface="selfEvolving" />,
+    );
+
+    expect(html).toContain("capabilities.selfProposedTitle");
+    expect(html).toContain("capabilities.selfEvolvingGroupNoCandidates");
+    expect(html).not.toContain("capabilities.store.title");
+    expect(html).not.toContain("capabilities.libraryTitle");
   });
 
   it("uses lightweight capability overview requests for item-only surfaces", () => {

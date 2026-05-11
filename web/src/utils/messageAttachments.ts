@@ -26,6 +26,21 @@ export function hasBlobAttachmentPath(attachment: MessageAttachment): boolean {
   return normalizeAttachmentPath(String(attachment.path || "")).startsWith("state/blobs/");
 }
 
+export function normalizeMessageAttachment(attachment: MessageAttachment): MessageAttachment {
+  return {
+    ...attachment,
+    kind: String(attachment.kind || "file"),
+    path: String(attachment.path || ""),
+    title: String(attachment.title || ""),
+    bytes: Number(attachment.bytes || 0),
+    mime_type: String(attachment.mime_type || ""),
+    local_preview_url: "local_preview_url" in attachment ? String(attachment.local_preview_url || "") : "",
+    download_url: "download_url" in attachment ? String(attachment.download_url || "") : "",
+    decryption_key: "decryption_key" in attachment ? String(attachment.decryption_key || "") : "",
+    aeskey: "aeskey" in attachment ? String(attachment.aeskey || "") : "",
+  };
+}
+
 function attachmentPathOrName(attachment: MessageAttachment): string {
   return normalizeAttachmentPath(String(attachment.path || attachment.title || "")).toLowerCase();
 }

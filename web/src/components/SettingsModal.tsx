@@ -898,6 +898,7 @@ export function SettingsModal({
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
     ...(globalSettingsEnabled ? [
       { id: "capabilities" as const, label: t("tabs.capabilities") },
+      { id: "selfEvolvingSkills" as const, label: t("tabs.selfEvolvingSkills") },
       { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
     ] : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
@@ -1107,6 +1108,16 @@ export function SettingsModal({
                   isDark={isDark}
                   isActive={scope === "global" && activeTab === "capabilities"}
                   groupId={groupId}
+                  surface="global"
+                />
+              )}
+
+              {activeTab === "selfEvolvingSkills" && (
+                <CapabilitiesTab
+                  isDark={isDark}
+                  isActive={scope === "global" && activeTab === "selfEvolvingSkills"}
+                  groupId={groupId}
+                  surface="selfEvolving"
                 />
               )}
 

@@ -7,6 +7,7 @@ import {
   isImageAttachment,
   isRedundantWecomImagePlaceholder,
   normalizeAttachmentPath,
+  normalizeMessageAttachment,
   isSvgAttachment,
 } from "../../src/utils/messageAttachments";
 
@@ -108,5 +109,19 @@ describe("messageAttachments", () => {
     expect(hasBlobAttachmentPath(attachment)).toBe(true);
     expect(getAttachmentBlobName(attachment)).toBe("sha_demo.png");
     expect(isImageAttachment(attachment)).toBe(true);
+  });
+
+  it("preserves download_url on normalized attachments so Web can render non-blob WeCom media", () => {
+    const normalized = normalizeMessageAttachment({
+      kind: "image",
+      title: "wechat-shot",
+      mime_type: "image/jpeg",
+      download_url: "https://example.test/media/123",
+      decryption_key: "aes-demo",
+    });
+
+    expect(normalized.download_url).toBe("https://example.test/media/123");
+    expect(normalized.decryption_key).toBe("aes-demo");
+    expect(isImageAttachment(normalized)).toBe(true);
   });
 });

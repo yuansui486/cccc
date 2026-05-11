@@ -16,6 +16,7 @@ const groupTabIds = new Set<GroupTabId>([
 
 const globalTabIds = new Set<GlobalTabId>([
   "capabilities",
+  "selfEvolvingSkills",
   "actorProfiles",
   "myProfiles",
   "branding",
