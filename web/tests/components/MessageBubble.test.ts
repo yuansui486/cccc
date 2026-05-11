@@ -3,6 +3,7 @@ import {
   getMessageBubbleMotionClass as getMotionClass,
   mayContainMarkdown as mayRenderMarkdown,
 } from "../../src/components/messageBubble/helpers";
+import { hasRenderableAttachmentSource } from "../../src/utils/messageAttachments";
 
 describe("getMessageBubbleMotionClass", () => {
   it("animates commentary bubbles with the transient commentary class", () => {
@@ -44,5 +45,19 @@ describe("mayContainMarkdown", () => {
 
   it("keeps internal attachment manifests as plain text", () => {
     expect(mayRenderMarkdown("[cccc] Attachments:\n- file.txt")).toBe(false);
+  });
+});
+
+describe("WeCom attachment rendering", () => {
+  it("keeps download-url images renderable even without blob paths", () => {
+    const attachment = {
+      kind: "image",
+      title: "wechat-shot",
+      mime_type: "image/jpeg",
+      download_url: "https://example.test/media/123",
+      decryption_key: "aes-demo",
+    };
+
+    expect(hasRenderableAttachmentSource(attachment as any)).toBe(true);
   });
 });

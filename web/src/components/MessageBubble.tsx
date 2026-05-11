@@ -28,6 +28,7 @@ import {
     mayContainMarkdown,
 } from "./messageBubble/helpers";
 import { LazyMarkdownRenderer } from "./LazyMarkdownRenderer";
+import { hasRenderableAttachmentSource } from "../utils/messageAttachments";
 
 const ANIMATED_MESSAGE_BUBBLE_KEYS = new Set<string>();
 const NEW_MESSAGE_ANIMATION_WINDOW_MS = 12000;
@@ -650,7 +651,7 @@ export const MessageBubble = memo(function MessageBubble({
             mime_type: String(a.mime_type || ""),
             local_preview_url: "local_preview_url" in a ? String(a.local_preview_url || "") : "",
         }))
-        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:"));
+        .filter((a) => a.path.startsWith("state/blobs/") || a.local_preview_url.startsWith("blob:") || hasRenderableAttachmentSource(a));
     const displayMessageText = useMemo(() => {
         if (isRedundantWecomImagePlaceholder(messageText, blobAttachments, sourcePlatform)) {
             return "";
