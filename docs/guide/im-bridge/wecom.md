@@ -60,7 +60,7 @@ The official WeCom guide notes that some organizations restrict who can create l
 
 ### Via Web UI
 
-This is the supported credential setup path today.
+This is the Web UI credential setup path.
 
 1. Open the CCCC Web UI at `http://127.0.0.1:8848/`
 2. Go to **Settings**
@@ -84,14 +84,15 @@ im:
 The current WeCom bridge does **not** require `CorpID`, `AgentID`, or a callback URL. The implementation only resolves `wecom_bot_id` and `wecom_secret`.
 :::
 
-### CLI Status
+### Via CLI
 
-CCCC can **start**, **stop**, and inspect a WeCom bridge from CLI once the group is already configured, but **`cccc im set` is not yet wired to accept WeCom credentials directly**.
+CCCC can also configure WeCom credentials from CLI:
 
-So the practical flow today is:
+```bash
+cccc im set wecom --wecom-bot-id WECOM_BOT_ID --wecom-secret WECOM_SECRET
+```
 
-- save `wecom_bot_id` and `wecom_secret` in the **Web UI**
-- optionally use CLI later only for control and inspection
+The values can be either the raw Bot ID / Secret or environment variable names. After configuration, use the same start/stop/status controls as other IM bridges.
 
 ## Step 3: Start the Bridge
 
@@ -141,13 +142,12 @@ The current WeCom adapter supports:
 
 - inbound callback subscription over WebSocket
 - outbound replies bound to the latest inbound callback request
+- response URL fallback for replies when provided by WeCom
 - plain text messaging
 - streaming replies
-
-Current limitations:
-
-- non-text inbound messages are normalized as text placeholders such as `[image]`
-- file/media upload and download bridging is not fully implemented yet
+- inbound image, file, voice, video, and mixed-message attachment metadata
+- direct media download, including AES-decrypted download URLs
+- outbound image/file replies, with inline stream image replies for PNG/JPEG where supported
 
 The adapter implementation lives in:
 

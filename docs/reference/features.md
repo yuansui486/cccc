@@ -78,7 +78,7 @@ The `chat.stream` event type represents real-time streaming content from agents.
 | Discord | ✅ Complete | `token_env` |
 | Feishu/Lark | ✅ Complete | `feishu_app_id_env` + `feishu_app_secret_env` |
 | DingTalk | ✅ Complete | `dingtalk_app_key_env` + `dingtalk_app_secret_env` (+ optional `dingtalk_robot_code_env`) |
-| WeCom | ✅ Complete | Web-configured Bot ID / Secret flow |
+| WeCom | ✅ Complete | Web UI or CLI Bot ID / Secret flow |
 | Weixin / WeChat | ✅ Complete | Web-configured account/login flow |
 
 ### Configuration

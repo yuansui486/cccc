@@ -59,6 +59,9 @@ Reserve `/send @all <message>` for true broadcasts, announcements, or urgent sha
 # Configure (platform-specific, see each guide)
 cccc im set <platform> --token-env <ENV_VAR>
 
+# Configure WeCom with long-connection Bot ID / Secret
+cccc im set wecom --wecom-bot-id WECOM_BOT_ID --wecom-secret WECOM_SECRET
+
 # Control
 cccc im start        # Start IM bridge
 cccc im stop         # Stop IM bridge
@@ -68,7 +71,7 @@ cccc im logs -f      # Follow logs
 ```
 
 ::: tip WeCom Note
-WeCom currently uses the same start/stop/status CLI controls, but credentials are configured through the Web UI rather than `cccc im set`.
+WeCom uses the long-connection Bot ID / Secret flow. Credentials can be saved from either the Web UI or `cccc im set wecom --wecom-bot-id ... --wecom-secret ...`.
 :::
 
 ## Quick Start
