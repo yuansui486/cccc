@@ -98,7 +98,7 @@ export function VoiceSecretaryWorkspacePanel({
                       active
                         ? isDark
                           ? "bg-white text-slate-950"
-                          : "bg-[rgb(35,36,37)] text-white"
+                          : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)]"
                         : isDark
                           ? "text-slate-300 hover:bg-white/10"
                           : "text-gray-600 hover:bg-black/5",
@@ -168,7 +168,9 @@ export function VoiceSecretaryWorkspacePanel({
               type="button"
               className={classNames(
                 "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-60",
-                isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                isDark
+                  ? "border-white/10 text-slate-300 hover:bg-white/10"
+                  : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
               )}
               onClick={onLoadLatestDocument}
               disabled={!activeDocumentPath}
@@ -184,7 +186,9 @@ export function VoiceSecretaryWorkspacePanel({
               type="button"
               className={classNames(
                 "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-60",
-                isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                isDark
+                  ? "border-white/10 text-slate-300 hover:bg-white/10"
+                  : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
               )}
               onClick={onSaveDocument}
               disabled={!!actionBusy}
@@ -202,7 +206,9 @@ export function VoiceSecretaryWorkspacePanel({
                 disabled={!activeDocumentPath}
                 className={classNames(
                   "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-50",
-                  isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                  isDark
+                    ? "border-white/10 text-slate-300 hover:bg-white/10"
+                    : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                 )}
               >
                 {t("voiceSecretaryDownloadDocument", { defaultValue: "Download .md" })}
@@ -212,7 +218,9 @@ export function VoiceSecretaryWorkspacePanel({
                 onClick={onToggleDocumentEditing}
                 className={classNames(
                   "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
-                  isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                  isDark
+                    ? "border-white/10 text-slate-300 hover:bg-white/10"
+                    : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                 )}
               >
                 {documentEditing
@@ -228,7 +236,9 @@ export function VoiceSecretaryWorkspacePanel({
               disabled={!transcriptCount || recording}
               className={classNames(
                 "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-50",
-                isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                isDark
+                  ? "border-white/10 text-slate-300 hover:bg-white/10"
+                  : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
               )}
               title={recording
                 ? t("voiceSecretaryClearTranscriptDisabledRecording", { defaultValue: "Stop recording before clearing transcript entries." })

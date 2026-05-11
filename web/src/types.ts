@@ -41,6 +41,9 @@ export type EventAttachment = {
   bytes?: number;
   mime_type?: string;
   local_preview_url?: string;
+  download_url?: string;
+  decryption_key?: string;
+  aeskey?: string;
 };
 
 // Local-only preview attachment used by optimistic messages before upload confirmation.
@@ -51,6 +54,9 @@ export type OptimisticAttachment = {
   bytes?: number;
   mime_type?: string;
   local_preview_url: string;
+  download_url?: string;
+  decryption_key?: string;
+  aeskey?: string;
 };
 
 export type MessageAttachment = EventAttachment | OptimisticAttachment;
@@ -352,6 +358,40 @@ export type CapabilitySourceState = {
   staleness_seconds?: number;
   record_count?: number;
   error?: string;
+};
+
+export type OneColleagueCapabilitySource = {
+  source_id: string;
+  enabled: boolean;
+  base_url?: string;
+  last_synced_at?: string;
+  last_success_at?: string;
+  last_error?: string;
+  last_cursor?: string;
+  updated_since?: string;
+  last_summary?: Record<string, number>;
+};
+
+export type OneColleaguePendingCapability = {
+  pending_id: string;
+  source_id?: string;
+  capability_id: string;
+  kind?: string;
+  name?: string;
+  status?: string;
+  old_version?: string;
+  new_version?: string;
+  checksum?: string;
+  risk_level?: string;
+  risk_reasons?: string[];
+  requires_confirmation?: boolean;
+  diff?: Array<Record<string, unknown>>;
+  created_at?: string;
+  updated_at?: string;
+  imported_at?: string;
+  record?: CapabilityImportRecord | null;
+  import_result?: Record<string, unknown>;
+  probe_result?: Record<string, unknown>;
 };
 
 export type CapabilitySourceInstance = {
@@ -1024,6 +1064,32 @@ export type WebAccessSession = {
     peer_runtime?: "hidden" | "visible" | string;
     pet_runtime?: "hidden" | "visible" | string;
   };
+};
+
+export type DoneHubStatus =
+  | "idle"
+  | "authenticating"
+  | "connected"
+  | "refreshing"
+  | "error";
+
+export type DoneHubSession = {
+  base_url: string;
+  access_token: string;
+  username: string;
+  display_name: string;
+  group: string;
+  quota: number;
+  used_quota: number;
+  role: number;
+  status: number;
+};
+
+export type DoneHubSavedLogin = {
+  base_url: string;
+  username: string;
+  password: string;
+  remember_password: boolean;
 };
 
 export type WebBranding = {

@@ -1328,6 +1328,50 @@ export async function createGroup(title: string, topic: string = "") {
   });
 }
 
+export async function createGroupFromTemplate(path: string, title: string, topic: string, file: File) {
+  clearGroupsReadRequest();
+  const form = new FormData();
+  form.append("path", path);
+  form.append("title", title);
+  form.append("topic", topic);
+  form.append("by", "user");
+  form.append("file", file);
+  return apiForm<{ group_id: string }>("/api/v1/groups/from_template", form);
+}
+
+export async function previewTemplate(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiForm<{ template: unknown }>("/api/v1/templates/preview", form);
+}
+
+export async function exportGroupTemplate(groupId: string) {
+  return apiJson<{ template: string; filename: string }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/template/export`,
+  );
+}
+
+export async function previewGroupTemplate(groupId: string, file: File) {
+  const form = new FormData();
+  form.append("by", "user");
+  form.append("file", file);
+  return apiForm<{ template: unknown; diff: unknown }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/template/preview_upload`,
+    form,
+  );
+}
+
+export async function importGroupTemplateReplace(groupId: string, file: File) {
+  const form = new FormData();
+  form.append("confirm", groupId);
+  form.append("by", "user");
+  form.append("file", file);
+  return apiForm<{ applied: boolean }>(
+    `/api/v1/groups/${encodeURIComponent(groupId)}/template/import_replace`,
+    form,
+  );
+}
+
 export type GroupCopyPreviewActor = {
   id?: string;
   title?: string;

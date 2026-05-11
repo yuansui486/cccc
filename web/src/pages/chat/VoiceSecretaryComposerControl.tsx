@@ -3037,7 +3037,7 @@ export function VoiceSecretaryComposerControl({
                         "inline-flex min-h-[34px] items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60",
                         isDark
                           ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/10"
-                          : "border-black/10 bg-white text-gray-700 hover:bg-black/5",
+                          : "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                       )}
                       onClick={() => void setAssistantEnabledForGroup(!assistantEnabled)}
                       disabled={actionBusy === "enable" || !selectedGroupId}
@@ -3050,7 +3050,7 @@ export function VoiceSecretaryComposerControl({
                         className={classNames(
                           "relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
                           assistantEnabled
-                            ? isDark ? "bg-white" : "bg-[rgb(35,36,37)]"
+                            ? isDark ? "bg-white" : "bg-[var(--color-accent-primary)]"
                             : isDark ? "bg-white/15" : "bg-gray-300",
                         )}
                       >
@@ -3103,7 +3103,7 @@ export function VoiceSecretaryComposerControl({
                               active
                                 ? isDark
                                   ? "bg-white text-slate-950 shadow-sm"
-                                  : "bg-[rgb(35,36,37)] text-white shadow-sm"
+                                  : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)]"
                                 : isDark
                                   ? "text-slate-300 hover:bg-white/10 hover:text-white"
                                   : "text-gray-600 hover:bg-black/5 hover:text-gray-900",
@@ -3178,7 +3178,9 @@ export function VoiceSecretaryComposerControl({
                             type="button"
                             className={classNames(
                               "inline-flex min-h-[34px] items-center rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60",
-                              isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 bg-white text-gray-700 hover:bg-black/5",
+                              isDark
+                                ? "border-white/10 text-slate-300 hover:bg-white/10"
+                                : "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                             )}
                             onClick={() => void loadAudioDevices()}
                             disabled={recording || !!actionBusy}
@@ -3197,7 +3199,7 @@ export function VoiceSecretaryComposerControl({
                               : "border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100"
                             : isDark
                               ? "border-white/10 bg-white/[0.06] text-slate-100 hover:bg-white/10"
-                              : "border-black/10 bg-white text-gray-800 hover:bg-black/5",
+                              : "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                         )}
                         onClick={(event) => {
                           event.preventDefault();
@@ -3291,7 +3293,9 @@ export function VoiceSecretaryComposerControl({
                   disabled={!!actionBusy}
                   className={classNames(
                     "rounded-full border px-3 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60",
-                    isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 bg-white text-gray-700 hover:bg-black/5",
+                    isDark
+                      ? "border-white/10 text-slate-300 hover:bg-white/10"
+                      : "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                   )}
                 >
                   {actionBusy === "new_doc"
@@ -3349,7 +3353,9 @@ export function VoiceSecretaryComposerControl({
                         disabled={actionBusy === "new_doc"}
                         className={classNames(
                           "rounded-full px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60",
-                          isDark ? "bg-white text-[rgb(20,20,22)] hover:bg-white/90" : "bg-[rgb(35,36,37)] text-white hover:bg-black",
+                          isDark
+                            ? "bg-white text-[rgb(20,20,22)] hover:bg-white/90"
+                            : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110",
                         )}
                       >
                         {actionBusy === "new_doc"
@@ -3408,7 +3414,7 @@ export function VoiceSecretaryComposerControl({
                               viewing ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                               isDark
                                 ? "border-white/10 bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-35"
-                                : "border-black/10 bg-white text-gray-500 hover:bg-black/5 hover:text-gray-900 disabled:opacity-35",
+                                : "border-[var(--glass-accent-border)] bg-white text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg)] disabled:opacity-35",
                             )}
                           >
                             <span className="text-[10px] font-semibold leading-none">
@@ -3447,10 +3453,10 @@ export function VoiceSecretaryComposerControl({
                               captureTarget
                                 ? isDark
                                   ? "border-white/70 bg-white/10 shadow-[0_0_0_3px_rgba(255,255,255,0.08)]"
-                                  : "border-[rgb(35,36,37)] bg-white shadow-[0_0_0_3px_rgba(35,36,37,0.08)]"
+                                  : "border-[var(--color-accent-primary)] bg-white shadow-[0_0_0_3px_rgba(59,130,246,0.16)]"
                                 : isDark
                                   ? "border-white/25 bg-white/[0.03] hover:border-white/50 hover:bg-white/[0.08] disabled:opacity-45"
-                                  : "border-gray-300 bg-white hover:border-[rgb(35,36,37)]/35 hover:bg-[rgb(245,245,245)] disabled:opacity-45",
+                                  : "border-gray-300 bg-white hover:border-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg)] disabled:opacity-45",
                             )}
                           >
                             {captureTarget ? (
@@ -3458,7 +3464,7 @@ export function VoiceSecretaryComposerControl({
                                 aria-hidden="true"
                                 className={classNames(
                                   "h-2.5 w-2.5 rounded-full",
-                                  isDark ? "bg-white" : "bg-[rgb(35,36,37)]",
+                                  isDark ? "bg-white" : "bg-[var(--color-accent-primary)]",
                                 )}
                               />
                             ) : null}
@@ -3539,7 +3545,9 @@ export function VoiceSecretaryComposerControl({
                       type="button"
                       className={classNames(
                         "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-60",
-                        isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                        isDark
+                          ? "border-white/10 text-slate-300 hover:bg-white/10"
+                          : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                       )}
                       onClick={() => loadDocumentDraft(activeDocument)}
                       disabled={!activeDocument}
@@ -3555,7 +3563,9 @@ export function VoiceSecretaryComposerControl({
                       type="button"
                       className={classNames(
                         "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-60",
-                        isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                        isDark
+                          ? "border-white/10 text-slate-300 hover:bg-white/10"
+                          : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                       )}
                       onClick={() => void saveDocument()}
                       disabled={!!actionBusy}
@@ -3571,7 +3581,9 @@ export function VoiceSecretaryComposerControl({
                     disabled={!activeDocument}
                     className={classNames(
                       "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-50",
-                      isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                      isDark
+                        ? "border-white/10 text-slate-300 hover:bg-white/10"
+                        : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                     )}
                   >
                     {t("voiceSecretaryDownloadDocument", { defaultValue: "Download .md" })}
@@ -3581,7 +3593,9 @@ export function VoiceSecretaryComposerControl({
                     onClick={() => setDocumentEditing((value) => !value)}
                     className={classNames(
                       "rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
-                      isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 text-gray-700 hover:bg-black/5",
+                      isDark
+                        ? "border-white/10 text-slate-300 hover:bg-white/10"
+                        : "border-[var(--glass-accent-border)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
                     )}
                   >
                     {documentEditing
@@ -3653,7 +3667,7 @@ export function VoiceSecretaryComposerControl({
                       "mt-3 w-full rounded-2xl border px-3 py-2.5 text-xs font-semibold transition-colors disabled:opacity-60",
                       isDark
                         ? "border-white bg-white text-[rgb(20,20,22)] hover:bg-white/90"
-                        : "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white hover:bg-black",
+                        : "border-[var(--glass-accent-border)] bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110",
                     )}
                     onClick={() => void sendPanelRequest()}
                     disabled={!!actionBusy || !documentInstruction.trim()}

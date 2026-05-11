@@ -74,7 +74,9 @@ export function VoiceSecretaryDocumentListPanel({
           disabled={!!actionBusy}
           className={classNames(
             "rounded-full border px-3 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60",
-            isDark ? "border-white/10 text-slate-300 hover:bg-white/10" : "border-black/10 bg-white text-gray-700 hover:bg-black/5",
+            isDark
+              ? "border-white/10 text-slate-300 hover:bg-white/10"
+              : "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg-hover)]",
           )}
         >
           {actionBusy === "new_doc"
@@ -132,7 +134,9 @@ export function VoiceSecretaryDocumentListPanel({
                 disabled={actionBusy === "new_doc"}
                 className={classNames(
                   "rounded-full px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60",
-                  isDark ? "bg-white text-[rgb(20,20,22)] hover:bg-white/90" : "bg-[rgb(35,36,37)] text-white hover:bg-black",
+                  isDark
+                    ? "bg-white text-[rgb(20,20,22)] hover:bg-white/90"
+                    : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110",
                 )}
               >
                 {actionBusy === "new_doc"
@@ -228,10 +232,10 @@ export function VoiceSecretaryDocumentListPanel({
                       captureTarget
                         ? isDark
                           ? "border-white/70 bg-white/10 shadow-[0_0_0_3px_rgba(255,255,255,0.08)]"
-                          : "border-[rgb(35,36,37)] bg-white shadow-[0_0_0_3px_rgba(35,36,37,0.08)]"
+                          : "border-[var(--color-accent-primary)] bg-white shadow-[0_0_0_3px_rgba(59,130,246,0.16)]"
                         : isDark
                           ? "border-white/25 bg-white/[0.03] hover:border-white/50 hover:bg-white/[0.08] disabled:opacity-45"
-                          : "border-gray-300 bg-white hover:border-[rgb(35,36,37)]/35 hover:bg-[rgb(245,245,245)] disabled:opacity-45",
+                          : "border-gray-300 bg-white hover:border-[var(--color-accent-primary)] hover:bg-[var(--glass-accent-bg)] disabled:opacity-45",
                     )}
                   >
                     {captureTarget ? (
@@ -239,7 +243,7 @@ export function VoiceSecretaryDocumentListPanel({
                         aria-hidden="true"
                         className={classNames(
                           "h-3 w-3 rounded-full",
-                          isDark ? "bg-white" : "bg-[rgb(35,36,37)]",
+                          isDark ? "bg-white" : "bg-[var(--color-accent-primary)]",
                         )}
                       />
                     ) : null}
