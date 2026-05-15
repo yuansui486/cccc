@@ -4,7 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 
 def _detect_version() -> str:
-    for dist_name in ("cccc-pair", "cccc"):
+    for dist_name in ("no1", "cccc-pair", "cccc"):
         try:
             return version(dist_name)
         except PackageNotFoundError:

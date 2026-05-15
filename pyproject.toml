@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cccc-pair"
-version = "0.4.15"
+name = "no1"
+version = "0.4.14"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
@@ -58,7 +58,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "cccc.ports.web" = ["dist/**"]
-"cccc.resources" = ["*.md", "*.yaml", "*.json", "*.py"]
+"cccc.resources" = ["*.md", "*.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

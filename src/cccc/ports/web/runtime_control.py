@@ -257,18 +257,6 @@ def wait_for_web_ready(*, host: str, port: int, timeout_s: float = 6.0) -> bool:
     return False
 
 
-def web_ready_timeout_seconds() -> float:
-    raw = str(os.environ.get("CCCC_WEB_READY_TIMEOUT_SECONDS") or "").strip()
-    if raw:
-        try:
-            value = float(raw)
-            if value > 0:
-                return value
-        except Exception:
-            pass
-    return DEFAULT_WEB_READY_TIMEOUT_SECONDS
-
-
 def start_supervised_web_child(
     *,
     home: Path,
@@ -296,14 +284,13 @@ def start_supervised_web_child(
         launch_source=launch_source,
     )
     runtime_pid = int(getattr(proc, "pid", 0) or 0)
-    ready_timeout_s = web_ready_timeout_seconds()
     try:
-        if not wait_for_web_ready(host=str(host), port=int(port), timeout_s=ready_timeout_s):
+        if not wait_for_web_ready(host=str(host), port=int(port), timeout_s=6.0):
             ret = proc.poll()
             if ret is None:
                 stop_web_child(proc, timeout_s=1.0)
             clear_web_runtime_state(home=home, pid=runtime_pid if runtime_pid > 0 else None)
-            return None, f"web server failed to become ready on {host}:{int(port)} within {ready_timeout_s:g}s"
+            return None, f"web server failed to become ready on {host}:{int(port)}"
     except BaseException:
         try:
             if proc.poll() is None:
