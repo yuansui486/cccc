@@ -208,7 +208,7 @@ describe("buildLocalTaskProposalReminders", () => {
       if (reminders[0]?.action.type === "task_proposal") {
         expect(reminders[0].action.operation).toBe("handoff");
         expect(reminders[0].action.reason?.kind).toBe("stalled_active_task");
-        expect(buildTaskProposalMessage(reminders[0].action)).toContain("without recent task changes");
+        expect(buildTaskProposalMessage(reminders[0].action)).toContain("缺少最近任务变更");
       }
     } finally {
       Date.now = originalNow;
@@ -258,7 +258,7 @@ describe("buildLocalTaskProposalReminders", () => {
         expect(reminders[0].action.reason?.kind).toBe("ownership_drift");
         const message = buildTaskProposalMessage(reminders[0].action);
         expect(message).toContain("T-99");
-        expect(message).toContain("owner and task status");
+        expect(message).toContain("owner 与任务状态");
       }
     } finally {
       Date.now = originalNow;
@@ -294,7 +294,7 @@ describe("buildLocalTaskProposalReminders", () => {
     if (reminders[0]?.action.type === "task_proposal") {
       expect(reminders[0].action.assignee).toBe("peer-1");
       expect(reminders[0].action.reason?.kind).toBe("assign_active_owner");
-      expect(buildTaskProposalMessage(reminders[0].action)).toContain("currently has no owner");
+      expect(buildTaskProposalMessage(reminders[0].action)).toContain("当前没有 owner");
     }
   });
 });

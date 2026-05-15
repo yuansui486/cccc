@@ -29,8 +29,20 @@ function makeStorage() {
 }
 
 const sessionStorageMock = makeStorage();
+const TestFile = globalThis.File ?? class File extends Blob {
+  name: string;
+  lastModified: number;
+  webkitRelativePath = "";
+
+  constructor(fileBits: BlobPart[], fileName: string, options?: FilePropertyBag) {
+    super(fileBits, options);
+    this.name = fileName;
+    this.lastModified = options?.lastModified ?? Date.now();
+  }
+};
 
 vi.stubGlobal("fetch", fetchMock);
+vi.stubGlobal("File", TestFile);
 vi.stubGlobal("window", {
   location: { search: "", protocol: "http:", host: "localhost" },
 });
@@ -41,6 +53,7 @@ describe("api error normalization", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("File", TestFile);
     vi.stubGlobal("window", {
       location: { search: "", protocol: "http:", host: "localhost" },
     });
@@ -396,7 +409,11 @@ describe("api.fetchPresentation", () => {
     expect(form.get("captured_at")).toBe("2026-03-22T12:00:00Z");
     expect(form.get("width")).toBe("1440");
     expect(form.get("height")).toBe("900");
-    expect(form.get("file")).toBe(file);
+    const uploaded = form.get("file") as File;
+    expect(uploaded).toBeInstanceOf(Blob);
+    expect(uploaded.name).toBe("snapshot.jpg");
+    expect(uploaded.type).toBe("image/jpeg");
+    expect(uploaded.size).toBe(file.size);
   });
 
   it("publishes a presentation URL on the JSON endpoint", async () => {
@@ -973,7 +990,11 @@ describe("api.message refs", () => {
     expect(form.get("reply_required")).toBe("true");
     expect(form.get("client_id")).toBe("client-2");
     expect(form.get("refs_json")).toBe(JSON.stringify(refs));
-    expect(form.get("files")).toBe(file);
+    const uploaded = form.get("files") as File;
+    expect(uploaded).toBeInstanceOf(Blob);
+    expect(uploaded.name).toBe("note.txt");
+    expect(uploaded.type).toBe("text/plain");
+    expect(uploaded.size).toBe(file.size);
   });
 });
 

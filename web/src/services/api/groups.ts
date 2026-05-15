@@ -1084,7 +1084,7 @@ export async function publishPresentationUpload(
   form.append("slot", String(payload.slotId || "").trim() || "auto");
   form.append("title", String(payload.title || "").trim());
   form.append("summary", String(payload.summary || "").trim());
-  form.append("file", payload.file);
+  form.append("file", payload.file, payload.file.name);
   const resp = await apiForm<{
     group_id?: unknown;
     slot_id?: unknown;
@@ -1265,7 +1265,7 @@ export async function uploadPresentationReferenceSnapshot(
   form.append("captured_at", String(payload.capturedAt || "").trim());
   form.append("width", String(Number.isFinite(Number(payload.width)) ? Number(payload.width) : 0));
   form.append("height", String(Number.isFinite(Number(payload.height)) ? Number(payload.height) : 0));
-  form.append("file", payload.file);
+  form.append("file", payload.file, payload.file.name);
   const resp = await apiForm<{ group_id?: unknown; snapshot?: unknown }>(
     `/api/v1/groups/${encodeURIComponent(groupId)}/presentation/ref_snapshot`,
     form,

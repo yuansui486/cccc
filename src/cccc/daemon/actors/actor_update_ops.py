@@ -8,11 +8,13 @@ from typing import Any, Callable, Dict, Optional, Sequence
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
+from ..runtime_session_ops import start_pty_actor_with_runtime_resume
 from ...kernel.actors import find_actor, list_actors, update_actor
 from ...kernel.group import load_group
 from ...kernel.ledger import append_event
 from ...kernel.permissions import require_actor_permission
 from ...kernel.runtime import runtime_start_preflight_error
+from ...kernel.runtime_state_source import actor_uses_codex_app_server_state
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...runners.platform_support import pty_support_error_message
@@ -98,6 +100,7 @@ def handle_actor_update(
         "enabled",
         "runner",
         "runtime",
+        "runtime_state_source",
     }
     unknown = set(patch.keys()) - allowed
     if unknown:
@@ -326,7 +329,21 @@ def handle_actor_update(
                     if runtime_error:
                         return _error("runtime_unavailable", runtime_error)
 
-                if runner_effective == "headless":
+                if actor_uses_codex_app_server_state(actor):
+                    session = codex_app_supervisor.start_pty_app_actor(
+                        group_id=group.group_id,
+                        actor_id=actor_id,
+                        cwd=cwd,
+                        env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
+                        model=model_from_runtime_command(launch_spec["effective_command"]),
+                        remote_tui_base_command=list(launch_spec["effective_command"]),
+                        max_backlog_bytes=pty_backlog_bytes(),
+                    )
+                    try:
+                        write_pty_state(group.group_id, actor_id, pid=session.remote_tui_pid())
+                    except Exception:
+                        pass
+                elif runner_effective == "headless":
                     if runtime == "web_model":
                         try:
                             write_headless_state(group.group_id, actor_id)
@@ -360,14 +377,16 @@ def handle_actor_update(
                         except Exception:
                             pass
                 else:
-                    session = pty_runner.SUPERVISOR.start_actor(
+                    session = start_pty_actor_with_runtime_resume(
                         group_id=group.group_id,
                         actor_id=actor_id,
                         cwd=cwd,
-                        command=launch_spec["effective_command"],
+                        base_command=launch_spec["effective_command"],
                         env=prepare_pty_env(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
                         runtime=runtime,
+                        model=model_from_runtime_command(launch_spec["effective_command"]),
                         max_backlog_bytes=pty_backlog_bytes(),
+                        runtime_start_preflight_error=runtime_start_preflight_error,
                     )
                     try:
                         write_pty_state(group.group_id, actor_id, pid=session.pid)
@@ -383,6 +402,10 @@ def handle_actor_update(
             if runtime == "web_model" and runner_effective == "headless":
                 remove_headless_state(group.group_id, actor_id)
                 remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+            elif actor_uses_codex_app_server_state(actor):
+                codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
+                remove_pty_state_if_pid(group.group_id, actor_id, pid=0)
+                remove_headless_state(group.group_id, actor_id)
             elif runtime == "codex" and runner_effective == "headless":
                 codex_app_supervisor.stop_actor(group_id=group.group_id, actor_id=actor_id)
                 remove_headless_state(group.group_id, actor_id)

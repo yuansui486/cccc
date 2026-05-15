@@ -36,6 +36,7 @@ from .group.group_bootstrap_ops import try_handle_group_bootstrap_op
 from .ops.registry_ops import try_handle_registry_op
 from .ops.capability_ops import try_handle_capability_op
 from .ops.group_copy_ops import try_handle_group_copy_op
+from .ops.template_ops import try_handle_template_op
 from .im.im_ops import try_handle_im_op
 from .actors.runner_ops import try_handle_headless_op
 from .actors.web_model_runtime_ops import try_handle_web_model_runtime_op
@@ -145,6 +146,10 @@ def dispatch_request(
     group_bootstrap_resp = try_handle_group_bootstrap_op(op, args)
     if group_bootstrap_resp is not None:
         return group_bootstrap_resp, False
+
+    template_resp = try_handle_template_op(op, args)
+    if template_resp is not None:
+        return template_resp, False
 
     group_copy_resp = try_handle_group_copy_op(op, args)
     if group_copy_resp is not None:

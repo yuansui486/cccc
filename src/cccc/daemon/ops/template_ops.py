@@ -736,3 +736,15 @@ def group_create_from_template(args: Dict[str, Any]) -> DaemonResponse:
         return apply_resp
 
     return DaemonResponse(ok=True, result={"group_id": group.group_id, "applied": True})
+
+
+def try_handle_template_op(op: str, args: Dict[str, Any]) -> Optional[DaemonResponse]:
+    if op == "group_create_from_template":
+        return group_create_from_template(args)
+    if op == "group_template_export":
+        return group_template_export(args)
+    if op == "group_template_preview":
+        return group_template_preview(args)
+    if op == "group_template_import_replace":
+        return group_template_import_replace(args)
+    return None

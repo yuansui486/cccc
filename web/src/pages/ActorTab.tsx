@@ -28,8 +28,6 @@ export interface ActorTabProps {
 export function ActorTab({
   actor,
   groupId,
-  selectedGroupRunning = false,
-  selectedGroupActorsHydrating = false,
   agentState,
   termEpoch,
   busy,
@@ -57,8 +55,6 @@ export function ActorTab({
       <LazyAgentTab
         actor={actor}
         groupId={groupId}
-        selectedGroupRunning={selectedGroupRunning}
-        selectedGroupActorsHydrating={selectedGroupActorsHydrating}
         termEpoch={termEpoch}
         agentState={agentState}
         isVisible={isVisible}

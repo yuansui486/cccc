@@ -158,6 +158,7 @@ export function ChatTab({
     setReplyRequired,
     destGroupId,
     setDestGroupId,
+    composerGroupSettled,
     mentionSuggestions,
 
     // Agent state
@@ -166,7 +167,7 @@ export function ChatTab({
 
     // Actions
     sendMessage,
-    reportComposerError,
+    slashCommands,
     copyMessageLink,
     copyMessageText,
     startReply,
@@ -814,6 +815,8 @@ export function ChatTab({
             composerRef={composerRef}
             composerText={composerText}
             setComposerText={setComposerText}
+            composerGroupSettled={composerGroupSettled}
+            slashCommands={slashCommands}
             priority={priority}
             replyRequired={replyRequired}
             setPriority={setPriority}

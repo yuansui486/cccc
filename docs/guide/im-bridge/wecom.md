@@ -148,6 +148,13 @@ The current WeCom adapter supports:
 - inbound image, file, voice, video, and mixed-message attachment metadata
 - direct media download, including AES-decrypted download URLs
 - outbound image/file replies, with inline stream image replies for PNG/JPEG where supported
+- outbound file/media attachments via the WeCom AI Bot WebSocket chunk upload protocol
+- inbound file/media download with WeCom AES decryption when the callback includes a download URL and AES key
+
+Current limitations:
+
+- non-text inbound messages include text placeholders such as `[image]`, `[file: name]`, `[voice]`, or `[video]` alongside attachment metadata
+- inline stream image replies are limited to PNG/JPEG payloads that fit WeCom's stream item size limit; other attachments use media upload first
 
 The adapter implementation lives in:
 

@@ -5,6 +5,8 @@ import {
   getStableMessageKey,
   shouldAutoScrollToBottom,
   shouldDetachChatFollowOnScroll,
+  shouldNotifyScrollChange,
+  shouldRunScheduledBottomScroll,
   shouldUseVirtualizedMessageList,
 } from "../../src/components/virtualMessageListHelpers";
 import type { LedgerEvent } from "../../src/types";
@@ -225,6 +227,30 @@ describe("shouldDetachChatFollowOnScroll", () => {
   });
 });
 
+describe("shouldNotifyScrollChange", () => {
+  it("notifies at bottom when parent scroll affordance state is stale", () => {
+    expect(
+      shouldNotifyScrollChange({
+        wasAtBottom: true,
+        atBottom: true,
+        showScrollButton: true,
+        chatUnreadCount: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not notify repeatedly when bottom state and parent affordance are already clean", () => {
+    expect(
+      shouldNotifyScrollChange({
+        wasAtBottom: true,
+        atBottom: true,
+        showScrollButton: false,
+        chatUnreadCount: 0,
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("shouldAutoScrollToBottom", () => {
   it("allows auto-scroll only when still following from the bottom", () => {
     expect(
@@ -262,6 +288,30 @@ describe("shouldAutoScrollToBottom", () => {
         followMode: "detached",
         isAtBottom: false,
         forceStickToBottom: true,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("shouldRunScheduledBottomScroll", () => {
+  it("drops a queued auto-scroll when the user leaves the bottom before it runs", () => {
+    expect(
+      shouldRunScheduledBottomScroll({
+        followMode: "detached",
+        isAtBottom: false,
+        forceStickToBottom: false,
+        explicitForce: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps explicit scroll-to-bottom actions working while detached", () => {
+    expect(
+      shouldRunScheduledBottomScroll({
+        followMode: "detached",
+        isAtBottom: false,
+        forceStickToBottom: false,
+        explicitForce: true,
       }),
     ).toBe(true);
   });

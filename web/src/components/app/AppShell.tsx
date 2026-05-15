@@ -15,6 +15,7 @@ type AppShellProps = {
   groupDoc: GroupDoc | null;
   groupContext: GroupContext | null;
   actors: Actor[];
+  runtimeActors: Actor[];
   recipientActors: Actor[];
   recipientActorsBusy: boolean;
   destGroupScopeLabel: string;
@@ -96,6 +97,7 @@ export function AppShell({
   groupDoc,
   groupContext,
   actors,
+  runtimeActors,
   recipientActors,
   recipientActorsBusy,
   destGroupScopeLabel,
@@ -167,7 +169,7 @@ export function AppShell({
   } as CSSProperties;
 
   useEffect(() => {
-    if (!selectedGroupId || actors.length === 0) return;
+    if (!selectedGroupId || runtimeActors.length === 0) return;
     if (typeof window === "undefined") return;
 
     const nav = navigator as Navigator & {
@@ -204,7 +206,7 @@ export function AppShell({
         globalThis.clearTimeout(timeoutId);
       }
     };
-  }, [selectedGroupId, actors.length]);
+  }, [selectedGroupId, runtimeActors.length]);
 
   return (
     <div
@@ -215,7 +217,7 @@ export function AppShell({
         orderedGroups={orderedGroups}
         archivedGroupIds={archivedGroupIds}
         selectedGroupId={selectedGroupId}
-        actors={actors}
+        actors={runtimeActors}
         activeTab={activeTab}
         unreadChatCount={chatUnreadCount}
         isOpen={sidebarOpen}
@@ -318,7 +320,7 @@ export function AppShell({
             aria-hidden={activeTab === "chat"}
           >
             {renderedActorIds.map((actorId) => {
-              const actor = actors.find((item) => item.id === actorId) || null;
+              const actor = runtimeActors.find((item) => item.id === actorId) || null;
               const isVisible = activeTab === actorId && activeTab !== "chat";
               const agentState =
                 (groupContext?.agent_states || []).find((item) => item.id === (actor?.id || "")) || null;
