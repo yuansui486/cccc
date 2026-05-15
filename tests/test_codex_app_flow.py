@@ -96,6 +96,294 @@ class TestCodexAppFlow(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_claude_headless_start_uses_persistent_print_session(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from cccc.daemon.runtime_session_ops import read_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            session = ClaudeAppSession(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                cwd=Path(home),
+                env={},
+            )
+
+            class FakeProc:
+                pid = 12345
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return None
+
+            class FakeThread:
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+
+                def start(self):
+                    return None
+
+            launch_commands: list[list[str]] = []
+
+            def fake_popen(cmd, *args, **kwargs):
+                launch_commands.append(list(cmd))
+                return FakeProc()
+
+            with (
+                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
+                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
+            ):
+                session.start()
+
+            self.assertEqual(len(launch_commands), 1)
+            self.assertIn("--session-id", launch_commands[0])
+            self.assertIn("42e9ef0c-3b75-43a0-9056-eef13dd1061d", launch_commands[0])
+            self.assertNotIn("--no-session-persistence", launch_commands[0])
+            stored = read_runtime_session("g_claude_resume", "peer1")
+            self.assertEqual(stored.get("runner"), "headless")
+            self.assertEqual(stored.get("status"), "usable")
+            self.assertTrue(bool(stored.get("resume_eligible")))
+        finally:
+            cleanup()
+
+    def test_claude_headless_start_resumes_existing_session_id(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from cccc.daemon.runtime_session_ops import record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            base_command = [
+                "claude",
+                "-p",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+                "--include-partial-messages",
+                "--include-hook-events",
+                "--verbose",
+                "--dangerously-skip-permissions",
+            ]
+            record_headless_runtime_session(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                runtime="claude",
+                cwd=cwd,
+                command=base_command,
+                provider_session_id="434d41d0-02e9-4760-9f13-155d04cde834",
+                status="usable",
+                captured_from="stream_json_init",
+                resume_eligible=True,
+            )
+            session = ClaudeAppSession(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                env={},
+            )
+
+            class FakeProc:
+                pid = 12345
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return None
+
+            class FakeThread:
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+
+                def start(self):
+                    return None
+
+            launch_commands: list[list[str]] = []
+
+            def fake_popen(cmd, *args, **kwargs):
+                launch_commands.append(list(cmd))
+                return FakeProc()
+
+            with (
+                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
+                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
+            ):
+                session.start()
+
+            self.assertEqual(len(launch_commands), 1)
+            self.assertEqual(launch_commands[0][:3], ["claude", "--resume", "434d41d0-02e9-4760-9f13-155d04cde834"])
+            self.assertIn("-p", launch_commands[0])
+        finally:
+            cleanup()
+
+    def test_claude_headless_resume_exit_falls_back_without_poisoning_turn_queue(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            base_command = [
+                "claude",
+                "-p",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+                "--include-partial-messages",
+                "--include-hook-events",
+                "--verbose",
+                "--dangerously-skip-permissions",
+            ]
+            record_headless_runtime_session(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                runtime="claude",
+                cwd=cwd,
+                command=base_command,
+                provider_session_id="stale-session",
+                status="usable",
+                captured_from="stream_json_init",
+                resume_eligible=True,
+            )
+            session = ClaudeAppSession(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                env={},
+            )
+
+            class ExitedProc:
+                pid = 111
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return 1
+
+                def terminate(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 1
+
+            class RunningProc:
+                pid = 222
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return None
+
+            class FakeThread:
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+
+                def start(self):
+                    return None
+
+            launch_commands: list[list[str]] = []
+
+            def fake_popen(cmd, *args, **kwargs):
+                launch_commands.append(list(cmd))
+                return ExitedProc() if len(launch_commands) == 1 else RunningProc()
+
+            with (
+                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
+                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="fresh-session"),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
+            ):
+                session.start()
+
+            self.assertEqual(launch_commands[0][:3], ["claude", "--resume", "stale-session"])
+            self.assertEqual(launch_commands[1][:3], ["claude", "--session-id", "fresh-session"])
+            self.assertEqual(session._turn_queue.qsize(), 0)
+            stored = read_runtime_session("g_claude_resume", "peer1")
+            self.assertEqual(stored.get("provider_session_id"), "fresh-session")
+            self.assertEqual(stored.get("status"), "usable")
+        finally:
+            cleanup()
+
+    def test_claude_headless_resume_rejected_on_first_turn_marks_metadata_failed(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            base_command = [
+                "claude",
+                "-p",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+                "--include-partial-messages",
+                "--include-hook-events",
+                "--verbose",
+                "--dangerously-skip-permissions",
+            ]
+            record_headless_runtime_session(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                runtime="claude",
+                cwd=cwd,
+                command=base_command,
+                provider_session_id="stale-session",
+                status="usable",
+                captured_from="stream_json_init",
+                resume_eligible=True,
+            )
+            session = ClaudeAppSession(
+                group_id="g_claude_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                env={},
+            )
+            session._resumed_provider_session_id = "stale-session"
+            session._active_turn_id = "turn-bootstrap"
+            session._active_event_id = "bootstrap-event"
+            session._active_control_kind = "bootstrap"
+
+            emitted: list[str] = []
+            with (
+                patch.object(session, "_persist_state", return_value=None),
+                patch.object(session, "_emit", side_effect=lambda event_type, payload: emitted.append(event_type)),
+                patch.object(session, "_restart_fresh_after_resume_rejected", return_value=None) as restart_after_resume_rejected,
+            ):
+                session._handle_result_event(
+                    {
+                        "type": "result",
+                        "subtype": "error",
+                        "error": "No conversation found for stale-session",
+                    }
+                )
+
+            stored = read_runtime_session("g_claude_resume", "peer1")
+            self.assertEqual(stored.get("status"), "resume_failed")
+            self.assertFalse(bool(stored.get("resume_eligible")))
+            self.assertIn("No conversation found", str(stored.get("last_resume_error") or ""))
+            self.assertIn("headless.session.resume_failed", emitted)
+            self.assertIn("headless.control.failed", emitted)
+            restart_after_resume_rejected.assert_called_once()
+        finally:
+            cleanup()
+
     def test_actor_list_uses_codex_supervisor_state_for_headless_working(self) -> None:
         from cccc.daemon.actors.actor_ops import handle_actor_list
 
@@ -2330,6 +2618,38 @@ class TestCodexAppFlow(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_claude_resume_rejected_restart_preserves_non_bootstrap_queued_turns(self) -> None:
+        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+
+        home, cleanup = self._with_home()
+        try:
+            session = ClaudeAppSession(
+                group_id="g_test",
+                actor_id="peer1",
+                cwd=Path(home),
+                env={},
+            )
+            bootstrap = _PendingTurn(text="bootstrap", event_id="", control_kind="bootstrap")
+            user_turn = _PendingTurn(text="user work", event_id="evt-user")
+            control_turn = _PendingTurn(text="control work", event_id="evt-control", control_kind="system_notify")
+            session._turn_queue.put_nowait(bootstrap)
+            session._turn_queue.put_nowait(user_turn)
+            session._turn_queue.put_nowait(None)
+            session._turn_queue.put_nowait(control_turn)
+
+            with patch.object(session, "_emit") as emit:
+                preserved = session._drain_restart_replay_turns()
+                session._requeue_restart_replay_turns(preserved)
+
+            self.assertEqual([payload.event_id for payload in preserved], ["evt-user", "evt-control"])
+            self.assertEqual(session._turn_queue.qsize(), 2)
+            self.assertIs(session._turn_queue.get_nowait(), user_turn)
+            self.assertIs(session._turn_queue.get_nowait(), control_turn)
+            event_types = [str(call.args[0]) for call in emit.call_args_list if call.args]
+            self.assertEqual(event_types, ["headless.turn.requeued", "headless.control.requeued"])
+        finally:
+            cleanup()
+
     def test_codex_notifications_keep_streaming_when_agent_message_phase_missing(self) -> None:
         from cccc.daemon.codex_app_sessions import CodexAppSession
         from cccc.kernel.headless_events import headless_events_path
@@ -3021,6 +3341,145 @@ class TestCodexAppFlow(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_actor_activity_thread_uses_pty_tail_prompt_when_override_missing(self) -> None:
+        from cccc.daemon.serve_ops import start_actor_activity_thread
+        from cccc.kernel.actors import add_actor
+        from cccc.kernel.group import create_group, load_group
+        from cccc.kernel.registry import load_registry
+
+        home, cleanup = self._with_home()
+        try:
+            reg = load_registry()
+            created = create_group(reg, title="pty-tail-activity", topic="")
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            published: list[dict] = []
+
+            class _PtySupervisor:
+                @staticmethod
+                def actor_running(_group_id: str, _actor_id: str) -> bool:
+                    return True
+
+                @staticmethod
+                def idle_seconds(*, group_id: str, actor_id: str) -> float:
+                    return 600.0
+
+                @staticmethod
+                def terminal_override(*, group_id: str, actor_id: str):
+                    return None
+
+                @staticmethod
+                def tail_output(*, group_id: str, actor_id: str, max_bytes: int) -> bytes:
+                    return "previous output\n› \n".encode("utf-8")
+
+            class _Broadcaster:
+                def publish(self, event: dict) -> None:
+                    published.append(event)
+
+            stop_event = threading.Event()
+            thread = start_actor_activity_thread(
+                stop_event=stop_event,
+                home=Path(home),
+                pty_supervisor=_PtySupervisor(),
+                headless_supervisor=object(),
+                codex_supervisor=object(),
+                event_broadcaster=_Broadcaster(),
+                load_group=load_group,
+                interval_seconds=1.0,
+            )
+            try:
+                time.sleep(0.25)
+                actor_events = [event for event in published if str(event.get("kind") or "") == "actor.activity"]
+                self.assertTrue(actor_events)
+                actors = ((actor_events[-1].get("data") or {}).get("actors") or [])
+                self.assertEqual(len(actors), 1)
+                self.assertEqual(str(actors[0].get("effective_working_state") or ""), "idle")
+                self.assertEqual(str(actors[0].get("effective_working_reason") or ""), "pty_terminal_prompt_visible")
+            finally:
+                stop_event.set()
+                thread.join(timeout=1.0)
+        finally:
+            cleanup()
+
+    def test_actor_activity_thread_uses_codex_app_server_state_for_pty_app_server_actor(self) -> None:
+        from cccc.daemon.serve_ops import start_actor_activity_thread
+        from cccc.kernel.actors import add_actor, update_actor
+        from cccc.kernel.group import create_group, load_group
+        from cccc.kernel.registry import load_registry
+
+        home, cleanup = self._with_home()
+        try:
+            reg = load_registry()
+            created = create_group(reg, title="pty-app-server-activity", topic="")
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")  # type: ignore[arg-type]
+            update_actor(group, "peer1", {"runtime_state_source": "app_server"})  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            published: list[dict] = []
+
+            class _PtySupervisor:
+                @staticmethod
+                def actor_running(_group_id: str, _actor_id: str) -> bool:
+                    return True
+
+                @staticmethod
+                def idle_seconds(*, group_id: str, actor_id: str) -> float:
+                    return 600.0
+
+                @staticmethod
+                def terminal_override(*, group_id: str, actor_id: str):
+                    raise AssertionError("PTY terminal signals should not drive app-server-backed Codex PTY state")
+
+            class _CodexSupervisor:
+                @staticmethod
+                def actor_running(group_id: str, actor_id: str) -> bool:
+                    return True
+
+                @staticmethod
+                def get_state(group_id: str, actor_id: str) -> dict:
+                    return {
+                        "group_id": group_id,
+                        "actor_id": actor_id,
+                        "status": "working",
+                        "current_task_id": "turn-1",
+                        "updated_at": "2026-05-12T00:00:00Z",
+                    }
+
+            class _Broadcaster:
+                def publish(self, event: dict) -> None:
+                    published.append(event)
+
+            stop_event = threading.Event()
+            thread = start_actor_activity_thread(
+                stop_event=stop_event,
+                home=Path(home),
+                pty_supervisor=_PtySupervisor(),
+                headless_supervisor=object(),
+                codex_supervisor=_CodexSupervisor(),
+                event_broadcaster=_Broadcaster(),
+                load_group=load_group,
+                interval_seconds=1.0,
+            )
+            try:
+                time.sleep(0.25)
+                actor_events = [event for event in published if str(event.get("kind") or "") == "actor.activity"]
+                self.assertTrue(actor_events)
+                actors = ((actor_events[-1].get("data") or {}).get("actors") or [])
+                self.assertEqual(len(actors), 1)
+                self.assertEqual(str(actors[0].get("runner_effective") or ""), "pty")
+                self.assertEqual(str(actors[0].get("effective_working_state") or ""), "working")
+                self.assertEqual(str(actors[0].get("effective_working_reason") or ""), "headless_working")
+            finally:
+                stop_event.set()
+                thread.join(timeout=1.0)
+        finally:
+            cleanup()
+
     def test_codex_session_persists_headless_state_file(self) -> None:
         from cccc.daemon.codex_app_sessions import CodexAppSession
         from cccc.daemon.runner_state_ops import headless_state_path
@@ -3054,6 +3513,149 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertEqual(int(payload.get("pid") or 0), os.getpid())
             self.assertEqual(str(payload.get("status") or ""), "working")
             self.assertEqual(str(payload.get("current_task_id") or ""), "turn-1")
+        finally:
+            cleanup()
+
+    def test_codex_headless_start_resumes_recorded_app_server_thread(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            record_headless_runtime_session(
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                runtime="codex",
+                cwd=cwd,
+                command=["codex", "app-server", "--listen", "stdio://"],
+                provider_thread_id="thr_existing",
+                status="usable",
+                captured_from="app_server_thread_start",
+                resume_eligible=True,
+            )
+            session = CodexAppSession(
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                env={},
+            )
+
+            class FakeProc:
+                pid = 12345
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return None
+
+            class FakeThread:
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+
+                def start(self):
+                    return None
+
+            requests: list[tuple[str, dict]] = []
+
+            def fake_request(method, params, *, timeout):
+                requests.append((method, dict(params or {})))
+                if method == "initialize":
+                    return {}
+                if method == "thread/resume":
+                    return {"thread": {"id": "thr_existing"}}
+                raise AssertionError(f"unexpected request: {method}")
+
+            with (
+                patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch.object(session, "_request", side_effect=fake_request),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
+            ):
+                session.start()
+
+            self.assertEqual(requests[1][0], "thread/resume")
+            self.assertEqual(requests[1][1].get("threadId"), "thr_existing")
+            stored = read_runtime_session("g_codex_resume", "peer1")
+            self.assertEqual(stored.get("provider_thread_id"), "thr_existing")
+            self.assertEqual(stored.get("captured_from"), "app_server_thread_resume")
+            self.assertTrue(bool(stored.get("resume_eligible")))
+        finally:
+            cleanup()
+
+    def test_codex_headless_resume_failure_falls_back_to_fresh_thread(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            record_headless_runtime_session(
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                runtime="codex",
+                cwd=cwd,
+                command=["codex", "app-server", "--listen", "stdio://"],
+                provider_thread_id="thr_stale",
+                status="usable",
+                captured_from="app_server_thread_start",
+                resume_eligible=True,
+            )
+            session = CodexAppSession(
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                env={},
+            )
+
+            class FakeProc:
+                pid = 12345
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return None
+
+            class FakeThread:
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+
+                def start(self):
+                    return None
+
+            requests: list[str] = []
+
+            def fake_request(method, params, *, timeout):
+                requests.append(method)
+                if method == "initialize":
+                    return {}
+                if method == "thread/resume":
+                    raise RuntimeError("thread not found")
+                if method == "thread/start":
+                    return {"thread": {"id": "thr_fresh"}}
+                raise AssertionError(f"unexpected request: {method}")
+
+            with (
+                patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch.object(session, "_request", side_effect=fake_request),
+                patch.object(session, "_persist_state"),
+                patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
+            ):
+                session.start()
+
+            self.assertEqual(requests, ["initialize", "thread/resume", "thread/start"])
+            stored = read_runtime_session("g_codex_resume", "peer1")
+            self.assertEqual(stored.get("provider_thread_id"), "thr_fresh")
+            self.assertEqual(stored.get("captured_from"), "app_server_thread_start")
+            self.assertTrue(bool(stored.get("resume_eligible")))
         finally:
             cleanup()
 
@@ -3123,6 +3725,241 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertIn("codex", str(payload.get("reason") or "").lower())
         finally:
             manager.stop_actor(group_id="g_test", actor_id="peer1")
+            cleanup()
+
+    def test_codex_pty_app_session_starts_ws_server_and_remote_tui(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSessionManager
+
+        home, cleanup = self._with_home()
+        try:
+            manager = CodexAppSessionManager()
+            requests: list[tuple[str, dict]] = []
+            started_pty: list[dict] = []
+
+            class FakeProc:
+                pid = 12345
+                stdin = io.StringIO()
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+
+                def poll(self):
+                    return None
+
+                def terminate(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            class FakeThread:
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+
+                def start(self):
+                    return None
+
+            class FakeWs:
+                def send(self, data):
+                    return None
+
+                def recv(self):
+                    time.sleep(1)
+                    return ""
+
+                def close(self):
+                    return None
+
+            def fake_request(self, method: str, params: dict, *, timeout: float):
+                requests.append((method, params))
+                if method == "initialize":
+                    return {}
+                if method == "thread/start":
+                    return {"thread": {"id": "thr-pty-app"}}
+                return {}
+
+            def fake_start_actor(**kwargs):
+                started_pty.append(dict(kwargs))
+
+                class _PtySession:
+                    pid = 22222
+
+                    def is_running(self):
+                        return True
+
+                return _PtySession()
+
+            with patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()) as popen, patch(
+                "cccc.daemon.codex_app_sessions.threading.Thread", FakeThread
+            ), patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True), patch(
+                "cccc.daemon.codex_app_sessions._connect_websocket", return_value=FakeWs()
+            ) as connect_ws, patch(
+                "cccc.daemon.codex_app_sessions._codex_cli_available", return_value=True
+            ), patch(
+                "cccc.daemon.codex_app_sessions.CodexAppSession._request", fake_request
+            ), patch(
+                "cccc.daemon.codex_app_sessions.CodexAppSession._build_bootstrap_control_text", return_value="bootstrap"
+            ), patch(
+                "cccc.daemon.codex_app_sessions.pty_runner.SUPERVISOR.start_actor", side_effect=fake_start_actor
+            ):
+                session = manager.start_pty_app_actor(
+                    group_id="g_test",
+                    actor_id="peer1",
+                    cwd=Path(home),
+                    env={},
+                    model="gpt-5.5",
+                    remote_tui_base_command=[
+                        "codex",
+                        "-c",
+                        "shell_environment_policy.inherit=all",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                        "--search",
+                    ],
+                    max_backlog_bytes=1234,
+                )
+
+            self.assertTrue(session.is_running())
+            self.assertTrue(manager.actor_running("g_test", "peer1"))
+            self.assertTrue(session._turn_queue.empty())
+            command = list(popen.call_args.args[0])
+            self.assertEqual(command[:3], ["codex", "app-server", "--listen"])
+            self.assertTrue(str(command[3]).startswith("ws://127.0.0.1:"))
+            connect_ws.assert_called_once()
+            self.assertEqual([item[0] for item in requests[:2]], ["initialize", "thread/start"])
+            self.assertEqual(len(started_pty), 1)
+            self.assertEqual(
+                started_pty[0]["command"],
+                [
+                    "codex",
+                    "-c",
+                    "shell_environment_policy.inherit=all",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "--search",
+                    "--remote",
+                    command[3],
+                ],
+            )
+            self.assertEqual(started_pty[0]["runtime"], "codex")
+        finally:
+            manager.stop_actor(group_id="g_test", actor_id="peer1")
+            cleanup()
+
+    def test_codex_pty_app_remote_tui_exit_stops_app_server_session(self) -> None:
+        from cccc.daemon.server import _handle_pty_session_exit
+        from cccc.kernel.actors import add_actor, update_actor
+        from cccc.kernel.group import create_group, load_group
+        from cccc.kernel.registry import load_registry
+
+        home, cleanup = self._with_home()
+        try:
+            reg = load_registry()
+            created = create_group(reg, title="pty-app-exit", topic="")
+            group = load_group(created.group_id)
+            self.assertIsNotNone(group)
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")  # type: ignore[arg-type]
+            update_actor(group, "peer1", {"runtime_state_source": "app_server"})  # type: ignore[arg-type]
+            group.save()  # type: ignore[union-attr]
+
+            class _Session:
+                group_id = created.group_id
+                actor_id = "peer1"
+                pid = 12345
+
+            with patch("cccc.daemon.server._remove_pty_state_if_pid", return_value=True), patch(
+                "cccc.daemon.server.codex_app_supervisor.stop_actor"
+            ) as stop_actor:
+                _handle_pty_session_exit(_Session())  # type: ignore[arg-type]
+
+            stop_actor.assert_called_once_with(group_id=created.group_id, actor_id="peer1")
+        finally:
+            cleanup()
+
+    def test_codex_remote_tui_command_filters_prompt_and_keeps_approval_flags(self) -> None:
+        from cccc.daemon.codex_app_sessions import _codex_remote_tui_command
+
+        command = _codex_remote_tui_command(
+            [
+                "codex",
+                "-c",
+                "shell_environment_policy.inherit=all",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--search",
+                "do not forward this prompt",
+            ],
+            "ws://127.0.0.1:12345",
+        )
+        self.assertEqual(
+            command,
+            [
+                "codex",
+                "-c",
+                "shell_environment_policy.inherit=all",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--search",
+                "--remote",
+                "ws://127.0.0.1:12345",
+            ],
+        )
+
+    def test_codex_websocket_idle_timeout_does_not_stop_session(self) -> None:
+        from cccc.daemon.codex_app_sessions import CodexAppSession
+
+        home, cleanup = self._with_home()
+        try:
+            session = CodexAppSession(
+                group_id="g_ws_timeout",
+                actor_id="peer1",
+                cwd=Path(home),
+                env={},
+                transport="websocket",
+            )
+
+            class FakeProc:
+                pid = 12345
+
+                def poll(self):
+                    return None
+
+                def terminate(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            class FakeWsTimeout(Exception):
+                pass
+
+            FakeWsTimeout.__name__ = "WebSocketTimeoutException"
+
+            release = threading.Event()
+            entered_second_recv = threading.Event()
+
+            class FakeWs:
+                count = 0
+
+                def recv(self):
+                    self.count += 1
+                    if self.count == 1:
+                        raise FakeWsTimeout("timed out")
+                    entered_second_recv.set()
+                    release.wait(timeout=1)
+                    raise RuntimeError("closed")
+
+                def close(self):
+                    release.set()
+
+            session._proc = FakeProc()
+            session._ws = FakeWs()
+            session._running = True
+
+            thread = threading.Thread(target=session._websocket_loop, daemon=True)
+            thread.start()
+            self.assertTrue(entered_second_recv.wait(timeout=1))
+            self.assertTrue(session.is_running())
+            release.set()
+            thread.join(timeout=1)
+            self.assertFalse(thread.is_alive())
+        finally:
             cleanup()
 
 if __name__ == "__main__":

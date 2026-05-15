@@ -4,6 +4,45 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow SemVer/PEP 440.
 
+## [0.4.17] — 2026-05-14
+
+### Added
+- **Codex PTY app-server state source** for interactive Codex actors. Codex can now keep a PTY surface for the user while CCCC derives runtime activity from Codex app-server events instead of relying only on terminal text heuristics.
+- **Runtime state source controls** across daemon, CLI, Web API, and actor contracts, currently scoped to Codex PTY actors that opt into app-server-backed state.
+- **WeCom media bridging improvements**, including outbound file/media upload through the WeCom AI Bot WebSocket chunk protocol and active outbound sends when no callback reply handle is available.
+
+### Changed
+- **Codex PTY lifecycle handling** was tightened so remote TUI exit stops the backing app-server session, disabled actors project as stopped even if stale runtime state remains, and app-server-backed PTY actors avoid duplicate bootstrap queuing.
+- **PTY activity detection** was split into reusable terminal-state helpers with better Claude prompt/working detection and safer Codex prompt-versus-working ordering.
+- **Runtime dock and actor list state** now treat app-server-backed Codex PTY actors like structured runtime sessions for activity rings while preserving their PTY runner identity for terminal access.
+- **Chat scrolling behavior** now clears stale scroll affordances more reliably when the user is already at the bottom or jumps to a specific message.
+
+### Fixed
+- Fixed Codex PTY state false-idle cases where an older prompt line could override a newer visible `Working (...)` banner.
+- Fixed app-server-backed Codex PTY tests so CI does not depend on the runner having the Codex CLI installed.
+- Fixed disabled actor projections that could still appear active when stale headless/app-server state existed.
+- Fixed runtime avatar rendering for Claude by using an inline Claude logo where the packaged runtime logo path is not appropriate.
+
+## [0.4.16] — 2026-05-13
+
+### Added
+- **Durable runtime session resume state** for supported provider runtimes. CCCC now stores provider session metadata under each group so actors can relaunch into the same Claude, Codex, or Gemini session when the runtime supports explicit resume.
+- **PTY runtime resume support** for Claude, Codex, and Gemini with provider-specific session capture: generated explicit session IDs for Claude/Gemini, Codex `/status` session detection, stale-resume fallback, and safeguards against PTY/headless session mix-ups.
+- **Headless runtime session metadata** for Claude and Codex app sessions, including provider session/thread recording and guarded native-resume handling where supported.
+
+### Changed
+- **Actor terminal connection handling** was extracted into a reusable hook, reducing AgentTab complexity and making PTY attach, reconnect, terminal signals, and runtime transitions easier to maintain.
+- **Runtime state synchronization in Web** now uses one unified actor snapshot path for ordinary actors and built-in runtime actors, while `actor.activity` updates merge into both stores. Runtime dock state is less likely to appear stale until a manual page refresh.
+- **Composer and Voice Secretary UI behavior** were tightened around cross-group recipients, mobile/voice layout, live transcript preview behavior, and attachment/action plumbing.
+- **MCP install and runtime startup checks** were hardened so already-installed runtime MCP configurations are handled more predictably during actor startup.
+
+### Fixed
+- Fixed runtime dock desynchronization where an actor could be running in the daemon but still appear stopped in the Web UI until refresh.
+- Fixed noisy terminal attach loops when switching between PTY and headless actors, including repeated `terminal attach is only available for PTY actors` messages.
+- Fixed stale or rejected runtime resume metadata so failed provider resume attempts fall back to fresh starts and do not poison subsequent launches.
+- Fixed Copy Groups export so runtime session metadata remains excluded from copied group packages.
+- Fixed built-in assistant startup/profile synchronization so PET and Voice Secretary use their own configuration instead of inheriting foreman runtime details.
+
 ## [0.4.15] — 2026-05-10
 
 ### Added

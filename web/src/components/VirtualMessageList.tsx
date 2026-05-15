@@ -14,6 +14,9 @@ import {
   getAutoFollowTrigger,
   getStableMessageKey,
   shouldAutoScrollToBottom,
+  shouldDetachChatFollowOnScroll,
+  shouldNotifyScrollChange,
+  shouldRunScheduledBottomScroll,
   shouldUseVirtualizedMessageList,
 } from "./virtualMessageListHelpers";
 
@@ -383,10 +386,18 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
   }, []);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((opts?: { force?: boolean }) => {
     const el = parentRef.current;
     if (!el || displayMessages.length <= 0) return;
     window.requestAnimationFrame(() => {
+      if (!shouldRunScheduledBottomScroll({
+        followMode: followModeRef.current,
+        isAtBottom: isAtBottomRef.current,
+        forceStickToBottom: forceStickToBottomUntilRef.current > performance.now(),
+        explicitForce: !!opts?.force,
+      })) {
+        return;
+      }
       el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
     });
   }, [displayMessages.length]);
@@ -409,7 +420,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     scrollRafRef.current = window.requestAnimationFrame(() => {
       scrollRafRef.current = null;
       if (!shouldForceStickToBottom()) return;
-      scrollToBottom();
+      scrollToBottom({ force: true });
     });
   }, [cancelScheduledScroll, scrollToBottom, shouldForceStickToBottom]);
 
@@ -493,7 +504,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     // to avoid triggering store updates and re-renders during inertia scrolling.
     const wasAtBottom = isAtBottomRef.current;
     setAtBottom(atBottom);
-    if (atBottom !== wasAtBottom) {
+    if (shouldNotifyScrollChange({ wasAtBottom, atBottom, showScrollButton, chatUnreadCount })) {
       onScrollChange?.(atBottom);
     }
 
@@ -540,7 +551,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
       onLoadMore();
     }
     });
-  }, [cancelScheduledScroll, checkIsAtBottom, getAnchorSnapshot, getCurrentContentSize, hasMoreHistory, isLoadingHistory, onLoadMore, onScrollChange, onScrollSnapshot, setAtBottom, setFollowMode]);
+  }, [cancelScheduledScroll, chatUnreadCount, checkIsAtBottom, getAnchorSnapshot, getCurrentContentSize, hasMoreHistory, isLoadingHistory, onLoadMore, onScrollChange, onScrollSnapshot, setAtBottom, setFollowMode, showScrollButton]);
 
   // When switching views (group or window-mode), reset internal scroll bookkeeping.
   //
@@ -568,8 +579,9 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     latestSnapshotRef.current = null;
 
     scrollTokenRef.current += 1;
-    setAtBottom(true);
-    setFollowMode(initialScrollAnchorId ? "detached" : "follow");
+    const hasInitialJumpTarget = !!(initialScrollAnchorId || initialScrollTargetId);
+    setAtBottom(!hasInitialJumpTarget);
+    setFollowMode(hasInitialJumpTarget ? "detached" : "follow");
     didInitialScrollRef.current = false;
     topLoadArmedRef.current = true;
     cancelScheduledScroll();
@@ -594,7 +606,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     if (shouldVirtualize) {
       virtualizer.measure();
     }
-  }, [displayMessages, initialScrollAnchorId, resetKey, cancelScheduledScroll, onScrollSnapshot, setAtBottom, setFollowMode, shouldVirtualize, virtualizer]);
+  }, [displayMessages, initialScrollAnchorId, initialScrollTargetId, resetKey, cancelScheduledScroll, onScrollSnapshot, setAtBottom, setFollowMode, shouldVirtualize, virtualizer]);
 
   const tailMutationSignature = useMemo(() => {
     const lastMessage = displayMessages[displayMessages.length - 1];
@@ -976,7 +988,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
               className={`fixed bottom-36 right-6 p-3 rounded-full shadow-xl transition-all z-10 ${isDark
                 ? "bg-slate-800 text-white hover:bg-slate-700 border border-slate-700"
                 : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
-                }`}
+              }`}
               onClick={() => {
                 setAtBottom(true);
                 setFollowMode("follow");

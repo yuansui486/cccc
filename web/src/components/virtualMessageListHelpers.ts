@@ -65,6 +65,16 @@ export function shouldDetachChatFollowOnScroll(input: {
   return input.currentTop < input.previousTop - 4;
 }
 
+export function shouldNotifyScrollChange(input: {
+  wasAtBottom: boolean;
+  atBottom: boolean;
+  showScrollButton: boolean;
+  chatUnreadCount: number;
+}): boolean {
+  if (input.atBottom && (input.showScrollButton || input.chatUnreadCount > 0)) return true;
+  return input.atBottom !== input.wasAtBottom;
+}
+
 export function shouldAutoScrollToBottom(input: {
   followMode: "follow" | "detached";
   isAtBottom: boolean;
@@ -72,6 +82,20 @@ export function shouldAutoScrollToBottom(input: {
 }): boolean {
   if (input.forceStickToBottom) return true;
   return input.followMode === "follow" && input.isAtBottom;
+}
+
+export function shouldRunScheduledBottomScroll(input: {
+  followMode: "follow" | "detached";
+  isAtBottom: boolean;
+  forceStickToBottom: boolean;
+  explicitForce: boolean;
+}): boolean {
+  if (input.explicitForce) return true;
+  return shouldAutoScrollToBottom({
+    followMode: input.followMode,
+    isAtBottom: input.isAtBottom,
+    forceStickToBottom: input.forceStickToBottom,
+  });
 }
 
 export function getStableMessageKey(message: LedgerEvent | undefined, index: number): string | number {

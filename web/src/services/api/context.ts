@@ -574,7 +574,7 @@ export async function sendMessage(
     form.append("reply_required", replyRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
-    for (const file of files) form.append("files", file);
+    for (const file of files) form.append("files", file, file.name);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/send_upload`, form);
   }
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/send`, {
@@ -588,6 +588,44 @@ export async function sendMessage(
       reply_required: replyRequired,
       client_id: clientId,
       refs: refs || [],
+    }),
+  });
+}
+
+export type TrackedSendMessagePayload = {
+  title: string;
+  text: string;
+  to?: string[];
+  outcome?: string;
+  checklist?: Array<Record<string, unknown>>;
+  assignee?: string;
+  waiting_on?: "none" | "user" | "actor" | "external" | string;
+  handoff_to?: string;
+  notes?: string;
+  priority?: "normal" | "attention";
+  reply_required?: boolean;
+  idempotency_key?: string;
+  refs?: MessageRef[];
+};
+
+export async function trackedSendMessage(groupId: string, payload: TrackedSendMessagePayload) {
+  return apiJson<{ task_id?: string }>(`/api/v1/groups/${encodeURIComponent(groupId)}/tracked_send`, {
+    method: "POST",
+    body: JSON.stringify({
+      title: payload.title,
+      text: payload.text,
+      by: "user",
+      to: payload.to || [],
+      outcome: payload.outcome || "",
+      checklist: payload.checklist || [],
+      assignee: payload.assignee || "",
+      waiting_on: payload.waiting_on || "actor",
+      handoff_to: payload.handoff_to || "",
+      notes: payload.notes || "",
+      priority: payload.priority || "normal",
+      reply_required: payload.reply_required ?? true,
+      idempotency_key: payload.idempotency_key || "",
+      refs: payload.refs || [],
     }),
   });
 }
@@ -613,7 +651,7 @@ export async function replyMessage(
     form.append("reply_required", replyRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
-    for (const file of files) form.append("files", file);
+    for (const file of files) form.append("files", file, file.name);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/reply_upload`, form);
   }
   return apiJson(`/api/v1/groups/${encodeURIComponent(groupId)}/reply`, {

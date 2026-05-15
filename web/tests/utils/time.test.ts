@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { formatMessageTimestamp } from "../../src/utils/time";
 
 function pad2(value: number): string {
@@ -22,33 +22,40 @@ function expectedMessageTimestamp(date: Date, now: Date): string {
 }
 
 describe("formatMessageTimestamp", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("formats messages from today as hour and minute", () => {
     const now = new Date("2026-03-23T12:34:56Z");
-    vi.setSystemTime(now);
-    const value = new Date(now.getTime() - 90 * 60 * 1000);
-    expect(formatMessageTimestamp(value.toISOString())).toBe(expectedMessageTimestamp(value, now));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const value = new Date(now.getTime() - 90 * 60 * 1000);
+      expect(formatMessageTimestamp(value.toISOString())).toBe(expectedMessageTimestamp(value, now));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("formats messages from the same year with month, day, and time", () => {
     const now = new Date("2026-03-23T12:34:56Z");
-    vi.setSystemTime(now);
-    const value = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
-    expect(formatMessageTimestamp(value.toISOString())).toBe(expectedMessageTimestamp(value, now));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const value = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+      expect(formatMessageTimestamp(value.toISOString())).toBe(expectedMessageTimestamp(value, now));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("formats messages from prior years with full date and time", () => {
     const now = new Date("2026-03-23T12:34:56Z");
-    vi.setSystemTime(now);
-    const value = new Date("2025-11-18T08:09:00Z");
-    expect(formatMessageTimestamp(value.toISOString())).toBe(expectedMessageTimestamp(value, now));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const value = new Date("2025-11-18T08:09:00Z");
+      expect(formatMessageTimestamp(value.toISOString())).toBe(expectedMessageTimestamp(value, now));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("passes through invalid timestamps", () => {

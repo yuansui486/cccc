@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useMemo } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
 import { DropOverlay } from "./components/DropOverlay";
 const AppModals = lazy(() => import("./components/AppModals").then((m) => ({ default: m.AppModals })));
 import { DoneHubLoginGate } from "./components/DoneHubLoginGate";
@@ -24,6 +24,7 @@ import { useAppTabState } from "./hooks/useAppTabState";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
 import { buildReplyComposerState } from "./utils/chatReply";
+import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
 import {
   useGroupStore,
   useUIStore,
@@ -47,12 +48,14 @@ export default function App() {
   const selectedGroupId = useGroupStore((state) => state.selectedGroupId);
   const groupDoc = useGroupStore((state) => state.groupDoc);
   const actors = useGroupStore((state) => state.actors);
+  const internalRuntimeActorsByGroup = useGroupStore((state) => state.internalRuntimeActorsByGroup);
   const groupContext = useGroupStore((state) => state.groupContext);
   const groupSettings = useGroupStore((state) => state.groupSettings);
   const selectedGroupActorsHydrating = useGroupStore((state) => state.selectedGroupActorsHydrating);
   const setSelectedGroupId = useGroupStore((state) => state.setSelectedGroupId);
   const refreshGroups = useGroupStore((state) => state.refreshGroups);
   const refreshActors = useGroupStore((state) => state.refreshActors);
+  const refreshInternalRuntimeActors = useGroupStore((state) => state.refreshInternalRuntimeActors);
   const loadGroup = useGroupStore((state) => state.loadGroup);
   const warmGroup = useGroupStore((state) => state.warmGroup);
   const openChatWindow = useGroupStore((state) => state.openChatWindow);
@@ -89,6 +92,8 @@ export default function App() {
   const openModal = useModalStore((s) => s.openModal);
   const modalFlags = useModalStore((s) => s.modals);
   const editingActor = useModalStore((s) => s.editingActor);
+  const peerRuntimeVisibility = useObservabilityStore((state) => state.peerRuntimeVisibility);
+  const petRuntimeVisibility = useObservabilityStore((state) => state.petRuntimeVisibility);
 
   const doneHubStatus = useDoneHubStore((state) => state.status);
   const doneHubSession = useDoneHubStore((state) => state.session);
@@ -131,6 +136,34 @@ export default function App() {
   const [showMentionMenu, setShowMentionMenu] = React.useState(false);
   const [_mentionFilter, setMentionFilter] = React.useState("");
   const [mentionSelectedIndex, setMentionSelectedIndex] = React.useState(0);
+  const internalRuntimeActors = useMemo(
+    () => internalRuntimeActorsByGroup[String(selectedGroupId || "").trim()] || [],
+    [internalRuntimeActorsByGroup, selectedGroupId]
+  );
+  const refreshRuntimeActors = useCallback(
+    async (groupIdArg?: string, opts?: { includeUnread?: boolean }) => {
+      const gid = String(groupIdArg || selectedGroupId || "").trim();
+      if (!gid) return;
+      await refreshActors(gid, opts);
+    },
+    [refreshActors, selectedGroupId],
+  );
+  const visibleRuntimeActors = useMemo(
+    () =>
+      filterVisibleRuntimeActors(
+        [
+          ...actors,
+          ...internalRuntimeActors.filter(
+            (actor) => !actors.some((existing) => String(existing.id || "") === String(actor.id || ""))
+          ),
+        ],
+        {
+          peerRuntimeVisibility,
+          petRuntimeVisibility,
+        }
+      ),
+    [actors, internalRuntimeActors, peerRuntimeVisibility, petRuntimeVisibility]
+  );
 
   useEffect(() => {
     const handlePageHide = () => clearAllOutbox();
@@ -155,7 +188,7 @@ export default function App() {
     handleTabChange,
   } = useAppTabState({
     activeTab,
-    actors,
+    runtimeActors: visibleRuntimeActors,
     selectedGroupId,
     chatSessionAtBottom,
     isSmallScreen,
@@ -163,6 +196,24 @@ export default function App() {
     setShowScrollButton,
     setChatUnreadCount,
   });
+
+  React.useEffect(() => {
+    if (activeTab === "chat") return;
+    if (visibleRuntimeActors.some((actor) => String(actor.id || "") === activeTab)) return;
+    setActiveTab("chat");
+  }, [activeTab, setActiveTab, visibleRuntimeActors]);
+
+  React.useEffect(() => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid || petRuntimeVisibility !== "visible") {
+      return undefined;
+    }
+    void refreshInternalRuntimeActors(gid);
+    const interval = window.setInterval(() => {
+      void refreshInternalRuntimeActors(gid);
+    }, 60000);
+    return () => window.clearInterval(interval);
+  }, [selectedGroupId, petRuntimeVisibility, refreshInternalRuntimeActors]);
 
   const { connectStream, fetchContext, cleanup: cleanupSSE } = useSSE({
     activeTabRef,
@@ -213,7 +264,7 @@ export default function App() {
 
   useGlobalEvents({
     refreshGroups,
-    refreshActors,
+    refreshActors: refreshRuntimeActors,
     selectedGroupId,
   });
 
@@ -323,6 +374,7 @@ export default function App() {
         groupDoc={groupDoc}
         groupContext={groupContext}
         actors={actors}
+        runtimeActors={visibleRuntimeActors}
         recipientActors={recipientActors}
         recipientActorsBusy={recipientActorsBusy}
         destGroupScopeLabel={destGroupScopeLabel}
@@ -412,7 +464,7 @@ export default function App() {
         onEditActor={editActor}
         onRemoveActor={removeActor}
         onOpenActorInbox={openActorInbox}
-        onRefreshActors={() => void refreshActors()}
+        onRefreshActors={() => void refreshRuntimeActors(selectedGroupId)}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       />

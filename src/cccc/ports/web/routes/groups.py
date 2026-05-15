@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import mimetypes
@@ -17,11 +18,16 @@ from ....contracts.v1.automation import AutomationRuleSet
 from ....daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
 from ....daemon.server import get_daemon_endpoint
 from ....daemon.group.presentation_ops import load_presentation_snapshot, resolve_workspace_asset_path
+from ....daemon.ops.group_copy_ops import (
+    group_copy_export as run_group_copy_export,
+    group_copy_import as run_group_copy_import,
+    group_copy_preview_import as run_group_copy_preview_import,
+)
 from ....daemon.context.context_ops import _get_summary_context_fast, _rebuild_summary_snapshot
 from ....runners import headless as headless_runner
 from ....runners import pty as pty_runner
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
-from ....kernel.headless_events import headless_events_path
+from ....kernel.headless_events import headless_events_path, read_headless_replay_events
 from ....kernel.group import get_group_state, load_group, normalize_group_capability_defaults
 from ....kernel.context import ContextStorage
 from ....kernel.query_projections import get_groups_projection
@@ -93,6 +99,21 @@ _CONTEXT_INFLIGHT: Dict[str, asyncio.Future[Dict[str, Any]]] = {}
 _CONTEXT_GENERATION: Dict[str, int] = {}
 _CONTEXT_LOCK = asyncio.Lock()
 logger = logging.getLogger("cccc.web.groups")
+WEB_MAX_GROUP_COPY_PACKAGE_BYTES = 100 * 1024 * 1024
+
+
+def _response_to_dict(resp: Any) -> Dict[str, Any]:
+    if isinstance(resp, dict):
+        return resp
+    try:
+        model_dump = getattr(resp, "model_dump", None)
+        if callable(model_dump):
+            out = model_dump()
+            if isinstance(out, dict):
+                return out
+    except Exception:
+        pass
+    return {"ok": False, "error": {"code": "internal_error", "message": f"invalid response type: {type(resp).__name__}"}}
 
 
 def _actor_running_local(group_id: str, actor: Any) -> bool:
@@ -230,54 +251,8 @@ def _read_group_local(group_id: str) -> Dict[str, Any]:
     return {"ok": True, "result": {"group": doc}}
 
 
-def _read_active_headless_replay_lines(group: Any, *, limit: int = 400) -> list[str]:
-    path = headless_events_path(group.path)
-    try:
-      raw_lines = read_last_lines(path, max(50, int(limit or 400)))
-    except Exception:
-      return []
-    indexed: list[tuple[int, str, str, str]] = []
-    for idx, raw in enumerate(raw_lines):
-      try:
-        payload = json.loads(raw)
-      except Exception:
-        continue
-      if not isinstance(payload, dict):
-        continue
-      actor_id = str(payload.get("actor_id") or "").strip()
-      event_type = str(payload.get("type") or "").strip()
-      if not actor_id or not event_type:
-        continue
-      indexed.append((idx, raw, actor_id, event_type))
-
-    active_start_by_actor: dict[str, int] = {}
-    for idx, _raw, actor_id, event_type in indexed:
-      if event_type == "headless.turn.started":
-        active_start_by_actor[actor_id] = idx
-      elif event_type in {"headless.turn.completed", "headless.turn.failed"}:
-        active_start_by_actor.pop(actor_id, None)
-
-    if not active_start_by_actor:
-      return []
-
-    replay_lines: list[str] = []
-    for idx, raw, actor_id, _event_type in indexed:
-      start_idx = active_start_by_actor.get(actor_id)
-      if start_idx is None or idx < start_idx:
-        continue
-      replay_lines.append(raw)
-    return replay_lines
-
-
 def _read_active_headless_snapshot(group: Any, *, limit: int = 400) -> Dict[str, Any]:
-    events: list[Dict[str, Any]] = []
-    for raw in _read_active_headless_replay_lines(group, limit=limit):
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            continue
-        if isinstance(payload, dict):
-            events.append(payload)
+    events = read_headless_replay_events(group.path, limit=limit)
     return {
         "group_id": str(getattr(group, "group_id", "") or "").strip(),
         "events": events,
@@ -653,6 +628,37 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def group_create(req: CreateGroupRequest) -> Dict[str, Any]:
         return await ctx.daemon({"op": "group_create", "args": {"title": req.title, "topic": req.topic, "by": req.by}})
 
+    @global_router.post("/groups/copy/preview_import", dependencies=[Depends(require_admin)])
+    async def group_copy_preview_import(file: UploadFile = File(...)) -> Dict[str, Any]:
+        raw = await file.read()
+        if len(raw) > WEB_MAX_GROUP_COPY_PACKAGE_BYTES:
+            raise HTTPException(status_code=413, detail={"code": "copy_package_too_large", "message": "group copy too large"})
+        package_b64 = base64.b64encode(raw).decode("ascii")
+        resp = await run_in_threadpool(run_group_copy_preview_import, {"package_b64": package_b64})
+        return _response_to_dict(resp)
+
+    @global_router.post("/groups/copy/import", dependencies=[Depends(require_admin)])
+    async def group_copy_import(
+        workspace_root: str = Form(""),
+        title: str = Form(""),
+        by: str = Form("user"),
+        file: UploadFile = File(...),
+    ) -> Dict[str, Any]:
+        raw = await file.read()
+        if len(raw) > WEB_MAX_GROUP_COPY_PACKAGE_BYTES:
+            raise HTTPException(status_code=413, detail={"code": "copy_package_too_large", "message": "group copy too large"})
+        package_b64 = base64.b64encode(raw).decode("ascii")
+        resp = await run_in_threadpool(
+            run_group_copy_import,
+            {
+                "package_b64": package_b64,
+                "workspace_root": workspace_root,
+                "title": title,
+                "by": by,
+            }
+        )
+        return _response_to_dict(resp)
+
     @global_router.post("/groups/from_template", dependencies=[Depends(require_admin)])
     async def group_create_from_template(
         path: str = Form(...),
@@ -797,6 +803,23 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if detail_mode == "summary":
             return await run_in_threadpool(_read_context_summary_local, gid)
         return await _deduped_context_get(gid, detail_mode, _fetch)
+
+    @group_router.get("/copy/export", response_model=None)
+    async def group_copy_export(group_id: str, request: Request) -> Any:
+        require_admin(request)
+        resp_obj = await run_in_threadpool(run_group_copy_export, {"group_id": group_id, "by": "user"})
+        resp = _response_to_dict(resp_obj)
+        if not bool(resp.get("ok")):
+            return resp
+        result = resp.get("result") if isinstance(resp.get("result"), dict) else {}
+        package_b64 = str((result or {}).get("package_b64") or "")
+        try:
+            package_bytes = base64.b64decode(package_b64.encode("ascii"), validate=True)
+        except Exception:
+            return {"ok": False, "error": {"code": "copy_export_invalid", "message": "daemon returned invalid copy package"}}
+        filename = str((result or {}).get("filename") or f"cccc-group--{group_id}.zip")
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        return StreamingResponse(iter([package_bytes]), media_type="application/zip", headers=headers)
 
     @group_router.get("/template/export")
     async def group_template_export(group_id: str) -> Dict[str, Any]:
