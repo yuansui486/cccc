@@ -6,6 +6,18 @@ from unittest.mock import patch
 
 
 class TestActorRuntimeOps(unittest.TestCase):
+    def test_model_from_runtime_command_reads_env_model_after_command(self) -> None:
+        from cccc.daemon.actors.actor_runtime_ops import model_from_runtime_command
+
+        self.assertEqual(
+            model_from_runtime_command([], {"ANTHROPIC_MODEL": "deepseek-v4-pro[1m]"}),
+            "deepseek-v4-pro[1m]",
+        )
+        self.assertEqual(
+            model_from_runtime_command(["codex", "-m", "gpt-5.5"], {"ANTHROPIC_MODEL": "ignored"}),
+            "gpt-5.5",
+        )
+
     def test_web_model_actor_start_schedules_chatgpt_browser_warmup(self) -> None:
         from cccc.daemon.actors import actor_runtime_ops
 

@@ -47,6 +47,8 @@
   "unicodeSupport": "（支持 Unicode，包括中文）",
   "leaveEmptyToUse": "留空则使用：",
   "aiRuntime": "AI 运行时",
+  "runtimePresets": "模型与 CLI 预设",
+  "runtimeRawChoices": "基础 CLI 运行时",
   "notInstalled": "（未安装）",
   "manualMcpRequired": "需要手动安装 MCP",
   "customCommandHint": "请在 <1>高级选项 → 命令覆盖</1> 中提供运行时命令。",

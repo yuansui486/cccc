@@ -11,6 +11,16 @@ import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import {
+  RUNTIME_PRESETS,
+  commandForRuntimePreset,
+  mergePresetSecrets,
+  mergePresetUnsetKeys,
+  runtimePresetById,
+  runtimePresetIdFor,
+  type RuntimePresetId,
+} from "../../utils/runtimePresets";
+import { getCurrentDoneHubAccessToken } from "../../stores/useDoneHubStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -171,6 +181,7 @@ export function EditActorModal({
   const [avatarBusy, setAvatarBusy] = useState<"" | "upload" | "clear">("");
   const [secretsPrimed, setSecretsPrimed] = useState(false);
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
+  const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const secretFetchSeqRef = useRef(0);
   const modalStateRef = useRef<{
     groupId: string;
@@ -332,6 +343,7 @@ export function EditActorModal({
     setSecretsClearAll(false);
     setSecretKeys([]);
     setSecretSource("none");
+    setSelectedRuntimePresetId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, actorId, isOpen, linkedProfileId, linkedProfileOwner, linkedProfileScope]);
 
@@ -359,6 +371,11 @@ export function EditActorModal({
   const rtInfo = runtimes.find((r) => r.name === runtime);
   const available = rtInfo?.available ?? false;
   const defaultCommand = rtInfo?.recommended_command || "";
+  const derivedRuntimePresetId = runtimePresetIdFor(runtime, command);
+  const effectiveRuntimePresetId =
+    selectedRuntimePresetId && runtimePresetById(selectedRuntimePresetId)?.runtime === runtime
+      ? selectedRuntimePresetId
+      : derivedRuntimePresetId;
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
 
   const convertToCustomDraft = () => {
@@ -699,16 +716,39 @@ export function EditActorModal({
                       <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("runtime")}</label>
                       <select
                         className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
-                        value={runtime}
+                        value={effectiveRuntimePresetId || runtime}
                         onChange={(e) => {
-                          const next = e.target.value as SupportedRuntime;
+                          const raw = e.target.value;
+                          const preset = runtimePresetById(raw);
+                          const next = (preset?.runtime || raw) as SupportedRuntime;
                           onChangeRuntime(next);
                           if (!supportsStandardWebHeadlessRuntime(next)) onChangeRunner("pty");
                           const nextInfo = runtimes.find((r) => r.name === next);
                           const nextDefault = String(nextInfo?.recommended_command || "").trim();
-                          onChangeCommand(nextDefault);
+                          onChangeCommand(preset ? commandForRuntimePreset(preset, nextInfo) : nextDefault);
+                          setSelectedRuntimePresetId(preset?.id || "");
+                          if (preset) {
+                            setSecretsSetText((current) => mergePresetSecrets(current, preset, getCurrentDoneHubAccessToken()));
+                            setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
+                          }
+                          if (preset?.envPrivate) {
+                            setSecretsPrimed(true);
+                          }
                         }}
                       >
+                        <optgroup label={t("runtimePresets")}>
+                          {RUNTIME_PRESETS.map((preset) => {
+                            const rtInfoLocal = runtimes.find((r) => r.name === preset.runtime);
+                            const runtimeAvailable = rtInfoLocal?.available ?? false;
+                            return (
+                              <option key={preset.id} value={preset.id} disabled={!runtimeAvailable}>
+                                {preset.label}
+                                {!runtimeAvailable ? ` ${t("notInstalled")}` : ""}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                        <optgroup label={t("runtimeRawChoices")}>
                         {SUPPORTED_RUNTIMES.map((rt) => {
                           const info = RUNTIME_INFO[rt];
                           const rtInfoLocal = runtimes.find((r) => r.name === rt);
@@ -721,6 +761,7 @@ export function EditActorModal({
                             </option>
                           );
                         })}
+                        </optgroup>
                       </select>
                     </div>
 
@@ -761,7 +802,10 @@ export function EditActorModal({
                       <Input
                         className="font-mono"
                         value={command}
-                        onChange={(e) => onChangeCommand(e.target.value)}
+                        onChange={(e) => {
+                          onChangeCommand(e.target.value);
+                          setSelectedRuntimePresetId("");
+                        }}
                         placeholder={defaultCommand || t("enterCommand")}
                       />
                       {isRunning ? <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("runtimeChangesNote")}</div> : null}

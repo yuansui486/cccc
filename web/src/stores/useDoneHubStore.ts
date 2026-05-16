@@ -51,6 +51,10 @@ type DoneHubState = {
   clearError: () => void;
 };
 
+export function getCurrentDoneHubAccessToken(): string {
+  return String(useDoneHubStore.getState().session?.access_token || "").trim();
+}
+
 function loadStoredSession(): DoneHubSession | null {
   if (typeof window === "undefined") return null;
   try {
