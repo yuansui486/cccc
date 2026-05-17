@@ -17,17 +17,14 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
   const connect = useDoneHubStore((state) => state.connect);
   const clearError = useDoneHubStore((state) => state.clearError);
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [rememberPassword, setRememberPassword] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
+  const [rememberPasswordDraft, setRememberPasswordDraft] = useState<boolean | null>(null);
   const appBrandName = getAppBrandName();
   const appLogoPath = getAppLogoPath();
-
-  useEffect(() => {
-    setUsername(savedLogin.username || "");
-    setPassword(savedLogin.password || "");
-    setRememberPassword(savedLogin.remember_password || Boolean(savedLogin.password));
-  }, [savedLogin.password, savedLogin.remember_password, savedLogin.username]);
+  const username = usernameDraft ?? savedLogin.username ?? "";
+  const password = passwordDraft ?? savedLogin.password ?? "";
+  const rememberPassword = rememberPasswordDraft ?? (savedLogin.remember_password || Boolean(savedLogin.password));
 
   useEffect(() => {
     clearError();
@@ -84,7 +81,7 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
                   </label>
                   <input
                     value={username}
-                    onChange={(event) => setUsername(event.target.value)}
+                    onChange={(event) => setUsernameDraft(event.target.value)}
                     placeholder={t("doneHub.usernamePlaceholder")}
                     className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
                     autoComplete="username"
@@ -98,7 +95,7 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
                   <input
                     type="password"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => setPasswordDraft(event.target.value)}
                     placeholder={t("doneHub.passwordPlaceholder")}
                     className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
                     autoComplete="current-password"
@@ -109,7 +106,7 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
                   <input
                     type="checkbox"
                     checked={rememberPassword}
-                    onChange={(event) => setRememberPassword(event.target.checked)}
+                    onChange={(event) => setRememberPasswordDraft(event.target.checked)}
                     className="h-4 w-4 rounded border border-[var(--glass-border-subtle)]"
                   />
                   <span>{t("doneHub.rememberPassword")}</span>

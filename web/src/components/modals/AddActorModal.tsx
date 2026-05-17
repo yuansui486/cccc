@@ -178,13 +178,6 @@ export function AddActorModal({
 
   const { modalRef } = useModalA11y(isOpen, handleClose);
 
-  useEffect(() => {
-    if (!isOpen) {
-      setAvatarFile(null);
-      setSelectedRuntimePresetId("");
-    }
-  }, [isOpen]);
-
   if (!isOpen) return null;
 
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
@@ -220,7 +213,10 @@ export function AddActorModal({
   const handleSubmit = async () => {
     try {
       const ok = await Promise.resolve(onAddActor(avatarFile));
-      if (ok) setAvatarFile(null);
+      if (ok) {
+        setAvatarFile(null);
+        setSelectedRuntimePresetId("");
+      }
     } catch (e) {
       setAddActorError(e instanceof Error ? e.message : t("failedToAddAgent"));
     }
