@@ -44,6 +44,24 @@ describe("runtime presets", () => {
     expect(next).not.toContain("一号同事登陆后得到的key");
   });
 
+  it("adds Kimi model env and preserves existing key without a DoneHub token", () => {
+    const kimi = runtimePresetById("model:kimi-k2.6-kimi");
+    expect(kimi).toBeTruthy();
+    const next = mergePresetSecrets('KIMI_API_KEY="real-token"', kimi!, "");
+    expect(next).toContain('KIMI_API_KEY="real-token"');
+    expect(next).toContain('KIMI_BASE_URL="https://peer.shierkeji.com/v1"');
+    expect(next).toContain('KIMI_MODEL_NAME="kimi-k2.6"');
+    expect(next).not.toContain("一号同事的key");
+  });
+
+  it("uses the DoneHub token for Kimi API key when available", () => {
+    const kimi = runtimePresetById("model:kimi-k2.6-kimi");
+    expect(kimi).toBeTruthy();
+    const next = mergePresetSecrets('KIMI_API_KEY="old-token"', kimi!, "done-hub-key");
+    expect(next).toContain('KIMI_API_KEY="done-hub-key"');
+    expect(next).not.toContain("old-token");
+  });
+
   it("adds unset keys when switching to a smaller Claude preset", () => {
     const doubao = runtimePresetById("model:doubao-code-claude");
     expect(doubao).toBeTruthy();

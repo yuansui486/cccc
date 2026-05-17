@@ -14,6 +14,10 @@ class TestActorRuntimeOps(unittest.TestCase):
             "deepseek-v4-pro[1m]",
         )
         self.assertEqual(
+            model_from_runtime_command([], {"KIMI_MODEL_NAME": "kimi-k2.6"}),
+            "kimi-k2.6",
+        )
+        self.assertEqual(
             model_from_runtime_command(["codex", "-m", "gpt-5.5"], {"ANTHROPIC_MODEL": "ignored"}),
             "gpt-5.5",
         )

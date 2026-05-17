@@ -62,7 +62,7 @@ def model_from_runtime_command(command: List[str], env: Optional[Dict[str, Any]]
         if item.startswith("--model="):
             return item.split("=", 1)[1].strip()
     env_map = env if isinstance(env, dict) else {}
-    for key in ("ANTHROPIC_MODEL", "OPENAI_MODEL", "CODEX_MODEL"):
+    for key in ("ANTHROPIC_MODEL", "OPENAI_MODEL", "CODEX_MODEL", "KIMI_MODEL_NAME"):
         value = str(env_map.get(key) or "").strip()
         if value:
             return value

@@ -6,7 +6,8 @@ export type RuntimePresetId =
   | "model:deepseek-v4-pro-claude"
   | "model:doubao-code-claude"
   | "model:gpt-5.4-codex"
-  | "model:gpt-5.5-codex";
+  | "model:gpt-5.5-codex"
+  | "model:kimi-k2.6-kimi";
 
 export type RuntimePreset = {
   id: RuntimePresetId;
@@ -68,6 +69,16 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     runtime: "codex",
     model: "gpt-5.5",
   },
+  {
+    id: "model:kimi-k2.6-kimi",
+    label: "kimi-k2.6（kimi）",
+    runtime: "kimi",
+    model: "kimi-k2.6",
+    envPrivate: {
+      KIMI_BASE_URL: "https://peer.shierkeji.com/v1",
+      KIMI_MODEL_NAME: "kimi-k2.6",
+    },
+  },
 ];
 
 export function runtimePresetById(id: string): RuntimePreset | null {
@@ -108,10 +119,11 @@ export function secretsTextForRuntimePreset(preset: RuntimePreset, authToken?: s
   for (const [key, value] of Object.entries(env)) {
     lines.push(`${key}=${quoteEnvValue(value)}`);
   }
-  if (preset.runtime === "claude" && preset.model) {
+  const authKey = authSecretKeyForRuntimePreset(preset);
+  if (authKey) {
     const token = String(authToken || "").trim();
     if (token) {
-      lines.splice(1, 0, `ANTHROPIC_AUTH_TOKEN=${quoteEnvValue(token)}`);
+      lines.splice(1, 0, `${authKey}=${quoteEnvValue(token)}`);
     }
   }
   return lines.join("\n");
@@ -121,13 +133,14 @@ export function mergePresetSecrets(existing: string, preset: RuntimePreset, auth
   const presetText = secretsTextForRuntimePreset(preset, authToken);
   const current = String(existing || "").trim();
   const presetKeys = knownPresetSecretKeysForRuntime(preset.runtime);
-  const shouldReplaceAuthToken = preset.runtime === "claude" && Boolean(String(authToken || "").trim());
+  const authKey = authSecretKeyForRuntimePreset(preset);
+  const shouldReplaceAuthToken = Boolean(authKey && String(authToken || "").trim());
   if (!current) return presetText;
   const kept = current
     .split("\n")
     .filter((line) => {
       const key = line.match(/^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=/i)?.[1];
-      if (key === "ANTHROPIC_AUTH_TOKEN" && !shouldReplaceAuthToken) return true;
+      if (authKey && key === authKey && !shouldReplaceAuthToken) return true;
       return !key || !presetKeys.has(key);
     })
     .join("\n")
@@ -139,7 +152,8 @@ export function mergePresetSecrets(existing: string, preset: RuntimePreset, auth
 export function mergePresetUnsetKeys(existing: string, preset: RuntimePreset): string {
   const current = String(existing || "").trim();
   const activeKeys = new Set(Object.keys(preset.envPrivate || {}));
-  if (preset.runtime === "claude" && preset.model) activeKeys.add("ANTHROPIC_AUTH_TOKEN");
+  const authKey = authSecretKeyForRuntimePreset(preset);
+  if (authKey) activeKeys.add(authKey);
   const keysToUnset = Array.from(knownPresetSecretKeysForRuntime(preset.runtime)).filter((key) => !activeKeys.has(key));
   if (!keysToUnset.length) return current;
   const seen = new Set<string>();
@@ -162,7 +176,15 @@ export function knownPresetSecretKeysForRuntime(runtime: string): Set<string> {
     for (const key of Object.keys(preset.envPrivate || {})) out.add(key);
   }
   if (runtime === "claude") out.add("ANTHROPIC_AUTH_TOKEN");
+  if (runtime === "kimi") out.add("KIMI_API_KEY");
   return out;
+}
+
+function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
+  if (!preset.model) return "";
+  if (preset.runtime === "claude") return "ANTHROPIC_AUTH_TOKEN";
+  if (preset.runtime === "kimi") return "KIMI_API_KEY";
+  return "";
 }
 
 function withCommandModel(command: string[], model: string): string[] {
