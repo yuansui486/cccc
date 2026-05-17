@@ -160,7 +160,6 @@ export function AddActorModal({
   onCancelAndReset,
 }: AddActorModalProps) {
   const { t } = useTranslation("actors");
-  const { modalRef } = useModalA11y(isOpen, onClose);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
@@ -170,6 +169,14 @@ export function AddActorModal({
       if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
     };
   }, [avatarPreviewUrl]);
+
+  const handleClose = () => {
+    setAvatarFile(null);
+    setSelectedRuntimePresetId("");
+    onClose();
+  };
+
+  const { modalRef } = useModalA11y(isOpen, handleClose);
 
   useEffect(() => {
     if (!isOpen) {
@@ -229,7 +236,7 @@ export function AddActorModal({
     <div
       className="fixed inset-0 backdrop-blur-sm flex items-stretch sm:items-start justify-center p-0 sm:p-6 z-50 animate-fade-in glass-overlay"
       onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
       role="dialog"
       aria-modal="true"

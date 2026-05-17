@@ -110,7 +110,9 @@ export function secretsTextForRuntimePreset(preset: RuntimePreset, authToken?: s
   }
   if (preset.runtime === "claude" && preset.model) {
     const token = String(authToken || "").trim();
-    lines.splice(1, 0, `ANTHROPIC_AUTH_TOKEN=${quoteEnvValue(token || "一号同事登陆后得到的key")}`);
+    if (token) {
+      lines.splice(1, 0, `ANTHROPIC_AUTH_TOKEN=${quoteEnvValue(token)}`);
+    }
   }
   return lines.join("\n");
 }
@@ -119,11 +121,13 @@ export function mergePresetSecrets(existing: string, preset: RuntimePreset, auth
   const presetText = secretsTextForRuntimePreset(preset, authToken);
   const current = String(existing || "").trim();
   const presetKeys = knownPresetSecretKeysForRuntime(preset.runtime);
+  const shouldReplaceAuthToken = preset.runtime === "claude" && Boolean(String(authToken || "").trim());
   if (!current) return presetText;
   const kept = current
     .split("\n")
     .filter((line) => {
       const key = line.match(/^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=/i)?.[1];
+      if (key === "ANTHROPIC_AUTH_TOKEN" && !shouldReplaceAuthToken) return true;
       return !key || !presetKeys.has(key);
     })
     .join("\n")

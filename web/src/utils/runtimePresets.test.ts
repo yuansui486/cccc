@@ -36,6 +36,14 @@ describe("runtime presets", () => {
     expect(next).not.toContain("CLAUDE_CODE_EFFORT_LEVEL");
   });
 
+  it("does not overwrite Claude auth token with placeholder text", () => {
+    const doubao = runtimePresetById("model:doubao-code-claude");
+    expect(doubao).toBeTruthy();
+    const next = mergePresetSecrets('ANTHROPIC_AUTH_TOKEN="real-token"', doubao!, "");
+    expect(next).toContain('ANTHROPIC_AUTH_TOKEN="real-token"');
+    expect(next).not.toContain("一号同事登陆后得到的key");
+  });
+
   it("adds unset keys when switching to a smaller Claude preset", () => {
     const doubao = runtimePresetById("model:doubao-code-claude");
     expect(doubao).toBeTruthy();
