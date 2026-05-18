@@ -16,6 +16,15 @@ import { ActorAvatarField } from "../ActorAvatarField";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import {
+  RUNTIME_PRESETS,
+  commandForRuntimePreset,
+  mergePresetSecrets,
+  runtimePresetById,
+  runtimePresetIdFor,
+  type RuntimePresetId,
+} from "../../utils/runtimePresets";
+import { getCurrentDoneHubAccessToken } from "../../stores/useDoneHubStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -105,6 +114,9 @@ function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
   if (runtime === "gemini") {
     return 'GOOGLE_API_KEY="..."';
   }
+  if (runtime === "hermes") {
+    return "# Configure Hermes providers, OAuth, and tools in your Hermes profile.";
+  }
   return 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."';
 }
 
@@ -151,8 +163,8 @@ export function AddActorModal({
   onCancelAndReset,
 }: AddActorModalProps) {
   const { t } = useTranslation("actors");
-  const { modalRef } = useModalA11y(isOpen, onClose);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
   useEffect(() => {
@@ -161,11 +173,26 @@ export function AddActorModal({
     };
   }, [avatarPreviewUrl]);
 
+  const handleClose = () => {
+    setAvatarFile(null);
+    setSelectedRuntimePresetId("");
+    onClose();
+  };
+
+  const { modalRef } = useModalA11y(isOpen, handleClose);
+
   if (!isOpen) return null;
 
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
   const runtimeAvailable = runtimeInfo?.available ?? false;
   const defaultCommand = runtimeInfo?.recommended_command || "";
+  const derivedRuntimePresetId = runtimePresetIdFor(newActorRuntime, newActorUseDefaultCommand ? "" : newActorCommand);
+  const effectiveRuntimePresetId =
+    selectedRuntimePresetId && runtimePresetById(selectedRuntimePresetId)?.runtime === newActorRuntime
+      ? selectedRuntimePresetId
+      : derivedRuntimePresetId;
+  const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
+  const runtimeChoiceDescription = selectedRuntimePreset?.description || RUNTIME_INFO[newActorRuntime]?.desc || "";
   const newActorSecretsPlaceholder = secretsPlaceholderForRuntime(newActorRuntime);
   const selectedProfile = actorProfiles.find((item) => actorProfileIdentityKey(item) === String(newActorProfileId || "").trim());
   const selectedProfileRuntime = String(selectedProfile?.runtime || "").trim() as SupportedRuntime;
@@ -189,7 +216,10 @@ export function AddActorModal({
   const handleSubmit = async () => {
     try {
       const ok = await Promise.resolve(onAddActor(avatarFile));
-      if (ok) setAvatarFile(null);
+      if (ok) {
+        setAvatarFile(null);
+        setSelectedRuntimePresetId("");
+      }
     } catch (e) {
       setAddActorError(e instanceof Error ? e.message : t("failedToAddAgent"));
     }
@@ -197,6 +227,7 @@ export function AddActorModal({
 
   const handleCancel = () => {
     setAvatarFile(null);
+    setSelectedRuntimePresetId("");
     onCancelAndReset();
   };
 
@@ -204,7 +235,7 @@ export function AddActorModal({
     <div
       className="fixed inset-0 backdrop-blur-sm flex items-stretch sm:items-start justify-center p-0 sm:p-6 z-50 animate-fade-in glass-overlay"
       onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
       role="dialog"
       aria-modal="true"
@@ -387,15 +418,41 @@ export function AddActorModal({
                       <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("aiRuntime")}</label>
                       <select
                         className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
-                        value={newActorRuntime}
+                        value={effectiveRuntimePresetId || newActorRuntime}
                         onChange={(e) => {
-                          const next = e.target.value as SupportedRuntime;
+                          const raw = e.target.value;
+                          const preset = runtimePresetById(raw);
+                          const next = (preset?.runtime || raw) as SupportedRuntime;
+                          const nextRuntimeInfo = runtimes.find((r) => r.name === next);
+                          const presetCommand = preset ? commandForRuntimePreset(preset, nextRuntimeInfo) : "";
                           setNewActorRuntime(next);
                           if (!supportsStandardWebHeadlessRuntime(next)) setNewActorRunner("pty");
-                          setNewActorCommand("");
-                          setNewActorUseDefaultCommand(next !== "custom");
+                          setNewActorCommand(presetCommand);
+                          setNewActorUseDefaultCommand(Boolean(preset && !preset.model) || (!preset && next !== "custom"));
+                          setSelectedRuntimePresetId(preset?.id || "");
+                          if (preset) {
+                            setNewActorSecretsSetText(
+                              mergePresetSecrets(newActorSecretsSetText, preset, getCurrentDoneHubAccessToken())
+                            );
+                          }
+                          if (preset?.envPrivate) {
+                            setShowAdvancedActor(true);
+                          }
                         }}
                       >
+                        <optgroup label={t("runtimePresets")}>
+                          {RUNTIME_PRESETS.map((preset) => {
+                            const rtInfo = runtimes.find((r) => r.name === preset.runtime);
+                            const available = rtInfo?.available ?? false;
+                            return (
+                              <option key={preset.id} value={preset.id} disabled={!available}>
+                                {preset.label}
+                                {!available ? ` ${t("notInstalled")}` : ""}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                        <optgroup label={t("runtimeRawChoices")}>
                         {SUPPORTED_RUNTIMES.map((rt) => {
                           const info = RUNTIME_INFO[rt];
                           const rtInfo = runtimes.find((r) => r.name === rt);
@@ -408,10 +465,11 @@ export function AddActorModal({
                             </option>
                           );
                         })}
+                        </optgroup>
                       </select>
-                      {RUNTIME_INFO[newActorRuntime]?.desc ? (
+                      {runtimeChoiceDescription ? (
                         <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                          {RUNTIME_INFO[newActorRuntime].desc}
+                          {runtimeChoiceDescription}
                         </div>
                       ) : null}
                     </div>
@@ -422,10 +480,11 @@ export function AddActorModal({
                           type="checkbox"
                           checked={newActorUseDefaultCommand}
                           onChange={(e) => {
-                            const checked = e.target.checked;
-                            setNewActorUseDefaultCommand(checked);
-                            if (checked) setNewActorCommand("");
-                          }}
+                          const checked = e.target.checked;
+                          setNewActorUseDefaultCommand(checked);
+                          if (checked) setNewActorCommand("");
+                          setSelectedRuntimePresetId("");
+                        }}
                         />
                         {t("useRuntimeDefaultCommand")}
                       </label>
@@ -471,7 +530,10 @@ export function AddActorModal({
                         <Input
                           className="font-mono"
                           value={newActorCommand}
-                          onChange={(e) => setNewActorCommand(e.target.value)}
+                          onChange={(e) => {
+                            setNewActorCommand(e.target.value);
+                            setSelectedRuntimePresetId("");
+                          }}
                           placeholder={defaultCommand || t("enterCommand")}
                         />
                       </div>

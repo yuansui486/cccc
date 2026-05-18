@@ -41,4 +41,10 @@ describe("CapabilitiesTab i18n", () => {
       }
     }
   });
+
+  it("does not expose group-switching as a composer status message", () => {
+    for (const locale of [enChat, zhChat, jaChat]) {
+      expect(locale).not.toHaveProperty("composerGroupSwitching");
+    }
+  });
 });

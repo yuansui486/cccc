@@ -335,7 +335,7 @@ def handle_actor_update(
                         actor_id=actor_id,
                         cwd=cwd,
                         env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
-                        model=model_from_runtime_command(launch_spec["effective_command"]),
+                        model=model_from_runtime_command(launch_spec["effective_command"], effective_env),
                         remote_tui_base_command=list(launch_spec["effective_command"]),
                         max_backlog_bytes=pty_backlog_bytes(),
                     )
@@ -355,7 +355,7 @@ def handle_actor_update(
                             actor_id=actor_id,
                             cwd=cwd,
                             env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
-                            model=model_from_runtime_command(launch_spec["effective_command"]),
+                            model=model_from_runtime_command(launch_spec["effective_command"], effective_env),
                         )
                     elif runtime == "claude":
                         claude_app_supervisor.start_actor(
@@ -363,7 +363,7 @@ def handle_actor_update(
                             actor_id=actor_id,
                             cwd=cwd,
                             env=dict(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
-                            model=model_from_runtime_command(launch_spec["effective_command"]),
+                            model=model_from_runtime_command(launch_spec["effective_command"], effective_env),
                         )
                     else:
                         headless_runner.SUPERVISOR.start_actor(
@@ -384,7 +384,7 @@ def handle_actor_update(
                         base_command=launch_spec["effective_command"],
                         env=prepare_pty_env(inject_actor_context_env(effective_env, group_id=group.group_id, actor_id=actor_id)),
                         runtime=runtime,
-                        model=model_from_runtime_command(launch_spec["effective_command"]),
+                        model=model_from_runtime_command(launch_spec["effective_command"], effective_env),
                         max_backlog_bytes=pty_backlog_bytes(),
                         runtime_start_preflight_error=runtime_start_preflight_error,
                     )

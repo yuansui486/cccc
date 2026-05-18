@@ -49,7 +49,7 @@ class ActorLaunchSpec(ActorLaunchConfig):
     effective_command: List[str]
 
 
-def model_from_runtime_command(command: List[str]) -> str:
+def model_from_runtime_command(command: List[str], env: Optional[Dict[str, Any]] = None) -> str:
     """Return an explicitly configured model from a runtime command."""
     items = [str(item or "").strip() for item in list(command or [])]
     for idx, item in enumerate(items):
@@ -61,6 +61,11 @@ def model_from_runtime_command(command: List[str]) -> str:
             return ""
         if item.startswith("--model="):
             return item.split("=", 1)[1].strip()
+    env_map = env if isinstance(env, dict) else {}
+    for key in ("ANTHROPIC_MODEL", "OPENAI_MODEL", "CODEX_MODEL", "KIMI_MODEL_NAME"):
+        value = str(env_map.get(key) or "").strip()
+        if value:
+            return value
     return ""
 
 
@@ -191,7 +196,8 @@ def resolve_actor_launch_spec(
     if launch_config["runtime"] not in supported_runtimes:
         raise ValueError(f"unsupported runtime: {launch_config['runtime']}")
 
-    effective_command = normalize_runtime_command(launch_config["runtime"], list(launch_config["command"] or []))
+    runtime = str(launch_config["runtime"] or "").strip()
+    effective_command = normalize_runtime_command(runtime, list(launch_config["command"] or []))
     return {
         **launch_config,
         "scope_key": scope_key,
@@ -308,7 +314,7 @@ def start_actor_process(
                 actor_id=actor_id,
                 cwd=cwd,
                 env=dict(inject_actor_context_env(effective_env, group.group_id, actor_id)),
-                model=model_from_runtime_command(effective_cmd),
+                model=model_from_runtime_command(effective_cmd, effective_env),
                 remote_tui_base_command=list(effective_cmd),
                 max_backlog_bytes=pty_backlog_bytes(),
             )
@@ -322,7 +328,7 @@ def start_actor_process(
                 actor_id=actor_id,
                 cwd=cwd,
                 env=dict(inject_actor_context_env(effective_env, group.group_id, actor_id)),
-                model=model_from_runtime_command(effective_cmd),
+                model=model_from_runtime_command(effective_cmd, effective_env),
             )
         elif runtime == "claude" and effective_runner == "headless":
             claude_app_supervisor.start_actor(
@@ -330,7 +336,7 @@ def start_actor_process(
                 actor_id=actor_id,
                 cwd=cwd,
                 env=dict(inject_actor_context_env(effective_env, group.group_id, actor_id)),
-                model=model_from_runtime_command(effective_cmd),
+                model=model_from_runtime_command(effective_cmd, effective_env),
             )
         elif effective_runner == "headless":
             headless_runner.SUPERVISOR.start_actor(
@@ -351,7 +357,7 @@ def start_actor_process(
                 base_command=effective_cmd,
                 env=prepare_pty_env(inject_actor_context_env(effective_env, group.group_id, actor_id)),
                 runtime=runtime,
-                model=model_from_runtime_command(effective_cmd),
+                model=model_from_runtime_command(effective_cmd, effective_env),
                 max_backlog_bytes=pty_backlog_bytes(),
                 runtime_start_preflight_error=runtime_start_preflight_error,
             )

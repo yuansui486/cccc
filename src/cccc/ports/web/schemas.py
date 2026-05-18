@@ -139,6 +139,10 @@ class ActorUpdateRequest(BaseModel):
     profile_action: Optional[Literal["convert_to_custom"]] = None
 
 
+class ActorRestartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class ActorProfileUpsertRequest(BaseModel):
     profile: Dict[str, Any] = Field(default_factory=dict)
     expected_revision: Optional[int] = None
@@ -272,6 +276,16 @@ class AssistantVoiceRuntimeInstallRequest(BaseModel):
 
 class AssistantVoiceRuntimeRemoveRequest(BaseModel):
     runtime_id: str = Field(default="")
+    by: str = Field(default="user")
+
+
+class AssistantVoiceRecordingLeaseRequest(BaseModel):
+    action: Literal["acquire", "heartbeat", "release", "status"] = Field(default="status")
+    owner_id: str = Field(default="")
+    lease_id: str = Field(default="")
+    ttl_seconds: int = Field(default=30)
+    capture_mode: str = Field(default="")
+    recognition_backend: str = Field(default="")
     by: str = Field(default="user")
 
 

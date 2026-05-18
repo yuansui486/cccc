@@ -23,17 +23,24 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
   const disconnect = useDoneHubStore((state) => state.disconnect);
   const clearError = useDoneHubStore((state) => state.clearError);
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [rememberPassword, setRememberPassword] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
+  const [rememberPasswordDraft, setRememberPasswordDraft] = useState<boolean | null>(null);
+  const username = usernameDraft ?? session?.username ?? savedLogin.username ?? "";
+  const password = passwordDraft ?? savedLogin.password ?? "";
+  const rememberPassword = rememberPasswordDraft ?? (savedLogin.remember_password || Boolean(savedLogin.password));
+
+  const handleClose = () => {
+    setUsernameDraft(null);
+    setPasswordDraft(null);
+    setRememberPasswordDraft(null);
+    onClose();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
-    setUsername(session?.username || savedLogin.username || "");
-    setPassword(savedLogin.password || "");
-    setRememberPassword(savedLogin.remember_password || Boolean(savedLogin.password));
     clearError();
-  }, [clearError, isOpen, savedLogin.password, savedLogin.remember_password, savedLogin.username, session?.username]);
+  }, [clearError, isOpen]);
 
   const hasSession = !!session;
   const showConnectedView = hasSession;
@@ -49,7 +56,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
   return (
     <ModalFrame
       isDark={_isDark}
-      onClose={onClose}
+      onClose={handleClose}
       titleId="account-auth-title"
       title={title}
       closeAriaLabel={t("common:close")}
@@ -114,7 +121,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
               event.preventDefault();
               void connect(username, password, rememberPassword).then((ok) => {
                 if (ok && !rememberPassword) {
-                  setPassword("");
+                  setPasswordDraft("");
                 }
               });
             }}
@@ -125,7 +132,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
               </label>
               <input
                 value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                onChange={(event) => setUsernameDraft(event.target.value)}
                 placeholder={t("modals:doneHub.usernamePlaceholder")}
                 className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
               />
@@ -138,7 +145,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
               <input
                 type="password"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => setPasswordDraft(event.target.value)}
                 placeholder={t("modals:doneHub.passwordPlaceholder")}
                 className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
               />
@@ -148,7 +155,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
               <input
                 type="checkbox"
                 checked={rememberPassword}
-                onChange={(event) => setRememberPassword(event.target.checked)}
+                onChange={(event) => setRememberPasswordDraft(event.target.checked)}
                 className="h-4 w-4 rounded border border-[var(--glass-border-subtle)]"
               />
               <span>{t("modals:doneHub.rememberPassword")}</span>
@@ -157,7 +164,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 className="glass-btn rounded-xl px-4 py-2.5 text-sm text-[var(--color-text-secondary)]"
               >
                 {t("common:cancel")}
@@ -196,7 +203,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
                 type="button"
                 onClick={() => {
                   disconnect();
-                  onClose();
+                  handleClose();
                 }}
                 className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-600 transition-colors hover:bg-rose-500/15 dark:text-rose-300"
               >

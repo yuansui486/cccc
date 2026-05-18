@@ -47,6 +47,8 @@
   "unicodeSupport": "(supports Unicode, incl. CJK)",
   "leaveEmptyToUse": "Leave empty to use:",
   "aiRuntime": "AI Runtime",
+  "runtimePresets": "Model + CLI presets",
+  "runtimeRawChoices": "Base CLI runtimes",
   "notInstalled": "(not installed)",
   "manualMcpRequired": "Manual MCP install required",
   "customCommandHint": "Provide a command for your runtime in <1>Advanced options → Command Override</1>.",

@@ -16,13 +16,27 @@ import { ScrollFade } from "./ScrollFade";
 import { getRuntimeIndicatorState } from "../utils/statusIndicators";
 import { getEffectiveActorRunner } from "../utils/headlessRuntimeSupport";
 import { copyTextToClipboard } from "../utils/copy";
+import { getStoppedTerminalOutputText } from "../utils/stoppedTerminalOutput";
+import { fetchTerminalTail } from "../services/api/diagnostics";
 import { useAgentTerminalConnection } from "./agentTerminal/useAgentTerminalConnection";
 
 const EMPTY_STREAMING_ACTIVITIES: StreamingActivity[] = [];
 const EMPTY_HEADLESS_PREVIEW_SESSIONS: HeadlessPreviewSession[] = [];
 const EMPTY_HEADLESS_RAW_EVENTS: HeadlessStreamEvent[] = [];
+const STOPPED_TAIL_FETCH_DELAY_MS = 350;
 
 const copyToClipboard = copyTextToClipboard;
+
+export function shouldFetchStoppedTerminalTail(args: {
+  activated: boolean;
+  isRunning: boolean;
+  isHeadless: boolean;
+  groupId: string;
+  actorId: string;
+  isActorBusy: boolean;
+}): boolean {
+  return Boolean(args.activated && !args.isRunning && !args.isHeadless && args.groupId && args.actorId && !args.isActorBusy);
+}
 
 interface AgentTabProps {
   actor: Actor;
@@ -69,6 +83,7 @@ export function AgentTab({
   const isHeadless = effectiveRunner === "headless";
   const isWebModel = String(actor.runtime || "").trim().toLowerCase() === "web_model";
   const canControl = !readOnly;
+  const isBusy = busy.includes(actor.id);
   const latestHeadlessText = useGroupStore((state) => {
     const bucket = state.chatByGroup[String(groupId || "").trim()];
     if (!bucket) return "";
@@ -112,6 +127,8 @@ export function AgentTab({
   const [activated, setActivated] = useState(false);
   // Bumped to trigger a fresh WebSocket connection from the reconnect button
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
+  const [stoppedTerminalText, setStoppedTerminalText] = useState("");
+  const [stoppedTerminalLoading, setStoppedTerminalLoading] = useState(false);
 
   const pasteStateRef = useRef<{ inFlight: boolean; lastAt: number }>({ inFlight: false, lastAt: 0 });
 
@@ -128,6 +145,46 @@ export function AgentTab({
   useEffect(() => {
     if (isVisible) setActivated(true);
   }, [isVisible]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStoppedTerminalText("");
+    if (
+      !shouldFetchStoppedTerminalTail({
+        activated,
+        isRunning,
+        isHeadless,
+        groupId,
+        actorId: actor.id,
+        isActorBusy: isBusy,
+      })
+    ) {
+      setStoppedTerminalLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setStoppedTerminalLoading(true);
+    const timer = window.setTimeout(() => {
+      fetchTerminalTail(groupId, actor.id, 8000, true, true)
+        .then((resp) => {
+          if (cancelled) return;
+          setStoppedTerminalText(resp.ok ? getStoppedTerminalOutputText(resp.result.text || "") : "");
+        })
+        .catch(() => {
+          if (!cancelled) setStoppedTerminalText("");
+        })
+        .finally(() => {
+          if (!cancelled) setStoppedTerminalLoading(false);
+        });
+    }, STOPPED_TAIL_FETCH_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activated, actor.id, groupId, isBusy, isHeadless, isRunning, termEpoch]);
 
   useEffect(() => {
     if (!activated || observabilityLoaded) return;
@@ -176,6 +233,7 @@ export function AgentTab({
     if (workingState === "working") return t("working");
     return t("running");
   })();
+  const stoppedTerminalOutputText = getStoppedTerminalOutputText(stoppedTerminalText);
   const primaryActionButtonClass =
     "inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] px-3.5 py-2.5 text-sm font-medium text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] transition-colors hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
   const secondaryActionButtonClass =
@@ -399,7 +457,6 @@ export function AgentTab({
     return () => clearTimeout(t);
   }, [canControl, isVisible, isSmallScreen, terminalReady]);
 
-  const isBusy = busy.includes(actor.id);
   const stateHeadline = String(agentState?.hot?.focus || agentState?.hot?.next_action || "").trim() || t('noAgentStateYet');
   const stateTask = String(agentState?.hot?.active_task_id || "").trim();
   const blockerCount = Array.isArray(agentState?.hot?.blockers) ? agentState.hot.blockers.length : 0;
@@ -623,7 +680,15 @@ export function AgentTab({
               ) : null}
             </div>
             <div className="mt-6 w-full max-w-xl flex-shrink-0 rounded-lg border border-dashed border-[var(--glass-border-subtle)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
-              {t('noRecentTerminalOutput')}
+              {stoppedTerminalLoading ? (
+                t('loadingLastTerminalOutput')
+              ) : stoppedTerminalOutputText ? (
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-left font-mono text-xs leading-relaxed">
+                  {stoppedTerminalOutputText}
+                </pre>
+              ) : (
+                t('noRecentTerminalOutput')
+              )}
             </div>
           </div>
         )}

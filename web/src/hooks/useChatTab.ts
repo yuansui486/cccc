@@ -1,7 +1,7 @@
 // useChatTab - Encapsulates ChatTab business logic and state.
 // Reduces prop drilling by providing state from stores and computed values directly.
 
-import { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import { useMemo, useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useGroupStore,
@@ -14,7 +14,16 @@ import {
 import { getEffectiveComposerDestGroupId, isComposerGroupSettled } from "../stores/useComposerStore";
 import { getChatSession } from "../stores/useUIStore";
 import { useChatOutboxStore, selectOutboxEntries } from "../stores/chatOutboxStore";
-import type { Actor, LedgerEvent, ChatMessageData, MessageRef, OptimisticAttachment, Task } from "../types";
+import type {
+  Actor,
+  LedgerEvent,
+  ChatMessageData,
+  MessageRef,
+  OptimisticAttachment,
+  PresentationMessageRef,
+  ReplyTarget,
+  Task,
+} from "../types";
 import * as api from "../services/api";
 import { buildReplyComposerState } from "../utils/chatReply";
 import {
@@ -640,6 +649,109 @@ interface UseChatTabOptions {
 
 type ChatEmptyState = "ready" | "hydrating" | "business_empty";
 
+export type FailedSendComposerSnapshot = {
+  originGroupId: string;
+  composerText: string;
+  composerFiles: File[];
+  toText: string;
+  replyTarget: ReplyTarget;
+  quotedPresentationRef: PresentationMessageRef | null;
+  priority: "normal" | "attention";
+  replyRequired: boolean;
+};
+
+type FailedSendComposerRestoreActions = Pick<
+  ReturnType<typeof useComposerStore.getState>,
+  | "setComposerText"
+  | "setComposerFiles"
+  | "setToText"
+  | "setReplyTarget"
+  | "setQuotedPresentationRef"
+  | "setPriority"
+  | "setReplyRequired"
+  | "upsertDraft"
+>;
+
+export function restoreFailedSendComposerState(
+  snapshot: FailedSendComposerSnapshot,
+  actions?: FailedSendComposerRestoreActions,
+): void {
+  const originGroupId = String(snapshot.originGroupId || "").trim();
+  if (!originGroupId) return;
+
+  const composerState = useComposerStore.getState();
+  const restoreActions = actions || composerState;
+  const currentSelectedGroupId = String(useGroupStore.getState().selectedGroupId || "").trim();
+  const currentActiveGroupId = String(composerState.activeGroupId || "").trim();
+  const stillOnOriginGroup = currentSelectedGroupId === originGroupId && currentActiveGroupId === originGroupId;
+
+  if (stillOnOriginGroup) {
+    restoreActions.setComposerText(snapshot.composerText);
+    restoreActions.setComposerFiles(snapshot.composerFiles);
+    restoreActions.setReplyTarget(snapshot.replyTarget);
+    restoreActions.setQuotedPresentationRef(snapshot.quotedPresentationRef);
+    restoreActions.setPriority(snapshot.priority);
+    restoreActions.setReplyRequired(snapshot.replyRequired);
+    restoreActions.setToText(snapshot.toText);
+    return;
+  }
+
+  restoreActions.upsertDraft(originGroupId, () => ({
+    composerText: snapshot.composerText,
+    composerFiles: snapshot.composerFiles,
+    toText: snapshot.toText,
+    replyTarget: snapshot.replyTarget,
+    quotedPresentationRef: snapshot.quotedPresentationRef,
+    priority: snapshot.priority,
+    replyRequired: snapshot.replyRequired,
+  }));
+}
+
+export type ComposerSendRoutingSnapshot = {
+  selectedGroupId: string;
+  destGroupId: string;
+  composerGroupSettled: boolean;
+  isCrossGroup: boolean;
+};
+
+export function buildComposerSendRoutingSnapshot({
+  selectedGroupId,
+  activeGroupId,
+  destGroupId,
+}: {
+  selectedGroupId: string;
+  activeGroupId: string;
+  destGroupId: string;
+}): ComposerSendRoutingSnapshot {
+  const selected = String(selectedGroupId || "").trim();
+  const active = String(activeGroupId || "").trim();
+  const dest = getEffectiveComposerDestGroupId(destGroupId, active, selected);
+  const composerGroupSettled = isComposerGroupSettled(active, selected);
+  return {
+    selectedGroupId: selected,
+    destGroupId: dest,
+    composerGroupSettled,
+    isCrossGroup: !!selected && !!dest && dest !== selected,
+  };
+}
+
+export function parseComposerRecipientTokens(toText: string, validRecipientSet: Set<string>): string[] {
+  const raw = String(toText || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const token of raw) {
+    if (token === "@") continue;
+    if (!validRecipientSet.has(token)) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+}
+
 export function useChatTab({
   selectedGroupId,
   selectedGroupRunning,
@@ -709,6 +821,7 @@ export function useChatTab({
     setPriority,
     setReplyRequired,
     setDestGroupId,
+    upsertDraft,
     clearDraft,
     clearComposer,
   } = useComposerStore();
@@ -779,20 +892,7 @@ export function useChatTab({
 
   // Parse toText into validated tokens
   const toTokens = useMemo(() => {
-    const raw = toText
-      .split(",")
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0);
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const token of raw) {
-      if (token === "@") continue;
-      if (!validRecipientSet.has(token)) continue;
-      if (seen.has(token)) continue;
-      seen.add(token);
-      out.push(token);
-    }
-    return out;
+    return parseComposerRecipientTokens(toText, validRecipientSet);
   }, [toText, validRecipientSet]);
 
   // Mention suggestions
@@ -856,7 +956,7 @@ export function useChatTab({
     t,
   });
 
-  const { slashCommands, refreshSlashCommands, tryExecuteSlashCommand } = useSlashCommands({
+  const { slashCommands, tryExecuteSlashCommand } = useSlashCommands({
     selectedGroupId,
     clearComposer,
     restoreComposerText: setComposerText,
@@ -958,20 +1058,6 @@ export function useChatTab({
     () => events.some(isFormalChatMessageEvent) || outboxEntries.length > 0,
     [events, outboxEntries]
   );
-  const latestFormalChatEventKey = useMemo(() => {
-    for (let idx = events.length - 1; idx >= 0; idx -= 1) {
-      const event = events[idx];
-      if (!isFormalChatMessageEvent(event)) continue;
-      return `${String(event.id || "")}:${String(event.ts || "")}:${String(event.by || "")}`;
-    }
-    return "";
-  }, [events]);
-
-  useEffect(() => {
-    if (!latestFormalChatEventKey) return;
-    void refreshSlashCommands();
-  }, [latestFormalChatEventKey, refreshSlashCommands]);
-
   const chatInitialScrollAnchorId = useMemo(() => {
     if (inChatWindow) return undefined;
     const snapshot = scrollSnapshot;
@@ -1106,22 +1192,31 @@ export function useChatTab({
 
   const sendMessage = useCallback(async () => {
     if (sendInFlightRef.current) return; // keyboard shortcut can bypass UI state; keep send single-flight locally
-    const txt = composerText.trim();
     if (!selectedGroupId) return;
     const latestSelectedGroupId = String(useGroupStore.getState().selectedGroupId || "").trim();
     if (latestSelectedGroupId !== selectedGroupId) return;
-    if (!isComposerGroupSettled(useComposerStore.getState().activeGroupId, latestSelectedGroupId)) return;
-    if (!txt && composerFiles.length === 0) return;
+    const composerStateSnapshot = useComposerStore.getState();
+    const routingSnapshot = buildComposerSendRoutingSnapshot({
+      selectedGroupId: latestSelectedGroupId,
+      activeGroupId: composerStateSnapshot.activeGroupId,
+      destGroupId: composerStateSnapshot.destGroupId,
+    });
+    if (!routingSnapshot.composerGroupSettled) return;
+    const originGroupId = routingSnapshot.selectedGroupId;
 
-    const dstGroup = String(sendGroupId || "").trim();
-    const isCrossGroup = !!dstGroup && dstGroup !== selectedGroupId;
+    const txt = String(composerStateSnapshot.composerText || "").trim();
+    const composerFilesSnapshot = composerStateSnapshot.composerFiles.slice();
+    if (!txt && composerFilesSnapshot.length === 0) return;
+
+    const dstGroup = routingSnapshot.destGroupId;
+    const isCrossGroup = routingSnapshot.isCrossGroup;
     if (await tryExecuteSlashCommand({
-      text: composerText,
-      composerFilesCount: composerFiles.length,
-      hasReplyTarget: !!replyTarget,
-      replyTarget,
-      replyRequired,
-      hasQuotedPresentationRef: !!quotedPresentationRef,
+      text: composerStateSnapshot.composerText,
+      composerFilesCount: composerFilesSnapshot.length,
+      hasReplyTarget: !!composerStateSnapshot.replyTarget,
+      replyTarget: composerStateSnapshot.replyTarget,
+      replyRequired: composerStateSnapshot.replyRequired,
+      hasQuotedPresentationRef: !!composerStateSnapshot.quotedPresentationRef,
       sendGroupId: dstGroup,
     })) {
       return;
@@ -1131,15 +1226,15 @@ export function useChatTab({
       return;
     }
 
-    const prio = replyRequired ? "attention" : (priority || "normal");
-    const replyTargetSnapshot = replyTarget;
-    const composerFilesSnapshot = composerFiles.slice();
-    const quotedPresentationRefSnapshot = quotedPresentationRef;
+    const replyTargetSnapshot = composerStateSnapshot.replyTarget;
+    const quotedPresentationRefSnapshot = composerStateSnapshot.quotedPresentationRef;
     const refsSnapshot: MessageRef[] = quotedPresentationRefSnapshot ? [quotedPresentationRefSnapshot] : [];
-    const prioritySnapshot = priority;
-    const replyRequiredSnapshot = replyRequired;
-    const toTextSnapshot = toText;
-    const assistantTargets = !isCrossGroup ? resolveAssistantTargets(toTokens) : [];
+    const prioritySnapshot = composerStateSnapshot.priority;
+    const replyRequiredSnapshot = composerStateSnapshot.replyRequired;
+    const toTextSnapshot = composerStateSnapshot.toText;
+    const toTokensSnapshot = parseComposerRecipientTokens(toTextSnapshot, validRecipientSet);
+    const prio = replyRequiredSnapshot ? "attention" : (prioritySnapshot || "normal");
+    const assistantTargets = !isCrossGroup ? resolveAssistantTargets(toTokensSnapshot) : [];
 
     // Generate a local ID for outbox tracking
     const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1183,13 +1278,28 @@ export function useChatTab({
     };
 
     const restoreComposerState = () => {
-      setComposerText(txt);
-      setComposerFiles(composerFilesSnapshot);
-      setReplyTarget(replyTargetSnapshot);
-      setQuotedPresentationRef(quotedPresentationRefSnapshot);
-      setPriority(prioritySnapshot);
-      setReplyRequired(replyRequiredSnapshot);
-      setToText(toTextSnapshot);
+      restoreFailedSendComposerState(
+        {
+          originGroupId,
+          composerText: txt,
+          composerFiles: composerFilesSnapshot,
+          toText: toTextSnapshot,
+          replyTarget: replyTargetSnapshot,
+          quotedPresentationRef: quotedPresentationRefSnapshot,
+          priority: prioritySnapshot,
+          replyRequired: replyRequiredSnapshot,
+        },
+        {
+          setComposerText,
+          setComposerFiles,
+          setReplyTarget,
+          setQuotedPresentationRef,
+          setPriority,
+          setReplyRequired,
+          setToText,
+          upsertDraft,
+        },
+      );
     };
 
     const applyImmediateComposerFeedback = () => {
@@ -1239,9 +1349,9 @@ export function useChatTab({
         group_id: selectedGroupId,
         data: {
           text: txt,
-          to: toTokens,
+          to: toTokensSnapshot,
           priority: prio,
-          reply_required: replyRequired,
+          reply_required: replyRequiredSnapshot,
           client_id: localId,
           reply_to: replyTargetSnapshot?.eventId || null,
           quote_text: replyTargetSnapshot?.text || undefined,
@@ -1258,7 +1368,7 @@ export function useChatTab({
     applyImmediateComposerFeedback();
     sendInFlightRef.current = true;
     try {
-      const to = toTokens;
+      const to = toTokensSnapshot;
       let resp;
       if (replyTargetSnapshot) {
         resp = await api.replyMessage(
@@ -1268,7 +1378,7 @@ export function useChatTab({
           replyTargetSnapshot.eventId,
           composerFilesSnapshot.length > 0 ? composerFilesSnapshot : undefined,
           prio,
-          replyRequired,
+          replyRequiredSnapshot,
           localId,
           refsSnapshot,
         );
@@ -1282,7 +1392,7 @@ export function useChatTab({
             to,
             composerFilesSnapshot.length > 0 ? composerFilesSnapshot : undefined,
             prio,
-            replyRequired,
+            replyRequiredSnapshot,
             localId,
             refsSnapshot,
           );
@@ -1354,18 +1464,10 @@ export function useChatTab({
       sendInFlightRef.current = false;
     }
   }, [
-    composerText,
-    composerFiles,
     selectedGroupId,
     groupSendBlockedReason,
     tryExecuteSlashCommand,
-    sendGroupId,
-    priority,
-    replyRequired,
-    toText,
-    toTokens,
-    replyTarget,
-    quotedPresentationRef,
+    validRecipientSet,
     inChatWindow,
     appendEvent,
     enqueueOutbox,
@@ -1380,6 +1482,7 @@ export function useChatTab({
     setReplyRequired,
     setToText,
     setDestGroupId,
+    upsertDraft,
     clearDraft,
     closeChatWindow,
     fileInputRef,

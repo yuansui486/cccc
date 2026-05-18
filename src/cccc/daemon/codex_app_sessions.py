@@ -24,12 +24,7 @@ from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .mcp_install import ensure_mcp_installed
 from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
 from .runner_state_ops import headless_state_path, remove_headless_state
-from .runtime_session_ops import (
-    mark_runtime_session_resume_failed,
-    prepare_headless_runtime_resume,
-    record_headless_runtime_session,
-    runtime_resume_enabled,
-)
+from .codex_app_thread_ops import start_codex_app_thread
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
 from ..util.process import pid_is_alive
@@ -84,7 +79,7 @@ def _is_websocket_idle_timeout(exc: BaseException) -> bool:
     return "timed out" in message and "websocket" in name
 
 
-def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str) -> list[str]:
+def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str, thread_id: str = "") -> list[str]:
     command = list(base_command or [])
     if not command or Path(str(command[0] or "")).name != "codex":
         command = ["codex"]
@@ -131,6 +126,11 @@ def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str) -
             i += 1
             continue
         break
+    thread_id = str(thread_id or "").strip()
+    if thread_id:
+        executable = filtered[0]
+        options = filtered[1:]
+        return [executable, "resume", *options, "--remote", str(listen_url), thread_id]
     filtered.extend(["--remote", str(listen_url)])
     return filtered
 
@@ -287,6 +287,11 @@ class CodexAppSession:
         self._last_turn_event_monotonic = 0.0
         self._active_stalled_emitted = False
         self._runtime_command: list[str] = []
+
+    def request_stop(self) -> None:
+        """Mark this session as intentionally stopping before transports close."""
+        with self._lock:
+            self._stop_requested = True
 
     def _agent_message_phase(self, item_id: str, item: Optional[Dict[str, Any]] = None) -> str:
         stream_id = str(item_id or "").strip()
@@ -536,8 +541,8 @@ class CodexAppSession:
             env = os.environ.copy()
             env.update(self.env)
             env.setdefault("CCCC_HOME", str(ensure_home()))
-            env.setdefault("CCCC_GROUP_ID", self.group_id)
-            env.setdefault("CCCC_ACTOR_ID", self.actor_id)
+            env["CCCC_GROUP_ID"] = self.group_id
+            env["CCCC_ACTOR_ID"] = self.actor_id
             env = with_node_deprecation_warnings_suppressed(env)
             if not ensure_mcp_installed("codex", self.cwd, auto_mcp_runtimes=("codex",), env=env):
                 raise RuntimeError("failed to install MCP for runtime: codex")
@@ -586,84 +591,25 @@ class CodexAppSession:
                 },
                 timeout=10.0,
             )
-            thread_params: Dict[str, Any] = {
-                "cwd": str(self.cwd),
-                "approvalPolicy": "never",
-                "sandbox": "danger-full-access",
-                "personality": "pragmatic",
-            }
-            if self.model:
-                thread_params["model"] = self.model
-            resume_doc = prepare_headless_runtime_resume(
+            thread_id, resumed = start_codex_app_thread(
+                request=self._request,
                 group_id=self.group_id,
                 actor_id=self.actor_id,
-                runtime="codex",
                 cwd=self.cwd,
                 command=self._runtime_command,
                 model=self.model,
             )
-            resumed = False
-            if resume_doc:
-                resume_params: Dict[str, Any] = {
-                    "threadId": str(resume_doc.get("provider_thread_id") or "").strip(),
-                    "personality": "pragmatic",
-                }
-                if self.model:
-                    resume_params["model"] = self.model
-                try:
-                    thread_resp = self._request(
-                        "thread/resume",
-                        resume_params,
-                        timeout=20.0,
-                    )
-                    resumed = True
-                except Exception as exc:
-                    mark_runtime_session_resume_failed(
-                        group_id=self.group_id,
-                        actor_id=self.actor_id,
-                        error=str(exc),
-                    )
-                    thread_resp = self._request(
-                        "thread/start",
-                        thread_params,
-                        timeout=20.0,
-                    )
-            else:
-                thread_resp = self._request(
-                    "thread/start",
-                    thread_params,
-                    timeout=20.0,
-                )
-            thread = thread_resp.get("thread") if isinstance(thread_resp, dict) else {}
-            thread_id = str((thread or {}).get("id") or "").strip()
-            if not thread_id:
-                raise RuntimeError("codex app-server returned empty thread id")
             with self._lock:
                 self._session_state.thread_id = thread_id
                 self._session_state.status = "idle"
                 self._session_state.updated_at = utc_now_iso()
             self._persist_state()
-            if runtime_resume_enabled():
-                try:
-                    record_headless_runtime_session(
-                        group_id=self.group_id,
-                        actor_id=self.actor_id,
-                        runtime="codex",
-                        cwd=self.cwd,
-                        model=self.model,
-                        command=self._runtime_command,
-                        provider_thread_id=thread_id,
-                        status="usable",
-                        captured_from="app_server_thread_resume" if resumed else "app_server_thread_start",
-                        resume_eligible=True,
-                    )
-                except Exception:
-                    pass
-            self._emit("headless.thread.resumed" if resumed else "headless.thread.started", {"thread_id": thread_id})
+            if thread_id:
+                self._emit("headless.thread.resumed" if resumed else "headless.thread.started", {"thread_id": thread_id})
             if not self.start_remote_tui:
                 self._queue_bootstrap_control_turn()
             if self.start_remote_tui:
-                remote_command = _codex_remote_tui_command(self.remote_tui_base_command, self.listen_url)
+                remote_command = _codex_remote_tui_command(self.remote_tui_base_command, self.listen_url, thread_id)
                 self._pty_session = pty_runner.SUPERVISOR.start_actor(
                     group_id=self.group_id,
                     actor_id=self.actor_id,
@@ -682,6 +628,7 @@ class CodexAppSession:
         with self._lock:
             proc = self._proc
             ws = self._ws
+            was_stop_requested = self._stop_requested
             self._stop_requested = True
             self._running = False
             self._proc = None
@@ -722,7 +669,7 @@ class CodexAppSession:
                 except Exception:
                     pass
         self._emit("headless.session.stopped", {})
-        if persist_actor_stopped:
+        if persist_actor_stopped and not was_stop_requested:
             persist_actor_process_exit_stopped(group_id=self.group_id, actor_id=self.actor_id, runner="headless")
 
     def is_running(self) -> bool:
@@ -752,7 +699,92 @@ class CodexAppSession:
         prompt = render_system_prompt(group=group, actor=actor)
         if not prompt.strip():
             return ""
-        return render_headless_control_text(control_kind="bootstrap", body=prompt)
+        bootstrap_instruction = "\n".join(
+            [
+                "[CCCC] BOOTSTRAP TOOL CONTRACT:",
+                (
+                    "First call MCP tool "
+                    f'cccc_bootstrap(actor_id="{self.actor_id}", group_id="{self.group_id}", '
+                    'inbox_kind_filter="all", inbox_limit=10).'
+                ),
+                "Pass actor_id explicitly; do not rely on environment variables for startup/bootstrap.",
+                "If cccc_bootstrap fails, stop this bootstrap turn instead of continuing with normal work.",
+            ]
+        )
+        return render_headless_control_text(control_kind="bootstrap", body=f"{bootstrap_instruction}\n\n{prompt}")
+
+    @staticmethod
+    def _mcp_tool_call_failed(item: Dict[str, Any]) -> bool:
+        if str(item.get("type") or "").strip() != "mcpToolCall":
+            return False
+        status = str(item.get("status") or "").strip().lower()
+        return status in {"failed", "error", "cancelled"} or item.get("error") is not None
+
+    @staticmethod
+    def _item_error_message(item: Dict[str, Any], *, fallback: str) -> str:
+        raw_error = item.get("error")
+        if isinstance(raw_error, dict):
+            message = str(raw_error.get("message") or "").strip()
+            if message:
+                return message
+        elif raw_error:
+            message = str(raw_error).strip()
+            if message:
+                return message
+        result = item.get("result")
+        if isinstance(result, dict):
+            content = result.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    text = str(part.get("text") or "").strip()
+                    if text:
+                        return text
+            message = str(result.get("message") or "").strip()
+            if message:
+                return message
+        return fallback
+
+    def _fail_active_control_turn_from_item(
+        self,
+        *,
+        turn_id: str,
+        event_id: str,
+        control_kind: str,
+        item: Dict[str, Any],
+        now: str,
+    ) -> None:
+        message = self._item_error_message(item, fallback="bootstrap control tool failed")
+        with self._lock:
+            self._active_turn_id = ""
+            self._active_event_id = ""
+            self._active_control_kind = ""
+            self._active_payload = None
+            self._session_state.status = "idle"
+            self._session_state.current_task_id = None
+            self._session_state.updated_at = now
+        self._persist_state()
+        self._agent_message_phase_by_stream_id.clear()
+        self._item_snapshots_by_id.clear()
+        self._plan_activity_id = ""
+        self._emit(
+            "headless.control.failed",
+            {
+                "turn_id": turn_id,
+                "event_id": event_id,
+                "control_kind": control_kind,
+                "status": "failed",
+                "error": {"message": message},
+                "failed_item": {
+                    "id": str(item.get("id") or "").strip(),
+                    "server": str(item.get("server") or "").strip(),
+                    "tool": str(item.get("tool") or "").strip(),
+                    "status": str(item.get("status") or "").strip(),
+                },
+            },
+        )
+        self._turn_done.set()
 
     def _queue_control_turn(self, *, text: str, control_kind: str, event_id: str = "", ts: str = "") -> bool:
         if not self.is_running():
@@ -935,6 +967,16 @@ class CodexAppSession:
                 self._handle_protocol_message(message)
         with self._lock:
             persist_actor_stopped = not self._stop_requested
+            stop_requested = bool(self._stop_requested)
+        if self.start_remote_tui and not stop_requested and self.remote_tui_pid() > 0:
+            try:
+                if pty_runner.SUPERVISOR.actor_running(group_id=self.group_id, actor_id=self.actor_id):
+                    with self._lock:
+                        self._ws = None
+                    return
+            except Exception:
+                pass
+            persist_actor_stopped = False
         self.stop(persist_actor_stopped=persist_actor_stopped)
 
     def _stderr_loop(self) -> None:
@@ -1143,10 +1185,44 @@ class CodexAppSession:
                 if self._active_stalled_emitted and self._session_state.status == "waiting":
                     self._session_state.status = "working"
                     self._session_state.updated_at = now
+        if method == "thread/status/changed":
+            thread_id = str(params.get("threadId") or "").strip()
+            status_doc = params.get("status") if isinstance(params.get("status"), dict) else {}
+            status_type = str((status_doc or {}).get("type") or "").strip()
+            active_flags = (status_doc or {}).get("activeFlags")
+            flags = {str(item or "").strip() for item in active_flags} if isinstance(active_flags, list) else set()
+            with self._lock:
+                current_thread_id = str(self._session_state.thread_id or "").strip()
+                if thread_id and current_thread_id and thread_id != current_thread_id:
+                    return
+                if thread_id and not current_thread_id:
+                    self._session_state.thread_id = thread_id
+                if status_type == "active":
+                    self._session_state.status = (
+                        "waiting"
+                        if flags.intersection({"waitingOnApproval", "waitingOnUserInput"})
+                        else self._session_state.status or "idle"
+                    )
+                    if flags.intersection({"waitingOnApproval", "waitingOnUserInput"}):
+                        self._session_state.current_task_id = thread_id or self._session_state.thread_id or None
+                elif status_type == "idle":
+                    self._session_state.status = "idle"
+                    self._session_state.current_task_id = None
+                elif status_type in {"notLoaded", "systemError"}:
+                    self._session_state.status = "waiting"
+                    self._session_state.current_task_id = thread_id or self._session_state.thread_id or None
+                else:
+                    return
+                self._session_state.updated_at = now
+            self._persist_state()
+            return
         if method == "turn/started":
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
             turn_id = str(turn.get("id") or "").strip()
+            thread_id = str(turn.get("threadId") or params.get("threadId") or "").strip()
             with self._lock:
+                if thread_id and not str(self._session_state.thread_id or "").strip():
+                    self._session_state.thread_id = thread_id
                 self._active_turn_id = turn_id
                 if not control_kind:
                     self._session_state.status = "working"
@@ -1499,7 +1575,16 @@ class CodexAppSession:
                 self._emit_item_activity(status="completed", turn_id=str(params.get("turnId") or ""), item=item)
                 return
             self._emit_item_activity(status="completed", turn_id=str(params.get("turnId") or ""), item=item)
-            self._emit("headless.item.completed", {"turn_id": str(params.get("turnId") or ""), "event_id": active_event_id, "stream_id": item_id, "item": item})
+            turn_id = str(params.get("turnId") or "")
+            self._emit("headless.item.completed", {"turn_id": turn_id, "event_id": active_event_id, "stream_id": item_id, "item": item})
+            if control_kind == "bootstrap" and self._mcp_tool_call_failed(item):
+                self._fail_active_control_turn_from_item(
+                    turn_id=turn_id,
+                    event_id=active_event_id,
+                    control_kind=control_kind,
+                    item=item,
+                    now=now,
+                )
             return
 
         if method == "turn/completed":
@@ -1618,6 +1703,9 @@ class _FallbackCodexAppSession:
         self._session_state.current_task_id = None
         self._session_state.updated_at = utc_now_iso()
         self._persist_state()
+
+    def request_stop(self) -> None:
+        return None
 
     def is_running(self) -> bool:
         return bool(self._running)
@@ -1763,6 +1851,8 @@ class CodexAppSessionManager:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
         with self._lock:
             session = self._sessions.pop(key, None)
+            if session is not None:
+                session.request_stop()
         if session is not None:
             session.stop()
 
@@ -1773,13 +1863,23 @@ class CodexAppSessionManager:
         with self._lock:
             keys = [key for key in self._sessions if key[0] == gid]
             sessions = [self._sessions.pop(key) for key in keys]
+            for session in sessions:
+                session.request_stop()
         for session in sessions:
             session.stop()
+
+    def begin_shutdown(self) -> None:
+        with self._lock:
+            sessions = list(self._sessions.values())
+            for session in sessions:
+                session.request_stop()
 
     def stop_all(self) -> None:
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
+            for session in sessions:
+                session.request_stop()
         for session in sessions:
             session.stop()
 

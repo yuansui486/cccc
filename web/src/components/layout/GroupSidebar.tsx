@@ -204,10 +204,6 @@ export function GroupSidebar({
     };
   }, [switcherOpen]);
 
-  useEffect(() => {
-    if (!isOpen) setSwitcherOpen(false);
-  }, [isOpen]);
-
   const handleResizeStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (isCollapsed) return;
@@ -593,6 +589,7 @@ export function GroupSidebar({
     archivedGroups,
     archivedPanelOpen,
     onCreateGroup,
+    orderedGroups.length,
     readOnly,
     renderGroupList,
     t,
@@ -722,7 +719,7 @@ export function GroupSidebar({
               isCollapsed ? "h-11 w-11 justify-center" : "w-full justify-between gap-3 px-3 py-3 text-left"
             )}
             onClick={() => setSwitcherOpen((prev) => !prev)}
-            aria-expanded={switcherOpen}
+            aria-expanded={isOpen && switcherOpen}
             aria-label={t("switchGroup")}
             title={t("switchGroup")}
           >
@@ -740,12 +737,12 @@ export function GroupSidebar({
               )}
             </div>
             {!isCollapsed && (
-              <ChevronDownIcon size={16} className={classNames("transition-transform", switcherOpen ? "rotate-180" : "")} />
+              <ChevronDownIcon size={16} className={classNames("transition-transform", isOpen && switcherOpen ? "rotate-180" : "")} />
             )}
           </button>
         </div>
 
-        {switcherOpen && (
+        {isOpen && switcherOpen && (
           <div
             ref={switcherPanelRef}
             className={classNames(
