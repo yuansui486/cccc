@@ -24,7 +24,7 @@ import {
   runtimePresetIdFor,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
-import { getCurrentDoneHubAccessToken } from "../../stores/useDoneHubStore";
+import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -432,7 +432,7 @@ export function AddActorModal({
                           setSelectedRuntimePresetId(preset?.id || "");
                           if (preset) {
                             setNewActorSecretsSetText(
-                              mergePresetSecrets(newActorSecretsSetText, preset, getCurrentDoneHubAccessToken())
+                              mergePresetSecrets(newActorSecretsSetText, preset, getCurrentDoneHubCodexApiKey())
                             );
                           }
                           if (preset?.envPrivate) {
