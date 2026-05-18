@@ -18,7 +18,19 @@ const { localStorageMock } = vi.hoisted(() => {
   }
 
   const storage = makeStorage();
+  const FileCtor = globalThis.File ?? class File extends Blob {
+    readonly name: string;
+    readonly lastModified: number;
+    readonly webkitRelativePath = "";
+
+    constructor(fileBits: BlobPart[], fileName: string, options?: FilePropertyBag) {
+      super(fileBits, options);
+      this.name = fileName;
+      this.lastModified = options?.lastModified ?? Date.now();
+    }
+  };
   vi.stubGlobal("localStorage", storage);
+  vi.stubGlobal("File", FileCtor);
   vi.stubGlobal("window", { setTimeout, clearTimeout, localStorage: storage });
   return { localStorageMock: storage };
 });
