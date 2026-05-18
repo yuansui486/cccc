@@ -21,6 +21,7 @@ import {
   apiForm,
   apiJson,
   ApiResponse,
+  capabilityStateRequestKey,
   clearContextRequest,
   contextRequestKey,
   FetchContextOptions,
@@ -354,15 +355,38 @@ export async function confirmOneColleaguePendingCapabilities(groupId: string, pe
 export async function fetchGroupCapabilityState(
   groupId: string,
   actorId: string = "user",
-  opts?: { capabilityId?: string; noCache?: boolean; signal?: AbortSignal },
+  opts?: { capabilityId?: string; noCache?: boolean; signal?: AbortSignal; view?: string },
 ) {
+  const gid = String(groupId || "").trim();
+  const aid = String(actorId || "user").trim() || "user";
+  const capabilityId = String(opts?.capabilityId || "").trim();
   const params = new URLSearchParams();
-  if (actorId) params.set("actor_id", actorId);
-  if (String(opts?.capabilityId || "").trim()) params.set("capability_id", String(opts?.capabilityId || "").trim());
+  params.set("actor_id", aid);
+  if (capabilityId) params.set("capability_id", capabilityId);
+  const view = String(opts?.view || "").trim();
+  if (view) params.set("view", view);
   if (opts?.noCache) params.set("_", String(Date.now()));
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return apiJson<CapabilityStateResult>(`/api/v1/groups/${encodeURIComponent(groupId)}/capabilities/state${suffix}`, {
-    signal: opts?.signal,
+  const load = () => {
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return apiJson<CapabilityStateResult>(`/api/v1/groups/${encodeURIComponent(gid)}/capabilities/state${suffix}`, {
+      signal: opts?.signal,
+    });
+  };
+  if (opts?.signal) return load();
+  if (opts?.noCache) {
+    return reuseSharedReadRequest(`${capabilityStateRequestKey(gid, aid, capabilityId, view)}:no-cache`, load);
+  }
+  return reuseSharedReadRequest(capabilityStateRequestKey(gid, aid, capabilityId, view), load);
+}
+
+export async function fetchSlashCommandCapabilityState(
+  groupId: string,
+  actorId: string = "user",
+  opts?: { noCache?: boolean; signal?: AbortSignal },
+) {
+  return fetchGroupCapabilityState(groupId, actorId, {
+    ...opts,
+    view: "slash_commands",
   });
 }
 

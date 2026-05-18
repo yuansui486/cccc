@@ -836,6 +836,29 @@ export type AssistantStateResult = {
   service_runtime?: AssistantServiceRuntime;
   service_runtimes?: AssistantServiceRuntime[];
   service_runtimes_by_id?: Record<string, AssistantServiceRuntime>;
+  recording_lease?: AssistantVoiceRecordingLease;
+};
+
+export type AssistantVoiceRecordingLease = {
+  owner_id: string;
+  group_id: string;
+  group_title?: string;
+  capture_mode?: string;
+  recognition_backend?: string;
+  by?: string;
+  created_at?: string;
+  updated_at?: string;
+  expires_at?: string;
+};
+
+export type AssistantVoiceRecordingLeaseResult = {
+  group_id: string;
+  action: string;
+  acquired?: boolean;
+  released?: boolean;
+  lost?: boolean;
+  leaseId?: string;
+  lease?: AssistantVoiceRecordingLease;
 };
 
 export type AssistantVoiceTrigger = {
@@ -1424,6 +1447,7 @@ export const SUPPORTED_RUNTIMES = [
   "auggie",
   "neovate",
   "gemini",
+  "hermes",
   "kimi",
   "web_model",
   "custom",
@@ -1438,6 +1462,7 @@ export const RUNTIME_INFO: Record<string, { label: string; desc: string }> = {
   codex: { label: "Codex CLI", desc: "" },
   droid: { label: "Droid", desc: "" },
   gemini: { label: "Gemini CLI", desc: "" },
+  hermes: { label: "Hermes Agent", desc: "Uses your Hermes profile with CCCC MCP" },
   kimi: { label: "Kimi CLI", desc: "" },
   neovate: { label: "Neovate Code", desc: "" },
   web_model: { label: "ChatGPT Web Model", desc: "ChatGPT browser delivery + remote MCP connector" },
@@ -1482,6 +1507,10 @@ export const RUNTIME_COLORS: Record<string, {
   gemini: {
     bg: "bg-yellow-900/30", text: "text-yellow-300", border: "border-yellow-600/50", dot: "bg-yellow-400",
     bgLight: "bg-yellow-50", textLight: "text-yellow-700", borderLight: "border-yellow-300", dotLight: "bg-yellow-500"
+  },
+  hermes: {
+    bg: "bg-cyan-900/30", text: "text-cyan-300", border: "border-cyan-600/50", dot: "bg-cyan-400",
+    bgLight: "bg-cyan-50", textLight: "text-cyan-700", borderLight: "border-cyan-300", dotLight: "bg-cyan-500"
   },
   kimi: {
     bg: "bg-lime-900/30", text: "text-lime-300", border: "border-lime-600/50", dot: "bg-lime-400",

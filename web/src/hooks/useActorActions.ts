@@ -5,6 +5,7 @@ import * as api from "../services/api";
 import type { Actor, SupportedRuntime } from "../types";
 import { formatCapabilityIdInput } from "../utils/capabilityAutoload";
 import { getEffectiveActorRunner } from "../utils/headlessRuntimeSupport";
+import { beginActorAction, endActorAction } from "./actorActionInFlight";
 
 const ACTOR_START_RECONCILE_DELAYS_MS = [1200, 3500] as const;
 
@@ -26,6 +27,7 @@ export function useActorActions(groupId: string) {
   // Local state: terminal epoch is used to force a terminal re-mount.
   const [termEpochByActor, setTermEpochByActor] = useState<Record<string, number>>({});
   const reconcileTimersRef = useRef<Record<string, number[]>>({});
+  const actorActionInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     return () => {
@@ -84,6 +86,8 @@ export function useActorActions(groupId: string) {
       if (!actor || !groupId) return;
       const isRunning = actor.running ?? actor.enabled ?? false;
       const wantsStart = !isRunning;
+      const actionKey = `actor-lifecycle:${actor.id}`;
+      if (!beginActorAction(actorActionInFlightRef, actionKey)) return;
       setBusy(`actor-${isRunning ? "stop" : "start"}:${actor.id}`);
       try {
         const resp = isRunning
@@ -93,6 +97,7 @@ export function useActorActions(groupId: string) {
           showError(`${resp.error.code}: ${resp.error.message}`);
           return;
         }
+        clearStreamingEventsForActor(actor.id, groupId);
         await Promise.all([refreshActors(), refreshGroups()]);
         if (wantsStart) {
           optimisticMarkRunning(actor.id, "actor_start_requested");
@@ -101,16 +106,19 @@ export function useActorActions(groupId: string) {
           clearReconcileTimers(actor.id);
         }
       } finally {
+        endActorAction(actorActionInFlightRef, actionKey);
         setBusy("");
       }
     },
-    [clearReconcileTimers, groupId, optimisticMarkRunning, refreshActors, refreshGroups, scheduleRuntimeReconcile, setBusy, showError]
+    [clearReconcileTimers, clearStreamingEventsForActor, groupId, optimisticMarkRunning, refreshActors, refreshGroups, scheduleRuntimeReconcile, setBusy, showError]
   );
 
   // Restart actor
   const relaunchActor = useCallback(
     async (actor: Actor) => {
       if (!groupId || !actor) return;
+      const actionKey = `actor-lifecycle:${actor.id}`;
+      if (!beginActorAction(actorActionInFlightRef, actionKey)) return;
       setBusy(`actor-relaunch:${actor.id}`);
       try {
         const resp = await api.restartActor(groupId, actor.id);
@@ -126,6 +134,7 @@ export function useActorActions(groupId: string) {
           [actor.id]: (prev[actor.id] || 0) + 1,
         }));
       } finally {
+        endActorAction(actorActionInFlightRef, actionKey);
         setBusy("");
       }
     },

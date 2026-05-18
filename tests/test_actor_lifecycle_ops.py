@@ -338,6 +338,58 @@ class TestActorLifecycleOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_actor_restart_keeps_runtime_session(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            create, _ = self._call("group_create", {"title": "actor-restart-session", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            self.assertTrue(group_id)
+
+            attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
+            self.assertTrue(attach.ok, getattr(attach, "error", None))
+
+            add, _ = self._call(
+                "actor_add",
+                {
+                    "group_id": group_id,
+                    "actor_id": "peer1",
+                    "title": "Peer 1",
+                    "runtime": "codex",
+                    "runner": "pty",
+                    "by": "user",
+                },
+            )
+            self.assertTrue(add.ok, getattr(add, "error", None))
+
+            from cccc.daemon.runtime_session_ops import read_runtime_session, record_pty_runtime_session
+
+            record_pty_runtime_session(
+                group_id=group_id,
+                actor_id="peer1",
+                runtime="codex",
+                cwd=Path("."),
+                command=["codex"],
+                provider_session_id="019dbe1d-cd97-7d31-9ba6-212d3e57b15c",
+                captured_from="test",
+            )
+            from cccc.kernel.group import load_group
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            group.doc["running"] = False
+            group.save()
+
+            restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
+            self.assertTrue(restart.ok, getattr(restart, "error", None))
+
+            self.assertEqual(
+                read_runtime_session(group_id, "peer1").get("provider_session_id"),
+                "019dbe1d-cd97-7d31-9ba6-212d3e57b15c",
+            )
+        finally:
+            cleanup()
+
     def test_actor_remove_stops_group_when_last_actor_removed(self) -> None:
         _, cleanup = self._with_home()
         try:

@@ -1561,6 +1561,58 @@ Result:
 }
 ```
 
+#### `assistant_voice_recording_lease`
+
+Acquire, refresh, release, or inspect the daemon-owned Voice Secretary recording
+lease. Web clients may keep a local browser lock for fast UX debouncing, but the
+daemon lease is the final cross-tab / cross-browser / cross-device guard that
+prevents two Voice Secretary recording streams from running at the same time.
+The lease is TTL-based so a crashed tab or disconnected browser eventually
+expires without manual cleanup.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+  action: "acquire" | "heartbeat" | "release" | "status"
+  owner_id?: string        // required for acquire/heartbeat/release
+  lease_id?: string        // returned by acquire; required to refresh/release that acquisition
+  ttl_seconds?: number     // default 30; bounded by the daemon
+  capture_mode?: string
+  recognition_backend?: string
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  action: string
+  acquired: boolean
+  released: boolean
+  lost: boolean
+  lease_id?: string        // only returned to the acquiring/refreshing owner
+  lease?: {
+    owner_id: string
+    group_id: string
+    group_title?: string
+    capture_mode?: string
+    recognition_backend?: string
+    by?: string
+    created_at?: string
+    updated_at?: string
+    expires_at?: string
+  }
+}
+```
+
+If another live lease exists, `acquire` / `heartbeat` returns
+`assistant_voice_recording_busy` with `details.active_lease`.
+`heartbeat` only refreshes the matching active `owner_id` + `lease_id`; it never
+creates a new lease. Stale `heartbeat` / `release` requests return `lost` or
+`released=false` without modifying a newer lease.
+
 #### `assistant_voice_transcript_append`
 
 Append a stable transcript segment for Voice Secretary. Web/browser ASR and
@@ -2086,6 +2138,87 @@ Result:
 Notes:
 - For linked actors (`profile_id` set), `actor_start` and `actor_restart` first resolve profile runtime config and profile secrets.
 - If the linked profile includes `capability_defaults`, daemon applies baseline capability enables through capability control plane before launch.
+
+#### `runtime_hermes_status`
+
+Return Hermes runtime setup diagnostics for the selected user Hermes profile.
+
+Args:
+```ts
+{}
+```
+
+Result:
+```ts
+{
+  runtime: "hermes"
+  setup_ready: boolean
+  auth_ready: boolean
+  launch_ready: boolean
+  hermes_cli: { available: boolean; path?: string; version?: string }
+  hermes_home: string
+  profile: { name: "default"; dir: string; exists: boolean; config_path: string; config_exists: boolean }
+  mcp: Record<string, unknown>
+  auth: Record<string, unknown>
+  phase0_gates: Array<Record<string, unknown>>
+  issues: string[]
+}
+```
+
+Notes:
+- CCCC does not create or select a separate Hermes profile.
+- `HERMES_HOME`, when supplied by the user, is treated as ordinary runtime environment.
+- `mcp.env` must persist `${CCCC_HOME}`, `${CCCC_GROUP_ID}`, and `${CCCC_ACTOR_ID}` placeholders so each actor process resolves its own CCCC identity.
+
+#### `runtime_hermes_prepare`
+
+Configure the `cccc` MCP server in the selected Hermes profile through Hermes' official MCP setup flow.
+
+Args:
+```ts
+{
+  cwd?: string
+  auto_enable_tools?: boolean // alias: yes
+  force_mcp?: boolean         // alias: force
+}
+```
+
+Result:
+```ts
+{
+  ok: boolean
+  commands_run?: Array<Record<string, unknown>>
+  status: Record<string, unknown>
+  error?: { code: string; message: string }
+}
+```
+
+Notes:
+- Setup MAY invoke `hermes mcp add cccc ...` and answer Hermes' discovery prompt only when `auto_enable_tools`/`yes` is true.
+- Discovery uses concrete CCCC env values, then CCCC normalizes saved Hermes MCP env back to actor-time placeholders.
+
+#### `runtime_hermes_mcp_test`
+
+Run Hermes' MCP test command for the configured `cccc` server with probe CCCC actor env.
+
+Args:
+```ts
+{
+  cwd?: string
+  group_id?: string
+  actor_id?: string
+}
+```
+
+Result:
+```ts
+{
+  ok: boolean
+  argv: string[]
+  result?: { returncode: number; stdout: string; stderr: string }
+  error?: { code: string; message: string }
+}
+```
 
 #### `actor_env_private_keys`
 
