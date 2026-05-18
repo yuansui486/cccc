@@ -21,6 +21,32 @@ describe("runtime presets", () => {
     ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5");
   });
 
+  it("builds Claude model commands from the runtime default", () => {
+    const preset = runtimePresetById("model:deepseek-v4-pro-claude");
+    expect(preset).toBeTruthy();
+    expect(
+      commandForRuntimePreset(preset!, {
+        name: "claude",
+        display_name: "Claude Code",
+        available: true,
+        recommended_command: "claude --dangerously-skip-permissions",
+      })
+    ).toBe("claude --dangerously-skip-permissions --model deepseek-v4-pro[1m]");
+  });
+
+  it("replaces stale Claude model command flags", () => {
+    const doubao = runtimePresetById("model:doubao-code-claude");
+    expect(doubao).toBeTruthy();
+    expect(
+      commandForRuntimePreset(doubao!, {
+        name: "claude",
+        display_name: "Claude Code",
+        available: true,
+        recommended_command: "claude --dangerously-skip-permissions --model old-model",
+      })
+    ).toBe("claude --dangerously-skip-permissions --model doubao-seed-2-0-pro-260215");
+  });
+
   it("replaces stale Claude preset keys when changing models", () => {
     const doubao = runtimePresetById("model:doubao-code-claude");
     expect(doubao).toBeTruthy();

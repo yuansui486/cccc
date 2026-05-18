@@ -107,8 +107,11 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
 export function commandForRuntimePreset(preset: RuntimePreset, runtimeInfo?: RuntimeInfo): string {
   const base = splitCommand(String(runtimeInfo?.recommended_command || "").trim());
   const command = preset.command && preset.command.length ? preset.command : base;
+  if (preset.runtime === "claude" && preset.model) {
+    return withCommandModel(command, preset.model, "--model").join(" ");
+  }
   if (preset.runtime === "codex" && preset.model) {
-    return withCommandModel(command, preset.model).join(" ");
+    return withCommandModel(command, preset.model, "-m").join(" ");
   }
   return command.join(" ");
 }
@@ -187,7 +190,7 @@ function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
   return "";
 }
 
-function withCommandModel(command: string[], model: string): string[] {
+function withCommandModel(command: string[], model: string, preferredFlag: "-m" | "--model"): string[] {
   const cleaned = command.filter(Boolean);
   const modelName = String(model || "").trim();
   if (!modelName) return cleaned;
@@ -200,7 +203,7 @@ function withCommandModel(command: string[], model: string): string[] {
       return [...cleaned.slice(0, idx), `--model=${modelName}`, ...cleaned.slice(idx + 1)];
     }
   }
-  return [...cleaned, "-m", modelName];
+  return [...cleaned, preferredFlag, modelName];
 }
 
 function modelFromCommand(command: string[]): string {
