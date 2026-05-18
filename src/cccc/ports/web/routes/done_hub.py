@@ -449,10 +449,21 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 self_ok, self_payload, self_error = _parse_json_response(self_resp)
                 if not self_ok or self_payload is None:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
+                session = _normalize_profile(base_url, self_payload)
+                client_config = await _configure_local_clients(client, base_url=base_url, session=session) or {}
+                session.update(client_config)
+        except _DoneHubClientConfigError:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "done_hub_client_config_failed",
+                    "message": _CLIENT_CONFIG_ERROR_MESSAGE,
+                },
+            }
         except httpx.HTTPError as exc:
             return {"ok": False, "error": {"code": "done_hub_network_error", "message": str(exc)}}
 
-        return {"ok": True, "result": {"session": _normalize_profile(base_url, self_payload)}}
+        return {"ok": True, "result": {"session": session}}
 
     @router.post("/team_presets/list")
     async def done_hub_team_presets_list(req: DoneHubTeamPresetRequest) -> Dict[str, Any]:

@@ -149,31 +149,33 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         base = "https://peer.shierkeji.com"
         calls: list[tuple[str, str, dict]] = []
 
-        def _factory(*args, **kwargs):
-            return _FakeAsyncClient(
+        responses = {
+            ("GET", f"{base}/api/user/self"): _FakeResponse(
+                200,
                 {
-                    ("GET", f"{base}/api/user/self"): _FakeResponse(
-                        200,
-                        {
-                            "success": True,
-                            "message": "",
-                            "data": {
-                                "username": "agent1",
-                                "display_name": "Agent 1",
-                                "group": "default",
-                                "quota": 250000,
-                                "used_quota": 1200,
-                                "role": 1,
-                                "status": 1,
-                                "access_token": "token-32",
-                            },
-                        },
-                    )
+                    "success": True,
+                    "message": "",
+                    "data": {
+                        "username": "agent1",
+                        "display_name": "Agent 1",
+                        "group": "default",
+                        "quota": 250000,
+                        "used_quota": 1200,
+                        "role": 1,
+                        "status": 1,
+                        "access_token": "token-32",
+                    },
                 },
-                calls,
             )
+        }
 
-        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+        def _factory(*args, **kwargs):
+            return _FakeAsyncClient(responses, calls)
+
+        with (
+            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+            patch("cccc.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value={"codex_api_key": "sk-codex-token"})),
+        ):
             client = self._create_client()
             resp = client.post(
                 "/api/v1/done_hub/self",
@@ -183,6 +185,8 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertTrue(bool(body.get("ok")))
+        session = ((body.get("result") or {}).get("session") or {})
+        self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-token")
         headers = calls[0][2].get("headers") or {}
         self.assertEqual(headers.get("Authorization"), "Bearer token-32")
 
