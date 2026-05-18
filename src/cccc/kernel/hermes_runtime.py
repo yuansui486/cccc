@@ -1,8 +1,8 @@
 """Hermes runtime setup helpers.
 
-Hermes follows the same integration model as Claude/Codex: CCCC uses the
-selected user Hermes home/profile and injects per-actor CCCC context at process
-launch. CCCC does not create or select a separate Hermes profile.
+Hermes follows the same integration model as Claude/Codex: OneColleague uses the
+selected user Hermes home/profile and injects per-actor runtime context at process
+launch. OneColleague does not create or select a separate Hermes profile.
 """
 
 from __future__ import annotations
@@ -22,7 +22,9 @@ from ..util.process import find_subprocess_executable, resolve_subprocess_argv
 from .runtime import get_cccc_mcp_stdio_command
 
 HERMES_PROVIDER_ID = "xai-oauth"
-HERMES_MCP_SERVER_NAME = "cccc"
+HERMES_MCP_SERVER_NAME = "onecolleague"
+LEGACY_HERMES_MCP_SERVER_NAME = "cccc"
+HERMES_MCP_SERVER_NAMES = (HERMES_MCP_SERVER_NAME, LEGACY_HERMES_MCP_SERVER_NAME)
 
 HERMES_MCP_ENV_PLACEHOLDERS: Dict[str, str] = {
     "CCCC_HOME": "${CCCC_HOME}",
@@ -80,7 +82,7 @@ def build_hermes_mcp_add_command(
 ) -> list[str]:
     cmd = list(cccc_cmd or get_cccc_mcp_stdio_command())
     if not cmd:
-        cmd = ["cccc", "mcp"]
+        cmd = ["onecolleague", "mcp"]
     out = ["hermes", "mcp", "add", HERMES_MCP_SERVER_NAME, "--command", str(cmd[0])]
     args = [str(part) for part in cmd[1:] if str(part).strip()]
     if args:
@@ -142,12 +144,21 @@ def _auth_doc_mentions_provider(value: Any) -> bool:
 
 def _inspect_mcp_config(config: Dict[str, Any], *, expected_cmd: list[str]) -> Dict[str, Any]:
     servers = config.get("mcp_servers") if isinstance(config.get("mcp_servers"), dict) else {}
-    entry = servers.get(HERMES_MCP_SERVER_NAME) if isinstance(servers, dict) else None
+    server_name = HERMES_MCP_SERVER_NAME
+    entry = None
+    if isinstance(servers, dict):
+        for candidate in HERMES_MCP_SERVER_NAMES:
+            candidate_entry = servers.get(candidate)
+            if isinstance(candidate_entry, dict):
+                entry = candidate_entry
+                server_name = candidate
+                break
     if not isinstance(entry, dict):
         return {
             "status": "missing",
             "configured": False,
             "server_name": HERMES_MCP_SERVER_NAME,
+            "accepted_server_names": list(HERMES_MCP_SERVER_NAMES),
             "expected_command": list(expected_cmd),
             "env_placeholders": dict(HERMES_MCP_ENV_PLACEHOLDERS),
         }
@@ -165,7 +176,9 @@ def _inspect_mcp_config(config: Dict[str, Any], *, expected_cmd: list[str]) -> D
     return {
         "status": status,
         "configured": True,
-        "server_name": HERMES_MCP_SERVER_NAME,
+        "server_name": server_name,
+        "accepted_server_names": list(HERMES_MCP_SERVER_NAMES),
+        "legacy_server_name": server_name == LEGACY_HERMES_MCP_SERVER_NAME,
         "command": command,
         "args": args,
         "enabled": enabled_ok,
@@ -192,18 +205,27 @@ def _inspect_auth(profile_dir: Path) -> Dict[str, Any]:
 
 
 def _normalize_mcp_config_placeholders(config_path: Path) -> None:
-    """Replace discovery-time CCCC env values with runtime placeholders.
+    """Replace discovery-time runtime env values with runtime placeholders.
 
     Hermes' official `mcp add` discovers tools by launching the server
-    immediately, so setup must pass concrete CCCC env values to avoid creating a
+    immediately, so setup must pass concrete runtime env values to avoid creating a
     literal `${CCCC_HOME}` directory during discovery. The persisted shared
     profile, however, must retain placeholders so each actor process resolves
-    its own CCCC identity at launch time.
+    its own OneColleague identity at launch time.
     """
+    def _find_entry(servers: Any) -> tuple[str, Any]:
+        if not isinstance(servers, dict):
+            return HERMES_MCP_SERVER_NAME, None
+        for candidate in HERMES_MCP_SERVER_NAMES:
+            entry = servers.get(candidate)
+            if isinstance(entry, dict):
+                return candidate, entry
+        return HERMES_MCP_SERVER_NAME, None
+
     def _matches() -> bool:
         doc_now = _read_yaml(config_path)
         servers_now = doc_now.get("mcp_servers") if isinstance(doc_now.get("mcp_servers"), dict) else None
-        entry_now = servers_now.get(HERMES_MCP_SERVER_NAME) if isinstance(servers_now, dict) else None
+        _server_name_now, entry_now = _find_entry(servers_now)
         env_now = entry_now.get("env") if isinstance(entry_now, dict) and isinstance(entry_now.get("env"), dict) else {}
         return all(str(env_now.get(key) or "") == value for key, value in HERMES_MCP_ENV_PLACEHOLDERS.items())
 
@@ -230,7 +252,9 @@ def _normalize_mcp_config_placeholders(config_path: Path) -> None:
             indent = len(line) - len(stripped)
             if in_env and indent <= env_indent:
                 in_env = False
-            if in_server and indent <= server_indent and not (indent == server_indent and content.startswith(f"{HERMES_MCP_SERVER_NAME}:")):
+            if in_server and indent <= server_indent and not (
+                indent == server_indent and any(content.startswith(f"{server_name}:") for server_name in HERMES_MCP_SERVER_NAMES)
+            ):
                 in_server = False
             if in_mcp and indent <= mcp_indent and not (indent == mcp_indent and content.startswith("mcp_servers:")):
                 in_mcp = False
@@ -238,7 +262,9 @@ def _normalize_mcp_config_placeholders(config_path: Path) -> None:
                 in_mcp = True
                 mcp_indent = indent
                 continue
-            if in_mcp and not in_server and indent > mcp_indent and content.startswith(f"{HERMES_MCP_SERVER_NAME}:"):
+            if in_mcp and not in_server and indent > mcp_indent and any(
+                content.startswith(f"{server_name}:") for server_name in HERMES_MCP_SERVER_NAMES
+            ):
                 in_server = True
                 server_indent = indent
                 continue
@@ -260,7 +286,7 @@ def _normalize_mcp_config_placeholders(config_path: Path) -> None:
 
     doc = _read_yaml(config_path)
     servers = doc.get("mcp_servers") if isinstance(doc.get("mcp_servers"), dict) else None
-    entry = servers.get(HERMES_MCP_SERVER_NAME) if isinstance(servers, dict) else None
+    _server_name, entry = _find_entry(servers)
     if not isinstance(entry, dict):
         return
     env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
@@ -318,7 +344,7 @@ def hermes_runtime_status(
     if not config_path.exists():
         issues.append("config_missing")
     if mcp.get("status") != "ready":
-        issues.append("cccc_mcp_config_not_ready")
+        issues.append("onecolleague_mcp_config_not_ready")
     if auth.get("status") != "present":
         issues.append("xai_oauth_missing")
 
@@ -367,8 +393,8 @@ def hermes_runtime_status(
         )
     )
     commands = {
-        "prepare": f"{env_prefix}cccc runtime hermes prepare --yes",
-        "mcp_test": f"{env_prefix}cccc runtime hermes mcp-test",
+        "prepare": f"{env_prefix}onecolleague runtime hermes prepare --yes",
+        "mcp_test": f"{env_prefix}onecolleague runtime hermes mcp-test",
         "auth_add": f"{env_prefix}{_shell_join(build_hermes_auth_add_command())}",
         "auth_add_no_browser": f"{env_prefix}{_shell_join(build_hermes_auth_add_command(no_browser=True))}",
         "launch": f"{env_prefix}{_shell_join(build_hermes_launch_command())}",
@@ -477,7 +503,7 @@ def prepare_hermes_runtime(
                     "ok": False,
                     "error": {
                         "code": "hermes_mcp_setup_requires_confirmation",
-                        "message": "Hermes MCP setup is discovery-first; rerun with auto_enable_tools/--yes to enable discovered CCCC tools.",
+                        "message": "Hermes MCP setup is discovery-first; rerun with auto_enable_tools/--yes to enable discovered OneColleague tools.",
                     },
                     "commands_run": commands_run,
                     "status": status,
@@ -503,7 +529,7 @@ def prepare_hermes_runtime(
             if result.returncode != 0 or ((status.get("mcp") or {}).get("status") != "ready"):
                 return {
                     "ok": False,
-                    "error": {"code": "hermes_mcp_add_failed", "message": "failed to configure Hermes CCCC MCP server"},
+                    "error": {"code": "hermes_mcp_add_failed", "message": "failed to configure Hermes OneColleague MCP server"},
                     "commands_run": commands_run,
                     "status": status,
                 }

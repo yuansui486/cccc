@@ -273,7 +273,7 @@ def create_app() -> FastAPI:
                 clear_web_runtime_state(home=home, pid=runtime_pid)
             _close_web_logging()
 
-    app = FastAPI(title="cccc web", version=__version__, lifespan=_lifespan)
+    app = FastAPI(title="OneColleague Web", version=__version__, lifespan=_lifespan)
     home = ensure_home()
     web_mode = _web_mode()
     read_only = web_mode == "exhibit"

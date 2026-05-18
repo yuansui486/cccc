@@ -1,5 +1,5 @@
 """
-CCCC MCP Server — entrypoint
+OneColleague MCP Server — entrypoint
 
 Runs in stdio mode for agent runtimes.
 
@@ -7,7 +7,7 @@ Usage:
     python -m cccc.ports.mcp.main
 
 Or via CLI:
-    cccc mcp
+    onecolleague mcp
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from ... import __version__
 from .server import MCPError, handle_tool_call, list_tools_for_caller
+from .toolspecs import canonical_mcp_tool_name
 
 _SESSION_SUPPORTS_TOOLS_LIST_CHANGED = False
 _PENDING_NOTIFICATIONS: List[Dict[str, Any]] = []
@@ -146,7 +147,7 @@ def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
                 "prompts": {},
             },
             "serverInfo": {
-                "name": "cccc-mcp",
+                "name": "onecolleague-mcp",
                 "version": __version__,
             },
         })
@@ -198,8 +199,9 @@ def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
                 enable_result = result.get("enable_result")
                 if isinstance(enable_result, dict) and bool(enable_result.get("refresh_required")):
                     refresh_required = True
+            canonical_tool_name = canonical_mcp_tool_name(tool_name)
             if (
-                tool_name
+                canonical_tool_name
                 in {"cccc_capability_enable", "cccc_capability_import", "cccc_capability_install", "cccc_capability_uninstall", "cccc_capability_use"}
                 and refresh_required
                 and _SESSION_SUPPORTS_TOOLS_LIST_CHANGED

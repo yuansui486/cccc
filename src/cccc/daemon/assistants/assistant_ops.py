@@ -1930,7 +1930,7 @@ def _group_voice_input_by_target(items: list[Dict[str, Any]]) -> list[Dict[str, 
             group_item["request_kind"] = "document_request" if has_request else "document_input"
         if target_kind in {"secretary", "document"} and has_request:
             group_item["requires_report"] = True
-            group_item["report_channel"] = "cccc_voice_secretary_request(action=\"report\")"
+            group_item["report_channel"] = "onecolleague_voice_secretary_request(action=\"report\")"
     return list(grouped.values())
 
 
@@ -1970,20 +1970,20 @@ def _voice_input_required_outputs(group_item: Dict[str, Any]) -> list[str]:
     )
     if target_kind == "secretary" and request_ids:
         return [
-            f"Use MCP tool cccc_voice_secretary_request(action=\"report\", request_id=\"{request_arg}\", status=\"done\"|\"needs_user\"|\"failed\", reply_text=\"...\")."
+            f"Use MCP tool onecolleague_voice_secretary_request(action=\"report\", request_id=\"{request_arg}\", status=\"done\"|\"needs_user\"|\"failed\", reply_text=\"...\")."
         ]
     if target_kind == "composer" and request_ids:
         if composer_replace_operation:
             return [
-                f"Use MCP tool cccc_voice_secretary_composer(action=\"submit_prompt_draft\", request_id=\"{request_arg}\", draft_text=\"...\")."
+                f"Use MCP tool onecolleague_voice_secretary_composer(action=\"submit_prompt_draft\", request_id=\"{request_arg}\", draft_text=\"...\")."
             ]
         return [
-            f"Use MCP tool cccc_voice_secretary_composer(action=\"submit_prompt_draft\", request_id=\"{request_arg}\", draft_text=\"...\")."
+            f"Use MCP tool onecolleague_voice_secretary_composer(action=\"submit_prompt_draft\", request_id=\"{request_arg}\", draft_text=\"...\")."
         ]
     if target_kind == "document":
         if bool(group_item.get("requires_report")):
             return [
-                f"Edit the repository markdown directly, then use MCP tool cccc_voice_secretary_request(action=\"report\", request_id=\"{request_arg}\", status=\"done\", reply_text=\"...\")."
+                f"Edit the repository markdown directly, then use MCP tool onecolleague_voice_secretary_request(action=\"report\", request_id=\"{request_arg}\", status=\"done\", reply_text=\"...\")."
             ]
         return ["Edit the repository markdown directly."]
     return []
@@ -2190,7 +2190,7 @@ def _voice_input_batch_public(group_item: Dict[str, Any]) -> Dict[str, Any]:
     }
     if bool(group_item.get("requires_report")):
         out["requires_report"] = True
-        out["report_channel"] = str(group_item.get("report_channel") or "cccc_voice_secretary_request(action=\"report\")")
+        out["report_channel"] = str(group_item.get("report_channel") or "onecolleague_voice_secretary_request(action=\"report\")")
     if required_outputs:
         out["required_outputs"] = required_outputs
     for key in ("request_ids", "operations", "kinds", "intent_hints", "languages", "sources"):

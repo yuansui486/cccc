@@ -1,6 +1,7 @@
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cccc.ports.mcp.toolspecs import MCP_TOOLS
 
@@ -44,6 +45,20 @@ class TestMcpToolspecDispatchParity(unittest.TestCase):
             [],
             msg=f"Tools dispatched in server.py but missing from MCP_TOOLS: {sorted(impl_names - spec_names)}",
         )
+
+    def test_onecolleague_tool_alias_dispatches_to_canonical_handler(self) -> None:
+        from cccc.ports.mcp import server as mcp_server
+        from cccc.ports.mcp.common import runtime_context_override
+
+        with runtime_context_override(group_id="g_test"), patch.object(
+            mcp_server,
+            "project_info",
+            return_value={"ok": True, "name": "project"},
+        ):
+            self.assertEqual(
+                mcp_server.handle_tool_call("onecolleague_project_info", {"group_id": "g_test"}),
+                mcp_server.handle_tool_call("cccc_project_info", {"group_id": "g_test"}),
+            )
 
 
 if __name__ == "__main__":

@@ -157,7 +157,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                 json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             )
             self.assertEqual(init_resp.status_code, 200)
-            self.assertEqual((init_resp.json().get("result") or {}).get("serverInfo", {}).get("name"), "cccc-mcp")
+            self.assertEqual((init_resp.json().get("result") or {}).get("serverInfo", {}).get("name"), "onecolleague-mcp")
 
             list_resp = client.post(
                 f"/mcp/web-model/{connector_id}",
@@ -167,32 +167,32 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(list_resp.status_code, 200)
             tools = ((list_resp.json().get("result") or {}).get("tools") or [])
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("cccc_runtime_wait_next_turn", names)
-            self.assertIn("cccc_runtime_complete_turn", names)
-            self.assertIn("cccc_code_exec", names)
-            self.assertIn("cccc_code_wait", names)
-            self.assertIn("cccc_repo", names)
-            self.assertIn("cccc_repo_edit", names)
-            self.assertIn("cccc_apply_patch", names)
-            self.assertIn("cccc_shell", names)
-            self.assertIn("cccc_exec_command", names)
-            self.assertIn("cccc_write_stdin", names)
-            self.assertIn("cccc_git", names)
-            self.assertIn("cccc_capability_search", names)
-            self.assertIn("cccc_capability_state", names)
-            self.assertIn("cccc_capability_enable", names)
-            self.assertIn("cccc_capability_use", names)
-            self.assertNotIn("cccc_actor", names)
-            self.assertNotIn("cccc_group", names)
-            self.assertNotIn("cccc_context_sync", names)
-            self.assertNotIn("cccc_terminal", names)
-            self.assertNotIn("cccc_debug", names)
-            self.assertNotIn("cccc_space", names)
-            self.assertNotIn("cccc_voice_secretary_document", names)
-            self.assertNotIn("cccc_voice_secretary_request", names)
-            self.assertNotIn("cccc_voice_secretary_composer", names)
-            self.assertNotIn("cccc_pet_decisions", names)
-            repo_spec = next((item for item in tools if isinstance(item, dict) and item.get("name") == "cccc_repo"), {})
+            self.assertIn("onecolleague_runtime_wait_next_turn", names)
+            self.assertIn("onecolleague_runtime_complete_turn", names)
+            self.assertIn("onecolleague_code_exec", names)
+            self.assertIn("onecolleague_code_wait", names)
+            self.assertIn("onecolleague_repo", names)
+            self.assertIn("onecolleague_repo_edit", names)
+            self.assertIn("onecolleague_apply_patch", names)
+            self.assertIn("onecolleague_shell", names)
+            self.assertIn("onecolleague_exec_command", names)
+            self.assertIn("onecolleague_write_stdin", names)
+            self.assertIn("onecolleague_git", names)
+            self.assertIn("onecolleague_capability_search", names)
+            self.assertIn("onecolleague_capability_state", names)
+            self.assertIn("onecolleague_capability_enable", names)
+            self.assertIn("onecolleague_capability_use", names)
+            self.assertNotIn("onecolleague_actor", names)
+            self.assertNotIn("onecolleague_group", names)
+            self.assertNotIn("onecolleague_context_sync", names)
+            self.assertNotIn("onecolleague_terminal", names)
+            self.assertNotIn("onecolleague_debug", names)
+            self.assertNotIn("onecolleague_space", names)
+            self.assertNotIn("onecolleague_voice_secretary_document", names)
+            self.assertNotIn("onecolleague_voice_secretary_request", names)
+            self.assertNotIn("onecolleague_voice_secretary_composer", names)
+            self.assertNotIn("onecolleague_pet_decisions", names)
+            repo_spec = next((item for item in tools if isinstance(item, dict) and item.get("name") == "onecolleague_repo"), {})
             self.assertTrue(((repo_spec.get("annotations") or {}).get("readOnlyHint")))
 
             help_resp = client.post(
@@ -202,7 +202,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 20,
                     "method": "tools/call",
-                    "params": {"name": "cccc_help", "arguments": {}},
+                    "params": {"name": "onecolleague_help", "arguments": {}},
                 },
             )
             self.assertEqual(help_resp.status_code, 200)
@@ -210,11 +210,11 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             help_payload = json.loads(help_text)
             help_markdown = str(help_payload.get("markdown") or "")
             self.assertIn("## Web Model Transport (Runtime)", help_markdown)
-            self.assertIn("normal CCCC agent", help_markdown)
+            self.assertIn("normal OneColleague agent", help_markdown)
             self.assertIn("remote MCP pull", help_markdown)
             browser_state = read_chatgpt_browser_state(group.group_id, "peer1")
             self.assertEqual(browser_state.get("auto_reload_last_progress_reason"), "mcp_tool")
-            self.assertEqual(browser_state.get("auto_reload_last_progress_detail"), "cccc_help")
+            self.assertEqual(browser_state.get("auto_reload_last_progress_detail"), "onecolleague_help")
 
             with patch("cccc.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
                 wait_resp = client.post(
@@ -224,7 +224,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                         "jsonrpc": "2.0",
                         "id": 3,
                         "method": "tools/call",
-                        "params": {"name": "cccc_runtime_wait_next_turn", "arguments": {}},
+                        "params": {"name": "onecolleague_runtime_wait_next_turn", "arguments": {}},
                     },
                 )
             self.assertEqual(wait_resp.status_code, 200)
@@ -243,7 +243,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(activity_resp.status_code, 200)
             activity_items = ((activity_resp.json().get("result") or {}).get("connectors") or [])
             activity = next(item for item in activity_items if str(item.get("connector_id") or "") == connector_id)
-            self.assertEqual(activity.get("last_tool_name"), "cccc_runtime_wait_next_turn")
+            self.assertEqual(activity.get("last_tool_name"), "onecolleague_runtime_wait_next_turn")
             self.assertEqual(activity.get("last_wait_status"), "work_available")
             self.assertEqual(activity.get("last_turn_id"), turn.get("turn_id"))
             self.assertTrue(str(activity.get("last_activity_at") or "").strip())
@@ -268,18 +268,18 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(list_resp.status_code, 200)
             tools = ((list_resp.json().get("result") or {}).get("tools") or [])
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("cccc_shell", names)
-            self.assertIn("cccc_exec_command", names)
-            self.assertIn("cccc_write_stdin", names)
-            self.assertIn("cccc_capability_enable", names)
-            self.assertIn("cccc_capability_use", names)
-            self.assertNotIn("cccc_actor", names)
-            self.assertNotIn("cccc_capability_import", names)
-            self.assertNotIn("cccc_capability_block", names)
-            self.assertNotIn("cccc_capability_uninstall", names)
-            self.assertNotIn("cccc_context_sync", names)
-            self.assertNotIn("cccc_space", names)
-            self.assertNotIn("cccc_voice_secretary_document", names)
+            self.assertIn("onecolleague_shell", names)
+            self.assertIn("onecolleague_exec_command", names)
+            self.assertIn("onecolleague_write_stdin", names)
+            self.assertIn("onecolleague_capability_enable", names)
+            self.assertIn("onecolleague_capability_use", names)
+            self.assertNotIn("onecolleague_actor", names)
+            self.assertNotIn("onecolleague_capability_import", names)
+            self.assertNotIn("onecolleague_capability_block", names)
+            self.assertNotIn("onecolleague_capability_uninstall", names)
+            self.assertNotIn("onecolleague_context_sync", names)
+            self.assertNotIn("onecolleague_space", names)
+            self.assertNotIn("onecolleague_voice_secretary_document", names)
 
             actor_call = client.post(
                 f"/mcp/web-model/{connector_id}",
@@ -288,7 +288,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "tools/call",
-                    "params": {"name": "cccc_actor", "arguments": {"action": "list"}},
+                    "params": {"name": "onecolleague_actor", "arguments": {"action": "list"}},
                 },
             )
             self.assertEqual(actor_call.status_code, 200)
@@ -304,7 +304,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                         "id": 3,
                         "method": "tools/call",
                         "params": {
-                            "name": "cccc_capability_enable",
+                            "name": "onecolleague_capability_enable",
                             "arguments": {"capability_id": "pack:diagnostics", "scope": "group"},
                         },
                     },
@@ -333,13 +333,13 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(list_resp.status_code, 200)
             tools = ((list_resp.json().get("result") or {}).get("tools") or [])
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("cccc_capability_use", names)
-            self.assertIn("cccc_capability_enable", names)
-            self.assertNotIn("cccc_capability_import", names)
-            self.assertNotIn("cccc_capability_block", names)
-            self.assertNotIn("cccc_capability_uninstall", names)
-            self.assertNotIn("cccc_actor", names)
-            self.assertNotIn("cccc_space", names)
+            self.assertIn("onecolleague_capability_use", names)
+            self.assertIn("onecolleague_capability_enable", names)
+            self.assertNotIn("onecolleague_capability_import", names)
+            self.assertNotIn("onecolleague_capability_block", names)
+            self.assertNotIn("onecolleague_capability_uninstall", names)
+            self.assertNotIn("onecolleague_actor", names)
+            self.assertNotIn("onecolleague_space", names)
 
             direct_actor_call = client.post(
                 f"/mcp/web-model/{connector_id}",
@@ -348,7 +348,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "tools/call",
-                    "params": {"name": "cccc_actor", "arguments": {"action": "list"}},
+                    "params": {"name": "onecolleague_actor", "arguments": {"action": "list"}},
                 },
             )
             self.assertEqual(direct_actor_call.status_code, 200)
@@ -364,9 +364,9 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                         "id": 3,
                         "method": "tools/call",
                         "params": {
-                            "name": "cccc_capability_use",
+                            "name": "onecolleague_capability_use",
                             "arguments": {
-                                "tool_name": "cccc_actor",
+                                "tool_name": "onecolleague_actor",
                                 "tool_arguments": {"action": "list"},
                             },
                         },
@@ -389,7 +389,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                         "id": 4,
                         "method": "tools/call",
                         "params": {
-                            "name": "cccc_capability_enable",
+                            "name": "onecolleague_capability_enable",
                             "arguments": {"capability_id": "pack:diagnostics", "scope": "group"},
                         },
                     },
@@ -503,7 +503,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 10,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo", "arguments": {"action": "read", "path": "README.md"}},
+                    "params": {"name": "onecolleague_repo", "arguments": {"action": "read", "path": "README.md"}},
                 },
             )
             self.assertEqual(read_resp.status_code, 200)
@@ -518,7 +518,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 11,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo", "arguments": {"action": "read", "path": "../outside.txt"}},
+                    "params": {"name": "onecolleague_repo", "arguments": {"action": "read", "path": "../outside.txt"}},
                 },
             )
             self.assertEqual(blocked.status_code, 200)
@@ -532,11 +532,11 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 12,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo", "arguments": {"action": "write", "path": "x.txt", "content": "x"}},
+                    "params": {"name": "onecolleague_repo", "arguments": {"action": "write", "path": "x.txt", "content": "x"}},
                 },
             )
             self.assertEqual(edit_blocked.status_code, 200)
-            self.assertIn("cccc_repo_edit", json.dumps(edit_blocked.json(), ensure_ascii=False))
+            self.assertIn("onecolleague_repo_edit", json.dumps(edit_blocked.json(), ensure_ascii=False))
         finally:
             cleanup()
 
@@ -564,7 +564,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 190,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo", "arguments": {"action": "list_dir", "path": ".", "depth": 2}},
+                    "params": {"name": "onecolleague_repo", "arguments": {"action": "list_dir", "path": ".", "depth": 2}},
                 },
             )
             self.assertEqual(list_dir_resp.status_code, 200)
@@ -579,7 +579,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 191,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_repo",
+                        "name": "onecolleague_repo",
                         "arguments": {"action": "read", "path": "src/app.txt", "start_line": 2, "end_line": 3},
                     },
                 },
@@ -598,7 +598,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 192,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_apply_patch",
+                        "name": "onecolleague_apply_patch",
                         "arguments": {
                             "patch": "\n".join(
                                 [
@@ -632,7 +632,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 20,
                     "method": "tools/call",
-                    "params": {"name": "cccc_shell", "arguments": {"command": "printf shell-ok > shell.txt && cat shell.txt"}},
+                    "params": {"name": "onecolleague_shell", "arguments": {"command": "printf shell-ok > shell.txt && cat shell.txt"}},
                 },
             )
             self.assertEqual(shell_resp.status_code, 200)
@@ -650,7 +650,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 200,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_exec_command",
+                        "name": "onecolleague_exec_command",
                         "arguments": {
                             "command": "printf exec-start; sleep 0.2; printf exec-done",
                             "yield_time_ms": 10,
@@ -672,7 +672,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 2001,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_write_stdin",
+                        "name": "onecolleague_write_stdin",
                         "arguments": {"session_id": exec_session_id, "yield_time_ms": 300},
                     },
                 },
@@ -690,7 +690,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 201,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo", "arguments": {"action": "read", "path": "shell.txt"}},
+                    "params": {"name": "onecolleague_repo", "arguments": {"action": "read", "path": "shell.txt"}},
                 },
             )
             self.assertEqual(read_resp.status_code, 200)
@@ -707,7 +707,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 202,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_repo_edit",
+                        "name": "onecolleague_repo_edit",
                         "arguments": {
                             "action": "replace",
                             "path": "shell.txt",
@@ -732,7 +732,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 203,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_repo_edit",
+                        "name": "onecolleague_repo_edit",
                         "arguments": {
                             "action": "replace",
                             "path": "shell.txt",
@@ -756,7 +756,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 204,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_repo_edit",
+                        "name": "onecolleague_repo_edit",
                         "arguments": {
                             "action": "multi_replace",
                             "path": "shell.txt",
@@ -781,7 +781,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 21,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo_edit", "arguments": {"action": "mkdir", "path": "notes"}},
+                    "params": {"name": "onecolleague_repo_edit", "arguments": {"action": "mkdir", "path": "notes"}},
                 },
             )
             self.assertEqual(mkdir_resp.status_code, 200)
@@ -795,7 +795,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "id": 22,
                     "method": "tools/call",
                     "params": {
-                        "name": "cccc_repo_edit",
+                        "name": "onecolleague_repo_edit",
                         "arguments": {"action": "move", "path": "shell.txt", "dest_path": "notes/shell.txt"},
                     },
                 },
@@ -811,7 +811,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 23,
                     "method": "tools/call",
-                    "params": {"name": "cccc_git", "arguments": {"action": "status"}},
+                    "params": {"name": "onecolleague_git", "arguments": {"action": "status"}},
                 },
             )
             self.assertEqual(git_status.status_code, 200)
@@ -825,7 +825,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 24,
                     "method": "tools/call",
-                    "params": {"name": "cccc_git", "arguments": {"action": "add", "all_changes": True}},
+                    "params": {"name": "onecolleague_git", "arguments": {"action": "add", "all_changes": True}},
                 },
             )
             self.assertEqual(git_add.status_code, 200)
@@ -840,7 +840,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 25,
                     "method": "tools/call",
-                    "params": {"name": "cccc_git", "arguments": {"action": "commit", "message": "Add shell output"}},
+                    "params": {"name": "onecolleague_git", "arguments": {"action": "commit", "message": "Add shell output"}},
                 },
             )
             self.assertEqual(git_commit.status_code, 200)
@@ -853,7 +853,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 26,
                     "method": "tools/call",
-                    "params": {"name": "cccc_repo_edit", "arguments": {"action": "delete", "path": "notes", "recursive": True}},
+                    "params": {"name": "onecolleague_repo_edit", "arguments": {"action": "delete", "path": "notes", "recursive": True}},
                 },
             )
             self.assertEqual(delete_resp.status_code, 200)
@@ -866,7 +866,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 27,
                     "method": "tools/call",
-                    "params": {"name": "cccc_shell", "arguments": {"command": "pwd", "cwd": "../outside"}},
+                    "params": {"name": "onecolleague_shell", "arguments": {"command": "pwd", "cwd": "../outside"}},
                 },
             )
             self.assertEqual(blocked.status_code, 200)
@@ -1487,6 +1487,6 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                 json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             )
             self.assertEqual(init_resp.status_code, 200)
-            self.assertEqual((init_resp.json().get("result") or {}).get("serverInfo", {}).get("name"), "cccc-mcp")
+            self.assertEqual((init_resp.json().get("result") or {}).get("serverInfo", {}).get("name"), "onecolleague-mcp")
         finally:
             cleanup()

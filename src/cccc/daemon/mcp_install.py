@@ -15,6 +15,10 @@ from ..util.conv import coerce_bool
 from ..util.fs import read_json
 from ..util.process import resolve_subprocess_argv
 
+MCP_SERVER_NAME = "onecolleague"
+LEGACY_MCP_SERVER_NAME = "cccc"
+MCP_SERVER_NAMES = (MCP_SERVER_NAME, LEGACY_MCP_SERVER_NAME)
+
 
 def _parse_mcp_get_output(output: str) -> Dict[str, str]:
     parsed: Dict[str, str] = {}
@@ -132,7 +136,7 @@ def _home_dir(env: Dict[str, str] | None) -> Path:
 def _cccc_home_dir(env: Dict[str, str] | None) -> Path | None:
     raw = ""
     if isinstance(env, dict):
-        raw = str(env.get("CCCC_HOME") or "").strip()
+        raw = str(env.get("ONECOLLEAGUE_HOME") or env.get("CCCC_HOME") or "").strip()
     if raw:
         return Path(raw).expanduser().resolve()
     return None
@@ -159,31 +163,32 @@ def _kimi_share_dir(env: Dict[str, str] | None) -> Path:
 def build_mcp_add_command(runtime: str) -> list[str] | None:
     cccc_cmd = _runtime_expected_cccc_command(runtime)
     if runtime == "claude":
-        return ["claude", "mcp", "add", "-s", "user", "cccc", "--", *cccc_cmd]
+        return ["claude", "mcp", "add", "-s", "user", MCP_SERVER_NAME, "--", *cccc_cmd]
     if runtime == "codex":
-        return ["codex", "mcp", "add", "cccc", "--", *cccc_cmd]
+        return ["codex", "mcp", "add", MCP_SERVER_NAME, "--", *cccc_cmd]
     if runtime == "droid":
-        return ["droid", "mcp", "add", "--type", "stdio", "cccc", *cccc_cmd]
+        return ["droid", "mcp", "add", "--type", "stdio", MCP_SERVER_NAME, *cccc_cmd]
     if runtime == "amp":
-        return ["amp", "mcp", "add", "cccc", *cccc_cmd]
+        return ["amp", "mcp", "add", MCP_SERVER_NAME, *cccc_cmd]
     if runtime == "auggie":
-        return ["auggie", "mcp", "add", "cccc", "--", *cccc_cmd]
+        return ["auggie", "mcp", "add", MCP_SERVER_NAME, "--", *cccc_cmd]
     if runtime == "neovate":
-        return ["neovate", "mcp", "add", "-g", "cccc", *cccc_cmd]
+        return ["neovate", "mcp", "add", "-g", MCP_SERVER_NAME, *cccc_cmd]
     if runtime == "gemini":
-        return ["gemini", "mcp", "add", "-s", "user", "cccc", *cccc_cmd]
+        return ["gemini", "mcp", "add", "-s", "user", MCP_SERVER_NAME, *cccc_cmd]
     if runtime == "hermes":
         return ["cccc", "runtime", "hermes", "prepare", "--yes"]
     if runtime == "kimi":
-        return ["kimi", "mcp", "add", "--transport", "stdio", "cccc", "--", *cccc_cmd]
+        return ["kimi", "mcp", "add", "--transport", "stdio", MCP_SERVER_NAME, "--", *cccc_cmd]
     return None
 
 
-def build_mcp_remove_command(runtime: str) -> list[str] | None:
+def build_mcp_remove_command(runtime: str, server_name: str = MCP_SERVER_NAME) -> list[str] | None:
+    name = str(server_name or MCP_SERVER_NAME).strip() or MCP_SERVER_NAME
     if runtime == "claude":
-        return ["claude", "mcp", "remove", "cccc", "-s", "user"]
+        return ["claude", "mcp", "remove", name, "-s", "user"]
     if runtime == "droid":
-        return ["droid", "mcp", "remove", "cccc"]
+        return ["droid", "mcp", "remove", name]
     return None
 
 
@@ -216,10 +221,31 @@ def _json_mcp_state(paths: tuple[Path, ...], expected_cmd: list[str]) -> str:
         servers = cfg.get("mcpServers") if isinstance(cfg, dict) else None
         if not isinstance(servers, dict):
             continue
-        entry = servers.get("cccc")
-        if entry is None:
+        for server_name in MCP_SERVER_NAMES:
+            entry = servers.get(server_name)
+            if entry is None:
+                continue
+            if _json_mcp_entry_matches_expected(entry, expected_cmd):
+                return "ready"
+            state = "stale"
+    return state
+
+
+def _probe_named_cli_mcp_state(
+    argv_prefix: list[str],
+    *,
+    expected_cmd: list[str],
+    matcher,
+    text: bool,
+    env: Dict[str, str] | None,
+) -> str:
+    state = "missing"
+    for server_name in MCP_SERVER_NAMES:
+        result = _run_cli([*argv_prefix, server_name], timeout=10, text=text, env=env)
+        if result.returncode != 0:
             continue
-        if _json_mcp_entry_matches_expected(entry, expected_cmd):
+        output = _coerce_output_text(result.stdout)
+        if matcher(output, expected_cmd):
             return "ready"
         state = "stale"
     return state
@@ -229,17 +255,22 @@ def _runtime_mcp_state(runtime: str, *, env: Dict[str, str] | None = None) -> st
     expected_cmd = _runtime_expected_cccc_command(runtime)
 
     if runtime == "claude":
-        result = _run_cli(["claude", "mcp", "get", "cccc"], timeout=10, text=False, env=env)
-        if result.returncode != 0:
-            return "missing"
-        output = _coerce_output_text(result.stdout)
-        return "ready" if _claude_mcp_entry_matches_expected(output, expected_cmd) else "stale"
+        return _probe_named_cli_mcp_state(
+            ["claude", "mcp", "get"],
+            expected_cmd=expected_cmd,
+            matcher=_claude_mcp_entry_matches_expected,
+            text=False,
+            env=env,
+        )
 
     if runtime == "codex":
-        result = _run_cli(["codex", "mcp", "get", "cccc"], timeout=10, env=env)
-        if result.returncode != 0:
-            return "missing"
-        return "ready" if _codex_mcp_entry_matches_expected(result.stdout, expected_cmd) else "stale"
+        return _probe_named_cli_mcp_state(
+            ["codex", "mcp", "get"],
+            expected_cmd=expected_cmd,
+            matcher=_codex_mcp_entry_matches_expected,
+            text=True,
+            env=env,
+        )
 
     if runtime == "droid":
         home = _home_dir(env)
@@ -262,10 +293,15 @@ def _runtime_mcp_state(runtime: str, *, env: Dict[str, str] | None = None) -> st
         servers = doc.get("amp.mcpServers")
         if not isinstance(servers, dict):
             return "missing"
-        entry = servers.get("cccc")
-        if entry is None:
-            return "missing"
-        return "ready" if _json_mcp_entry_matches_expected(entry, expected_cmd) else "stale"
+        state = "missing"
+        for server_name in MCP_SERVER_NAMES:
+            entry = servers.get(server_name)
+            if entry is None:
+                continue
+            if _json_mcp_entry_matches_expected(entry, expected_cmd):
+                return "ready"
+            state = "stale"
+        return state
 
     if runtime == "auggie":
         settings_path = _home_dir(env) / ".augment" / "settings.json"
@@ -277,10 +313,15 @@ def _runtime_mcp_state(runtime: str, *, env: Dict[str, str] | None = None) -> st
         servers = doc.get("mcpServers")
         if not isinstance(servers, dict):
             return "missing"
-        entry = servers.get("cccc")
-        if entry is None:
-            return "missing"
-        return "ready" if _json_mcp_entry_matches_expected(entry, expected_cmd) else "stale"
+        state = "missing"
+        for server_name in MCP_SERVER_NAMES:
+            entry = servers.get(server_name)
+            if entry is None:
+                continue
+            if _json_mcp_entry_matches_expected(entry, expected_cmd):
+                return "ready"
+            state = "stale"
+        return state
 
     if runtime == "neovate":
         config_path = _home_dir(env) / ".neovate" / "config.json"
@@ -292,10 +333,15 @@ def _runtime_mcp_state(runtime: str, *, env: Dict[str, str] | None = None) -> st
         servers = doc.get("mcpServers")
         if not isinstance(servers, dict):
             return "missing"
-        entry = servers.get("cccc")
-        if entry is None:
-            return "missing"
-        return "ready" if _json_mcp_entry_matches_expected(entry, expected_cmd) else "stale"
+        state = "missing"
+        for server_name in MCP_SERVER_NAMES:
+            entry = servers.get(server_name)
+            if entry is None:
+                continue
+            if _json_mcp_entry_matches_expected(entry, expected_cmd):
+                return "ready"
+            state = "stale"
+        return state
 
     if runtime == "gemini":
         return _json_mcp_state((_home_dir(env) / ".gemini" / "settings.json",), expected_cmd)
@@ -358,8 +404,10 @@ def ensure_mcp_installed(
             return False
 
         if state == "stale":
-            remove_cmd = build_mcp_remove_command(runtime)
-            if remove_cmd:
+            for server_name in MCP_SERVER_NAMES:
+                remove_cmd = build_mcp_remove_command(runtime, server_name=server_name)
+                if not remove_cmd:
+                    continue
                 remove_result = _run_cli(remove_cmd, cwd=cwd, timeout=30, env=env)
                 if remove_result.returncode != 0:
                     return False

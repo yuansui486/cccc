@@ -74,7 +74,7 @@ def build_voice_prompt_refine_input_text(
     parts.extend(
         [
             "draft_text rule:",
-            "Put only composer text in the cccc_voice_secretary_composer draft_text argument; do not print the draft in chat or console.",
+            "Put only composer text in the onecolleague_voice_secretary_composer draft_text argument; do not print the draft in chat or console.",
         ]
     )
     if replace_operation:

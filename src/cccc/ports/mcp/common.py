@@ -30,6 +30,10 @@ def _env_str(name: str) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def _env_explicitly_empty(name: str) -> bool:
+    return name in os.environ and str(os.environ.get(name) or "").strip() == ""
+
+
 @dataclass(frozen=True)
 class _RuntimeContext:
     home: str
@@ -250,17 +254,23 @@ def _runtime_context() -> _RuntimeContext:
             actor_id=override.actor_id,
         )
 
-    home = _normalize_home(_env_str("CCCC_HOME"))
-    gid = _env_str("CCCC_GROUP_ID")
-    aid = _env_str("CCCC_ACTOR_ID")
+    home = _normalize_home(_env_str("ONECOLLEAGUE_HOME") or _env_str("CCCC_HOME"))
+    gid = _env_str("ONECOLLEAGUE_GROUP_ID") or _env_str("CCCC_GROUP_ID")
+    aid = _env_str("ONECOLLEAGUE_ACTOR_ID") or _env_str("CCCC_ACTOR_ID")
+    home_explicitly_empty = _env_explicitly_empty("ONECOLLEAGUE_HOME") or _env_explicitly_empty("CCCC_HOME")
+    gid_explicitly_empty = _env_explicitly_empty("ONECOLLEAGUE_GROUP_ID") or _env_explicitly_empty("CCCC_GROUP_ID")
+    aid_explicitly_empty = _env_explicitly_empty("ONECOLLEAGUE_ACTOR_ID") or _env_explicitly_empty("CCCC_ACTOR_ID")
 
     ancestor_pids = _iter_ancestor_pids()
-    if not home:
-        home = _normalize_home(_first_ancestor_env_value(ancestor_pids, "CCCC_HOME"))
-    if not gid:
-        gid = _first_ancestor_env_value(ancestor_pids, "CCCC_GROUP_ID")
-    if not aid:
-        aid = _first_ancestor_env_value(ancestor_pids, "CCCC_ACTOR_ID")
+    if not home and not home_explicitly_empty:
+        home = _normalize_home(
+            _first_ancestor_env_value(ancestor_pids, "ONECOLLEAGUE_HOME")
+            or _first_ancestor_env_value(ancestor_pids, "CCCC_HOME")
+        )
+    if not gid and not gid_explicitly_empty:
+        gid = _first_ancestor_env_value(ancestor_pids, "ONECOLLEAGUE_GROUP_ID") or _first_ancestor_env_value(ancestor_pids, "CCCC_GROUP_ID")
+    if not aid and not aid_explicitly_empty:
+        aid = _first_ancestor_env_value(ancestor_pids, "ONECOLLEAGUE_ACTOR_ID") or _first_ancestor_env_value(ancestor_pids, "CCCC_ACTOR_ID")
 
     default_home = _normalize_home(str(cccc_home()))
     candidate_homes: list[str] = []
@@ -268,13 +278,15 @@ def _runtime_context() -> _RuntimeContext:
         if item and item not in candidate_homes:
             candidate_homes.append(item)
 
-    if not gid or not aid:
+    if (not gid and not gid_explicitly_empty) or (not aid and not aid_explicitly_empty):
         for candidate in candidate_homes:
             recovered = _find_runtime_binding_from_pty_state(candidate, ancestor_pids)
             if not recovered:
                 continue
-            gid = gid or recovered[0]
-            aid = aid or recovered[1]
+            if not gid and not gid_explicitly_empty:
+                gid = recovered[0]
+            if not aid and not aid_explicitly_empty:
+                aid = recovered[1]
             home = home or candidate
             if gid and aid:
                 break
@@ -302,12 +314,12 @@ def _resolve_group_id(arguments: Dict[str, Any]) -> str:
     if not gid:
         raise MCPError(
             code="missing_group_id",
-            message="missing group_id (set CCCC_GROUP_ID env or pass group_id)",
+            message="missing group_id (set ONECOLLEAGUE_GROUP_ID/CCCC_GROUP_ID env or pass group_id)",
         )
     if env_gid and arg_gid and arg_gid != env_gid:
         raise MCPError(
             code="group_id_mismatch",
-            message="group_id mismatch (tool args must match CCCC_GROUP_ID)",
+            message="group_id mismatch (tool args must match ONECOLLEAGUE_GROUP_ID/CCCC_GROUP_ID)",
             details={"env": env_gid, "arg": arg_gid},
         )
     return gid
@@ -321,12 +333,12 @@ def _resolve_self_actor_id(arguments: Dict[str, Any]) -> str:
     if not aid:
         raise MCPError(
             code="missing_actor_id",
-            message="missing actor_id (set CCCC_ACTOR_ID env or pass actor_id)",
+            message="missing actor_id (set ONECOLLEAGUE_ACTOR_ID/CCCC_ACTOR_ID env or pass actor_id)",
         )
     if env_aid and arg_aid and arg_aid != env_aid:
         raise MCPError(
             code="actor_id_mismatch",
-            message="actor_id mismatch (tool args must match CCCC_ACTOR_ID)",
+            message="actor_id mismatch (tool args must match ONECOLLEAGUE_ACTOR_ID/CCCC_ACTOR_ID)",
             details={"env": env_aid, "arg": arg_aid},
         )
     return _validate_self_actor_id(aid)
@@ -343,12 +355,12 @@ def _resolve_caller_from_by(arguments: Dict[str, Any]) -> str:
     if not aid:
         raise MCPError(
             code="missing_actor_id",
-            message="missing actor id (set CCCC_ACTOR_ID env or pass by)",
+            message="missing actor id (set ONECOLLEAGUE_ACTOR_ID/CCCC_ACTOR_ID env or pass by)",
         )
     if env_aid and arg_by and arg_by != env_aid:
         raise MCPError(
             code="actor_id_mismatch",
-            message="by mismatch (tool args must match CCCC_ACTOR_ID)",
+            message="by mismatch (tool args must match ONECOLLEAGUE_ACTOR_ID/CCCC_ACTOR_ID)",
             details={"env": env_aid, "arg": arg_by},
         )
     return _validate_self_actor_id(aid)
@@ -370,12 +382,12 @@ def _resolve_caller_actor_id(arguments: Dict[str, Any]) -> str:
     if not aid:
         raise MCPError(
             code="missing_actor_id",
-            message="missing actor id (set CCCC_ACTOR_ID env or pass by/actor_id)",
+            message="missing actor id (set ONECOLLEAGUE_ACTOR_ID/CCCC_ACTOR_ID env or pass by/actor_id)",
         )
     if env_aid and arg_aid and arg_aid != env_aid:
         raise MCPError(
             code="actor_id_mismatch",
-            message="actor id mismatch (tool args must match CCCC_ACTOR_ID)",
+            message="actor id mismatch (tool args must match ONECOLLEAGUE_ACTOR_ID/CCCC_ACTOR_ID)",
             details={"env": env_aid, "arg": arg_aid},
         )
     return _validate_self_actor_id(aid)

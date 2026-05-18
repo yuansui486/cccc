@@ -14,13 +14,24 @@ from contextvars import ContextVar
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from ..common import MCPError, _runtime_context
+from ..toolspecs import (
+    LEGACY_MCP_TOOL_PREFIX,
+    ONECOLLEAGUE_MCP_TOOL_PREFIX,
+    canonical_mcp_tool_name,
+)
 
 NestedToolCaller = Callable[[str, Dict[str, Any]], Dict[str, Any]]
 ListTools = Callable[[], List[Dict[str, Any]]]
 
 CODE_MODE_EXEC_TOOL = "cccc_code_exec"
 CODE_MODE_WAIT_TOOL = "cccc_code_wait"
+ONECOLLEAGUE_CODE_MODE_EXEC_TOOL = "onecolleague_code_exec"
+ONECOLLEAGUE_CODE_MODE_WAIT_TOOL = "onecolleague_code_wait"
 CODE_MODE_TOOL_NAMES = {CODE_MODE_EXEC_TOOL, CODE_MODE_WAIT_TOOL}
+CODE_MODE_TOOL_ALIAS_NAMES = CODE_MODE_TOOL_NAMES | {
+    ONECOLLEAGUE_CODE_MODE_EXEC_TOOL,
+    ONECOLLEAGUE_CODE_MODE_WAIT_TOOL,
+}
 
 _DEFAULT_YIELD_TIME_MS = 10_000
 _DEFAULT_MAX_OUTPUT_TOKENS = 10_000
@@ -127,7 +138,7 @@ _TOOL_HELP_COMPACT_NOTES = {
         "Use COMMON_WORK_LOOPS, tool_names(query), list_tools(query), and tool_help(query) when unsure.",
     ],
 }
-_TOOL_HELP_CURATED_TOOLS = {
+_LEGACY_TOOL_HELP_CURATED_TOOLS = {
     "finish_turn": [
         "cccc_message_reply",
         "cccc_message_send",
@@ -216,6 +227,15 @@ _TOOL_HELP_CURATED_TOOLS = {
         "cccc_git",
     ],
 }
+_TOOL_HELP_CURATED_TOOLS = {
+    key: [
+        ONECOLLEAGUE_MCP_TOOL_PREFIX + name[len(LEGACY_MCP_TOOL_PREFIX) :]
+        if name.startswith(LEGACY_MCP_TOOL_PREFIX)
+        else name
+        for name in value
+    ]
+    for key, value in _LEGACY_TOOL_HELP_CURATED_TOOLS.items()
+}
 _TOOL_HELP_CURATED_LOOPS = {
     "finish_turn": ["finish_turn"],
     "turn_complete": ["finish_turn"],
@@ -292,20 +312,32 @@ def _tool_description(spec: Mapping[str, Any]) -> str:
 def _enabled_nested_tools(list_tools: ListTools) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen: set[str] = set()
+
+    def add_tool(*, raw_name: str, global_name: str, description: str) -> None:
+        key = str(global_name or "").strip()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        out.append(
+            {
+                "name": raw_name,
+                "global_name": key,
+                "description": description,
+            }
+        )
+
     for spec in list_tools():
         if not isinstance(spec, dict):
             continue
         name = str(spec.get("name") or "").strip()
-        if not name or name in CODE_MODE_TOOL_NAMES or name in seen:
+        if not name or name in CODE_MODE_TOOL_NAMES:
             continue
-        seen.add(name)
-        out.append(
-            {
-                "name": name,
-                "global_name": _normalize_identifier(name),
-                "description": _tool_description(spec),
-            }
-        )
+        description = _tool_description(spec)
+        add_tool(raw_name=name, global_name=_normalize_identifier(name), description=description)
+        if name.startswith(ONECOLLEAGUE_MCP_TOOL_PREFIX):
+            legacy_name = LEGACY_MCP_TOOL_PREFIX + name[len(ONECOLLEAGUE_MCP_TOOL_PREFIX) :]
+            if legacy_name not in CODE_MODE_TOOL_NAMES:
+                add_tool(raw_name=name, global_name=_normalize_identifier(legacy_name), description=description)
     out.sort(key=lambda item: item["global_name"])
     return out
 
@@ -569,10 +601,11 @@ def _nested_tool_error_text(exc: MCPError) -> str:
 def _call_nested_tool(cell: _CodeCell, event: Dict[str, Any], nested_tool_caller: NestedToolCaller) -> None:
     event_id = str(event.get("id") or "").strip()
     name = str(event.get("name") or "").strip()
+    canonical_name = canonical_mcp_tool_name(name)
     raw_input = event.get("input")
     if not event_id or not name:
         return
-    if name in CODE_MODE_TOOL_NAMES:
+    if name in CODE_MODE_TOOL_NAMES or canonical_name in CODE_MODE_TOOL_NAMES:
         _send_tool_response(cell, event_id=event_id, ok=False, error=f"{name} cannot be invoked from code mode")
         return
     if raw_input is None:
@@ -1052,7 +1085,14 @@ function buildContext(toolsMetadata, initialStoredValues, workLoops, helpAliases
       if (rank.has(String(getName(item) || ""))) selected.push(item);
       else rest.push(item);
     }
-    selected.sort((a, b) => (rank.get(String(getName(a) || "")) || 0) - (rank.get(String(getName(b) || "")) || 0));
+    selected.sort((a, b) => {
+      const rankDelta = (rank.get(String(getName(a) || "")) || 0) - (rank.get(String(getName(b) || "")) || 0);
+      if (rankDelta) return rankDelta;
+      const aPreferred = String(a && a.name || "") === String(a && a.raw_name || "");
+      const bPreferred = String(b && b.name || "") === String(b && b.raw_name || "");
+      if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
+      return String(a && a.name || "").localeCompare(String(b && b.name || ""));
+    });
     return selected.concat(rest);
   }
   function toolMatches(tool, tokens) {
@@ -1094,10 +1134,10 @@ function buildContext(toolsMetadata, initialStoredValues, workLoops, helpAliases
     const matched = allTools.filter((tool) => toolMatches(tool, tokens));
     if (curated.length) {
       const curatedSet = new Set(curated.map((name) => String(name || "")));
-      const exact = allTools.filter((tool) => curatedSet.has(tool.raw_name));
+      const exact = allTools.filter((tool) => curatedSet.has(tool.raw_name) || curatedSet.has(tool.name));
       const selected = exact.length ? exact : matched;
       const seen = new Set();
-      return rankByCurated(selected, curated, (tool) => tool.raw_name).filter((tool) => {
+      return rankByCurated(selected, curated, (tool) => curatedSet.has(tool.raw_name) ? tool.raw_name : tool.name).filter((tool) => {
         const key = tool.raw_name;
         if (seen.has(key)) return false;
         seen.add(key);

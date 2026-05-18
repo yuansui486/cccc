@@ -1,6 +1,6 @@
 import unittest
 
-from cccc.ports.mcp.toolspecs import MCP_TOOLS
+from cccc.ports.mcp.toolspecs import MCP_TOOLS, MCP_TOOLS_WITH_ALIASES
 
 
 class TestMcpToolspecSchemaGuard(unittest.TestCase):
@@ -19,8 +19,14 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
             self.assertTrue(desc, msg=f"MCP_TOOLS[{idx}] empty description")
             self.assertTrue(name.startswith("cccc_"), msg=f"MCP_TOOLS[{idx}] invalid name prefix: {name}")
 
+    def test_onecolleague_alias_specs_exist_for_every_builtin(self) -> None:
+        canonical = {str(spec.get("name") or "") for spec in MCP_TOOLS if isinstance(spec, dict)}
+        aliased = {str(spec.get("name") or "") for spec in MCP_TOOLS_WITH_ALIASES if isinstance(spec, dict)}
+        expected_aliases = {"onecolleague_" + name[len("cccc_") :] for name in canonical if name.startswith("cccc_")}
+        self.assertTrue(expected_aliases.issubset(aliased), msg=f"missing aliases: {sorted(expected_aliases - aliased)}")
+
     def test_input_schema_shape_is_consistent(self) -> None:
-        for idx, spec in enumerate(MCP_TOOLS):
+        for idx, spec in enumerate(MCP_TOOLS_WITH_ALIASES):
             schema = spec.get("inputSchema")
             self.assertIsInstance(schema, dict, msg=f"MCP_TOOLS[{idx}] inputSchema must be dict")
             self.assertEqual(schema.get("type"), "object", msg=f"MCP_TOOLS[{idx}] inputSchema.type must be object")

@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_TOOL_NAMES, SPECIALIZED_CORE_TOOL_NAMES
 from ..common import MCPError, _call_daemon_or_raise
+from ..toolspecs import canonical_mcp_tool_name
 
 _CORE_TOOL_NAME_SET = set(CORE_TOOL_NAMES) | set(SPECIALIZED_CORE_TOOL_NAMES)
 _EXT_TOOL_NAME_RE = re.compile(r"^cccc_ext_[a-f0-9]{8}_(.+)$")
@@ -26,7 +27,7 @@ def _skill_runtime_contract_fields(capability_id: str) -> Dict[str, Any]:
         "next_step_hint": (
             "capsule-runtime skill activation is visible in capability_state.active_capsule_skills. "
             "Do not expect new dynamic_tools for skill capsules. Install or update skill sources through "
-            "CCCC capability runtime so URL, repository, and local SKILL.md targets stay visible in Capability Center."
+            "OneColleague capability runtime so URL, repository, and local SKILL.md targets stay visible in Capability Center."
         ),
     }
 
@@ -341,7 +342,7 @@ def capability_install(
     ttl_seconds: int = 3600,
     reason: str = "",
 ) -> Dict[str, Any]:
-    """Install a target into the CCCC capability lifecycle and enable it for use."""
+    """Install a target into the OneColleague capability lifecycle and enable it for use."""
     target_actor = str(actor_id or by).strip()
     return _call_daemon_or_raise(
         {
@@ -374,7 +375,7 @@ def capability_use(
     """One-step capability use: enable then optionally call tool."""
     target_actor = str(actor_id or by).strip()
     cap_id = str(capability_id or "").strip()
-    call_tool = str(tool_name or "").strip()
+    call_tool = canonical_mcp_tool_name(str(tool_name or "").strip())
     tool_args = dict(tool_arguments) if isinstance(tool_arguments, dict) else {}
 
     if not cap_id and call_tool:

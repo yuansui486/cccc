@@ -360,7 +360,7 @@ def create_nomcp_session(
         "created_status_digest": status_digest,
         "created_diff_digest": diff_digest,
         "title": str(title or "").strip() or "No-MCP advisory session",
-        "brief": str(brief or "").strip() or "Review the linked CCCC project context and return advisory findings.",
+        "brief": str(brief or "").strip() or "Review the linked OneColleague project context and return advisory findings.",
         "reply_to_event_id": str(reply_to_event_id or "").strip(),
         "recipient": str(recipient or "user").strip() or "user",
         "allowed_paths": [str(item or "").strip().replace("\\", "/") for item in (allowed_paths or []) if str(item or "").strip()],
@@ -730,7 +730,7 @@ pre {{ background: #f6f7f9; padding: 12px; overflow: auto; border-radius: 8px; }
 <form method="post" action="{html.escape(base + '/send?token=' + token, quote=True)}">
 <p><label>Message id <input name="msg_id" value="advice-{html.escape(secrets.token_hex(4))}"></label></p>
 <p><textarea name="text" rows="10" style="width:100%" placeholder="Advisory findings only. No local execution authority."></textarea></p>
-<p><button type="submit">Send advisory message to CCCC</button></p>
+<p><button type="submit">Send advisory message to OneColleague</button></p>
 </form>
 """
 
@@ -790,7 +790,7 @@ def send_nomcp_advisory(sid: str, token: str, *, msg_id: str, text: str, title: 
             return {"status": "duplicate_ignored", "event_id": str(existing.get("event_id") or ""), "msg_id": clean_msg_id}
         group = load_group(str(session.get("group_id") or ""))
         if group is None:
-            raise NomcpSessionError("group_not_found", "bound CCCC group no longer exists", 404)
+            raise NomcpSessionError("group_not_found", "bound OneColleague group no longer exists", 404)
         heading = str(title or "").strip()
         rendered = f"**{heading}**\n\n{body}" if heading else body
         recipient = str(session.get("recipient") or "user").strip() or "user"

@@ -770,7 +770,7 @@ def repo_tool(
 
     raise MCPError(
         code="invalid_action",
-        message="cccc_repo action must be info|list|list_dir|read; use cccc_repo_edit for writes and cccc_apply_patch for Codex patches",
+        message="onecolleague_repo action must be info|list|list_dir|read; use onecolleague_repo_edit for writes and onecolleague_apply_patch for Codex patches",
     )
 
 

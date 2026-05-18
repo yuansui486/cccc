@@ -1,5 +1,5 @@
 """
-CCCC MCP Server - IM-style Agent Collaboration Tools
+OneColleague MCP Server - IM-style Agent Collaboration Tools
 
 Static MCP surface (role and capability-pack visibility may hide some tools):
 - cccc_help / cccc_bootstrap / cccc_project_info
@@ -53,7 +53,13 @@ from .common import (
     _resolve_self_actor_id,
     _runtime_context,
 )
-from .toolspecs import MCP_TOOLS
+from .toolspecs import (
+    CANONICAL_MCP_TOOLS,
+    canonical_mcp_tool_name,
+    is_legacy_mcp_tool_name,
+    mcp_tool_display_spec,
+    onecolleague_tool_name,
+)
 
 # ---------------------------------------------------------------------------
 # Handler re-exports for backward compatibility (tests import from server.py)
@@ -86,6 +92,7 @@ from .handlers.cccc_repo import (  # noqa: F401
     write_stdin_tool,
 )
 from .handlers.code_mode import (  # noqa: F401
+    CODE_MODE_TOOL_ALIAS_NAMES,
     CODE_MODE_TOOL_NAMES,
     code_exec_tool,
     code_mode_enabled,
@@ -190,6 +197,15 @@ from .utils.help_markdown import _select_help_markdown
 from .utils.space_args import _normalize_space_query_options_mcp
 
 
+def _display_tool_name(name: str) -> str:
+    raw = str(name or "").strip()
+    return onecolleague_tool_name(raw) if is_legacy_mcp_tool_name(raw) else raw
+
+
+def _display_tool_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
+    return mcp_tool_display_spec(spec)
+
+
 def _normalize_to_arg(raw: Any) -> Optional[List[str]]:
     """Normalise the ``to`` argument from MCP tool calls.
 
@@ -211,7 +227,7 @@ def _normalize_to_arg(raw: Any) -> Optional[List[str]]:
     return None
 
 
-_BUILTIN_MCP_TOOL_NAMES = frozenset(str(spec.get("name") or "") for spec in MCP_TOOLS if isinstance(spec, dict))
+_BUILTIN_MCP_TOOL_NAMES = frozenset(str(spec.get("name") or "") for spec in CANONICAL_MCP_TOOLS if isinstance(spec, dict))
 _WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES = frozenset(
     web_model_advertised_tool_names(_BUILTIN_MCP_TOOL_NAMES, actor_role="peer")
 )
@@ -224,6 +240,7 @@ _WEB_MODEL_PACK_TOOL_NAMES = frozenset(
     if str(name or "").strip() in _BUILTIN_MCP_TOOL_NAMES
 )
 _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES = frozenset(WEB_MODEL_CORE_TOOLS)
+_BUILTIN_MCP_TOOL_DISPLAY_NAMES = frozenset(_display_tool_name(name) for name in _BUILTIN_MCP_TOOL_NAMES)
 _CAPABILITY_USE_NESTED_BUILTIN_CALL: ContextVar[bool] = ContextVar(
     "cccc_capability_use_nested_builtin_call",
     default=False,
@@ -267,7 +284,7 @@ def _require_web_model_actor(group_id: str, actor_id: str) -> None:
 def _authorize_web_model_builtin_tool_call(name: str) -> None:
     """Keep Web Model schema stable while enforcing actor role at call time."""
     tool_name = str(name or "").strip()
-    if tool_name in CODE_MODE_TOOL_NAMES and not code_mode_enabled():
+    if tool_name in CODE_MODE_TOOL_ALIAS_NAMES and not code_mode_enabled():
         raise MCPError(
             code="code_mode_disabled",
             message=f"{tool_name} is disabled by CCCC_WEB_MODEL_CODE_MODE=0",
@@ -727,7 +744,10 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
         gid = _resolve_group_id(arguments)
         action = str(arguments.get("action") or "info").strip().lower()
         if action not in {"info", "list", "list_dir", "read"}:
-            raise MCPError(code="invalid_action", message="cccc_repo is read-only; use cccc_repo_edit/cccc_apply_patch for writes")
+            raise MCPError(
+                code="invalid_action",
+                message="onecolleague_repo is read-only; use onecolleague_repo_edit/onecolleague_apply_patch for writes",
+            )
         return repo_tool(
             group_id=gid,
             action=action,
@@ -756,7 +776,7 @@ def _handle_cccc_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dic
         if action not in {"replace", "multi_replace", "write", "mkdir", "delete", "move"}:
             raise MCPError(
                 code="invalid_action",
-                message="cccc_repo_edit action must be replace|multi_replace|write|mkdir|delete|move; use cccc_apply_patch for Codex patches",
+                message="onecolleague_repo_edit action must be replace|multi_replace|write|mkdir|delete|move; use onecolleague_apply_patch for Codex patches",
             )
         return repo_tool(
             group_id=gid,
@@ -1384,6 +1404,8 @@ def _handle_debug_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Di
 
 def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Handle MCP tool call."""
+    requested_name = str(name or "").strip()
+    name = canonical_mcp_tool_name(requested_name)
     _authorize_web_model_builtin_tool_call(name)
     for handler in (
         _handle_cccc_namespace,
@@ -1410,7 +1432,7 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                         "group_id": gid,
                         "actor_id": aid,
                         "by": aid,
-                        "tool_name": str(name or ""),
+                        "tool_name": str(requested_name or name or ""),
                         "arguments": arguments if isinstance(arguments, dict) else {},
                     },
                 },
@@ -1480,11 +1502,15 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
             else set(_WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES)
         )
         if not code_mode_enabled():
-            names -= CODE_MODE_TOOL_NAMES
-        return [spec for spec in MCP_TOOLS if str(spec.get("name") or "") in names]
+            names -= CODE_MODE_TOOL_ALIAS_NAMES
+        out: List[Dict[str, Any]] = []
+        for spec in CANONICAL_MCP_TOOLS:
+            if str(spec.get("name") or "") in names:
+                out.append(_display_tool_spec(spec))
+        return out
 
     if profile == "full":
-        visible = {str(spec.get("name") or "").strip() for spec in MCP_TOOLS if isinstance(spec, dict)}
+        visible = {str(spec.get("name") or "").strip() for spec in CANONICAL_MCP_TOOLS if isinstance(spec, dict)}
         visible -= admin_excluded
     else:
         tools_raw = state.get("visible_tools") if isinstance(state, dict) else []
@@ -1523,7 +1549,7 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                 }
             )
 
-    out = [spec for spec in MCP_TOOLS if str(spec.get("name") or "") in visible]
+    out = [_display_tool_spec(spec) for spec in CANONICAL_MCP_TOOLS if str(spec.get("name") or "") in visible]
     existing = {str(spec.get("name") or "") for spec in out}
     for spec in dynamic_specs:
         dname = str(spec.get("name") or "")

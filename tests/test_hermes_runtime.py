@@ -30,12 +30,15 @@ class TestHermesRuntime(unittest.TestCase):
         return Path(td), cleanup
 
     def _write_ready_config(self, config_path: Path, command: list[str]) -> None:
+        self._write_ready_config_for_server(config_path, command, server_name="onecolleague")
+
+    def _write_ready_config_for_server(self, config_path: Path, command: list[str], *, server_name: str) -> None:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             yaml.safe_dump(
                 {
                     "mcp_servers": {
-                        "cccc": {
+                        server_name: {
                             "command": command[0],
                             "args": command[1:],
                             "env": {
@@ -119,7 +122,7 @@ class TestHermesRuntime(unittest.TestCase):
             self.assertEqual(ready["mcp"]["status"], "ready")
 
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-            doc["mcp_servers"]["cccc"]["env"]["CCCC_ACTOR_ID"] = "peer1"
+            doc["mcp_servers"]["onecolleague"]["env"]["CCCC_ACTOR_ID"] = "peer1"
             config_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
             with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
                 "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
@@ -145,7 +148,7 @@ class TestHermesRuntime(unittest.TestCase):
 
         def fake_run(argv, *, hermes_home_path=None, cwd=None, timeout=60, input_text=None, extra_env=None):
             calls.append((list(argv), input_text, str(hermes_home_path or "")))
-            if argv[:4] == ["hermes", "mcp", "add", "cccc"]:
+            if argv[:4] == ["hermes", "mcp", "add", "onecolleague"]:
                 self.assertEqual(input_text, "Y\n")
                 self.assertIsNone(hermes_home_path)
                 self._write_ready_config(config_path, command)
@@ -168,7 +171,7 @@ class TestHermesRuntime(unittest.TestCase):
                     "hermes",
                     "mcp",
                     "add",
-                    "cccc",
+                    "onecolleague",
                     "--command",
                     "/abs/cccc",
                     "--args",
@@ -180,7 +183,7 @@ class TestHermesRuntime(unittest.TestCase):
                 ],
             )
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-            env = doc["mcp_servers"]["cccc"]["env"]
+            env = doc["mcp_servers"]["onecolleague"]["env"]
             self.assertEqual(env["CCCC_HOME"], "${CCCC_HOME}")
             self.assertEqual(env["CCCC_GROUP_ID"], "${CCCC_GROUP_ID}")
             self.assertEqual(env["CCCC_ACTOR_ID"], "${CCCC_ACTOR_ID}")
@@ -209,6 +212,29 @@ class TestHermesRuntime(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_status_accepts_legacy_hermes_mcp_server_name(self) -> None:
+        from cccc.kernel.hermes_runtime import hermes_runtime_status
+
+        cccc_home, cleanup = self._with_home()
+        user_home = cccc_home / "user"
+        command = ["/abs/cccc", "mcp"]
+        try:
+            self._write_ready_config_for_server(user_home / ".hermes" / "config.yaml", command, server_name="cccc")
+            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
+                return_value=command,
+            ), patch(
+                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+                return_value="/usr/bin/hermes",
+            ):
+                status = hermes_runtime_status(home=cccc_home, include_version=False)
+
+            self.assertEqual(status["mcp"]["status"], "ready")
+            self.assertEqual(status["mcp"]["server_name"], "cccc")
+            self.assertTrue(status["mcp"]["legacy_server_name"])
+        finally:
+            cleanup()
+
     def test_placeholder_normalization_preserves_unrelated_comments(self) -> None:
         from cccc.kernel.hermes_runtime import _normalize_mcp_config_placeholders
 
@@ -221,7 +247,7 @@ class TestHermesRuntime(unittest.TestCase):
                     "# keep header\n"
                     "model: ''\n"
                     "mcp_servers:\n"
-                    "  cccc:\n"
+                    "  onecolleague:\n"
                     "    command: /abs/cccc\n"
                     "    args:\n"
                     "    - mcp\n"

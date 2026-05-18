@@ -230,7 +230,7 @@ export function ProjectedBrowserSurfacePanel({
       labels?.viewerReasonMissingDisplay || t("presentationBrowserViewerReasonMissingDisplay", { defaultValue: "No X display" }),
     viewerReasonDisplayNotOwned:
       labels?.viewerReasonDisplayNotOwned ||
-      t("presentationBrowserViewerReasonDisplayNotOwned", { defaultValue: "Display is not CCCC-owned" }),
+      t("presentationBrowserViewerReasonDisplayNotOwned", { defaultValue: "Display is not OneColleague-owned" }),
     viewerReasonDisabled:
       labels?.viewerReasonDisabled || t("presentationBrowserViewerReasonDisabled", { defaultValue: "VNC disabled" }),
     viewerReasonUnsupportedPlatform:

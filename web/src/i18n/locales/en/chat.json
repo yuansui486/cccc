@@ -467,7 +467,7 @@
   "presentationSnapshotTabLabel": "Snapshot",
   "presentationQuotedSnapshotAlt": "Quoted snapshot",
   "presentationEmbeddedModeHelp": "Standard mode is lightweight. If links jump out or the page cannot load, switch to enhanced mode.",
-  "presentationInteractiveModeHelp": "Enhanced mode works better for local or private pages and tries to keep navigation inside CCCC.",
+  "presentationInteractiveModeHelp": "Enhanced mode works better for local or private pages and tries to keep navigation inside OneColleague.",
   "presentationBrowserStarting": "Preparing interactive view...",
   "presentationBrowserReconnecting": "Reconnecting interactive view...",
   "presentationBrowserReady": "Interactive view ready",
@@ -488,7 +488,7 @@
   "presentationBrowserViewerReasonX11vncNotFound": "x11vnc not installed",
   "presentationBrowserViewerReasonWaylandEnv": "Wayland env inherited",
   "presentationBrowserViewerReasonMissingDisplay": "No X display",
-  "presentationBrowserViewerReasonDisplayNotOwned": "Display is not CCCC-owned",
+  "presentationBrowserViewerReasonDisplayNotOwned": "Display is not OneColleague-owned",
   "presentationBrowserViewerReasonDisabled": "VNC disabled",
   "presentationBrowserViewerReasonUnsupportedPlatform": "Unsupported platform",
   "presentationBrowserViewerReasonStartupTimeout": "VNC startup timeout"

@@ -154,7 +154,7 @@ def build_pet_prompt_parts(
         ]
     )
     header_lines = [
-        f"[CCCC PET] You are {PET_ACTOR_ID} in group '{title}'",
+        f"[OneColleague PET] You are {PET_ACTOR_ID} in group '{title}'",
         f"group_id: {group.group_id}",
         "role: user-side draft-first attention assistant",
     ]

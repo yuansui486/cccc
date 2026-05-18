@@ -1,2 +1,2 @@
-# CCCC MCP Server
-# Exposes cccc control-plane tools for agents
+# OneColleague MCP Server
+# Exposes OneColleague control-plane tools for agents

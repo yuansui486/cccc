@@ -191,9 +191,10 @@ def get_runtime_command(name: str) -> List[str]:
 
 
 def get_cccc_mcp_stdio_command() -> List[str]:
-    """Return the most stable command line for launching `cccc mcp`.
+    """Return the most stable command line for launching the OneColleague MCP server.
 
-    Prefer an absolute path to the installed `cccc` entrypoint when available.
+    Prefer an absolute path to the installed `onecolleague` entrypoint when available,
+    with the legacy `cccc` entrypoint as a compatibility fallback.
     On Windows this avoids relying on runtime-specific PATH inheritance for MCP
     child processes. Fall back to the current Python interpreter otherwise.
     """
@@ -213,7 +214,22 @@ def get_cccc_mcp_stdio_command() -> List[str]:
             bin_dirs.append(Path(sys.executable).resolve().parent)
         except Exception:
             pass
-        names = ["cccc.exe", "cccc.cmd", "cccc.bat", "cccc", "cccc-script.py"] if is_windows else ["cccc"]
+        names = (
+            [
+                "onecolleague.exe",
+                "onecolleague.cmd",
+                "onecolleague.bat",
+                "onecolleague",
+                "onecolleague-script.py",
+                "cccc.exe",
+                "cccc.cmd",
+                "cccc.bat",
+                "cccc",
+                "cccc-script.py",
+            ]
+            if is_windows
+            else ["onecolleague", "cccc"]
+        )
         seen_dirs: set[str] = set()
         for bin_dir in bin_dirs:
             try:
@@ -229,7 +245,12 @@ def get_cccc_mcp_stdio_command() -> List[str]:
                     candidates.append(candidate)
     except Exception:
         pass
-    for raw in (shutil.which("cccc"), shutil.which("cccc.exe") if is_windows else None):
+    path_names = (
+        ("onecolleague", "onecolleague.exe", "cccc", "cccc.exe")
+        if is_windows
+        else ("onecolleague", "cccc")
+    )
+    for raw in (shutil.which(name) for name in path_names):
         if raw:
             candidates.append(Path(raw))
     seen: set[str] = set()

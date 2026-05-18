@@ -1,14 +1,49 @@
-"""MCP tool schemas for CCCC consolidated surface."""
+"""MCP tool schemas for OneColleague's consolidated surface."""
 
 from __future__ import annotations
 
+import copy
+
 from .task_types import TASK_TYPE_IDS
+
+LEGACY_MCP_TOOL_PREFIX = "cccc_"
+ONECOLLEAGUE_MCP_TOOL_PREFIX = "onecolleague_"
 
 _CCCC_HELP_DESCRIPTION = (
     "Load the effective collaboration playbook for this group "
     "(role-aware, on-demand, with runtime quick-use hints). "
     "Use when workflow or capability-routing details are unclear."
 )
+
+
+def is_legacy_mcp_tool_name(name: str) -> bool:
+    return str(name or "").startswith(LEGACY_MCP_TOOL_PREFIX)
+
+
+def is_onecolleague_mcp_tool_name(name: str) -> bool:
+    return str(name or "").startswith(ONECOLLEAGUE_MCP_TOOL_PREFIX)
+
+
+def onecolleague_tool_name(name: str) -> str:
+    raw = str(name or "").strip()
+    if is_legacy_mcp_tool_name(raw):
+        return ONECOLLEAGUE_MCP_TOOL_PREFIX + raw[len(LEGACY_MCP_TOOL_PREFIX) :]
+    return raw
+
+
+def canonical_mcp_tool_name(name: str) -> str:
+    raw = str(name or "").strip()
+    if is_onecolleague_mcp_tool_name(raw):
+        return LEGACY_MCP_TOOL_PREFIX + raw[len(ONECOLLEAGUE_MCP_TOOL_PREFIX) :]
+    return raw
+
+
+def mcp_tool_alias_names(name: str) -> set[str]:
+    canonical = canonical_mcp_tool_name(name)
+    aliases = {canonical}
+    if is_legacy_mcp_tool_name(canonical):
+        aliases.add(onecolleague_tool_name(canonical))
+    return {item for item in aliases if item}
 
 
 def _obj(properties: dict, required: list[str] | None = None) -> dict:
@@ -20,10 +55,10 @@ def _obj(properties: dict, required: list[str] | None = None) -> dict:
 
 
 _COMMON_GROUP = {
-    "group_id": {"type": "string", "description": "Working group ID (optional if CCCC_GROUP_ID is set)"},
+    "group_id": {"type": "string", "description": "Working group ID (optional if ONECOLLEAGUE_GROUP_ID or CCCC_GROUP_ID is set)"},
 }
 _COMMON_ACTOR = {
-    "actor_id": {"type": "string", "description": "Actor ID (optional if CCCC_ACTOR_ID is set)"},
+    "actor_id": {"type": "string", "description": "Actor ID (optional if ONECOLLEAGUE_ACTOR_ID or CCCC_ACTOR_ID is set)"},
 }
 _COMMON_BY = {
     "by": {"type": "string", "description": "Caller actor id override (normally auto-resolved)"},
@@ -1255,3 +1290,63 @@ MCP_TOOLS = [
         ),
     },
 ]
+
+CANONICAL_MCP_TOOLS = MCP_TOOLS
+
+
+def _alias_text(value: str) -> str:
+    text = str(value or "")
+    legacy_group = "__ONECOLLEAGUE_LEGACY_GROUP_ID__"
+    legacy_actor = "__ONECOLLEAGUE_LEGACY_ACTOR_ID__"
+    legacy_home = "__ONECOLLEAGUE_LEGACY_HOME__"
+    replacements = {
+        "ONECOLLEAGUE_GROUP_ID or CCCC_GROUP_ID": f"ONECOLLEAGUE_GROUP_ID or legacy {legacy_group}",
+        "ONECOLLEAGUE_ACTOR_ID or CCCC_ACTOR_ID": f"ONECOLLEAGUE_ACTOR_ID or legacy {legacy_actor}",
+        "ONECOLLEAGUE_HOME or CCCC_HOME": f"ONECOLLEAGUE_HOME or legacy {legacy_home}",
+        "CCCC_GROUP_ID": f"ONECOLLEAGUE_GROUP_ID or legacy {legacy_group}",
+        "CCCC_ACTOR_ID": f"ONECOLLEAGUE_ACTOR_ID or legacy {legacy_actor}",
+        "CCCC_HOME": f"ONECOLLEAGUE_HOME or legacy {legacy_home}",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = text.replace("CCCC", "OneColleague")
+    text = text.replace("cccc_", "onecolleague_")
+    text = text.replace(legacy_group, "CCCC_GROUP_ID")
+    text = text.replace(legacy_actor, "CCCC_ACTOR_ID")
+    text = text.replace(legacy_home, "CCCC_HOME")
+    return text
+
+
+def _alias_schema_text(value):
+    if isinstance(value, dict):
+        return {key: _alias_schema_text(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_alias_schema_text(item) for item in value]
+    if isinstance(value, str):
+        return _alias_text(value)
+    return value
+
+
+def _alias_tool_spec(spec: dict) -> dict:
+    item = copy.deepcopy(spec)
+    name = str(item.get("name") or "").strip()
+    item["name"] = onecolleague_tool_name(name)
+    item["description"] = _alias_text(str(item.get("description") or ""))
+    item["inputSchema"] = _alias_schema_text(item.get("inputSchema"))
+    return item
+
+
+def mcp_tool_display_spec(spec: dict) -> dict:
+    name = str(spec.get("name") or "").strip()
+    if is_legacy_mcp_tool_name(name):
+        return _alias_tool_spec(spec)
+    return copy.deepcopy(spec)
+
+
+ONECOLLEAGUE_MCP_TOOLS = [
+    _alias_tool_spec(spec)
+    for spec in CANONICAL_MCP_TOOLS
+    if isinstance(spec, dict) and is_legacy_mcp_tool_name(str(spec.get("name") or ""))
+]
+
+MCP_TOOLS_WITH_ALIASES = ONECOLLEAGUE_MCP_TOOLS + CANONICAL_MCP_TOOLS

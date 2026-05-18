@@ -51,6 +51,8 @@ Issues = "https://github.com/ChesterRa/cccc/issues"
 [project.scripts]
 cccc = "cccc.cli:main"
 ccccd = "cccc.daemon_main:main"
+onecolleague = "cccc.cli:main"
+onecolleagued = "cccc.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true

@@ -572,36 +572,36 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             "\n".join(
                 [
                     "## Web Model Transport (Runtime)",
-                    "- You are still a normal CCCC agent; follow the same "
+                    "- You are still a normal OneColleague agent; follow the same "
                     "bootstrap/help/message/coordination/capability rules as other actors.",
                     "- If a turn was injected into the web chat, work from that envelope and do not call "
-                    "`cccc_runtime_wait_next_turn` first for that turn.",
+                    "`onecolleague_runtime_wait_next_turn` first for that turn.",
                     "- If no turn was injected and you are operating by remote MCP pull, call "
-                    "`cccc_runtime_wait_next_turn` to get work.",
-                    "- Web chat text alone is not a visible CCCC reply. Use `cccc_message_send` or "
-                    "`cccc_message_reply` for peer/user-visible communication.",
-                    "- If CCCC MCP tools are not visible in the selected ChatGPT model, you do not have CCCC local access "
+                    "`onecolleague_runtime_wait_next_turn` to get work.",
+                    "- Web chat text alone is not a visible OneColleague reply. Use `onecolleague_message_send` or "
+                    "`onecolleague_message_reply` for peer/user-visible communication.",
+                    "- If OneColleague MCP tools are not visible in the selected ChatGPT model, you do not have OneColleague local access "
                     "in this chat. Do not claim local execution; tell the user to switch to a GPT-5.x ChatGPT session "
-                    "that can see the CCCC connector.",
-                    "- For non-trivial local workspace work, default to `cccc_code_exec`: use JavaScript `tools.*` "
+                    "that can see the OneColleague connector.",
+                    "- For non-trivial local workspace work, default to `onecolleague_code_exec`: use JavaScript `tools.*` "
                     "calls to compose repo reads, patches, shell/test commands, git diff, and visible reports in one focused flow.",
-                    "- Use direct repo/shell/git tools for simple one-step actions; use `cccc_code_exec` when the work needs "
+                    "- Use direct repo/shell/git tools for simple one-step actions; use `onecolleague_code_exec` when the work needs "
                     "more than one local operation or when patch/test/diff feedback should stay together.",
-                    "- Direct tools remain available for simple steps: `cccc_repo`, `cccc_apply_patch`, `cccc_repo_edit`, "
-                    "`cccc_exec_command`, `cccc_write_stdin`, `cccc_shell`, and `cccc_git`.",
-                    "- Delivered CCCC attachments are blob references, not browser uploads. Read text attachments with "
-                    "`cccc_file(action=\"read\", rel_path=...)`; use `blob_path` for binary files or local inspection.",
+                    "- Direct tools remain available for simple steps: `onecolleague_repo`, `onecolleague_apply_patch`, `onecolleague_repo_edit`, "
+                    "`onecolleague_exec_command`, `onecolleague_write_stdin`, `onecolleague_shell`, and `onecolleague_git`.",
+                    "- Delivered OneColleague attachments are blob references, not browser uploads. Read text attachments with "
+                    "`onecolleague_file(action=\"read\", rel_path=...)`; use `blob_path` for binary files or local inspection.",
                     "- When you create a file that the user or a peer should receive, keep it under the active scope and "
-                    "send it back with `cccc_file(action=\"send\", path=..., text=...)` instead of only mentioning a path.",
-                    "- Inside `cccc_code_exec`, call nested tools as `await tools.cccc_repo({...})`, "
-                    "`await tools.cccc_apply_patch({...})`; inspect `COMMON_WORK_LOOPS`, `tool_names(\"repo\")`, "
+                    "send it back with `onecolleague_file(action=\"send\", path=..., text=...)` instead of only mentioning a path.",
+                    "- Inside `onecolleague_code_exec`, call nested tools as `await tools.onecolleague_repo({...})`, "
+                    "`await tools.onecolleague_apply_patch({...})`; inspect `COMMON_WORK_LOOPS`, `tool_names(\"repo\")`, "
                     "`list_tools(\"repo\")`, or `tool_help(\"repo\")` if a tool name or loop is unclear; "
                     "use `tool_help(\"repo\", {detail:\"schema\"})` only when needed.",
-                    "- Prefer the Codex-style loop: read with line ranges, patch, run focused validation, then inspect `cccc_git(action=\"diff\")`.",
-                    "- For exact small edits, use `cccc_repo_edit(action=\"replace\"|\"multi_replace\", "
+                    "- Prefer the Codex-style loop: read with line ranges, patch, run focused validation, then inspect `onecolleague_git(action=\"diff\")`.",
+                    "- For exact small edits, use `onecolleague_repo_edit(action=\"replace\"|\"multi_replace\", "
                     "expected_sha256=...)`; use `write` only for deliberate full-file writes.",
-                    "- Prefer `cccc_exec_command`/`cccc_write_stdin` for long-running commands; `cccc_shell` is for short one-shot commands.",
-                    "- Finish each processed turn with `cccc_runtime_complete_turn` for status/evidence. "
+                    "- Prefer `onecolleague_exec_command`/`onecolleague_write_stdin` for long-running commands; `onecolleague_shell` is for short one-shot commands.",
+                    "- Finish each processed turn with `onecolleague_runtime_complete_turn` for status/evidence. "
                     "Browser-injected turns are already delivery-committed, so missing completion should not block later turns.",
                 ]
             ).rstrip()
@@ -643,18 +643,18 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             ]
             if "pack:space" not in enabled_pack_ids:
                 lines_space.append(
-                    '- If `cccc_space` is hidden in this session, use `cccc_capability_use(tool_name="cccc_space", tool_arguments={"action":"status"})` to expose it.'
+                    '- If `onecolleague_space` is hidden in this session, use `onecolleague_capability_use(tool_name="cccc_space", tool_arguments={"action":"status"})` to expose it.'
                 )
             if work_bound:
                 lines_space.append(
-                    '- Use `cccc_space(action="query", lane="work")` for shared/project knowledge lookup.'
+                    '- Use `onecolleague_space(action="query", lane="work")` for shared/project knowledge lookup.'
                 )
                 lines_space.append(
                     '- For long artifact jobs that return `accepted=true` with `status="pending"` or `status="queued"`, do not poll. Wait for the later `system.notify`, continue other work or standby, and use a one-shot reminder only if the result blocks delivery and nothing else can proceed.'
                 )
             if memory_bound:
                 lines_space.append(
-                    '- Keep local memory first; use `cccc_space(action="query", lane="memory")` only as a deeper recall fallback.'
+                    '- Keep local memory first; use `onecolleague_space(action="query", lane="memory")` only as a deeper recall fallback.'
                 )
             if mode != "active":
                 lines_space.append(
@@ -730,7 +730,7 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
             [
                 "- Capsule skill is runtime capsule activation, not a full local skill-package install.",
                 "- Runtime success is mainly visible via `capability_state.active_capsule_skills`; `dynamic_tools` may stay unchanged.",
-                "- Install repository, URL, and local `SKILL.md` sources through `cccc_capability_install` so they remain CCCC capability records.",
+                "- Install repository, URL, and local `SKILL.md` sources through `onecolleague_capability_install` so they remain CCCC capability records.",
             ]
         )
         sections.append("\n".join(lines).rstrip())

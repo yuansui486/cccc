@@ -41,7 +41,8 @@ def _restore_invocation_web_overrides(previous: dict[str, Optional[str]], applie
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="cccc", description="CCCC vNext (working group + scopes)")
+    prog = os.path.basename(sys.argv[0] or "") or "cccc"
+    p = argparse.ArgumentParser(prog=prog, description="OneColleague (working group + scopes)")
     p.add_argument(
         "--port",
         "--web-port",
@@ -294,7 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lc.add_argument("--force", action="store_true", help="Force a compaction run (ignore thresholds)")
     p_lc.set_defaults(func=cmd_ledger_compact)
 
-    p_daemon = sub.add_parser("daemon", help="Manage ccccd daemon")
+    p_daemon = sub.add_parser("daemon", help="Manage OneColleague daemon")
     p_daemon.add_argument("action", choices=["start", "stop", "status"], help="Action")
     p_daemon.set_defaults(func=cmd_daemon)
 
@@ -561,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ver = sub.add_parser("version", help="Show version")
     p_ver.set_defaults(func=cmd_version)
 
-    p_status = sub.add_parser("status", help="Show overall CCCC status (daemon, groups, actors)")
+    p_status = sub.add_parser("status", help="Show overall OneColleague status (daemon, groups, actors)")
     p_status.set_defaults(func=cmd_status)
 
     return p

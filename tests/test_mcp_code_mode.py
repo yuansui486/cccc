@@ -249,14 +249,14 @@ await new Promise(() => {});
         home, _workspace, group, cleanup = self._with_home_and_group()
         try:
             expected = {
-                "cccc_code_exec",
-                "cccc_code_wait",
-                "cccc_repo",
-                "cccc_apply_patch",
-                "cccc_exec_command",
-                "cccc_write_stdin",
-                "cccc_git",
-                "cccc_message_send",
+                "onecolleague_code_exec",
+                "onecolleague_code_wait",
+                "onecolleague_repo",
+                "onecolleague_apply_patch",
+                "onecolleague_exec_command",
+                "onecolleague_write_stdin",
+                "onecolleague_git",
+                "onecolleague_message_send",
             }
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
                 names = {str(spec.get("name") or "") for spec in mcp_server.list_tools_for_caller()}
@@ -274,9 +274,9 @@ await new Promise(() => {});
                 home=str(home), group_id=group.group_id, actor_id="peer1"
             ):
                 names = {str(spec.get("name") or "") for spec in mcp_server.list_tools_for_caller()}
-                self.assertNotIn("cccc_code_exec", names)
-                self.assertNotIn("cccc_code_wait", names)
-                self.assertIn("cccc_repo", names)
+                self.assertNotIn("onecolleague_code_exec", names)
+                self.assertNotIn("onecolleague_code_wait", names)
+                self.assertIn("onecolleague_repo", names)
                 with self.assertRaises(mcp_server.MCPError) as cm:
                     mcp_server.handle_tool_call("cccc_code_exec", {"source": "text('blocked')"})
             self.assertEqual(cm.exception.code, "code_mode_disabled")
@@ -334,18 +334,18 @@ const repoNames = tool_names("repo");
 const messageNames = tool_names("message");
 const files = list_tools("file");
 text(JSON.stringify({
-  hasRepo: help.tools.some((tool) => tool.raw_name === "cccc_repo"),
+  hasRepo: help.tools.some((tool) => tool.raw_name === "onecolleague_repo"),
   compactByDefault: help.tools.every((tool) => tool.summary && !tool.description),
   fullHasSchemaText: full.tools.some((tool) => tool.description && tool.description.includes("inputSchema")),
-  turnCompleteAlias: names[0] === "cccc_runtime_complete_turn",
-  finishCurated: finishNames.slice(0, 4).join(",") === "cccc_message_reply,cccc_message_send,cccc_agent_state,cccc_runtime_complete_turn",
-  finishNoRepoNoise: !finishNames.includes("cccc_apply_patch"),
-  finishToolsNarrow: finish.tools.slice(0, 4).every((tool) => ["cccc_message_reply", "cccc_message_send", "cccc_agent_state", "cccc_runtime_complete_turn"].includes(tool.raw_name)),
-  repoRanking: repoNames.slice(0, 4).join(",") === "cccc_repo,cccc_repo_edit,cccc_apply_patch,cccc_git",
-  messageRanking: messageNames.slice(0, 2).join(",") === "cccc_message_reply,cccc_message_send",
+  turnCompleteAlias: names[0] === "onecolleague_runtime_complete_turn",
+  finishCurated: finishNames.slice(0, 4).join(",") === "onecolleague_message_reply,onecolleague_message_send,onecolleague_agent_state,onecolleague_runtime_complete_turn",
+  finishNoRepoNoise: !finishNames.includes("onecolleague_apply_patch"),
+  finishToolsNarrow: finish.tools.slice(0, 4).every((tool) => ["onecolleague_message_reply", "onecolleague_message_send", "onecolleague_agent_state", "onecolleague_runtime_complete_turn"].includes(tool.raw_name)),
+  repoRanking: repoNames.slice(0, 4).join(",") === "onecolleague_repo,onecolleague_repo_edit,onecolleague_apply_patch,onecolleague_git",
+  messageRanking: messageNames.slice(0, 2).join(",") === "onecolleague_message_reply,onecolleague_message_send",
   trackedSendBounded: messageHelp.notes.some((note) => note.includes("durable delegation")),
   finishLoopAlias: turn.common_work_loops.some((loop) => loop.name === "finish_turn"),
-  fileListCompact: files.some((tool) => tool.raw_name === "cccc_file" && tool.summary),
+  fileListCompact: files.some((tool) => tool.raw_name === "onecolleague_file" && tool.summary),
   hasPatchLoop: COMMON_WORK_LOOPS.some((loop) => loop.name === "patch_safely"),
   usage: help.usage.includes("tools.<name>"),
 }));

@@ -83,7 +83,7 @@ class TestMcpInstall(unittest.TestCase):
             ), patch("cccc.daemon.mcp_install.Path.home", return_value=home):
                 self.assertFalse(is_mcp_installed("droid"))
 
-    def test_ensure_mcp_installed_kimi_adds_cccc_stdio(self) -> None:
+    def test_ensure_mcp_installed_kimi_adds_onecolleague_stdio(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             cwd = Path(td)
             with patch("cccc.daemon.mcp_install._runtime_mcp_state", side_effect=["missing", "ready"]), patch(
@@ -95,7 +95,7 @@ class TestMcpInstall(unittest.TestCase):
                     ok = ensure_mcp_installed("kimi", cwd, auto_mcp_runtimes=("kimi",))
                     self.assertTrue(ok)
                     mock_run.assert_called_once_with(
-                        ["kimi", "mcp", "add", "--transport", "stdio", "cccc", "--", "/abs/cccc", "mcp"],
+                        ["kimi", "mcp", "add", "--transport", "stdio", "onecolleague", "--", "/abs/cccc", "mcp"],
                         capture_output=True,
                         text=True,
                         cwd=str(cwd),
@@ -167,6 +167,11 @@ class TestMcpInstall(unittest.TestCase):
                 with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
                     mock_run.side_effect = [
                         Mock(
+                            returncode=1,
+                            stdout=b"",
+                            stderr=b"",
+                        ),
+                        Mock(
                             returncode=0,
                             stdout=(
                                 "cccc:\n"
@@ -178,10 +183,11 @@ class TestMcpInstall(unittest.TestCase):
                         ),
                         Mock(returncode=0, stdout="", stderr=""),
                         Mock(returncode=0, stdout="", stderr=""),
+                        Mock(returncode=0, stdout="", stderr=""),
                         Mock(
                             returncode=0,
                             stdout=(
-                                "cccc:\n"
+                                "onecolleague:\n"
                                 "  Scope: User config\n"
                                 "  Type: stdio\n"
                                 "  Command: C:\\CCCC\\cccc.exe\n"
@@ -195,10 +201,23 @@ class TestMcpInstall(unittest.TestCase):
                         mock_run.call_args_list,
                         [
                             call(
+                                ["claude", "mcp", "get", "onecolleague"],
+                                capture_output=True,
+                                text=False,
+                                timeout=10,
+                            ),
+                            call(
                                 ["claude", "mcp", "get", "cccc"],
                                 capture_output=True,
                                 text=False,
                                 timeout=10,
+                            ),
+                            call(
+                                ["claude", "mcp", "remove", "onecolleague", "-s", "user"],
+                                capture_output=True,
+                                text=True,
+                                cwd=str(cwd),
+                                timeout=30,
                             ),
                             call(
                                 ["claude", "mcp", "remove", "cccc", "-s", "user"],
@@ -208,14 +227,14 @@ class TestMcpInstall(unittest.TestCase):
                                 timeout=30,
                             ),
                             call(
-                                ["claude", "mcp", "add", "-s", "user", "cccc", "--", "C:\\CCCC\\cccc.exe", "mcp"],
+                                ["claude", "mcp", "add", "-s", "user", "onecolleague", "--", "C:\\CCCC\\cccc.exe", "mcp"],
                                 capture_output=True,
                                 text=True,
                                 cwd=str(cwd),
                                 timeout=30,
                             ),
                             call(
-                                ["claude", "mcp", "get", "cccc"],
+                                ["claude", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=False,
                                 timeout=10,
@@ -236,7 +255,7 @@ class TestMcpInstall(unittest.TestCase):
                     ok = ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",), env=env)
                     self.assertTrue(ok)
                     mock_run.assert_called_once_with(
-                        ["codex", "mcp", "add", "cccc", "--", "/abs/cccc", "mcp"],
+                        ["codex", "mcp", "add", "onecolleague", "--", "/abs/cccc", "mcp"],
                         capture_output=True,
                         text=True,
                         cwd=str(cwd),
@@ -310,7 +329,7 @@ class TestMcpInstall(unittest.TestCase):
                 self.assertFalse(ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",)))
 
     def test_is_mcp_installed_codex_uses_resolved_windows_cli_path(self) -> None:
-        with patch("cccc.daemon.mcp_install.sys.platform", "linux"), patch("cccc.daemon.mcp_install.resolve_subprocess_argv", return_value=[r"C:\Tools\codex.cmd", "mcp", "get", "cccc"]), patch(
+        with patch("cccc.daemon.mcp_install.sys.platform", "linux"), patch("cccc.daemon.mcp_install.resolve_subprocess_argv", return_value=[r"C:\Tools\codex.cmd", "mcp", "get", "onecolleague"]), patch(
             "cccc.daemon.mcp_install.subprocess.run"
         ) as mock_run:
             mock_run.return_value.returncode = 0
@@ -320,7 +339,7 @@ class TestMcpInstall(unittest.TestCase):
             self.assertTrue(is_mcp_installed("codex"))
 
         mock_run.assert_called_once_with(
-            [r"C:\Tools\codex.cmd", "mcp", "get", "cccc"],
+            [r"C:\Tools\codex.cmd", "mcp", "get", "onecolleague"],
             capture_output=True,
             timeout=10,
             text=True,
@@ -334,7 +353,7 @@ class TestMcpInstall(unittest.TestCase):
                 return_value=["C:\\CCCC\\cccc.exe", "mcp"],
             ), patch(
                 "cccc.daemon.mcp_install.resolve_subprocess_argv",
-                return_value=[r"C:\Tools\codex.cmd", "mcp", "add", "cccc", "--", "C:\\CCCC\\cccc.exe", "mcp"],
+                return_value=[r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague", "--", "C:\\CCCC\\cccc.exe", "mcp"],
             ), patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
                 mock_run.return_value.returncode = 0
 
@@ -342,7 +361,7 @@ class TestMcpInstall(unittest.TestCase):
 
             self.assertTrue(ok)
             mock_run.assert_called_once_with(
-                [r"C:\Tools\codex.cmd", "mcp", "add", "cccc", "--", "C:\\CCCC\\cccc.exe", "mcp"],
+                [r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague", "--", "C:\\CCCC\\cccc.exe", "mcp"],
                 capture_output=True,
                 text=True,
                 cwd=str(cwd),
@@ -361,6 +380,11 @@ class TestMcpInstall(unittest.TestCase):
             ):
                 with patch("cccc.daemon.mcp_install.subprocess.run") as mock_run:
                     mock_run.side_effect = [
+                        Mock(
+                            returncode=1,
+                            stdout="",
+                            stderr="",
+                        ),
                         Mock(
                             returncode=0,
                             stdout=(
@@ -389,20 +413,26 @@ class TestMcpInstall(unittest.TestCase):
                         mock_run.call_args_list,
                         [
                             call(
+                                ["codex", "mcp", "get", "onecolleague"],
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                            ),
+                            call(
                                 ["codex", "mcp", "get", "cccc"],
                                 capture_output=True,
                                 text=True,
                                 timeout=10,
                             ),
                             call(
-                                ["codex", "mcp", "add", "cccc", "--", "C:\\CCCC\\cccc.exe", "mcp"],
+                                ["codex", "mcp", "add", "onecolleague", "--", "C:\\CCCC\\cccc.exe", "mcp"],
                                 capture_output=True,
                                 text=True,
                                 cwd=str(cwd),
                                 timeout=30,
                             ),
                             call(
-                                ["codex", "mcp", "get", "cccc"],
+                                ["codex", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=True,
                                 timeout=10,
@@ -410,7 +440,22 @@ class TestMcpInstall(unittest.TestCase):
                         ],
                     )
 
-    def test_get_cccc_mcp_stdio_command_prefers_sibling_entrypoint(self) -> None:
+    def test_get_cccc_mcp_stdio_command_prefers_onecolleague_sibling_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            bin_dir = Path(td)
+            python_exe = bin_dir / "python.exe"
+            onecolleague_exe = bin_dir / "onecolleague.exe"
+            cccc_exe = bin_dir / "cccc.exe"
+            python_exe.write_text("", encoding="utf-8")
+            onecolleague_exe.write_text("", encoding="utf-8")
+            cccc_exe.write_text("", encoding="utf-8")
+            with patch("cccc.kernel.runtime.sys.platform", "win32"), patch(
+                "cccc.kernel.runtime.sys.executable",
+                str(python_exe),
+            ), patch("cccc.kernel.runtime.shutil.which", return_value=None):
+                self.assertEqual(get_cccc_mcp_stdio_command(), [str(onecolleague_exe.resolve()), "mcp"])
+
+    def test_get_cccc_mcp_stdio_command_falls_back_to_legacy_sibling_entrypoint(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             bin_dir = Path(td)
             python_exe = bin_dir / "python.exe"

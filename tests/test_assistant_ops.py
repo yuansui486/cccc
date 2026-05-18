@@ -749,7 +749,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertIn("Voice Secretary Runtime Actor", prompt)
             self.assertIn("not the foreman", prompt)
             self.assertIn("secretary-scope", prompt)
-            self.assertIn("use MCP tools cccc_bootstrap, then cccc_help", prompt)
+            self.assertIn("use MCP tools onecolleague_bootstrap, then onecolleague_help", prompt)
             self.assertIn("daemon-delivered input_envelope", prompt)
             self.assertIn("Work order", prompt)
             self.assertIn("Context (not task)", prompt)
@@ -760,8 +760,8 @@ class TestAssistantOps(unittest.TestCase):
             self.assertNotIn("first instruction after cold start or resume", prompt)
             self.assertNotIn("wait until the first runtime instruction", prompt)
             self.assertIn("Do not edit project code", prompt)
-            self.assertIn("cccc_voice_secretary_document", prompt)
-            self.assertIn("cccc_voice_secretary_request", prompt)
+            self.assertIn("onecolleague_voice_secretary_document", prompt)
+            self.assertIn("onecolleague_voice_secretary_request", prompt)
             self.assertIn("never copy them into user-facing markdown", prompt)
             self.assertIn("Maintain the target document incrementally", prompt)
             self.assertIn("non-lossy editorial pass", prompt)
@@ -1088,9 +1088,9 @@ class TestAssistantOps(unittest.TestCase):
             ):
                 tools = list_tools_for_caller()
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("cccc_voice_secretary_document", names)
-            self.assertIn("cccc_voice_secretary_request", names)
-            self.assertIn("cccc_voice_secretary_composer", names)
+            self.assertIn("onecolleague_voice_secretary_document", names)
+            self.assertIn("onecolleague_voice_secretary_request", names)
+            self.assertIn("onecolleague_voice_secretary_composer", names)
 
             convert, _ = self._call(
                 "actor_update",
@@ -2547,7 +2547,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertIn("重点看看风险和副作用", input_text)
             self.assertIn("Recent context", input_text)
             self.assertIn("需要补验收标准", input_text)
-            self.assertIn("Use MCP tool cccc_voice_secretary_composer", input_text)
+            self.assertIn("Use MCP tool onecolleague_voice_secretary_composer", input_text)
             self.assertIn("draft_text must contain only the text to add", input_text)
             self.assertNotIn("Return only the composer text to insert", input_text)
             self.assertNotIn("Execution rules:", input_text)
@@ -2727,7 +2727,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertTrue(read.ok, getattr(read, "error", None))
             input_text = str((read.result or {}).get("input_text") or "")
             self.assertIn("Operation: replace_with_refined_prompt", input_text)
-            self.assertIn("Use MCP tool cccc_voice_secretary_composer", input_text)
+            self.assertIn("Use MCP tool onecolleague_voice_secretary_composer", input_text)
             self.assertIn("draft_text must contain the complete replacement prompt", input_text)
             self.assertNotIn("Do not return only an incremental addition", input_text)
             self.assertNotIn("Append mode", input_text)
@@ -4107,7 +4107,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertIn("Target: secretary", input_text)
             self.assertIn(f"Request id: {request_id}", input_text)
             self.assertIn("Required output:", input_text)
-            self.assertIn("Use MCP tool cccc_voice_secretary_request(action=\"report\"", input_text)
+            self.assertIn("Use MCP tool onecolleague_voice_secretary_request(action=\"report\"", input_text)
             self.assertIn("Task:", input_text)
             self.assertIn("刚才的总结有没有遗漏", input_text)
             self.assertEqual((read.result or {}).get("documents"), [])
@@ -4115,7 +4115,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertTrue(batches)
             self.assertEqual(batches[0].get("request_kind"), "ask_request")
             self.assertTrue(batches[0].get("requires_report"))
-            self.assertEqual(batches[0].get("report_channel"), 'cccc_voice_secretary_request(action="report")')
+            self.assertEqual(batches[0].get("report_channel"), 'onecolleague_voice_secretary_request(action="report")')
 
             state, _ = self._call(
                 "assistant_state",
@@ -4965,7 +4965,7 @@ class TestAssistantOps(unittest.TestCase):
             document_input_text = str((read.result or {}).get("input_text") or "")
             self.assertIn("Mode: document", document_input_text)
             self.assertIn("Required output:", document_input_text)
-            self.assertIn("Edit the repository markdown directly, then use MCP tool cccc_voice_secretary_request", document_input_text)
+            self.assertIn("Edit the repository markdown directly, then use MCP tool onecolleague_voice_secretary_request", document_input_text)
             self.assertIn("Task:", document_input_text)
             self.assertIn("concise launch-risk summary", document_input_text)
             batches = (read.result or {}).get("input_batches") if isinstance(read.result, dict) else []

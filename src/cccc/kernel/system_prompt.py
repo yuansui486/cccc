@@ -93,7 +93,7 @@ def render_role_system_prompt(
 
     # Build minimal prompt
     lines = [
-        f"[CCCC] You are {actor_id} ({role}) in group '{title}'",
+        f"[OneColleague] You are {actor_id} ({role}) in group '{title}'",
         f"group_id: {group_id}",
     ]
     runtime_label = str(runtime_name or "").strip()
@@ -127,8 +127,8 @@ def render_role_system_prompt(
         lines.append("scopes (* = active):")
         lines.extend(scope_lines)
     
-    # Keep this stable and short. Long-lived playbook details belong in cccc_help.
-    visible_reply_line = "- Visible replies must go through MCP: cccc_message_send / cccc_message_reply."
+    # Keep this stable and short. Long-lived playbook details belong in onecolleague_help.
+    visible_reply_line = "- Visible replies must go through MCP: onecolleague_message_send / onecolleague_message_reply."
 
     core_lines = [
         "Working Style:",
@@ -143,7 +143,7 @@ def render_role_system_prompt(
         "- Before sending, verify `reply_to` and `to`; make the audience explicit when it differs.",
         "- Terminal output is not delivery.",
         "- A status message, plan, or promise is not task progress; for action requests, either start the work now or state the exact blocker.",
-        "- At key transitions, sync shared control-plane state and your cccc_agent_state.",
+        "- At key transitions, sync shared control-plane state and your onecolleague_agent_state.",
         "- Once scope is approved, finish it end-to-end; do not ask to continue on obvious next steps.",
         "- For strategy or scope discussion, align first; implement only after explicit action intent.",
     ]
@@ -168,7 +168,7 @@ def render_system_prompt(*, group: Group, actor: Dict[str, Any]) -> str:
     Design principles:
     - Minimal: Only session-specific context (identity, group, scopes)
     - No tool docs: Agent sees MCP tools automatically
-    - Ops playbook lives in MCP: see cccc_help
+    - Ops playbook lives in MCP: see onecolleague_help
     """
     actor_id = str(actor.get("id") or "").strip()
     if is_pet_actor(actor):

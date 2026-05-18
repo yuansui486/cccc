@@ -130,7 +130,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if ctx.dist_dir is not None:
             return '<meta http-equiv="refresh" content="0; url=/ui/">'
         return (
-            "<h3>cccc web</h3>"
+            "<h3>OneColleague Web</h3>"
             "<p>This is a minimal control-plane port. UI will live under <code>/ui</code> later.</p>"
             "<p>Try <code>/api/v1/ping</code> and <code>/api/v1/groups</code>.</p>"
         )
@@ -383,11 +383,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     async def _handle_remote_mcp_payload(payload: Any, *, connector: Optional[Dict[str, Any]] = None) -> Response:
         from ...mcp.main import handle_request as handle_mcp_request
+        from ...mcp.toolspecs import canonical_mcp_tool_name
 
         def _tool_call_activity(item: Dict[str, Any], resp: Dict[str, Any]) -> Dict[str, str]:
             method = str(item.get("method") or "").strip()
             params = item.get("params") if isinstance(item.get("params"), dict) else {}
             tool_name = str(params.get("name") or "").strip() if method == "tools/call" else ""
+            canonical_tool_name = canonical_mcp_tool_name(tool_name)
             call_status = "error" if isinstance(resp, dict) and ("error" in resp or bool((resp.get("result") or {}).get("isError"))) else "ok"
             wait_status = ""
             turn_id = ""
@@ -408,11 +410,11 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     if isinstance(parsed, dict):
                         if isinstance(parsed.get("error"), dict):
                             error = str((parsed.get("error") or {}).get("message") or error).strip()
-                        if tool_name == "cccc_runtime_wait_next_turn":
+                        if canonical_tool_name == "cccc_runtime_wait_next_turn":
                             wait_status = str(parsed.get("status") or "").strip()
                             turn = parsed.get("turn") if isinstance(parsed.get("turn"), dict) else {}
                             turn_id = str(turn.get("turn_id") or "").strip() if isinstance(turn, dict) else ""
-                        elif tool_name == "cccc_runtime_complete_turn":
+                        elif canonical_tool_name == "cccc_runtime_complete_turn":
                             wait_status = str(parsed.get("status") or "").strip()
                             turn_id = str(parsed.get("turn_id") or "").strip()
             return {
@@ -435,7 +437,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             async def _record_browser_progress(reason: str, detail: str) -> None:
                 if not isinstance(connector, dict):
                     return
-                if method != "tools/call" or not requested_tool_name or requested_tool_name == "cccc_runtime_complete_turn":
+                if method != "tools/call" or not requested_tool_name or canonical_mcp_tool_name(requested_tool_name) == "cccc_runtime_complete_turn":
                     return
                 try:
                     from ....daemon.actors.web_model_tool_confirm_watcher import record_web_model_browser_progress

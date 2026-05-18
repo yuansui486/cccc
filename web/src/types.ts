@@ -1,4 +1,4 @@
-// Shared type definitions for CCCC Web UI
+// Shared type definitions for OneColleague Web UI
 
 // Theme types
 export type Theme = "light" | "dark" | "system";
@@ -1464,7 +1464,7 @@ export const RUNTIME_INFO: Record<string, { label: string; desc: string }> = {
   codex: { label: "Codex CLI", desc: "" },
   droid: { label: "Droid", desc: "" },
   gemini: { label: "Gemini CLI", desc: "" },
-  hermes: { label: "Hermes Agent", desc: "Uses your Hermes profile with CCCC MCP" },
+  hermes: { label: "Hermes Agent", desc: "Uses your Hermes profile with OneColleague MCP" },
   kimi: { label: "Kimi CLI", desc: "" },
   neovate: { label: "Neovate Code", desc: "" },
   web_model: { label: "ChatGPT Web Model", desc: "ChatGPT browser delivery + remote MCP connector" },

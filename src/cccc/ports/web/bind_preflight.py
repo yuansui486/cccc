@@ -48,11 +48,11 @@ def _listener_detected(*, host: str, port: int) -> bool:
 
 
 def _switch_port_examples(port: int = 9000) -> str:
-    cli_cmd = f"`cccc --port {int(port)}`"
+    cli_cmd = f"`onecolleague --port {int(port)}`"
     if sys.platform.startswith("win"):
-        env_cmd = f"`$env:CCCC_WEB_PORT={int(port)}; cccc`"
+        env_cmd = f"`$env:CCCC_WEB_PORT={int(port)}; onecolleague`"
     else:
-        env_cmd = f"`CCCC_WEB_PORT={int(port)} cccc`"
+        env_cmd = f"`CCCC_WEB_PORT={int(port)} onecolleague`"
     return f"Example: {cli_cmd} or {env_cmd}."
 
 
@@ -87,11 +87,11 @@ def describe_bind_error(*, host: str, port: int, exc: OSError) -> str:
                 "On Windows this commonly means the port falls inside an excluded TCP port range "
                 "reserved by Hyper-V, WSL, WinNAT, or HNS, even when no process is listening. "
                 "Check with `netsh interface ipv4 show excludedportrange protocol=tcp`, then restart "
-                f"CCCC with a different port. {_switch_port_examples()}"
+                f"OneColleague with a different port. {_switch_port_examples()}"
             )
         return (
             f"{base} Another process is already using that port. "
-            "Stop the existing process, or restart CCCC on a different port. "
+            "Stop the existing process, or restart OneColleague on a different port. "
             f"{_switch_port_examples()}"
         )
     if _is_windows_access_denied(exc):
@@ -99,7 +99,7 @@ def describe_bind_error(*, host: str, port: int, exc: OSError) -> str:
             f"{base} Windows denied the bind. On Windows this commonly means the port falls "
             "inside an excluded TCP port range reserved by Hyper-V, WSL, WinNAT, or HNS, "
             "even when no process is listening. Check with "
-            "`netsh interface ipv4 show excludedportrange protocol=tcp`, then restart CCCC "
+            "`netsh interface ipv4 show excludedportrange protocol=tcp`, then restart OneColleague "
             f"with a different port. {_switch_port_examples()}"
         )
     detail = str(exc).strip()

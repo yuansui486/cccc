@@ -1634,7 +1634,7 @@ def build_chatgpt_web_model_health_snapshot(
     elif raw_delivery_status == "ambiguous":
         delivery_state = "ambiguous"
         delivery_label = "Delivery unverified"
-        delivery_reason = last_error or "CCCC attempted to submit the prompt, but could not verify whether ChatGPT accepted it."
+        delivery_reason = last_error or "OneColleague attempted to submit the prompt, but could not verify whether ChatGPT accepted it."
     elif raw_delivery_status == "failed":
         delivery_state = "failed"
         delivery_label = "Delivery failed"

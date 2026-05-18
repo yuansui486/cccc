@@ -1,7 +1,7 @@
 export const BASIC_MCP_CONFIG_SNIPPET = JSON.stringify(
   {
     mcpServers: {
-      cccc: { command: "cccc", args: ["mcp"] },
+      onecolleague: { command: "onecolleague", args: ["mcp"] },
     },
   },
   null,
