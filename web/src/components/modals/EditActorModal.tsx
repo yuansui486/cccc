@@ -20,7 +20,7 @@ import {
   runtimePresetIdFor,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
-import { getCurrentDoneHubAccessToken } from "../../stores/useDoneHubStore";
+import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -732,7 +732,7 @@ export function EditActorModal({
                           onChangeCommand(preset ? commandForRuntimePreset(preset, nextInfo) : nextDefault);
                           setSelectedRuntimePresetId(preset?.id || "");
                           if (preset) {
-                            setSecretsSetText((current) => mergePresetSecrets(current, preset, getCurrentDoneHubAccessToken()));
+                            setSecretsSetText((current) => mergePresetSecrets(current, preset, getCurrentDoneHubCodexApiKey()));
                             setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
                           }
                           if (preset?.envPrivate) {

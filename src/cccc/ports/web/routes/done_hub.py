@@ -241,12 +241,17 @@ def _pick_first_model_name(models: Dict[str, Any], prefix: str) -> str:
     raise _DoneHubClientConfigError(f"missing model with prefix {prefix}")
 
 
-def _codex_auth_content(raw_key: str) -> str:
+def _normalize_codex_api_key(raw_key: str) -> str:
     api_key = str(raw_key or "").strip()
     if not api_key:
         raise _DoneHubClientConfigError("missing codex token key")
     if not api_key.startswith("sk-"):
         api_key = f"sk-{api_key}"
+    return api_key
+
+
+def _codex_auth_content(raw_key: str) -> str:
+    api_key = _normalize_codex_api_key(raw_key)
     return json.dumps({"OPENAI_API_KEY": api_key}, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -333,10 +338,10 @@ def _sync_local_client_files(*, codex_key: str, codex_model: str, gemini_key: st
     _write_text_atomic(gemini_settings_path, _gemini_settings_content())
 
 
-async def _configure_local_clients(client: httpx.AsyncClient, *, base_url: str, session: Dict[str, Any]) -> None:
+async def _configure_local_clients(client: httpx.AsyncClient, *, base_url: str, session: Dict[str, Any]) -> Dict[str, Any]:
     group = str(session.get("group") or "").strip().lower()
     if group == "pro":
-        return
+        return {}
 
     access_token = str(session.get("access_token") or "").strip()
     if not access_token:
@@ -369,6 +374,11 @@ async def _configure_local_clients(client: httpx.AsyncClient, *, base_url: str, 
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         raise _DoneHubClientConfigError(_CLIENT_CONFIG_ERROR_MESSAGE) from None
+    return {
+        "codex_api_key": _normalize_codex_api_key(codex_key),
+        "codex_model": codex_model,
+        "gemini_model": gemini_model,
+    }
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -405,7 +415,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 if not self_ok or self_payload is None:
                     return {"ok": False, "error": {"code": "done_hub_self_failed", "message": self_error}}
                 session = _normalize_profile(base_url, self_payload)
-                await _configure_local_clients(client, base_url=base_url, session=session)
+                client_config = await _configure_local_clients(client, base_url=base_url, session=session) or {}
+                session.update(client_config)
         except _DoneHubClientConfigError:
             return {
                 "ok": False,

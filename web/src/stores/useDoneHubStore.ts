@@ -55,6 +55,10 @@ export function getCurrentDoneHubAccessToken(): string {
   return String(useDoneHubStore.getState().session?.access_token || "").trim();
 }
 
+export function getCurrentDoneHubCodexApiKey(): string {
+  return String(useDoneHubStore.getState().session?.codex_api_key || "").trim();
+}
+
 function loadStoredSession(): DoneHubSession | null {
   if (typeof window === "undefined") return null;
   try {
@@ -69,6 +73,8 @@ function loadStoredSession(): DoneHubSession | null {
     return {
       base_url: baseUrl,
       access_token: accessToken,
+      codex_api_key: String(record.codex_api_key || "").trim() || undefined,
+      codex_model: String(record.codex_model || "").trim() || undefined,
       username: String(record.username || "").trim(),
       display_name: String(record.display_name || "").trim(),
       group: String(record.group || "").trim(),
@@ -285,10 +291,15 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       }));
       return false;
     }
-    persistSession(nextSession);
+    const mergedSession = {
+      ...nextSession,
+      codex_api_key: nextSession.codex_api_key || latestSession.codex_api_key,
+      codex_model: nextSession.codex_model || latestSession.codex_model,
+    };
+    persistSession(mergedSession);
     set({
       status: "connected",
-      session: nextSession,
+      session: mergedSession,
       errorMessage: "",
     });
     return true;

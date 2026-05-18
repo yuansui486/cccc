@@ -71,6 +71,8 @@ function normalizeSession(value: unknown): DoneHubSession | null {
   return {
     base_url: baseUrl,
     access_token: accessToken,
+    codex_api_key: String(record.codex_api_key || "").trim() || undefined,
+    codex_model: String(record.codex_model || "").trim() || undefined,
     username: String(record.username || "").trim(),
     display_name: String(record.display_name || "").trim(),
     group: String(record.group || "").trim(),

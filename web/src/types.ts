@@ -1100,6 +1100,8 @@ export type DoneHubStatus =
 export type DoneHubSession = {
   base_url: string;
   access_token: string;
+  codex_api_key?: string;
+  codex_model?: string;
   username: string;
   display_name: string;
   group: string;

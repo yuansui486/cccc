@@ -446,6 +446,9 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertTrue(bool(body.get("ok")))
+            session = ((body.get("result") or {}).get("session") or {})
+            self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-secret")
+            self.assertNotEqual(str(session.get("codex_api_key") or ""), "token-32")
             post_token_calls = [call for call in calls if call[0:2] == ("POST", f"{base}/api/token/")]
             self.assertEqual(len(post_token_calls), 1)
             self.assertEqual(post_token_calls[0][2].get("json"), {
@@ -632,6 +635,9 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertTrue(bool(body.get("ok")))
+            session = ((body.get("result") or {}).get("session") or {})
+            self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-key")
+            self.assertNotEqual(str(session.get("codex_api_key") or ""), "token-32")
             post_token_calls = [call for call in calls if call[0:2] == ("POST", f"{base}/api/token/")]
             self.assertEqual(post_token_calls, [])
             token_get_params = [call[2].get("params") for call in calls if call[0:2] == ("GET", f"{base}/api/token/")]
