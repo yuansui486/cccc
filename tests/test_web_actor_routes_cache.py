@@ -32,13 +32,13 @@ class TestWebActorRoutesCache(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
@@ -50,8 +50,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
         return self._local_call_daemon(req)
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="actor-cache-test", topic="").group_id
@@ -75,26 +75,26 @@ class TestWebActorRoutesCache(unittest.TestCase):
         self.assertTrue(bool(created.get("ok")), created)
 
     def test_pid_matches_actor_context_requires_exact_proc_environ_match(self) -> None:
-        from cccc.ports.web.routes.actors import _pid_matches_actor_context
+        from no1.ports.web.routes.actors import _pid_matches_actor_context
 
         environ_text = b"CCCC_GROUP_ID=group-1\0CCCC_ACTOR_ID=peer-10\0"
         with patch("builtins.open", mock_open(read_data=environ_text)), patch(
-            "cccc.ports.web.routes.actors.subprocess.run",
+            "no1.ports.web.routes.actors.subprocess.run",
             return_value=MagicMock(stdout=""),
         ):
             self.assertFalse(_pid_matches_actor_context(43210, group_id="group-1", actor_id="peer-1"))
 
     def test_pid_matches_actor_context_requires_exact_ps_match(self) -> None:
-        from cccc.ports.web.routes.actors import _pid_matches_actor_context
+        from no1.ports.web.routes.actors import _pid_matches_actor_context
 
         with patch("builtins.open", side_effect=OSError("proc unavailable")), patch(
-            "cccc.ports.web.routes.actors.subprocess.run",
+            "no1.ports.web.routes.actors.subprocess.run",
             return_value=MagicMock(stdout="CCCC_GROUP_ID=group-1 CCCC_ACTOR_ID=peer-10 /bin/sh"),
         ):
             self.assertFalse(_pid_matches_actor_context(43210, group_id="group-1", actor_id="peer-1"))
 
         with patch("builtins.open", side_effect=OSError("proc unavailable")), patch(
-            "cccc.ports.web.routes.actors.subprocess.run",
+            "no1.ports.web.routes.actors.subprocess.run",
             return_value=MagicMock(stdout="CCCC_GROUP_ID=group-1 CCCC_ACTOR_ID=peer-1 /bin/sh"),
         ):
             self.assertTrue(_pid_matches_actor_context(43210, group_id="group-1", actor_id="peer-1"))
@@ -119,8 +119,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 time.sleep(0.12)
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer 1"}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
-                "cccc.ports.web.routes.actors._read_actor_list_local",
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
                 side_effect=AssertionError("actor list should use daemon before local fallback"),
             ):
                 with self._client() as client:
@@ -166,8 +166,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 actor_list_reads += 1
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer 1"}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
-                "cccc.ports.web.routes.actors._read_actor_list_local",
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
                 side_effect=AssertionError("actor list should use daemon before local fallback"),
             ):
                 with self._client() as client:
@@ -205,8 +205,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer stale"}]}}
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer fresh"}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
-                "cccc.ports.web.routes.actors._read_actor_list_local",
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
                 side_effect=AssertionError("actor list should use daemon before local fallback"),
             ):
                 with self._client() as client:
@@ -261,8 +261,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"actors": [{"id": "peer-1", "running": False}]}}
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "running": True}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
-                "cccc.ports.web.routes.actors._read_actor_list_local",
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
                 side_effect=AssertionError("actor list should use daemon before local fallback"),
             ):
                 with self._client() as client:
@@ -315,8 +315,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"actors": [{"id": "peer-1", "running": False}]}}
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "running": True}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
-                "cccc.ports.web.routes.actors._read_actor_list_local",
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
                 side_effect=AssertionError("actor list should use daemon before local fallback"),
             ):
                 with self._client() as client:
@@ -345,7 +345,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_falls_back_to_local_effective_working_state_projection_when_daemon_unavailable(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.context import AgentState, AgentStateHot, AgentsData
+            from no1.kernel.context import AgentState, AgentStateHot, AgentsData
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -353,16 +353,16 @@ class TestWebActorRoutesCache(unittest.TestCase):
 
             agent_state = AgentsData(agents=[AgentState(id="peer-1", hot=AgentStateHot(active_task_id="T123"))])
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.ContextStorage.load_agents", return_value=agent_state
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.ContextStorage.load_agents", return_value=agent_state
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
                 return_value=301.0,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.tail_output",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.tail_output",
                 return_value=b"",
             ):
                 with self._client() as client:
@@ -378,24 +378,24 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_falls_back_to_pty_state_file_for_running_status(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import write_pty_state
+            from no1.daemon.runner_state_ops import write_pty_state
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
             self._add_actor(group_id, runtime="claude")
             write_pty_state(group_id, "peer-1", pid=43210)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
                 return_value=None,
             ), patch(
-                "cccc.ports.web.routes.actors.pid_is_alive",
+                "no1.ports.web.routes.actors.pid_is_alive",
                 return_value=True,
             ), patch(
-                "cccc.ports.web.routes.actors._pid_matches_actor_context",
+                "no1.ports.web.routes.actors._pid_matches_actor_context",
                 return_value=True,
             ):
                 with self._client() as client:
@@ -412,7 +412,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_ignores_stale_pty_state_file_when_supervisor_is_not_running(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import pty_state_path, write_pty_state
+            from no1.daemon.runner_state_ops import pty_state_path, write_pty_state
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -423,14 +423,14 @@ class TestWebActorRoutesCache(unittest.TestCase):
             state_doc["pid"] = 43210
             state_path.write_text(json.dumps(state_doc), encoding="utf-8")
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
-                "cccc.ports.web.routes.actors.pid_is_alive",
+                "no1.ports.web.routes.actors.pid_is_alive",
                 return_value=True,
             ), patch(
-                "cccc.ports.web.routes.actors._pid_matches_actor_context",
+                "no1.ports.web.routes.actors._pid_matches_actor_context",
                 return_value=False,
             ):
                 with self._client() as client:
@@ -447,8 +447,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_reads_codex_headless_state_file(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import headless_state_path
-            from cccc.util.fs import atomic_write_json
+            from no1.daemon.runner_state_ops import headless_state_path
+            from no1.util.fs import atomic_write_json
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -484,7 +484,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 },
             )
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list):
                 with self._client() as client:
                     resp = client.get(f"/api/v1/groups/{group_id}/actors")
 
@@ -501,7 +501,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_local_fallback_reports_web_model_queued_count(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.ledger import append_event
+            from no1.kernel.ledger import append_event
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -521,8 +521,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 }
             )
             self.assertTrue(bool(created.get("ok")), created)
-            from cccc.daemon.runner_state_ops import write_headless_state
-            from cccc.kernel.group import load_group
+            from no1.daemon.runner_state_ops import write_headless_state
+            from no1.kernel.group import load_group
 
             write_headless_state(group_id, "web-1")
             group = load_group(group_id)
@@ -552,7 +552,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 data={"text": "queued one", "to": ["web-1"]},
             )
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list):
                 with self._client() as client:
                     resp = client.get(f"/api/v1/groups/{group_id}/actors?include_unread=1")
 
@@ -569,14 +569,14 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_codex_pty_prefers_headless_state_file(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import headless_state_path
-            from cccc.util.fs import atomic_write_json
+            from no1.daemon.runner_state_ops import headless_state_path
+            from no1.util.fs import atomic_write_json
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
             self._add_actor(group_id, runtime="codex")
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -595,14 +595,14 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 },
             )
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
                 return_value=12.0,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.tail_output",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.tail_output",
                 return_value=b"",
             ):
                 with self._client() as client:
@@ -620,10 +620,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_codex_pty_app_server_keeps_pty_runner_effective(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import headless_state_path
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
-            from cccc.util.fs import atomic_write_json
+            from no1.daemon.runner_state_ops import headless_state_path
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
+            from no1.util.fs import atomic_write_json
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -646,14 +646,14 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 },
             )
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
                 return_value=12.0,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.tail_output",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.tail_output",
                 return_value=b"",
             ):
                 with self._client() as client:
@@ -671,9 +671,9 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_codex_pty_app_server_falls_back_to_pty_state_for_running(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import write_pty_state
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.runner_state_ops import write_pty_state
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -684,23 +684,23 @@ class TestWebActorRoutesCache(unittest.TestCase):
             group.save()  # type: ignore[union-attr]
             write_pty_state(group_id, "peer-1", pid=43210)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.codex_app_supervisor.get_state",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.codex_app_supervisor.get_state",
                 return_value=None,
             ), patch(
-                "cccc.ports.web.routes.actors.codex_app_supervisor.actor_running",
+                "no1.ports.web.routes.actors.codex_app_supervisor.actor_running",
                 return_value=False,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
-                "cccc.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
+                "no1.ports.web.routes.actors.pty_runner.SUPERVISOR.idle_seconds",
                 return_value=None,
             ), patch(
-                "cccc.ports.web.routes.actors.pid_is_alive",
+                "no1.ports.web.routes.actors.pid_is_alive",
                 return_value=True,
             ), patch(
-                "cccc.ports.web.routes.actors._pid_matches_actor_context",
+                "no1.ports.web.routes.actors._pid_matches_actor_context",
                 return_value=True,
             ):
                 with self._client() as client:
@@ -718,10 +718,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def test_actor_list_route_disabled_codex_pty_app_server_actor_is_stopped(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import headless_state_path
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
-            from cccc.util.fs import atomic_write_json
+            from no1.daemon.runner_state_ops import headless_state_path
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
+            from no1.util.fs import atomic_write_json
 
             os.environ.pop("CCCC_WEB_MODE", None)
             group_id = self._create_group()
@@ -744,8 +744,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 },
             )
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
-                "cccc.ports.web.routes.actors.codex_app_supervisor.get_state",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._daemon_unavailable_for_actor_list), patch(
+                "no1.ports.web.routes.actors.codex_app_supervisor.get_state",
                 return_value={
                     "group_id": group_id,
                     "actor_id": "peer-1",
@@ -753,7 +753,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     "current_task_id": "turn-1",
                 },
             ), patch(
-                "cccc.ports.web.routes.actors.codex_app_supervisor.actor_running",
+                "no1.ports.web.routes.actors.codex_app_supervisor.actor_running",
                 return_value=True,
             ):
                 with self._client() as client:
@@ -788,8 +788,8 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 time.sleep(0.12)
                 return {"ok": True, "result": {"actors": [{"id": "peer-1", "unread_count": 2}]}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
-                "cccc.ports.web.routes.actors._read_actor_list_local",
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
                 side_effect=AssertionError("actor list should use daemon before local fallback"),
             ):
                 with self._client() as client:

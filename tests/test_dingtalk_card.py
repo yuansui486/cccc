@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cccc.ports.im.adapters.dingtalk_card import (
+from no1.ports.im.adapters.dingtalk_card import (
     DingTalkAICardClient,
     DingTalkCardHandle,
     THROTTLE_INTERVAL_S,
@@ -59,7 +59,7 @@ def _patch_aiohttp(resp_mock):
     session.request = MagicMock(return_value=_async_cm(resp_mock))
     session_cm = _async_cm(session)
     return patch(
-        "cccc.ports.im.adapters.dingtalk_card.aiohttp.ClientSession",
+        "no1.ports.im.adapters.dingtalk_card.aiohttp.ClientSession",
         return_value=session_cm,
     )
 
@@ -259,7 +259,7 @@ def test_api_http_error_returns_none(client):
 def test_api_network_error_returns_none(client):
     """Network exceptions should not propagate — return None."""
     with patch(
-        "cccc.ports.im.adapters.dingtalk_card.aiohttp.ClientSession",
+        "no1.ports.im.adapters.dingtalk_card.aiohttp.ClientSession",
         side_effect=OSError("connection refused"),
     ):
         result = _run(client._api("PUT", "/v1.0/card/streaming", {"x": 1}))

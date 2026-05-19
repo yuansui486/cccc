@@ -22,13 +22,13 @@ class TestCCCSCoreProfileEvents(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_core_profile_event_kinds_are_emitted(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:

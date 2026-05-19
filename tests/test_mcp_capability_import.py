@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 class TestMcpCapabilityImport(unittest.TestCase):
     def test_capability_install_wrapper_calls_daemon(self) -> None:
-        from cccc.ports.mcp.server import capability_install
+        from no1.ports.mcp.server import capability_install
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"state": "ready", "use_ready_capability_ids": ["skill:github:demo:triage"]},
         ) as daemon_mock:
             result = capability_install(
@@ -34,7 +34,7 @@ class TestMcpCapabilityImport(unittest.TestCase):
         self.assertEqual(str(args.get("scope") or ""), "actor")
 
     def test_capability_import_wrapper_calls_daemon(self) -> None:
-        from cccc.ports.mcp.server import capability_import
+        from no1.ports.mcp.server import capability_import
 
         record = {
             "capability_id": "skill:github:demo:triage",
@@ -42,7 +42,7 @@ class TestMcpCapabilityImport(unittest.TestCase):
             "capsule_text": "Use triage checklist",
         }
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"ok": True},
         ) as daemon_mock:
             result = capability_import(
@@ -72,17 +72,17 @@ class TestMcpCapabilityImport(unittest.TestCase):
 
     def test_mcp_router_capability_import_accepts_actor_id_without_by(self) -> None:
         import os
-        from cccc.ports.mcp.server import handle_tool_call
+        from no1.ports.mcp.server import handle_tool_call
 
         with patch(
-            "cccc.ports.mcp.server.capability_import",
+            "no1.ports.mcp.server.capability_import",
             return_value={"ok": True, "state": "runnable"},
         ) as import_mock, patch.dict(
             os.environ,
             {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"},
         ):
             result = handle_tool_call(
-                "cccc_capability_import",
+                "onecolleague_capability_import",
                 {
                     "group_id": "g1",
                     "actor_id": "peer-1",

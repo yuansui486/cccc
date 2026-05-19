@@ -6,7 +6,7 @@ from typing import get_args
 
 class TestActorGroupStateContract(unittest.TestCase):
     def test_group_state_includes_stopped(self) -> None:
-        from cccc.contracts.v1.actor import GroupState
+        from no1.contracts.v1.actor import GroupState
 
         values = set(get_args(GroupState))
         self.assertIn("active", values)
@@ -15,8 +15,8 @@ class TestActorGroupStateContract(unittest.TestCase):
         self.assertIn("stopped", values)
 
     def test_get_group_state_preserves_stopped(self) -> None:
-        from cccc.kernel.group import create_group, get_group_state
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group, get_group_state
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:

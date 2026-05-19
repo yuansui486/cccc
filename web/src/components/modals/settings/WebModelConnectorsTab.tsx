@@ -81,8 +81,8 @@ function connectorActivityLabel(connector: api.WebModelConnector, wm: Translate)
   const tool = String(connector.last_tool_name || "").trim();
   if (!connector.last_activity_at) return wm("activity.notSeenYet");
   if (status === "error") return wm("activity.lastCallFailed");
-  if (tool === "cccc_runtime_wait_next_turn" && wait) return wm("activity.wait", { status: wait });
-  if (tool === "cccc_runtime_complete_turn" && wait) return wm("activity.complete", { status: wait });
+  if (tool === "onecolleague_runtime_wait_next_turn" && wait) return wm("activity.wait", { status: wait });
+  if (tool === "onecolleague_runtime_complete_turn" && wait) return wm("activity.complete", { status: wait });
   return tool || String(connector.last_method || "").trim() || wm("activity.seen");
 }
 

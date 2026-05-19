@@ -22,7 +22,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
         return Path(td), cleanup
 
     def test_parse_resume_hints_uses_explicit_resume_only(self) -> None:
-        from cccc.daemon.runtime_session_ops import parse_codex_status_session_id, parse_runtime_resume_hint
+        from no1.daemon.runtime_session_ops import parse_codex_status_session_id, parse_runtime_resume_hint
 
         claude = parse_runtime_resume_hint(
             "Resume this session with:\nclaude --resume 42e9ef0c-3b75-43a0-9056-eef13dd1061d"
@@ -46,13 +46,13 @@ class TestRuntimeSessionOps(unittest.TestCase):
         self.assertEqual(gemini.get("provider_session_id"), "gemini-session-1234")
 
     def test_pty_resume_verify_default_is_long_enough_for_slow_provider_resume(self) -> None:
-        from cccc.daemon.runtime_session_ops import _pty_resume_verify_seconds
+        from no1.daemon.runtime_session_ops import _pty_resume_verify_seconds
 
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(_pty_resume_verify_seconds(), 20.0)
 
     def test_pty_resume_verify_seconds_env_override(self) -> None:
-        from cccc.daemon.runtime_session_ops import _pty_resume_verify_seconds
+        from no1.daemon.runtime_session_ops import _pty_resume_verify_seconds
 
         with patch.dict(os.environ, {"CCCC_PTY_RESUME_VERIFY_SECONDS": "3.5"}):
             self.assertEqual(_pty_resume_verify_seconds(), 3.5)
@@ -60,11 +60,11 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_claude_first_start_generates_explicit_session_id(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
+            from no1.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
 
             cwd = home / "repo"
             cwd.mkdir()
-            with patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"):
+            with patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"):
                 command, doc = prepare_initial_pty_session_command(
                     group_id="g1",
                     actor_id="peer1",
@@ -95,7 +95,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_claude_existing_session_control_is_not_rewritten(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
+            from no1.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -118,11 +118,11 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_gemini_first_start_generates_explicit_session_id(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
+            from no1.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
 
             cwd = home / "repo"
             cwd.mkdir()
-            with patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="a3df810a-6a19-48e8-b75b-772d3ee65721"):
+            with patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="a3df810a-6a19-48e8-b75b-772d3ee65721"):
                 command, doc = prepare_initial_pty_session_command(
                     group_id="g1",
                     actor_id="peer1",
@@ -147,7 +147,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_gemini_existing_session_control_or_subcommand_is_not_rewritten(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
+            from no1.daemon.runtime_session_ops import prepare_initial_pty_session_command, read_runtime_session
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -180,11 +180,11 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 actor_id="peer2",
                 runtime="gemini",
                 cwd=cwd,
-                base_command=["gemini", "mcp", "add", "cccc"],
+                base_command=["gemini", "mcp", "add", "onecolleague"],
                 env={},
                 max_backlog_bytes=1000,
             )
-            self.assertEqual(command, ["gemini", "mcp", "add", "cccc"])
+            self.assertEqual(command, ["gemini", "mcp", "add", "onecolleague"])
             self.assertIsNone(doc)
             self.assertEqual(read_runtime_session("g1", "peer1"), {})
             self.assertEqual(read_runtime_session("g1", "peer2"), {})
@@ -195,7 +195,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_existing_claude_session_prepares_explicit_resume(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 prepare_pty_resume_command,
                 record_pty_runtime_session,
             )
@@ -230,7 +230,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_existing_gemini_session_prepares_explicit_resume(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 prepare_pty_resume_command,
                 record_pty_runtime_session,
             )
@@ -264,7 +264,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
         old = os.environ.get("CCCC_RUNTIME_RESUME")
         os.environ["CCCC_RUNTIME_RESUME"] = "0"
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 prepare_initial_pty_session_command,
                 prepare_pty_resume_command,
                 record_pty_runtime_session,
@@ -313,7 +313,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_initial_preflight_failure_does_not_write_planned_claude_session(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import read_runtime_session, start_pty_actor_with_runtime_resume
+            from no1.daemon.runtime_session_ops import read_runtime_session, start_pty_actor_with_runtime_resume
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -337,7 +337,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_codex_first_start_schedules_status_capture_after_launch(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import start_pty_actor_with_runtime_resume
+            from no1.daemon.runtime_session_ops import start_pty_actor_with_runtime_resume
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -353,10 +353,10 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 return FallbackSession()
 
             with patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=fake_start_actor,
             ), patch(
-                "cccc.daemon.runtime_session_ops._schedule_codex_pty_status_capture",
+                "no1.daemon.runtime_session_ops._schedule_codex_pty_status_capture",
                 side_effect=lambda **kwargs: scheduled.append(kwargs),
             ):
                 session = start_pty_actor_with_runtime_resume(
@@ -382,7 +382,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_already_running_initial_start_does_not_write_generated_session_id(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import read_runtime_session, start_pty_actor_with_runtime_resume
+            from no1.daemon.runtime_session_ops import read_runtime_session, start_pty_actor_with_runtime_resume
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -396,11 +396,11 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 calls.append(list(kwargs.get("command") or []))
                 return ExistingSession()
 
-            with patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="unused-session-id"), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
+            with patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="unused-session-id"), patch(
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=fake_start_actor,
             ):
                 session = start_pty_actor_with_runtime_resume(
@@ -423,7 +423,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_codex_status_capture_records_current_pty_session_id(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import _capture_codex_pty_session_from_status, read_runtime_session
+            from no1.daemon.runtime_session_ops import _capture_codex_pty_session_from_status, read_runtime_session
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -438,13 +438,13 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 return True
 
             with patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
                 side_effect=fake_tail_output,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.write_input",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.write_input",
                 side_effect=fake_write_input,
             ), patch.dict(os.environ, {"CCCC_CODEX_PTY_STATUS_SUBMIT_DELAY_SECONDS": "0"}):
                 doc = _capture_codex_pty_session_from_status(
@@ -466,7 +466,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_codex_status_capture_uses_bracketed_paste_when_available(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import _capture_codex_pty_session_from_status
+            from no1.daemon.runtime_session_ops import _capture_codex_pty_session_from_status
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -482,16 +482,16 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 return True
 
             with patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
                 side_effect=fake_tail_output,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.bracketed_paste_enabled",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.bracketed_paste_enabled",
                 return_value=True,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.write_input",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.write_input",
                 side_effect=fake_write_input,
             ), patch.dict(os.environ, {"CCCC_CODEX_PTY_STATUS_SUBMIT_DELAY_SECONDS": "0"}):
                 doc = _capture_codex_pty_session_from_status(
@@ -510,7 +510,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_codex_status_capture_without_session_id_does_not_record(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import _record_codex_pty_session_from_status_text, read_runtime_session
+            from no1.daemon.runtime_session_ops import _record_codex_pty_session_from_status_text, read_runtime_session
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -529,7 +529,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_resume_start_failure_marks_metadata_failed_and_creates_fresh_claude_session(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 read_runtime_session,
                 record_pty_runtime_session,
                 start_pty_actor_with_runtime_resume,
@@ -558,8 +558,8 @@ class TestRuntimeSessionOps(unittest.TestCase):
                     raise RuntimeError("resume id not found")
                 return FallbackSession()
 
-            with patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="generated-session-id"), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
+            with patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="generated-session-id"), patch(
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=fake_start_actor,
             ):
                 session = start_pty_actor_with_runtime_resume(
@@ -585,7 +585,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_resume_reject_initial_fallback_failure_marks_generated_session_failed(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 read_runtime_session,
                 record_pty_runtime_session,
                 start_pty_actor_with_runtime_resume,
@@ -614,17 +614,17 @@ class TestRuntimeSessionOps(unittest.TestCase):
                     return ResumeSession()
                 raise RuntimeError("fresh start failed")
 
-            with patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="generated-session-id"), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
+            with patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="generated-session-id"), patch(
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=fake_start_actor,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
                 return_value=b"No conversation found for resume id",
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.stop_actor",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.stop_actor",
             ):
                 with self.assertRaises(RuntimeError):
                     start_pty_actor_with_runtime_resume(
@@ -651,7 +651,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_pty_resume_process_quick_exit_marks_failed_and_falls_back_fresh(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 read_runtime_session,
                 record_pty_runtime_session,
                 start_pty_actor_with_runtime_resume,
@@ -684,19 +684,19 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 return ResumeSession() if len(calls) == 1 else FallbackSession()
 
             with patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=fake_start_actor,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
                 return_value=b"Error: thread not found",
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.stop_actor",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.stop_actor",
                 side_effect=lambda **kwargs: stopped.append((kwargs.get("group_id"), kwargs.get("actor_id"))),
             ), patch(
-                "cccc.daemon.runtime_session_ops._schedule_codex_pty_status_capture",
+                "no1.daemon.runtime_session_ops._schedule_codex_pty_status_capture",
                 side_effect=lambda **kwargs: scheduled.append(kwargs),
             ):
                 session = start_pty_actor_with_runtime_resume(
@@ -725,7 +725,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_pty_resume_success_does_not_wait_full_verify_window(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import record_pty_runtime_session, start_pty_actor_with_runtime_resume
+            from no1.daemon.runtime_session_ops import record_pty_runtime_session, start_pty_actor_with_runtime_resume
 
             cwd = home / "repo"
             cwd.mkdir()
@@ -750,22 +750,22 @@ class TestRuntimeSessionOps(unittest.TestCase):
                 return ResumeSession()
 
             with patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=fake_start_actor,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch(
-                "cccc.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
+                "no1.daemon.runtime_session_ops.pty_runner.SUPERVISOR.tail_output",
                 return_value=b"Restored session\n",
             ), patch(
-                "cccc.daemon.runtime_session_ops._pty_resume_foreground_verify_seconds",
+                "no1.daemon.runtime_session_ops._pty_resume_foreground_verify_seconds",
                 return_value=0.0,
             ), patch(
-                "cccc.daemon.runtime_session_ops._pty_resume_verify_seconds",
+                "no1.daemon.runtime_session_ops._pty_resume_verify_seconds",
                 return_value=20.0,
             ), patch(
-                "cccc.daemon.runtime_session_ops._schedule_pty_resume_failure_monitor",
+                "no1.daemon.runtime_session_ops._schedule_pty_resume_failure_monitor",
                 side_effect=lambda **kwargs: monitors.append(kwargs),
             ):
                 session = start_pty_actor_with_runtime_resume(
@@ -790,7 +790,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_runtime_session_runner_metadata_prevents_pty_headless_cross_resume(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 prepare_headless_runtime_resume,
                 prepare_pty_resume_command,
                 record_headless_runtime_session,
@@ -843,7 +843,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_headless_resume_metadata_is_usable_when_provider_supports_resume(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 prepare_headless_runtime_resume,
                 read_runtime_session,
                 record_headless_runtime_session,
@@ -881,7 +881,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
     def test_claude_headless_launch_uses_explicit_session_id_or_resume(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.runtime_session_ops import (
+            from no1.daemon.runtime_session_ops import (
                 prepare_claude_headless_launch_command,
                 record_headless_runtime_session,
             )
@@ -889,7 +889,7 @@ class TestRuntimeSessionOps(unittest.TestCase):
             cwd = home / "repo"
             cwd.mkdir()
             base = ["claude", "-p", "--input-format", "stream-json"]
-            with patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"):
+            with patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"):
                 command, doc, kind = prepare_claude_headless_launch_command(
                     group_id="g1",
                     actor_id="peer1",

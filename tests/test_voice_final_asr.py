@@ -4,14 +4,14 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from cccc.daemon.assistants.voice_final_asr import (
+from no1.daemon.assistants.voice_final_asr import (
     FinalAsrEvent,
     build_final_asr_text_event,
     collect_final_asr_text,
     iter_final_asr_events,
 )
-from cccc.daemon.assistants.voice_final_asr_debug import voice_final_asr_quality_flags
-from cccc.daemon.assistants.voice_pcm_segments import VoicePcmSegment
+from no1.daemon.assistants.voice_final_asr_debug import voice_final_asr_quality_flags
+from no1.daemon.assistants.voice_pcm_segments import VoicePcmSegment
 
 
 class _FakeOfflineSession:
@@ -32,9 +32,9 @@ class VoiceFinalAsrTests(unittest.TestCase):
         async def run_case() -> None:
             session = _FakeOfflineSession()
             with (
-                patch("cccc.daemon.assistants.voice_final_asr.detect_sherpa_vad_segments", AsyncMock(return_value=[])),
+                patch("no1.daemon.assistants.voice_final_asr.detect_sherpa_vad_segments", AsyncMock(return_value=[])),
                 patch(
-                    "cccc.daemon.assistants.voice_final_asr.get_voice_model_status",
+                    "no1.daemon.assistants.voice_final_asr.get_voice_model_status",
                     return_value={
                         "model_id": "sense_voice",
                         "runtime_id": "sherpa_onnx_streaming",
@@ -43,17 +43,17 @@ class VoiceFinalAsrTests(unittest.TestCase):
                     },
                 ),
                 patch(
-                    "cccc.daemon.assistants.voice_final_asr.resolve_installed_voice_model_offline_config",
+                    "no1.daemon.assistants.voice_final_asr.resolve_installed_voice_model_offline_config",
                     return_value={"engine": "sense_voice", "language": "auto", "sample_rate": 16000},
                 ),
                 patch(
-                    "cccc.daemon.assistants.voice_final_asr.build_pcm16_segments_from_ranges",
+                    "no1.daemon.assistants.voice_final_asr.build_pcm16_segments_from_ranges",
                     return_value=[
                         VoicePcmSegment(start_ms=0, end_ms=1000, audio=b"\x01\x00" * 16000),
                         VoicePcmSegment(start_ms=1200, end_ms=2400, audio=b"\x02\x00" * 16000),
                     ],
                 ),
-                patch("cccc.daemon.assistants.voice_final_asr.open_local_offline_asr_session", AsyncMock(return_value=session)) as open_session,
+                patch("no1.daemon.assistants.voice_final_asr.open_local_offline_asr_session", AsyncMock(return_value=session)) as open_session,
             ):
                 events = [
                     event
@@ -81,9 +81,9 @@ class VoiceFinalAsrTests(unittest.TestCase):
     def test_final_asr_keeps_normal_recordings_as_longer_context_chunks(self) -> None:
         async def run_case() -> None:
             with (
-                patch("cccc.daemon.assistants.voice_final_asr.detect_sherpa_vad_segments", AsyncMock(return_value=[])),
-                patch("cccc.daemon.assistants.voice_final_asr.open_local_offline_asr_session", AsyncMock(side_effect=AssertionError("stop after segment planning"))),
-                patch("cccc.daemon.assistants.voice_final_asr.split_pcm16_voice_segments", return_value=[]) as split_segments,
+                patch("no1.daemon.assistants.voice_final_asr.detect_sherpa_vad_segments", AsyncMock(return_value=[])),
+                patch("no1.daemon.assistants.voice_final_asr.open_local_offline_asr_session", AsyncMock(side_effect=AssertionError("stop after segment planning"))),
+                patch("no1.daemon.assistants.voice_final_asr.split_pcm16_voice_segments", return_value=[]) as split_segments,
             ):
                 events = []
                 async for event in iter_final_asr_events(
@@ -124,7 +124,7 @@ class CollectFinalAsrTextTests(unittest.TestCase):
                 if False:
                     yield FinalAsrEvent({})
 
-            with patch("cccc.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
+            with patch("no1.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
                 text = await collect_final_asr_text(
                     b"",
                     selected_model_id="sense_voice",
@@ -147,7 +147,7 @@ class CollectFinalAsrTextTests(unittest.TestCase):
                 for event in events:
                     yield event
 
-            with patch("cccc.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
+            with patch("no1.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
                 text = await collect_final_asr_text(
                     b"\x01\x00" * 16000,
                     selected_model_id="sense_voice",
@@ -168,7 +168,7 @@ class CollectFinalAsrTextTests(unittest.TestCase):
                 for event in events:
                     yield event
 
-            with patch("cccc.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
+            with patch("no1.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
                 text = await collect_final_asr_text(
                     b"\x01\x00" * 16000,
                     selected_model_id="sense_voice",
@@ -189,7 +189,7 @@ class CollectFinalAsrTextTests(unittest.TestCase):
                 for event in events:
                     yield event
 
-            with patch("cccc.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
+            with patch("no1.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
                 text = await collect_final_asr_text(
                     b"\x01\x00" * 16000,
                     selected_model_id="sense_voice",
@@ -211,7 +211,7 @@ class CollectFinalAsrTextTests(unittest.TestCase):
                 for event in events:
                     yield event
 
-            with patch("cccc.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
+            with patch("no1.daemon.assistants.voice_final_asr.iter_final_asr_events", fake_iter):
                 text = await collect_final_asr_text(
                     b"\x01\x00" * 16000,
                     selected_model_id="sense_voice",
@@ -226,7 +226,7 @@ class BuildFinalAsrTextEventTests(unittest.TestCase):
     def test_returns_none_when_collect_raises(self) -> None:
         async def run_case() -> None:
             with patch(
-                "cccc.daemon.assistants.voice_final_asr.collect_final_asr_text",
+                "no1.daemon.assistants.voice_final_asr.collect_final_asr_text",
                 AsyncMock(side_effect=RuntimeError("boom")),
             ):
                 event = await build_final_asr_text_event(
@@ -242,7 +242,7 @@ class BuildFinalAsrTextEventTests(unittest.TestCase):
     def test_returns_none_when_text_empty(self) -> None:
         async def run_case() -> None:
             with patch(
-                "cccc.daemon.assistants.voice_final_asr.collect_final_asr_text",
+                "no1.daemon.assistants.voice_final_asr.collect_final_asr_text",
                 AsyncMock(return_value="   "),
             ):
                 event = await build_final_asr_text_event(
@@ -258,7 +258,7 @@ class BuildFinalAsrTextEventTests(unittest.TestCase):
     def test_returns_event_payload_when_text_available(self) -> None:
         async def run_case() -> None:
             with patch(
-                "cccc.daemon.assistants.voice_final_asr.collect_final_asr_text",
+                "no1.daemon.assistants.voice_final_asr.collect_final_asr_text",
                 AsyncMock(return_value="今天苏州天气怎么样"),
             ):
                 event = await build_final_asr_text_event(

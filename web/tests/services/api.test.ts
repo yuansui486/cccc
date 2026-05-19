@@ -77,7 +77,7 @@ describe("api error normalization", () => {
     expect(
       formatApiErrorMessage({
         code: "daemon_unavailable",
-        message: "ccccd unavailable",
+        message: "onecolleagued unavailable",
         details: {
           transport: "tcp",
           endpoint: { host: "127.0.0.1", port: 9001 },
@@ -85,7 +85,7 @@ describe("api error normalization", () => {
           reason: "os_error",
         },
       })
-    ).toBe("ccccd unavailable · tcp 127.0.0.1:9001 · connect os error");
+    ).toBe("onecolleagued unavailable · tcp 127.0.0.1:9001 · connect os error");
   });
 
   it("normalizes daemon_unavailable messages from response bodies", async () => {
@@ -98,10 +98,10 @@ describe("api error normalization", () => {
             ok: false,
             error: {
               code: "daemon_unavailable",
-              message: "ccccd unavailable",
+              message: "onecolleagued unavailable",
               details: {
                 transport: "unix",
-                endpoint: { path: "/tmp/ccccd.sock" },
+                endpoint: { path: "/tmp/onecolleagued.sock" },
                 phase: "read",
                 reason: "timeout",
               },
@@ -122,10 +122,10 @@ describe("api error normalization", () => {
     if (resp.ok) {
       throw new Error("expected error response");
     }
-    expect(resp.error.message).toBe("ccccd unavailable · unix /tmp/ccccd.sock · read timeout");
+    expect(resp.error.message).toBe("onecolleagued unavailable · unix /tmp/onecolleagued.sock · read timeout");
     expect(resp.error.details).toEqual({
       transport: "unix",
-      endpoint: { path: "/tmp/ccccd.sock" },
+      endpoint: { path: "/tmp/onecolleagued.sock" },
       phase: "read",
       reason: "timeout",
     });
@@ -320,11 +320,11 @@ describe("api.fetchPresentation", () => {
   it("builds a token-aware websocket url for browser-surface streaming", async () => {
     sessionStorageMock.setItem("cccc_dev_token", "dev-token");
     vi.stubGlobal("window", {
-      location: { search: "", protocol: "https:", host: "cccc.test" },
+      location: { search: "", protocol: "https:", host: "onecolleague.test" },
     });
     const api = await import("../../src/services/api");
     expect(api.getPresentationBrowserSurfaceWebSocketUrl("g-demo", "slot-3")).toBe(
-      "wss://cccc.test/api/v1/groups/g-demo/presentation/browser_surface/ws?slot=slot-3&token=dev-token"
+      "wss://onecolleague.test/api/v1/groups/g-demo/presentation/browser_surface/ws?slot=slot-3&token=dev-token"
     );
   });
 
@@ -1283,7 +1283,7 @@ describe("api bootstrap read cache", () => {
         return Promise.resolve({
           status: 200,
           ok: true,
-          text: async () => JSON.stringify({ ok: true, result: { version: "1.0.0", home: "/tmp/cccc" } }),
+          text: async () => JSON.stringify({ ok: true, result: { version: "1.0.0", home: "/tmp/onecolleague" } }),
         });
       }
       return Promise.reject(new Error(`unexpected request: GET ${path}`));

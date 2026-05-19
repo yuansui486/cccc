@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
-from cccc.daemon.messaging.actor_delivery_planner import (
+from no1.daemon.messaging.actor_delivery_planner import (
     TRANSPORT_CLAUDE_HEADLESS,
     TRANSPORT_CODEX_HEADLESS,
     TRANSPORT_PTY,
@@ -201,9 +201,9 @@ def test_planner_routes_web_model_when_browser_delivery_enabled() -> None:
 
 
 def test_handle_send_uses_same_planner_for_claude_headless_actor(monkeypatch, tmp_path) -> None:
-    from cccc.contracts.v1 import DaemonRequest
-    from cccc.daemon.messaging.chat_ops import handle_send
-    from cccc.daemon.server import handle_request
+    from no1.contracts.v1 import DaemonRequest
+    from no1.daemon.messaging.chat_ops import handle_send
+    from no1.daemon.server import handle_request
 
     monkeypatch.setenv("CCCC_HOME", str(tmp_path))
     create_resp, _ = handle_request(
@@ -231,10 +231,10 @@ def test_handle_send_uses_same_planner_for_claude_headless_actor(monkeypatch, tm
     assert add_resp.ok
 
     with (
-        patch("cccc.daemon.messaging.chat_ops.claude_app_supervisor.actor_running", return_value=True),
-        patch("cccc.daemon.messaging.chat_ops.claude_app_supervisor.submit_user_message", return_value=True) as submit,
-        patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-        patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush,
+        patch("no1.daemon.messaging.chat_ops.claude_app_supervisor.actor_running", return_value=True),
+        patch("no1.daemon.messaging.chat_ops.claude_app_supervisor.submit_user_message", return_value=True) as submit,
+        patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+        patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush,
     ):
         resp = handle_send(
             {
@@ -256,16 +256,16 @@ def test_handle_send_uses_same_planner_for_claude_headless_actor(monkeypatch, tm
     assert resp.ok
     submit.assert_called_once()
     submitted_text = str(submit.call_args.kwargs.get("text") or "")
-    assert "[cccc] user → peer1:" in submitted_text
+    assert "[onecolleague] user → peer1:" in submitted_text
     assert "hello claude" in submitted_text
     queue_chat_message.assert_not_called()
     request_flush.assert_not_called()
 
 
 def test_handle_send_schedules_browser_delivery_for_web_model_actor(monkeypatch, tmp_path) -> None:
-    from cccc.contracts.v1 import DaemonRequest
-    from cccc.daemon.messaging.chat_ops import handle_send
-    from cccc.daemon.server import handle_request
+    from no1.contracts.v1 import DaemonRequest
+    from no1.daemon.messaging.chat_ops import handle_send
+    from no1.daemon.server import handle_request
 
     monkeypatch.setenv("CCCC_HOME", str(tmp_path))
     create_resp, _ = handle_request(
@@ -295,10 +295,10 @@ def test_handle_send_schedules_browser_delivery_for_web_model_actor(monkeypatch,
     assert add_resp.ok
 
     with (
-        patch("cccc.daemon.messaging.chat_ops.web_model_browser_delivery_enabled", return_value=True),
-        patch("cccc.daemon.messaging.chat_ops.schedule_web_model_browser_delivery", return_value=True) as schedule,
-        patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-        patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush,
+        patch("no1.daemon.messaging.chat_ops.web_model_browser_delivery_enabled", return_value=True),
+        patch("no1.daemon.messaging.chat_ops.schedule_web_model_browser_delivery", return_value=True) as schedule,
+        patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+        patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush,
     ):
         resp = handle_send(
             {

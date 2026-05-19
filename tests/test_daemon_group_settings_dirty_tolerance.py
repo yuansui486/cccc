@@ -5,9 +5,9 @@ import unittest
 
 class TestDaemonGroupSettingsDirtyTolerance(unittest.TestCase):
     def test_group_settings_update_tolerates_dirty_numeric_values(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:

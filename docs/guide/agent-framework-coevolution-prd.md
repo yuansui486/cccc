@@ -1,8 +1,8 @@
-# CCCC 与 Agent 共同进化 PRD
+# OneColleague 与 Agent 共同进化 PRD
 
 ## 1. 背景
 
-CCCC 当前已经具备多 Agent 协作的核心控制面：
+OneColleague 当前已经具备多 Agent 协作的核心控制面：
 
 - `coordination`：共享目标、决策、交接。
 - `tasks`：可追踪任务与生命周期。
@@ -11,21 +11,21 @@ CCCC 当前已经具备多 Agent 协作的核心控制面：
 - `capability`：能力搜索、启用、导入、禁用与自生成 skill 管理。
 - `agent_self_proposed` capsule skill：允许 Agent 提交窄作用域、可验证的流程性能力。
 
-这些能力已经让 CCCC 能“组织 Agent 工作”。下一步不是做一个泛化的自动学习系统，而是让 CCCC 在真实协作中形成一个可控的进化闭环：
+这些能力已经让 OneColleague 能“组织 Agent 工作”。下一步不是做一个泛化的自动学习系统，而是让 OneColleague 在真实协作中形成一个可控的进化闭环：
 
 `任务执行 -> 证据沉淀 -> 候选改进 -> 试运行 -> 验证 -> 晋升/回滚`
 
-本 PRD 目标是把这个闭环产品化，让 CCCC 和 Agent 能在不牺牲安全、可审计、可回滚的前提下共同进化。
+本 PRD 目标是把这个闭环产品化，让 OneColleague 和 Agent 能在不牺牲安全、可审计、可回滚的前提下共同进化。
 
 ## 2. 一句话目标
 
-让 Agent 从每次任务中提炼可复用经验，并让 CCCC 以受控、可追踪、可验证的方式把这些经验转化为 skill、checklist、routing rule 或 memory，从而逐步提升后续协作质量。
+让 Agent 从每次任务中提炼可复用经验，并让 OneColleague 以受控、可追踪、可验证的方式把这些经验转化为 skill、checklist、routing rule 或 memory，从而逐步提升后续协作质量。
 
 ## 3. 设计原则
 
 - 简单优先：MVP 只做一条最短闭环，不引入复杂模型训练、自动改代码、自动全局发布。
 - 当前所需：只沉淀已经在任务中被证据支持的经验，不为假想场景预留复杂规则引擎。
-- 单一职责：Agent 负责发现和提出改进；CCCC 负责记录、验证、治理和分发。
+- 单一职责：Agent 负责发现和提出改进；OneColleague 负责记录、验证、治理和分发。
 - 可审计：每个进化项必须能追溯来源任务、提出者、证据、试运行结果和当前状态。
 - 窄作用域默认：新能力默认只在当前 group 或 actor 试用，不自动全局启用。
 - 可回滚：任何晋升后的能力都必须能停用、降级或替换。
@@ -34,7 +34,7 @@ CCCC 当前已经具备多 Agent 协作的核心控制面：
 
 ### 4.1 普通用户
 
-希望 CCCC 越用越顺手，但不希望系统偷偷改变行为、污染记忆或自动安装不可信能力。
+希望 OneColleague 越用越顺手，但不希望系统偷偷改变行为、污染记忆或自动安装不可信能力。
 
 ### 4.2 Foreman
 
@@ -66,7 +66,7 @@ CCCC 当前已经具备多 Agent 协作的核心控制面：
 实现“自进化候选项”的端到端闭环：
 
 1. Agent 可在任务完成或关键转折时提交 `evolution.proposal`。
-2. CCCC 将提案记录为可查询、可审计的候选项。
+2. OneColleague 将提案记录为可查询、可审计的候选项。
 3. 候选项可以一键 dry-run 验证为 `agent_self_proposed` capsule skill。
 4. 候选项可以在 actor 或 group 作用域进入 trial。
 5. trial 使用后可记录 outcome。
@@ -77,7 +77,7 @@ CCCC 当前已经具备多 Agent 协作的核心控制面：
 
 MVP 不做：
 
-- 不做自动修改 CCCC 源码。
+- 不做自动修改 OneColleague 源码。
 - 不做自动全局启用。
 - 不做模型权重训练或外部训练数据集。
 - 不做复杂评分模型。
@@ -88,7 +88,7 @@ MVP 不做：
 ## 7. 术语
 
 - Evolution Proposal：Agent 提出的结构化改进候选。
-- Evolution Candidate：被 CCCC 持久化并进入生命周期管理的候选项。
+- Evolution Candidate：被 OneColleague 持久化并进入生命周期管理的候选项。
 - Evidence：支撑候选项的任务、消息、测试、错误、决策或结果链接。
 - Trial：候选项在窄作用域启用后的试运行状态。
 - Promotion：候选项通过验证后晋升为 qualified 能力。
@@ -118,7 +118,7 @@ Agent 在以下时机可以提交提案：
 
 ### 8.2 候选持久化
 
-CCCC 将提案保存为 `EvolutionCandidate`，初始状态为 `draft`。
+OneColleague 将提案保存为 `EvolutionCandidate`，初始状态为 `draft`。
 
 候选项不是立即生效能力。它只是一个可审计记录。
 
@@ -282,7 +282,7 @@ type EvolutionOutcome = {
 
 新增轻量存储模块：
 
-- `src/cccc/kernel/evolution.py`
+- `src/no1/kernel/evolution.py`
 
 职责：
 
@@ -438,7 +438,7 @@ CCCC_HOME/groups/<group_id>/state/evolution/outcomes.json
 
 新增 MCP 能力组：
 
-- `cccc_evolution`
+- `onecolleague_evolution`
 
 Action 风格：
 
@@ -589,7 +589,7 @@ Verification:
 
 ### 15.2 MCP
 
-- `cccc_evolution(action=proposal_create)` 可由 peer 调用。
+- `onecolleague_evolution(action=proposal_create)` 可由 peer 调用。
 - peer 不能将 trial 启用到其他 actor。
 - foreman 可执行 dry-run、start trial、promote、block、retire。
 - MCP 返回错误码可读，不吞掉 capability import diagnostics。
@@ -624,7 +624,7 @@ Verification:
 
 ### Milestone 2：MCP 工具
 
-- 新增 `cccc_evolution` handler。
+- 新增 `onecolleague_evolution` handler。
 - 补充 toolspec。
 - 覆盖 peer/foreman 权限测试。
 
@@ -660,7 +660,7 @@ Verification:
 3. Peer 调用：
 
 ```ts
-cccc_evolution({
+onecolleague_evolution({
   action: "proposal_create",
   title: "GitLab release preflight",
   problem: "部署类任务多次因为 CI 变量或 Nginx runtime wiring 漏检返工。",

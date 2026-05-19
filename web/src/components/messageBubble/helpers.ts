@@ -25,7 +25,7 @@ export function mayContainMarkdown(text: string): boolean {
   if (!value.trim()) return false;
   // Internal delivery manifests should stay compact plain text instead of
   // picking up prose list spacing from Markdown rendering.
-  if (/^\[cccc\]\s+(Attachments|References):/m.test(value)) return false;
+  if (/^\[onecolleague\]\s+(Attachments|References):/m.test(value)) return false;
   if (containsMarkdownTable(value)) return true;
   return /(```|`[^`\n]+`|\[[^\]]+\]\([^)]+\)|^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>\s)/m.test(value);
 }
@@ -97,9 +97,9 @@ export function getMessageBubbleMotionClass({
   if (!isStreaming && !isOptimistic) {
     if (!isNewlyArrived) return "";
     return isUserMessage
-      ? "cccc-message-bubble-enter cccc-message-bubble-enter-outgoing"
-      : "cccc-message-bubble-enter cccc-message-bubble-enter-incoming";
+      ? "onecolleague-message-bubble-enter onecolleague-message-bubble-enter-outgoing"
+      : "onecolleague-message-bubble-enter onecolleague-message-bubble-enter-incoming";
   }
-  if (phase === "commentary") return "cccc-transient-bubble cccc-transient-bubble-commentary";
-  return "cccc-transient-bubble";
+  if (phase === "commentary") return "onecolleague-transient-bubble onecolleague-transient-bubble-commentary";
+  return "onecolleague-transient-bubble";
 }

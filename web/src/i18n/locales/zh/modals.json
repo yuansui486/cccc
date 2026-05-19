@@ -311,7 +311,7 @@
     "parentTask": "父任务",
     "pendingHandoffs": "待移交",
     "petPersonaTitle": "宠物人格",
-    "petPersonaHint": "它会存放在本工作组的 CCCC_HELP.md 里的 `## @pet` 区块中。若当前为空，编辑器会从默认种子开始，你可以在这里定制宠物稳定的协作风格。",
+    "petPersonaHint": "它会存放在本工作组的 ONECOLLEAGUE_HELP.md 里的 `## @pet` 区块中。若当前为空，编辑器会从默认种子开始，你可以在这里定制宠物稳定的协作风格。",
     "petPersonaPlaceholder": "请把 Web 宠物描述成一个低噪声的协作助手，只强调它的路由风格、允许动作，以及明确不能做什么。",
     "petPersonaSaved": "宠物人格已保存。",
     "personaNotes": "人格备注",

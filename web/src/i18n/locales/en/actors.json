@@ -183,7 +183,7 @@
   "connectionLostDescription": "Terminal connection failed. The agent process may have stopped or the server is unreachable.",
   "reconnect": "Reconnect",
   "roleNotes": "Role Notes",
-  "roleNotesHint": "Stored in CCCC_HELP.md as this actor's `## @actor:` block. Use it for stable local guidance, not temporary tasks.",
+  "roleNotesHint": "Stored in ONECOLLEAGUE_HELP.md as this actor's `## @actor:` block. Use it for stable local guidance, not temporary tasks.",
   "newActorRoleNotesHint": "Saved as this actor's `## @actor:` block when you create the actor. Use it for stable local guidance, not temporary tasks.",
   "roleNotesPlaceholder": "Describe only this actor's local responsibilities, boundaries, and preferred behavior…",
   "rolePreset": "Role Preset",

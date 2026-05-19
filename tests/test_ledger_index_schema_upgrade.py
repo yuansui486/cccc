@@ -22,16 +22,16 @@ class TestLedgerIndexSchemaUpgrade(unittest.TestCase):
         return Path(td), cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_search_rebuilds_legacy_index_with_incompatible_events_schema(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import search_messages
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import search_messages
 
             create, _ = self._call("group_create", {"title": "legacy-index", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))

@@ -29,8 +29,8 @@ class TestDeliveryAutoMarkReadEvent(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -70,9 +70,9 @@ class TestDeliveryAutoMarkReadEvent(unittest.TestCase):
         return events
 
     def test_finalize_delivery_success_emits_chat_read_when_auto_mark_advances_cursor(self) -> None:
-        from cccc.daemon.messaging.delivery import PendingMessage, _finalize_delivery_success
-        from cccc.kernel.group import load_group
-        from cccc.kernel.inbox import get_cursor
+        from no1.daemon.messaging.delivery import PendingMessage, _finalize_delivery_success
+        from no1.kernel.group import load_group
+        from no1.kernel.inbox import get_cursor
 
         _, cleanup = self._with_home()
         try:
@@ -126,9 +126,9 @@ class TestDeliveryAutoMarkReadEvent(unittest.TestCase):
             cleanup()
 
     def test_finalize_delivery_success_skips_chat_read_when_cursor_is_already_newer(self) -> None:
-        from cccc.daemon.messaging.delivery import PendingMessage, _finalize_delivery_success
-        from cccc.kernel.group import load_group
-        from cccc.kernel.inbox import set_cursor
+        from no1.daemon.messaging.delivery import PendingMessage, _finalize_delivery_success
+        from no1.kernel.group import load_group
+        from no1.kernel.inbox import set_cursor
 
         _, cleanup = self._with_home()
         try:

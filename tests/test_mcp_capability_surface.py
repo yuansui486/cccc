@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cccc.kernel.capabilities import (
+from no1.kernel.capabilities import (
     BUILTIN_CAPABILITY_PACKS,
     CAPABILITY_ADMIN_TOOLS,
     CORE_ADMIN_TOOLS,
@@ -10,7 +10,7 @@ from cccc.kernel.capabilities import (
     CORE_TOOL_NAMES,
     SPECIALIZED_CORE_TOOL_NAMES,
 )
-from cccc.ports.mcp.toolspecs import MCP_TOOLS
+from no1.ports.mcp.toolspecs import MCP_TOOLS
 
 
 class TestMcpCapabilitySurface(unittest.TestCase):
@@ -50,22 +50,22 @@ class TestMcpCapabilitySurface(unittest.TestCase):
         admin = set(CORE_ADMIN_TOOLS)
         capability_admin_pack = set(BUILTIN_CAPABILITY_PACKS["pack:capability-admin"]["tool_names"])
 
-        self.assertIn("cccc_capability_search", core)
-        self.assertIn("cccc_capability_enable", core)
-        self.assertIn("cccc_capability_state", core)
-        self.assertIn("cccc_capability_install", core)
-        self.assertIn("cccc_capability_use", core)
-        self.assertIn("cccc_capability_enable", basic)
-        self.assertIn("cccc_capability_install", basic)
-        self.assertIn("cccc_capability_use", basic)
+        self.assertIn("onecolleague_capability_search", core)
+        self.assertIn("onecolleague_capability_enable", core)
+        self.assertIn("onecolleague_capability_state", core)
+        self.assertIn("onecolleague_capability_install", core)
+        self.assertIn("onecolleague_capability_use", core)
+        self.assertIn("onecolleague_capability_enable", basic)
+        self.assertIn("onecolleague_capability_install", basic)
+        self.assertIn("onecolleague_capability_use", basic)
         self.assertEqual(admin, set())
         self.assertEqual(capability_admin_pack, set(CAPABILITY_ADMIN_TOOLS))
-        self.assertNotIn("cccc_capability_block", core)
-        self.assertNotIn("cccc_capability_import", core)
-        self.assertNotIn("cccc_capability_uninstall", core)
-        self.assertIn("cccc_agent_state", core)
-        self.assertIn("cccc_coordination", core)
-        self.assertIn("cccc_memory", core)
+        self.assertNotIn("onecolleague_capability_block", core)
+        self.assertNotIn("onecolleague_capability_import", core)
+        self.assertNotIn("onecolleague_capability_uninstall", core)
+        self.assertIn("onecolleague_agent_state", core)
+        self.assertIn("onecolleague_coordination", core)
+        self.assertIn("onecolleague_memory", core)
 
 
 if __name__ == "__main__":

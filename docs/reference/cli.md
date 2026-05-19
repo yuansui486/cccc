@@ -1,105 +1,105 @@
 # CLI Reference
 
-Complete command reference for the CCCC CLI.
+Complete command reference for the OneColleague CLI.
 
 ## Global Commands
 
-### `cccc`
+### `onecolleague`
 
 Start the daemon and Web UI together.
 
 ```bash
-cccc                    # Start daemon + Web UI
-cccc --help             # Show help
+onecolleague            # Start daemon + Web UI
+onecolleague --help             # Show help
 ```
 
-### `cccc doctor`
+### `onecolleague doctor`
 
 Check your environment and diagnose issues.
 
 ```bash
-cccc doctor             # Full environment check
+onecolleague doctor             # Full environment check
 ```
 
-### `cccc runtime list`
+### `onecolleague runtime list`
 
 List available agent runtimes.
 
 ```bash
-cccc runtime list       # List detected runtimes
-cccc runtime list --all # List all supported runtimes
+onecolleague runtime list       # List detected runtimes
+onecolleague runtime list --all # List all supported runtimes
 ```
 
 ## Daemon Commands
 
-### `cccc daemon`
+### `onecolleague daemon`
 
-Manage the CCCC daemon.
+Manage the OneColleague daemon.
 
 ```bash
-cccc daemon status      # Check daemon status
-cccc daemon start       # Start daemon
-cccc daemon stop        # Stop daemon
+onecolleague daemon status      # Check daemon status
+onecolleague daemon start       # Start daemon
+onecolleague daemon stop        # Stop daemon
 ```
 
 Notes:
-- `cccc daemon start` refuses to spawn a duplicate daemon if the pid-file process is still alive but IPC is not responding.
-- In that case, run `cccc daemon stop` (or clean stale runtime state) before retrying start.
+- `onecolleague daemon start` refuses to spawn a duplicate daemon if the pid-file process is still alive but IPC is not responding.
+- In that case, run `onecolleague daemon stop` (or clean stale runtime state) before retrying start.
 
 ## Group Commands
 
-### `cccc attach`
+### `onecolleague attach`
 
 Create or attach to a working group.
 
 ```bash
-cccc attach .           # Attach current directory as scope
-cccc attach /path/to/project
+onecolleague attach .           # Attach current directory as scope
+onecolleague attach /path/to/project
 ```
 
-### `cccc groups`
+### `onecolleague groups`
 
 List all working groups.
 
 ```bash
-cccc groups             # List groups
+onecolleague groups             # List groups
 ```
 
-### `cccc use`
+### `onecolleague use`
 
 Switch to a different working group.
 
 ```bash
-cccc use <group_id>     # Switch to group
+onecolleague use <group_id>     # Switch to group
 ```
 
-### `cccc group`
+### `onecolleague group`
 
 Manage the current working group.
 
 ```bash
-cccc group create --title "my-group"         # Create group
-cccc group show <group_id>                   # Show group metadata
-cccc group update --group <id> --title "..." # Update title/topic
-cccc group use <group_id> .                  # Set active scope
-cccc group start --group <id>                # Start group actors
-cccc group stop --group <id>                 # Stop group actors
-cccc group set-state idle --group <id>       # Set state: active/idle/paused/stopped
-cccc group detach-scope <scope_key> --group <id>
-cccc group delete --group <id> --confirm <id>
+onecolleague group create --title "my-group"         # Create group
+onecolleague group show <group_id>                   # Show group metadata
+onecolleague group update --group <id> --title "..." # Update title/topic
+onecolleague group use <group_id> .                  # Set active scope
+onecolleague group start --group <id>                # Start group actors
+onecolleague group stop --group <id>                 # Stop group actors
+onecolleague group set-state idle --group <id>       # Set state: active/idle/paused/stopped
+onecolleague group detach-scope <scope_key> --group <id>
+onecolleague group delete --group <id> --confirm <id>
 ```
 
 ## Actor Commands
 
-### `cccc actor add`
+### `onecolleague actor add`
 
 Add a new actor to the group.
 
 ```bash
-cccc actor add <actor_id> --runtime claude
-cccc actor add <actor_id> --runtime codex
-cccc actor add <actor_id> --runtime web_model
-cccc actor add <actor_id> --runtime custom --command "my-agent"
+onecolleague actor add <actor_id> --runtime claude
+onecolleague actor add <actor_id> --runtime codex
+onecolleague actor add <actor_id> --runtime web_model
+onecolleague actor add <actor_id> --runtime custom --command "my-agent"
 ```
 
 Options:
@@ -110,155 +110,155 @@ Options:
 
 For the ChatGPT Web Model actor, create the actor first, then finish MCP URL and chat binding in `Settings > Global > ChatGPT Web Model`.
 
-### `cccc actor`
+### `onecolleague actor`
 
 Manage actors.
 
 ```bash
-cccc actor list                    # List actors
-cccc actor start <actor_id>        # Start actor
-cccc actor stop <actor_id>         # Stop actor
-cccc actor restart <actor_id>      # Restart actor
-cccc actor remove <actor_id>       # Remove actor
-cccc actor update <actor_id> ...   # Update actor settings
-cccc actor secrets <actor_id> ...  # Manage runtime-only secrets
+onecolleague actor list                    # List actors
+onecolleague actor start <actor_id>        # Start actor
+onecolleague actor stop <actor_id>         # Stop actor
+onecolleague actor restart <actor_id>      # Restart actor
+onecolleague actor remove <actor_id>       # Remove actor
+onecolleague actor update <actor_id> ...   # Update actor settings
+onecolleague actor secrets <actor_id> ...  # Manage runtime-only secrets
 ```
 
 ## Message Commands
 
-### `cccc send`
+### `onecolleague send`
 
 Send a message.
 
 ```bash
-cccc send "Hello"                  # No --to: default recipient policy applies (default: foreman)
-cccc send "Hello" --to @foreman    # Send to foreman
-cccc send "Hello" --to peer-1      # Send to specific actor
-cccc send "Announcement" --to @all # Explicit broadcast
+onecolleague send "Hello"                  # No --to: default recipient policy applies (default: foreman)
+onecolleague send "Hello" --to @foreman    # Send to foreman
+onecolleague send "Hello" --to peer-1      # Send to specific actor
+onecolleague send "Announcement" --to @all # Explicit broadcast
 ```
 
-### `cccc tracked-send`
+### `onecolleague tracked-send`
 
 Create a task and send one linked delegation message.
 
 ```bash
-cccc tracked-send "Please implement this and reply with validation evidence." \
+onecolleague tracked-send "Please implement this and reply with validation evidence." \
   --to peer-1 \
   --title "Implement feature" \
   --outcome "Feature is implemented and validation evidence is reported"
 ```
 
-### `cccc reply`
+### `onecolleague reply`
 
 Reply to a message.
 
 ```bash
-cccc reply <event_id> "Reply text"
+onecolleague reply <event_id> "Reply text"
 ```
 
-### `cccc inbox`
+### `onecolleague inbox`
 
 View inbox.
 
 ```bash
-cccc inbox --actor-id <id>         # View actor unread messages
-cccc inbox --actor-id <id> --mark-read
+onecolleague inbox --actor-id <id>         # View actor unread messages
+onecolleague inbox --actor-id <id> --mark-read
 ```
 
-### `cccc tail`
+### `onecolleague tail`
 
 Tail the ledger.
 
 ```bash
-cccc tail                          # Show recent events
-cccc tail -n 50                    # Show last 50 events
-cccc tail -f                       # Follow new events
+onecolleague tail                          # Show recent events
+onecolleague tail -n 50                    # Show last 50 events
+onecolleague tail -f                       # Follow new events
 ```
 
 ## IM Bridge Commands
 
-### `cccc im`
+### `onecolleague im`
 
 Manage IM Bridge.
 
 ```bash
-cccc im set telegram --token-env TELEGRAM_BOT_TOKEN
-cccc im set slack --bot-token-env SLACK_BOT_TOKEN --app-token-env SLACK_APP_TOKEN
-cccc im set discord --token-env DISCORD_BOT_TOKEN
-cccc im set feishu --app-key-env FEISHU_APP_ID --app-secret-env FEISHU_APP_SECRET
-cccc im set dingtalk --app-key-env DINGTALK_APP_KEY --app-secret-env DINGTALK_APP_SECRET --robot-code-env DINGTALK_ROBOT_CODE
+onecolleague im set telegram --token-env TELEGRAM_BOT_TOKEN
+onecolleague im set slack --bot-token-env SLACK_BOT_TOKEN --app-token-env SLACK_APP_TOKEN
+onecolleague im set discord --token-env DISCORD_BOT_TOKEN
+onecolleague im set feishu --app-key-env FEISHU_APP_ID --app-secret-env FEISHU_APP_SECRET
+onecolleague im set dingtalk --app-key-env DINGTALK_APP_KEY --app-secret-env DINGTALK_APP_SECRET --robot-code-env DINGTALK_ROBOT_CODE
 
-cccc im start                      # Start IM bridge
-cccc im stop                       # Stop IM bridge
-cccc im status                     # Check IM bridge status
-cccc im logs                       # View IM bridge logs
-cccc im logs -f                    # Follow IM bridge logs
+onecolleague im start                      # Start IM bridge
+onecolleague im stop                       # Stop IM bridge
+onecolleague im status                     # Check IM bridge status
+onecolleague im logs                       # View IM bridge logs
+onecolleague im logs -f                    # Follow IM bridge logs
 ```
 
 ## Group Space Commands
 
-### `cccc space`
+### `onecolleague space`
 
 Manage Group Space provider-backed shared memory.
 
 ```bash
-cccc space status
-cccc space credential status
-cccc space credential set --auth-json '{"cookies":[{"name":"SID","value":"...","domain":".google.com"}]}'
-cccc space credential set --auth-json-file ./notebooklm.storage_state.json
-cccc space credential clear
-cccc space health
+onecolleague space status
+onecolleague space credential status
+onecolleague space credential set --auth-json '{"cookies":[{"name":"SID","value":"...","domain":".google.com"}]}'
+onecolleague space credential set --auth-json-file ./notebooklm.storage_state.json
+onecolleague space credential clear
+onecolleague space health
 
-cccc space bind [remote_space_id]    # omit to auto-create NotebookLM notebook
-cccc space unbind
-cccc space sync --force
+onecolleague space bind [remote_space_id]    # omit to auto-create NotebookLM notebook
+onecolleague space unbind
+onecolleague space sync --force
 
-cccc space ingest --kind context_sync --payload '{"vision":"v0.5 plan"}'
-cccc space ingest --kind resource_ingest --payload '{"path":"docs/spec.md"}' --idempotency-key ingest-docs-1
+onecolleague space ingest --kind context_sync --payload '{"vision":"v0.5 plan"}'
+onecolleague space ingest --kind resource_ingest --payload '{"path":"docs/spec.md"}' --idempotency-key ingest-docs-1
 
-cccc space query "What is the latest shared plan?"
-cccc space query "Summarize risks from these sources" --options '{"source_ids":["src_1","src_2"]}'
+onecolleague space query "What is the latest shared plan?"
+onecolleague space query "Summarize risks from these sources" --options '{"source_ids":["src_1","src_2"]}'
 
-cccc space jobs list
-cccc space jobs list --state failed --limit 20
-cccc space jobs retry <job_id>
-cccc space jobs cancel <job_id>
+onecolleague space jobs list
+onecolleague space jobs list --state failed --limit 20
+onecolleague space jobs retry <job_id>
+onecolleague space jobs cancel <job_id>
 ```
 
 Notes:
 - `--group` is optional; defaults to the active group.
 - Current provider is `notebooklm`.
 - `--payload` and `--options` must be JSON objects.
-- `cccc space query --options` only supports `source_ids` (array of source IDs).
+- `onecolleague space query --options` only supports `source_ids` (array of source IDs).
 - `language` / `lang` are not valid query options (put language requirement in query text).
 - Provider credentials are write-only; CLI/Web only return masked metadata.
-- `cccc space health` validates credential format and adapter compatibility.
+- `onecolleague space health` validates credential format and adapter compatibility.
 - When a group is bound, curated `context_sync` exports are also auto-enqueued from `context_sync` updates.
-- `cccc space sync` performs two-way reconcile for Group Space:
+- `onecolleague space sync` performs two-way reconcile for Group Space:
   - local `repo/space/` files -> provider sources,
   - provider source/artifact projection -> local `repo/space/` (`.sync/remote-sources` and `artifacts/`).
 
 ## Setup Commands
 
-### `cccc setup`
+### `onecolleague setup`
 
 Configure MCP for an agent runtime.
 
 ```bash
-cccc setup --runtime claude        # Auto-configure for Claude Code
-cccc setup --runtime codex         # Auto-configure for Codex
-cccc setup --runtime kimi          # Auto-configure for Kimi CLI
+onecolleague setup --runtime claude        # Auto-configure for Claude Code
+onecolleague setup --runtime codex         # Auto-configure for Codex
+onecolleague setup --runtime kimi          # Auto-configure for Kimi CLI
 ```
 
-### `cccc update`
+### `onecolleague update`
 
-Upgrade CCCC in the current Python environment.
+Upgrade OneColleague in the current Python environment.
 
 ```bash
-cccc update                        # Upgrade using the detected channel
-cccc update --channel stable       # Force the stable PyPI channel
-cccc update --channel rc           # Force the TestPyPI RC channel
-cccc update --check                # Show install detection + planned command
+onecolleague update                        # Upgrade using the detected channel
+onecolleague update --channel stable       # Force the stable PyPI channel
+onecolleague update --channel rc           # Force the TestPyPI RC channel
+onecolleague update --check                # Show install detection + planned command
 ```
 
 Notes:
@@ -267,23 +267,23 @@ Notes:
 
 ## Web Commands
 
-### `cccc web`
+### `onecolleague web`
 
 Start only the Web UI (daemon must be running).
 
 ```bash
-cccc web                           # Start Web UI
-cccc web --port 9000               # Custom port
+onecolleague web                           # Start Web UI
+onecolleague web --port 9000               # Custom port
 ```
 
 ## MCP Commands
 
-### `cccc mcp`
+### `onecolleague mcp`
 
 Start the MCP server (for agent integration).
 
 ```bash
-cccc mcp                           # Start MCP server (stdio mode)
+onecolleague mcp                           # Start MCP server (stdio mode)
 ```
 
 ## Environment Variables
@@ -293,5 +293,5 @@ cccc mcp                           # Start MCP server (stdio mode)
 | `CCCC_HOME` | `~/.cccc` | Runtime home directory |
 | `CCCC_WEB_HOST` | `127.0.0.1` | Web UI bind address |
 | `CCCC_WEB_PORT` | `8848` | Web UI port |
-| `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Supervised Web child readiness timeout before CCCC treats startup as failed |
-| `CCCC_LOG_LEVEL` | `INFO` | Log level |
+| `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Supervised Web child readiness timeout before OneColleague treats startup as failed |
+| `CCCC_WEB_LOG_LEVEL` | `INFO` | Web log level |

@@ -1,18 +1,18 @@
 # Web UI Guide
 
-The CCCC Web UI is a mobile-first control plane for managing your AI agents.
+The OneColleague Web UI is a mobile-first control plane for managing your AI agents.
 
 ## Accessing the Web UI
 
-After starting CCCC:
+After starting OneColleague:
 
 ```bash
-cccc
+onecolleague
 ```
 
 Open http://127.0.0.1:8848/ in your browser.
 
-`cccc` is the single owner of the default local app session: it starts the daemon and Web together, and pressing `Ctrl+C` stops both together. If another `cccc` session is already running for the same `CCCC_HOME`, a second `cccc` command will refuse to start instead of silently sharing the old daemon.
+`onecolleague` is the single owner of the default local app session: it starts the daemon and Web together, and pressing `Ctrl+C` stops both together. If another `onecolleague` session is already running for the same `CCCC_HOME`, a second `onecolleague` command will refuse to start instead of silently sharing the old daemon.
 
 ## Interface Overview
 
@@ -29,7 +29,7 @@ The Web UI has these main areas:
 ### Creating a Group
 
 1. Click the **+** button in the sidebar
-2. Or use CLI: `cccc attach /path/to/project`
+2. Or use CLI: `onecolleague attach /path/to/project`
 
 ### Switching Groups
 
@@ -114,7 +114,7 @@ Access via the gear icon:
 
 Use **Copy Groups** when you need to duplicate, migrate, or back up a working group.
 
-- **Export group copy** downloads a zip containing durable CCCC group state: ledger history, actors, memory, attachments, automation, and group settings.
+- **Export group copy** downloads a zip containing durable OneColleague group state: ledger history, actors, memory, attachments, automation, and group settings.
 - The copy package does **not** include the workspace repository/project files. Copy or clone the workspace separately, then choose the workspace root during import.
 - System credentials, browser sessions, provider auth, and live runtime state are excluded. The package still contains user content such as ledger history, memory, and attachments; treat it as sensitive. Imported actors are stopped and the imported group starts idle.
 - If a group id already exists, import creates a new copy instead of replacing the existing group.
@@ -168,12 +168,12 @@ To access from outside your local network:
 ### LAN / Private Network
 
 ```bash
-CCCC_WEB_HOST=0.0.0.0 cccc
+CCCC_WEB_HOST=0.0.0.0 onecolleague
 ```
 
 This keeps localhost access working while also letting other devices on the same network open `http://YOUR_LAN_IP:8848/ui/`.
 
-If CCCC is running inside WSL2's default NAT networking, this is the exception: `0.0.0.0` only opens the port inside the Linux VM. For true LAN access from other devices, enable WSL mirrored networking or add a Windows `netsh interface portproxy` rule plus matching firewall allow.
+If OneColleague is running inside WSL2's default NAT networking, this is the exception: `0.0.0.0` only opens the port inside the Linux VM. For true LAN access from other devices, enable WSL mirrored networking or add a Windows `netsh interface portproxy` rule plus matching firewall allow.
 
 ### Cloudflare Tunnel (Recommended)
 
@@ -184,7 +184,7 @@ cloudflared tunnel --url http://127.0.0.1:8848
 ### Tailscale
 
 ```bash
-CCCC_WEB_HOST=$(tailscale ip -4) cccc
+CCCC_WEB_HOST=$(tailscale ip -4) onecolleague
 ```
 
 ### Security
@@ -193,13 +193,13 @@ Before exposing the Web UI beyond localhost, first create an **Admin Access Toke
 
 In **Settings > Web Access**, `127.0.0.1` means local-only and `0.0.0.0` means localhost plus your LAN IP on a normal local host. On WSL2 NAT, it still stays inside the VM until Windows networking forwards it outward.
 
-`Save` stores the target binding. If Web was started by `cccc` or `cccc web`, use `Apply now` in **Settings > Web Access** to perform the short supervised restart. If Web is managed by Docker, systemd, or another external supervisor, restart that service instead.
+`Save` stores the target binding. If Web was started by `onecolleague` or `onecolleague web`, use `Apply now` in **Settings > Web Access** to perform the short supervised restart. If Web is managed by Docker, systemd, or another external supervisor, restart that service instead.
 
-For the default local app flow, prefer restarting from the owning `cccc` session itself: `Ctrl+C` to stop the whole app, then run `cccc` again. That keeps daemon and Web on the same fresh code/runtime.
+For the default local app flow, prefer restarting from the owning `onecolleague` session itself: `Ctrl+C` to stop the whole app, then run `onecolleague` again. That keeps daemon and Web on the same fresh code/runtime.
 
 `Start` / `Stop` are only for Tailscale remote access and do not rebind the already-running Web socket.
 
-CCCC keeps the token policy tiered:
+OneColleague keeps the token policy tiered:
 
 - localhost-only: remote token gate is not the main concern
 - LAN/private network: Access Tokens are the default and recommended posture

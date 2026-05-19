@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cccc-pair"
+name = "no1"
 version = "0.4.18"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -44,25 +44,25 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ChesterRa/cccc"
-Repository = "https://github.com/ChesterRa/cccc"
-Issues = "https://github.com/ChesterRa/cccc/issues"
+Homepage = "https://github.com/ChesterRa/onecolleague"
+Repository = "https://github.com/ChesterRa/onecolleague"
+Issues = "https://github.com/ChesterRa/onecolleague/issues"
 
 [project.scripts]
-cccc = "cccc.cli:main"
-ccccd = "cccc.daemon_main:main"
+onecolleague = "no1.cli:main"
+onecolleagued = "no1.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-"cccc.ports.web" = ["dist/**"]
-"cccc.resources" = ["*.md", "*.yaml", "*.json", "*.py"]
+"no1.ports.web" = ["dist/**"]
+"no1.resources" = ["*.md", "*.yaml", "*.json", "*.py", "im/*"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["cccc*"]
+include = ["no1*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
-from cccc.runners.pty_win import PtySession
+from no1.runners.pty_win import PtySession
 
 
 class _FakeProc:

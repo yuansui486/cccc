@@ -21,8 +21,8 @@ class TestSystemNotifyOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -107,10 +107,10 @@ class TestSystemNotifyOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            with patch("cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                "cccc.daemon.messaging.delivery.queue_system_notify"
+            with patch("no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                "no1.daemon.messaging.delivery.queue_system_notify"
             ) as queue_mock, patch(
-                "cccc.daemon.messaging.delivery.flush_pending_messages", return_value=True
+                "no1.daemon.messaging.delivery.flush_pending_messages", return_value=True
             ) as flush_mock:
                 notify, _ = self._call(
                     "system_notify",
@@ -139,15 +139,15 @@ class TestSystemNotifyOps(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_input_notify_delivery_supports_legacy_pointer(self) -> None:
-        from cccc.contracts.v1 import SystemNotifyData
-        from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
+        from no1.contracts.v1 import SystemNotifyData
+        from no1.daemon.messaging.delivery import render_system_notify_delivery_text
 
         text = render_system_notify_delivery_text(
             notify=SystemNotifyData(
                 kind="info",
                 priority="normal",
                 title="Voice Secretary input available",
-                message='New Secretary input is waiting. Call MCP tool cccc_voice_secretary_document(action="read_new_input").',
+                message='New Secretary input is waiting. Call MCP tool onecolleague_voice_secretary_document(action="read_new_input").',
                 target_actor_id="voice-secretary",
                 requires_ack=False,
                 context={
@@ -162,15 +162,15 @@ class TestSystemNotifyOps(unittest.TestCase):
         self.assertIn("Pointer only", text)
         self.assertIn("reason=new_input", text)
         self.assertNotIn("Do not bootstrap", text)
-        self.assertNotIn("cccc_voice_secretary_composer", text)
+        self.assertNotIn("onecolleague_voice_secretary_composer", text)
         self.assertNotIn("Do not finish this turn with only a plan", text)
         self.assertNotIn("alpha beta transcript", text)
-        self.assertIn("cccc_voice_secretary_document", text)
+        self.assertIn("onecolleague_voice_secretary_document", text)
         self.assertNotIn("source_chars", text)
 
     def test_voice_secretary_input_notify_delivery_uses_inline_envelope_when_available(self) -> None:
-        from cccc.contracts.v1 import SystemNotifyData
-        from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
+        from no1.contracts.v1 import SystemNotifyData
+        from no1.daemon.messaging.delivery import render_system_notify_delivery_text
 
         text = render_system_notify_delivery_text(
             notify=SystemNotifyData(
@@ -205,8 +205,8 @@ class TestSystemNotifyOps(unittest.TestCase):
         self.assertNotIn("First action", text)
 
     def test_voice_secretary_action_request_notify_delivery_is_actionable(self) -> None:
-        from cccc.contracts.v1 import SystemNotifyData
-        from cccc.daemon.messaging.delivery import render_system_notify_delivery_text
+        from no1.contracts.v1 import SystemNotifyData
+        from no1.daemon.messaging.delivery import render_system_notify_delivery_text
 
         text = render_system_notify_delivery_text(
             notify=SystemNotifyData(

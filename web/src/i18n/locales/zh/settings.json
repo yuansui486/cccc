@@ -101,7 +101,7 @@
     "productNameTitle": "产品名称",
     "productNameHint": "用于侧边栏文字标识、登录页标题，以及浏览器标签页标题。",
     "productNameLabel": "名称",
-    "productNamePlaceholder": "CCCC",
+    "productNamePlaceholder": "一号同事",
     "saveName": "保存名称",
     "saved": "品牌设置已保存。",
     "saveFailed": "保存品牌设置失败。",
@@ -194,8 +194,8 @@
     "operationFailedReason": "操作未生效（{{reason}}）。",
     "enableScope": {
       "session": "会话",
-        "actor": "智能体",
-        "group": "工作组"
+      "actor": "智能体",
+      "group": "工作组"
     },
     "store": {
       "title": "OneColleague Skill 商店",
@@ -828,7 +828,11 @@
   },
   "guidance": {
     "openFromGroup": "请从工作组中打开此标签页。",
+    "overridesHint": "引导覆盖保存在 <0>CCCC_HOME</0>（按工作组）。",
+    "preambleTitle": "启动引导（Preamble）",
+    "preambleHint": "启动或重启后的第一次投递前会自动注入。",
     "helpTitle": "帮助（参考）",
+    "helpHint": "由 onecolleague_help 按需返回。",
     "overrideBadge": "覆盖",
     "builtinBadge": "内置",
     "expand": "展开",
@@ -848,6 +852,9 @@
     "structuredView": "结构化",
     "rawView": "原始 Markdown",
     "commonAndRolesTitle": "角色提示词",
+    "commonNotesTitle": "通用提示词",
+    "commonNotesHint": "未加标签、会共享给所有 actor 的 help 内容。",
+    "commonNotesPlaceholder": "在这里维护共享引导、工作流程细节和附录……",
     "foremanNotesTitle": "Foreman 提示词",
     "foremanNotesHint": "只有 foreman actor 会收到这一段。",
     "foremanNotesPlaceholder": "负责结果质量、审阅 peer 输出，并保持共享方向一致……",
@@ -924,7 +931,7 @@
     "description": "这些设置应用于整个一号同事实例（守护进程 + Web）。仅在调试时使用。",
     "runtimeInfoTitle": "运行时信息",
     "runtimeInfoHint": "快速查看当前 Web 包和已连接 daemon 的版本。",
-    "ccccVersion": "CCCC",
+    "ccccVersion": "一号同事",
     "daemonVersion": "Daemon",
     "versionMismatchBadge": "版本不一致",
     "versionMismatchHint": "Web 包与 daemon 的版本不一致。请重启一号同事让它们重新对齐。",
@@ -1092,7 +1099,7 @@
     "goalPortHintAdvanced": "只有当你的公网代理或隧道要求 Web 监听到别的端口时，才需要改这里。",
     "goalPublicUrlHint": "填写用户最终应该打开的浏览器地址，比如反向代理或隧道分配出来的 URL。",
     "publicTokenRequiredTitle": "公网暴露不能裸奔",
-    "publicTokenRequiredHint": "一旦设置了公网 URL，CCCC 会强制要求这条访问路径使用访问令牌。",
+    "publicTokenRequiredHint": "一旦设置了公网 URL，一号同事会强制要求这条访问路径使用访问令牌。",
     "saveChanges": "保存更改",
     "savedState": "已保存",
     "primaryActionSaveHint": "先把新的访问目标和绑定策略保存下来。如果当前运行中的 Web 还停留在旧绑定上，保存后再去应用或重启即可。",
@@ -1217,7 +1224,7 @@
     "restartDialogRemoteLabel": "局域网 / 远程",
     "restartDialogLoginHint": "如果当前启用了访问令牌登录，请先用 `?token=<access-token>` 打开一次，或者在浏览器里手动登录。",
     "restartDialogCommandsTitle": "重启示例",
-    "restartDialogCommandMainLabel": "如果你平时直接启动 CCCC",
+    "restartDialogCommandMainLabel": "如果你平时直接启动一号同事",
     "restartDialogCommandStandaloneLabel": "如果你平时单独启动 Web 服务",
     "restartDialogSupervisorHint": "如果 Web 是由 Docker、systemd 或其它 supervisor 托管的，请重启对应服务，而不是直接使用上面的命令。",
     "restartDialogDone": "知道了"

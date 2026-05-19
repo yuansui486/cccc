@@ -22,13 +22,13 @@ class TestAutomationSilenceActivityFilter(unittest.TestCase):
         return td, cleanup
 
     def test_get_last_group_activity_keeps_business_replies_but_ignores_silence_ack(self) -> None:
-        from cccc.contracts.v1 import ChatMessageData, SystemNotifyData
-        from cccc.daemon.automation.engine import _get_last_group_activity
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.registry import load_registry
-        from cccc.util.time import parse_utc_iso
+        from no1.contracts.v1 import ChatMessageData, SystemNotifyData
+        from no1.daemon.automation.engine import _get_last_group_activity
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.ledger import append_event
+        from no1.kernel.registry import load_registry
+        from no1.util.time import parse_utc_iso
 
         _, cleanup = self._with_home()
         try:
@@ -138,14 +138,14 @@ class TestAutomationSilenceActivityFilter(unittest.TestCase):
             cleanup()
 
     def test_check_silence_ignores_foreman_reply_and_reaches_auto_idle(self) -> None:
-        from cccc.contracts.v1 import ChatMessageData
-        from cccc.daemon.automation import AutomationManager, _cfg
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, get_group_state
-        from cccc.kernel.inbox import iter_events
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.registry import load_registry
-        from cccc.util.time import parse_utc_iso
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.automation import AutomationManager, _cfg
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, get_group_state
+        from no1.kernel.inbox import iter_events
+        from no1.kernel.ledger import append_event
+        from no1.kernel.registry import load_registry
+        from no1.util.time import parse_utc_iso
 
         _, cleanup = self._with_home()
         try:

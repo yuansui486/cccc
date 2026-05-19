@@ -5,9 +5,9 @@ import unittest
 
 class TestGroupTemplateDirtySettingsTolerance(unittest.TestCase):
     def test_build_template_tolerates_dirty_numeric_and_bool_settings(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.group_template import build_group_template_from_group, preview_group_template_replace
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.group_template import build_group_template_from_group, preview_group_template_replace
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:

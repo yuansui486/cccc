@@ -3,10 +3,10 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from cccc.kernel.group import Group
-from cccc.ports.im.adapters.base import IMAdapter
-from cccc.ports.im.bridge import IMBridge
-from cccc.ports.im.commands import ParsedCommand
+from no1.kernel.group import Group
+from no1.ports.im.adapters.base import IMAdapter
+from no1.ports.im.bridge import IMBridge
+from no1.ports.im.commands import ParsedCommand
 
 
 class _FakeAdapter(IMAdapter):

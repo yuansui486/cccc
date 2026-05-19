@@ -20,8 +20,8 @@ class TestDaemonCoreOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -59,7 +59,7 @@ class TestDaemonCoreOps(unittest.TestCase):
                         "developer_mode": True,
                         "logger_levels": {
                             "asyncio": "warning",
-                            "cccc.daemon.group_space_ops": "debug",
+                            "no1.daemon.group_space_ops": "debug",
                             "": "info",
                             "httpx": "bogus",
                         },
@@ -82,7 +82,7 @@ class TestDaemonCoreOps(unittest.TestCase):
                 obs.get("logger_levels"),
                 {
                     "asyncio": "WARNING",
-                    "cccc.daemon.group_space_ops": "DEBUG",
+                    "no1.daemon.group_space_ops": "DEBUG",
                 },
             )
             runtime_visibility = obs.get("runtime_visibility") if isinstance(obs.get("runtime_visibility"), dict) else {}
@@ -130,7 +130,7 @@ class TestDaemonCoreOps(unittest.TestCase):
             cleanup()
 
     def test_try_handle_unknown_daemon_core_op_returns_none(self) -> None:
-        from cccc.daemon.ops.daemon_core_ops import try_handle_daemon_core_op
+        from no1.daemon.ops.daemon_core_ops import try_handle_daemon_core_op
 
         self.assertIsNone(
             try_handle_daemon_core_op(

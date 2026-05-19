@@ -9,8 +9,8 @@ _CLEAN_ENV = {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}
 
 class TestMcpGroupSetStateStopped(unittest.TestCase):
     def test_group_set_state_stopped_maps_to_group_stop(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -21,7 +21,7 @@ class TestMcpGroupSetStateStopped(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_group",
+                "onecolleague_group",
                 {
                     "action": "set_state",
                     "group_id": "g_test",

@@ -21,8 +21,8 @@ class TestDiagnosticsOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -50,8 +50,8 @@ class TestDiagnosticsOps(unittest.TestCase):
             cleanup()
 
     def test_debug_tail_logs_reads_plain_log_files(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         td, cleanup = self._with_home()
         try:
@@ -61,8 +61,8 @@ class TestDiagnosticsOps(unittest.TestCase):
             home = Path(td)
             daemon_dir = home / "daemon"
             daemon_dir.mkdir(parents=True, exist_ok=True)
-            (daemon_dir / "ccccd.log").write_text("daemon-1\ndaemon-2\ndaemon-3\n", encoding="utf-8")
-            (daemon_dir / "cccc-web.log").write_text("web-1\nweb-2\n", encoding="utf-8")
+            (daemon_dir / "onecolleagued.log").write_text("daemon-1\ndaemon-2\ndaemon-3\n", encoding="utf-8")
+            (daemon_dir / "onecolleague-web.log").write_text("web-1\nweb-2\n", encoding="utf-8")
 
             reg = load_registry()
             group = create_group(reg, title="diag-logs")
@@ -100,7 +100,7 @@ class TestDiagnosticsOps(unittest.TestCase):
             cleanup()
 
     def test_try_handle_unknown_diagnostics_op_returns_none(self) -> None:
-        from cccc.daemon.ops.diagnostics_ops import try_handle_diagnostics_op
+        from no1.daemon.ops.diagnostics_ops import try_handle_diagnostics_op
 
         resp = try_handle_diagnostics_op(
             "not_diagnostics",
@@ -115,7 +115,7 @@ class TestDiagnosticsOps(unittest.TestCase):
         self.assertIsNone(resp)
 
     def test_debug_snapshot_includes_web_binding_runtime_evidence(self) -> None:
-        from cccc.ports.web.runtime_control import write_web_runtime_state
+        from no1.ports.web.runtime_control import write_web_runtime_state
 
         td, cleanup = self._with_home()
         try:
@@ -159,12 +159,12 @@ class TestDiagnosticsOps(unittest.TestCase):
             self.assertEqual(bool(runtime.get("pid_alive")), True)
             self.assertEqual(bool(web.get("runtime_matches_configured_binding")), False)
             self.assertIn("binding_apply_pending", web.get("issues") or [])
-            self.assertTrue(str(web.get("log_path") or "").endswith("daemon/cccc-web.log"))
+            self.assertTrue(str(web.get("log_path") or "").endswith("daemon/onecolleague-web.log"))
         finally:
             cleanup()
 
     def test_debug_snapshot_marks_stale_web_runtime_pid(self) -> None:
-        from cccc.ports.web.runtime_control import write_web_runtime_state
+        from no1.ports.web.runtime_control import write_web_runtime_state
 
         td, cleanup = self._with_home()
         try:

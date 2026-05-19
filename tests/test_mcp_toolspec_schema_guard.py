@@ -1,6 +1,6 @@
 import unittest
 
-from cccc.ports.mcp.toolspecs import MCP_TOOLS
+from no1.ports.mcp.toolspecs import MCP_TOOLS, MCP_TOOLS_WITH_ALIASES
 
 
 class TestMcpToolspecSchemaGuard(unittest.TestCase):
@@ -17,10 +17,16 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
             desc = str(spec.get("description") or "").strip()
             self.assertTrue(name, msg=f"MCP_TOOLS[{idx}] empty name")
             self.assertTrue(desc, msg=f"MCP_TOOLS[{idx}] empty description")
-            self.assertTrue(name.startswith("cccc_"), msg=f"MCP_TOOLS[{idx}] invalid name prefix: {name}")
+            self.assertTrue(name.startswith("onecolleague_"), msg=f"MCP_TOOLS[{idx}] invalid name prefix: {name}")
+
+    def test_onecolleague_alias_specs_exist_for_every_builtin(self) -> None:
+        canonical = {str(spec.get("name") or "") for spec in MCP_TOOLS if isinstance(spec, dict)}
+        aliased = {str(spec.get("name") or "") for spec in MCP_TOOLS_WITH_ALIASES if isinstance(spec, dict)}
+        expected_aliases = {"cccc_" + name[len("onecolleague_") :] for name in canonical if name.startswith("onecolleague_")}
+        self.assertTrue(expected_aliases.issubset(aliased), msg=f"missing aliases: {sorted(expected_aliases - aliased)}")
 
     def test_input_schema_shape_is_consistent(self) -> None:
-        for idx, spec in enumerate(MCP_TOOLS):
+        for idx, spec in enumerate(MCP_TOOLS_WITH_ALIASES):
             schema = spec.get("inputSchema")
             self.assertIsInstance(schema, dict, msg=f"MCP_TOOLS[{idx}] inputSchema must be dict")
             self.assertEqual(schema.get("type"), "object", msg=f"MCP_TOOLS[{idx}] inputSchema.type must be object")
@@ -30,7 +36,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
             self.assertIsInstance(required, list, msg=f"MCP_TOOLS[{idx}] inputSchema.required must be list")
 
     def test_space_query_toolspec_options_are_explicit(self) -> None:
-        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_space"), None)
+        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_space"), None)
         self.assertIsInstance(spec, dict)
         desc = str(spec.get("description") or "") if isinstance(spec, dict) else ""
         self.assertIn("status=pending|queued", desc)
@@ -48,7 +54,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertNotIn("lang", opt_props)
 
     def test_memory_actions_match_reme_surface(self) -> None:
-        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_memory"), None)
+        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_memory"), None)
         self.assertIsInstance(spec, dict)
         schema = spec.get("inputSchema") if isinstance(spec, dict) else {}
         self.assertIsInstance(schema, dict)
@@ -59,7 +65,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertEqual(action.get("enum"), ["layout_get", "search", "get", "write"])
 
     def test_memory_admin_actions_match_reme_surface(self) -> None:
-        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_memory_admin"), None)
+        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_memory_admin"), None)
         self.assertIsInstance(spec, dict)
         schema = spec.get("inputSchema") if isinstance(spec, dict) else {}
         self.assertIsInstance(schema, dict)
@@ -73,7 +79,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         )
 
     def test_messaging_toolspec_priority_matches_runtime_surface(self) -> None:
-        for tool_name in ("cccc_message_send", "cccc_message_reply", "cccc_file"):
+        for tool_name in ("onecolleague_message_send", "onecolleague_message_reply", "onecolleague_file"):
             spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == tool_name), None)
             self.assertIsInstance(spec, dict, msg=f"missing toolspec for {tool_name}")
             schema = spec.get("inputSchema") if isinstance(spec, dict) else {}
@@ -84,7 +90,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
             self.assertIsInstance(priority, dict)
             self.assertEqual(priority.get("enum"), ["normal", "attention"])
 
-        file_spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_file"), None)
+        file_spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_file"), None)
         file_schema = file_spec.get("inputSchema") if isinstance(file_spec, dict) else {}
         file_props = file_schema.get("properties") if isinstance(file_schema, dict) else {}
         action = file_props.get("action") if isinstance(file_props, dict) else {}
@@ -98,7 +104,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertIn("active scope", str((file_props.get("path") or {}).get("description") or ""))
 
     def test_task_toolspec_exposes_type_enum(self) -> None:
-        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_task"), None)
+        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_task"), None)
         self.assertIsInstance(spec, dict)
         schema = spec.get("inputSchema") if isinstance(spec, dict) else {}
         self.assertIsInstance(schema, dict)
@@ -112,7 +118,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         )
 
     def test_actor_toolspec_does_not_expose_legacy_session_restart_action(self) -> None:
-        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_actor"), None)
+        spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_actor"), None)
         self.assertIsInstance(spec, dict)
         props = ((spec.get("inputSchema") or {}).get("properties") or {}) if isinstance(spec, dict) else {}
         action = props.get("action") if isinstance(props, dict) else {}
@@ -121,8 +127,8 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertNotIn(removed_action, action.get("enum") or [])
 
     def test_remote_runtime_repo_tools_are_split_by_write_risk(self) -> None:
-        repo = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_repo"), None)
-        repo_edit = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_repo_edit"), None)
+        repo = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_repo"), None)
+        repo_edit = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_repo_edit"), None)
         self.assertIsInstance(repo, dict)
         self.assertIsInstance(repo_edit, dict)
 
@@ -144,30 +150,30 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertIn("replacements", edit_props)
         self.assertIn("expected_sha256", edit_props)
         self.assertNotIn("patch", edit_props)
-        apply_patch = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_apply_patch"), None)
+        apply_patch = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_apply_patch"), None)
         self.assertIsInstance(apply_patch, dict)
         self.assertIn("Codex-style", str(apply_patch.get("description") or ""))
 
     def test_capability_search_defaults_to_local_sources(self) -> None:
-        search = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_capability_search"), None)
+        search = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_capability_search"), None)
         self.assertIsInstance(search, dict)
         props = ((search.get("inputSchema") or {}).get("properties") or {}) if isinstance(search, dict) else {}
         self.assertEqual((props.get("include_external") or {}).get("default"), False)
 
     def test_web_model_local_power_tools_are_not_generic_core_tools(self) -> None:
-        from cccc.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS, resolve_core_tool_names
+        from no1.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS, resolve_core_tool_names
 
         web_model_only_tools = {
-            "cccc_runtime_wait_next_turn",
-            "cccc_runtime_complete_turn",
-            "cccc_code_exec",
-            "cccc_code_wait",
-            "cccc_repo_edit",
-            "cccc_apply_patch",
-            "cccc_shell",
-            "cccc_exec_command",
-            "cccc_write_stdin",
-            "cccc_git",
+            "onecolleague_runtime_wait_next_turn",
+            "onecolleague_runtime_complete_turn",
+            "onecolleague_code_exec",
+            "onecolleague_code_wait",
+            "onecolleague_repo_edit",
+            "onecolleague_apply_patch",
+            "onecolleague_shell",
+            "onecolleague_exec_command",
+            "onecolleague_write_stdin",
+            "onecolleague_git",
         }
         self.assertFalse(web_model_only_tools & set(CORE_BASIC_TOOLS))
         self.assertTrue(web_model_only_tools <= set(WEB_MODEL_CORE_TOOLS))
@@ -175,8 +181,8 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertTrue(web_model_only_tools <= resolve_core_tool_names(actor_role="peer", is_web_model=True))
 
     def test_web_model_turn_tools_describe_transport_boundary(self) -> None:
-        wait = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_runtime_wait_next_turn"), None)
-        complete = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_runtime_complete_turn"), None)
+        wait = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_runtime_wait_next_turn"), None)
+        complete = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_runtime_complete_turn"), None)
         self.assertIsInstance(wait, dict)
         self.assertIsInstance(complete, dict)
 
@@ -187,7 +193,7 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertIn("whether it was browser-delivered or pulled", complete_desc)
 
     def test_code_exec_schema_advertises_discovery_helpers(self) -> None:
-        code_exec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "cccc_code_exec"), None)
+        code_exec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_code_exec"), None)
         self.assertIsInstance(code_exec, dict)
         desc = str(code_exec.get("description") or "") if isinstance(code_exec, dict) else ""
         self.assertIn("COMMON_WORK_LOOPS", desc)

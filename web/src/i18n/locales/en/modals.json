@@ -311,7 +311,7 @@
     "parentTask": "Parent task",
     "pendingHandoffs": "Pending handoffs",
     "petPersonaTitle": "Pet Persona",
-    "petPersonaHint": "Stored in this group's CCCC_HELP.md as a `## @pet` block. When empty, the editor starts from the default seed and you can customize the pet's stable coordination style here.",
+    "petPersonaHint": "Stored in this group's ONECOLLEAGUE_HELP.md as a `## @pet` block. When empty, the editor starts from the default seed and you can customize the pet's stable coordination style here.",
     "petPersonaPlaceholder": "Describe the Web Pet as a low-noise coordination helper. Focus on routing style, allowed actions, and what it must not do.",
     "petPersonaSaved": "Pet persona saved.",
     "personaNotes": "Persona notes",

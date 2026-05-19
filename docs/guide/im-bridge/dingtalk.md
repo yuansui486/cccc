@@ -1,6 +1,6 @@
 # DingTalk Setup
 
-Connect your CCCC working group to DingTalk for enterprise collaboration.
+Connect your OneColleague working group to DingTalk for enterprise collaboration.
 
 ## Overview
 
@@ -10,12 +10,12 @@ DingTalk (钉钉) is ideal for:
 - Alibaba ecosystem users
 - Teams already using DingTalk
 
-CCCC uses DingTalk Stream mode (persistent WebSocket connection) for inbound messages and DingTalk Open APIs for outbound messages. No public URL is required.
+OneColleague uses DingTalk Stream mode (persistent WebSocket connection) for inbound messages and DingTalk Open APIs for outbound messages. No public URL is required.
 
 ## Prerequisites
 
 - DingTalk enterprise account with admin access
-- CCCC installed and running
+- OneColleague installed and running
 
 ## Step 1: Create an Application
 
@@ -24,7 +24,7 @@ CCCC uses DingTalk Stream mode (persistent WebSocket connection) for inbound mes
 3. Click **Application Development** → **Internal Development**
 4. Click **Create Application**
 5. Fill in:
-   - Application Name (e.g., "CCCC Bot")
+   - Application Name (e.g., "OneColleague Bot")
    - Application Description
    - Application Icon
 6. Click **Confirm**
@@ -63,15 +63,15 @@ CCCC uses DingTalk Stream mode (persistent WebSocket connection) for inbound mes
    - Specific users
 4. Publish the version
 
-## Step 5: Configure & Start CCCC
+## Step 5: Configure & Start OneColleague
 
 1. In your application, go to **Credentials & Basic Info**
 2. Copy **AppKey** and **AppSecret**
-3. (Optional) Copy **RobotCode** if shown in your Robot settings (CCCC can sometimes learn it after the first inbound message, but configuring it upfront is more reliable for attachments)
+3. (Optional) Copy **RobotCode** if shown in your Robot settings (OneColleague can sometimes learn it after the first inbound message, but configuring it upfront is more reliable for attachments)
 
 ### Option A: Via Web UI
 
-1. Open the CCCC Web UI at `http://127.0.0.1:8848/`
+1. Open the OneColleague Web UI at `http://127.0.0.1:8848/`
 2. Go to **Settings** (gear icon in header)
 3. Navigate to the **IM Bridge** tab
 4. Select **DingTalk** as the platform
@@ -93,18 +93,18 @@ export DINGTALK_ROBOT_CODE="your_robot_code"  # optional but recommended
 Then configure and start the bridge:
 
 ```bash
-cccc im set dingtalk \
+onecolleague im set dingtalk \
   --app-key-env DINGTALK_APP_KEY \
   --app-secret-env DINGTALK_APP_SECRET \
   --robot-code-env DINGTALK_ROBOT_CODE
 
-cccc im start
+onecolleague im start
 ```
 
 Verify it's running:
 
 ```bash
-cccc im status
+onecolleague im status
 ```
 
 Both methods save to `group.yaml`:
@@ -176,17 +176,17 @@ DingTalk supports various message types:
 - **ActionCard**: Interactive cards with buttons
 - **AI Card Streaming**: Agent responses are delivered as AI Cards with a real-time typewriter effect. Content streams in progressively as it is generated. If streaming fails (e.g., card API unavailable), the message automatically falls back to plain text delivery.
 
-CCCC automatically selects the appropriate format.
+OneColleague automatically selects the appropriate format.
 
 ### File Sharing
 
-Attach files to your message. DingTalk files are downloaded and stored in CCCC's blob storage, then forwarded to agents.
+Attach files to your message. DingTalk files are downloaded and stored in OneColleague's blob storage, then forwarded to agents.
 
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `/subscribe` | Start receiving messages from CCCC |
+| `/subscribe` | Start receiving messages from OneColleague |
 | `/unsubscribe` | Stop receiving messages |
 | `/send <message>` | Send to foreman (default) |
 | `/send @<actor> <message>` | Send to a specific agent |
@@ -217,11 +217,11 @@ Attach files to your message. DingTalk files are downloaded and stored in CCCC's
 1. Check if the robot is added to the chat
 2. Verify the bridge is running:
    ```bash
-   cccc im status
+   onecolleague im status
    ```
 3. Check logs:
    ```bash
-   cccc im logs -f
+   onecolleague im logs -f
    ```
 
 ### Connection drops
@@ -231,8 +231,8 @@ If the connection drops unexpectedly:
 1. Check network connectivity
 2. Restart the bridge:
    ```bash
-   cccc im stop
-   cccc im start
+   onecolleague im stop
+   onecolleague im start
    ```
 
 ## Security Notes

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 class TestWindowsSupportDiagnostics(unittest.TestCase):
     def test_platform_support_reports_missing_pywinpty(self) -> None:
-        from cccc.runners import platform_support
+        from no1.runners import platform_support
 
         missing = ModuleNotFoundError("No module named 'winpty'")
         missing.name = "winpty"
@@ -29,7 +29,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertTrue(any("pip install pywinpty" in str(item) for item in hints))
 
     def test_platform_support_matches_real_import_path(self) -> None:
-        from cccc.runners import platform_support
+        from no1.runners import platform_support
 
         with patch.object(platform_support.os, "name", "nt"), patch.object(
             platform_support.importlib,
@@ -44,7 +44,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertIsNotNone(pty_process)
 
     def test_platform_support_reports_import_failure(self) -> None:
-        from cccc.runners import platform_support
+        from no1.runners import platform_support
 
         with patch.object(platform_support.os, "name", "nt"), patch.object(
             platform_support.importlib,
@@ -58,7 +58,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertIn("native import failed", str(details.get("message") or ""))
 
     def test_actor_runtime_returns_explicit_windows_pty_error(self) -> None:
-        from cccc.daemon.actors import actor_runtime_ops
+        from no1.daemon.actors import actor_runtime_ops
 
         group = SimpleNamespace(
             group_id="g1",
@@ -112,7 +112,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertIn("pywinpty", str(result.get("error") or ""))
 
     def test_actor_runtime_returns_explicit_runtime_unavailable_error(self) -> None:
-        from cccc.daemon.actors import actor_runtime_ops
+        from no1.daemon.actors import actor_runtime_ops
 
         group = SimpleNamespace(
             group_id="g1",
@@ -161,8 +161,8 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertIn("not in PATH", str(result.get("error") or ""))
 
     def test_codex_actor_start_injects_skill_package_overlay_codex_home(self) -> None:
-        from cccc.daemon.actors import actor_runtime_ops
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.actors import actor_runtime_ops
+        from no1.daemon.ops import capability_ops as ops
 
         old_home = os.environ.get("CCCC_HOME")
         old_codex_home = os.environ.get("CODEX_HOME")
@@ -288,7 +288,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
                 os.environ["CODEX_HOME"] = old_codex_home
 
     def test_windows_pty_does_not_fallback_to_spawn_without_env(self) -> None:
-        from cccc.runners import pty_win
+        from no1.runners import pty_win
 
         with tempfile.TemporaryDirectory() as td:
             spawn_calls: list[dict[str, object]] = []
@@ -312,7 +312,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
             self.assertTrue(all("env" in call for call in spawn_calls))
 
     def test_windows_pty_stop_uses_tree_termination(self) -> None:
-        from cccc.runners import pty_win
+        from no1.runners import pty_win
 
         session = object.__new__(pty_win.PtySession)
         session._running = True
@@ -334,7 +334,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         mock_terminate.assert_called_once_with(4321, timeout_s=1.0, include_group=True, force=True)
 
     def test_codex_windows_command_still_gets_env_inherit_flag(self) -> None:
-        from cccc.daemon import server as daemon_server
+        from no1.daemon import server as daemon_server
 
         cmd = daemon_server._normalize_runtime_command("codex", [r"C:\Tools\codex.cmd", "--search"])
 

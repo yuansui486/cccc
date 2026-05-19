@@ -5,14 +5,14 @@ from unittest.mock import patch
 
 class TestCliGroupSetStateStopped(unittest.TestCase):
     def test_parser_accepts_stopped_choice(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         parser = cli.build_parser()
         args = parser.parse_args(["group", "set-state", "stopped"])
         self.assertEqual(args.state, "stopped")
 
     def test_set_state_stopped_routes_to_group_stop(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 

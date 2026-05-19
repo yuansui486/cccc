@@ -2,12 +2,12 @@
 layout: home
 
 hero:
-  name: CCCC
+  name: OneColleague
   text: Multi-Agent Collaboration Kernel
   tagline: Local-first control plane for reliable, multi-agent engineering collaboration
   image:
     src: /logo.svg
-    alt: CCCC
+    alt: OneColleague
   actions:
     - theme: brand
       text: Start in 10 Minutes

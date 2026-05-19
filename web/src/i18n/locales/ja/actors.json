@@ -181,7 +181,7 @@
   "connectionLostDescription": "ターミナル接続に失敗しました。エージェントプロセスが停止したか、サーバーに到達できません。",
   "reconnect": "再接続",
   "roleNotes": "役割ノート",
-  "roleNotesHint": "CCCC_HELP.md 内のこの actor 対応 `## @actor:` block に保存されます。臨時タスクではなく、安定したローカルガイダンスを書いてください。",
+  "roleNotesHint": "ONECOLLEAGUE_HELP.md 内のこの actor 対応 `## @actor:` block に保存されます。臨時タスクではなく、安定したローカルガイダンスを書いてください。",
   "newActorRoleNotesHint": "actor 作成時に対応する `## @actor:` block へ保存されます。臨時タスクではなく、安定したローカルガイダンスを書いてください。",
   "roleNotesPlaceholder": "この actor だけの責務・境界・望ましい振る舞いを記述します……",
   "rolePreset": "ロールプリセット",
@@ -252,5 +252,7 @@
   "headlessControlStalled": "制御タスクは待機中です",
   "headlessControlCompleted": "制御タスクが完了しました",
   "headlessControlFailed": "制御タスクが失敗しました",
-  "headlessControlUpdated": "制御タスクを更新しました"
+  "headlessControlUpdated": "制御タスクを更新しました",
+  "runtimePresets": "モデル + CLI プリセット",
+  "runtimeRawChoices": "基本 CLI ランタイム"
 }

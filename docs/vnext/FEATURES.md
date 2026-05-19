@@ -1,4 +1,4 @@
-# CCCC vNext — Features
+# OneColleague vNext — Features
 
 > 说明：本页属于 vNext 历史设计快照，可能滞后于当前实现。当前行为以 `docs/reference/*` 与 `docs/standards/*` 为准。
 
@@ -15,17 +15,17 @@
 
 ```bash
 # CLI
-cccc send "Hello" --to @all
-cccc reply <event_id> "Reply text"
+onecolleague send "Hello" --to @all
+onecolleague reply <event_id> "Reply text"
 
 # MCP
-cccc_message_send(text="Hello", to=["@all"])
-cccc_message_reply(reply_to="evt_xxx", text="Reply")
+onecolleague_message_send(text="Hello", to=["@all"])
+onecolleague_message_reply(reply_to="evt_xxx", text="Reply")
 ```
 
 ### 1.3 已读机制
 
-- Agent 调用 `cccc_inbox_mark_read(event_id)` 标记已读
+- Agent 调用 `onecolleague_inbox_mark_read(event_id)` 标记已读
 - 已读是累积的：标记 X 表示 X 及之前都已读
 - 游标存储在 `state/read_cursors.json`
 
@@ -45,8 +45,8 @@ daemon 解析 to 字段
 
 投递格式：
 ```
-[cccc] user → peer-a: 请帮我实现登录功能
-[cccc] user → peer-a (reply to evt_abc): 好的，请继续
+[onecolleague] user → peer-a: 请帮我实现登录功能
+[onecolleague] user → peer-a (reply to evt_abc): 好的，请继续
 ```
 
 ## 2. IM Bridge
@@ -111,11 +111,11 @@ im:
 ### 2.5 CLI 命令
 
 ```bash
-cccc im set telegram --token-env TELEGRAM_BOT_TOKEN
-cccc im start
-cccc im stop
-cccc im status
-cccc im logs -f
+onecolleague im set telegram --token-env TELEGRAM_BOT_TOKEN
+onecolleague im start
+onecolleague im stop
+onecolleague im status
+onecolleague im logs -f
 ```
 
 ## 3. Agent Guidance
@@ -126,13 +126,13 @@ cccc im logs -f
 系统提示 (薄层)
 ├── 你是谁：Actor ID、角色
 ├── 你在哪：Working Group、Scope
-└── 你能做什么：MCP 工具列表 + 关键提醒（参见 cccc_help）
+└── 你能做什么：MCP 工具列表 + 关键提醒（参见 onecolleague_help）
 
 MCP Tools (权威规程 + 执行接口)
-├── cccc_help：操作指南（规程）
-├── cccc_project_info：获取 PROJECT.md
-├── cccc_inbox_list / cccc_inbox_mark_read：收件箱
-└── cccc_message_send / cccc_message_reply：发送/回复
+├── onecolleague_help：操作指南（规程）
+├── onecolleague_project_info：获取 PROJECT.md
+├── onecolleague_inbox_list / onecolleague_inbox_mark_read：收件箱
+└── onecolleague_message_send / onecolleague_message_reply：发送/回复
 
 Ledger (完整记忆)
 └── 所有历史消息、事件
@@ -140,7 +140,7 @@ Ledger (完整记忆)
 
 ### 3.2 核心原则
 
-- **Do**: 一个权威规程（`cccc_help`）
+- **Do**: 一个权威规程（`onecolleague_help`）
 - **Do**: 内核强约束（RBAC 由 daemon 执行）
 - **Do**: 极短启动握手（Bootstrap）
 - **Don't**: 三套文案各写一遍
@@ -149,10 +149,10 @@ Ledger (完整记忆)
 
 ```
 1. 收到 SYSTEM 注入 → 知道自己是谁
-2. 调用 cccc_inbox_list → 获取未读消息
+2. 调用 onecolleague_inbox_list → 获取未读消息
 3. 处理消息 → 执行任务
-4. 调用 cccc_inbox_mark_read → 标记已读
-5. 调用 cccc_message_reply → 回复结果
+4. 调用 onecolleague_inbox_mark_read → 标记已读
+5. 调用 onecolleague_message_reply → 回复结果
 6. 等待下一条消息
 ```
 
@@ -210,7 +210,7 @@ Ledger (完整记忆)
 
 ### 5.4 远程访问（手机随时随地）
 
-当前阶段只提供**配置说明**（Web UI 的 Settings 弹窗里有 “Remote Access” 指南），CCCC 暂不内置 VPN/Tunnel 管理。
+当前阶段只提供**配置说明**（Web UI 的 Settings 弹窗里有 “Remote Access” 指南），OneColleague 暂不内置 VPN/Tunnel 管理。
 
 推荐方案：
 
@@ -222,7 +222,7 @@ Ledger (完整记忆)
 
 - **Tailscale（VPN）**
   - 安全边界清晰（Tailnet ACL）
-  - 推荐只绑定到 tailnet IP：`TAILSCALE_IP=$(tailscale ip -4)` 后用 `CCCC_WEB_HOST=$TAILSCALE_IP cccc`
+  - 推荐只绑定到 tailnet IP：`TAILSCALE_IP=$(tailscale ip -4)` 后用 `CCCC_WEB_HOST=$TAILSCALE_IP onecolleague`
   - 手机访问：`http://<TAILSCALE_IP>:8848/ui/`
 
 ## 6. Multi-Runtime 支持
@@ -241,27 +241,27 @@ Ledger (完整记忆)
 | neovate | `neovate` | Neovate Code |
 | custom | 自定义 | 任意命令 |
 
-CCCC 的 first-class runtime 正式支持仅限上面 8 个具名 CLI；`custom` 继续作为手动兜底入口。
+OneColleague 的 first-class runtime 正式支持仅限上面 8 个具名 CLI；`custom` 继续作为手动兜底入口。
 
 ### 6.2 Setup 命令
 
 ```bash
-cccc setup --runtime claude   # 配置 MCP（auto）
-cccc setup --runtime codex
-cccc setup --runtime droid
-cccc setup --runtime amp
-cccc setup --runtime auggie
-cccc setup --runtime neovate
-cccc setup --runtime gemini
-cccc setup --runtime kimi
-cccc setup --runtime custom
+onecolleague setup --runtime claude   # 配置 MCP（auto）
+onecolleague setup --runtime codex
+onecolleague setup --runtime droid
+onecolleague setup --runtime amp
+onecolleague setup --runtime auggie
+onecolleague setup --runtime neovate
+onecolleague setup --runtime gemini
+onecolleague setup --runtime kimi
+onecolleague setup --runtime custom
 ```
 
 ### 6.3 Runtime 检测
 
 ```bash
-cccc doctor        # 环境检查 + runtime 检测
-cccc runtime list  # 列出可用 runtime (JSON)
+onecolleague doctor        # 环境检查 + runtime 检测
+onecolleague runtime list  # 列出可用 runtime (JSON)
 ```
 
 ---

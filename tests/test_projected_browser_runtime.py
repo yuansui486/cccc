@@ -266,7 +266,7 @@ def _recv_socket_line(sock: socket.socket, *, timeout: float = 1.0) -> str:
 
 class TestProjectedBrowserRuntime(unittest.TestCase):
     def test_x11vnc_env_strips_wayland_session_markers(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         with patch.dict(
             runtime.os.environ,
@@ -287,7 +287,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertNotIn("WAYLAND_SOCKET", env)
 
     def test_x11vnc_start_uses_sanitized_x11_env(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         captured: dict[str, object] = {}
 
@@ -324,7 +324,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
             server.close()
 
     def test_x11vnc_refuses_non_cccc_owned_display(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         with patch.object(runtime.shutil, "which", return_value="/usr/bin/x11vnc"), patch.object(
             runtime.subprocess,
@@ -333,11 +333,11 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
             server, error = runtime._ProjectedVncServer.start(display=":0", display_owned=False)
 
         self.assertIsNone(server)
-        self.assertEqual(error, "display_not_cccc_owned")
+        self.assertEqual(error, "display_not_onecolleague_owned")
         popen.assert_not_called()
 
     def test_x11vnc_error_summary_preserves_wayland_cause(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         message = runtime._x11vnc_start_error(
             "x11vnc endpoint did not become ready",
@@ -346,7 +346,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertIn("x11vnc_wayland_env_detected", message)
 
     def test_projected_browser_session_captures_frames_only_for_viewers(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_cm = _FakePlaywrightCM()
         with (
@@ -393,7 +393,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
                 manager.close(key="test-capture-session")
 
     def test_projected_browser_capture_failures_do_not_fail_session_or_block_commands(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_runtime = _FailingCaptureRuntime()
         with patch.object(runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
@@ -436,7 +436,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
                 manager.close(key="test-capture-failure-session")
 
     def test_projected_browser_drains_commands_before_next_capture(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_runtime = _CountingCaptureRuntime()
         with patch.object(runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
@@ -493,7 +493,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
                 manager.close(key="test-command-priority-session")
 
     def test_vnc_viewer_mode_suppresses_cdp_frame_capture(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_runtime = _CountingCaptureRuntime()
         fake_vnc = _FakeVncServer()
@@ -540,7 +540,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertTrue(fake_vnc.closed)
 
     def test_socket_command_read_does_not_wait_for_timeout(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         runtime_sock, viewer_sock = socket.socketpair()
         try:
@@ -557,7 +557,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
             viewer_sock.close()
 
     def test_frame_stream_does_not_emit_state_for_every_frame(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_runtime = _CountingCaptureRuntime()
         with patch.object(runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
@@ -606,7 +606,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
                 manager.close(key="test-state-frame-decoupling-session")
 
     def test_chatgpt_submit_prompt_command_uses_projected_session_page(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         page = _FakePage()
         page.url = "https://chatgpt.com/"
@@ -623,11 +623,11 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
 
         with (
             patch(
-                "cccc.ports.web_model_browser_sidecar._submit_prompt",
+                "no1.ports.web_model_browser_sidecar._submit_prompt",
                 return_value={"send_selector": "#composer-submit-button", "submission_evidence": "message_echo"},
             ) as submit_prompt,
-            patch("cccc.ports.web_model_browser_sidecar._mark_page_pending_delivery") as mark_pending,
-            patch("cccc.ports.web_model_browser_sidecar._wait_for_conversation_url") as wait_conversation,
+            patch("no1.ports.web_model_browser_sidecar._mark_page_pending_delivery") as mark_pending,
+            patch("no1.ports.web_model_browser_sidecar._wait_for_conversation_url") as wait_conversation,
         ):
             result = session._apply_command(
                 projected,
@@ -658,7 +658,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertEqual(browser["pid"], 7654)
 
     def test_chatgpt_submit_prompt_command_reports_pending_new_chat_bind(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         page = _FakePage()
         page.url = "https://chatgpt.com/"
@@ -675,11 +675,11 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
 
         with (
             patch(
-                "cccc.ports.web_model_browser_sidecar._submit_prompt",
+                "no1.ports.web_model_browser_sidecar._submit_prompt",
                 return_value={"send_selector": "#composer-submit-button", "submission_evidence": "message_echo"},
             ),
-            patch("cccc.ports.web_model_browser_sidecar._mark_page_pending_delivery") as mark_pending,
-            patch("cccc.ports.web_model_browser_sidecar._wait_for_conversation_url", return_value="") as wait_conversation,
+            patch("no1.ports.web_model_browser_sidecar._mark_page_pending_delivery") as mark_pending,
+            patch("no1.ports.web_model_browser_sidecar._wait_for_conversation_url", return_value="") as wait_conversation,
         ):
             result = session._apply_command(
                 projected,
@@ -702,7 +702,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertEqual(browser["submission_evidence"], "message_echo")
 
     def test_chatgpt_auto_confirm_command_uses_projected_session_page(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         page = _FakePage()
         page.url = "https://chatgpt.com/c/bound-session"
@@ -718,7 +718,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.web_model_browser_sidecar._auto_confirm_page_tool_prompts",
+            "no1.ports.web_model_browser_sidecar._auto_confirm_page_tool_prompts",
             return_value={
                 "clicked": 1,
                 "candidate_count": 1,
@@ -742,7 +742,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertEqual(result.get("page_url"), "https://chatgpt.com/c/bound-session")
 
     def test_multiple_projected_browser_viewers_do_not_evict_each_other(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         session = runtime.ProjectedBrowserSession(
             session_key="test-browser-session",
@@ -776,7 +776,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
                     pass
 
     def test_headed_launch_uses_xvfb_env_when_display_missing(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         xvfb_proc = _FakeProc()
         fake_cm = _FakePlaywrightCM()
@@ -813,12 +813,12 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertIn("--window-position=0,0", list(launch_kwargs.get("args") or []))
         self.assertIn("xvfb", str(getattr(launched, "strategy", "") or ""))
         self.assertEqual((getattr(launched, "metadata", {}) or {}).get("display_owned"), True)
-        self.assertEqual((getattr(launched, "metadata", {}) or {}).get("display_owner"), "cccc_xvfb")
+        self.assertEqual((getattr(launched, "metadata", {}) or {}).get("display_owner"), "onecolleague_xvfb")
         launched.close()
         self.assertTrue(xvfb_proc.terminated or xvfb_proc.killed)
 
     def test_headed_launch_prefers_isolated_xvfb_even_when_display_exists(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         xvfb_proc = _FakeProc()
         fake_cm = _FakePlaywrightCM()
@@ -856,7 +856,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertTrue(xvfb_proc.terminated or xvfb_proc.killed)
 
     def test_headed_launch_does_not_fallback_to_host_display_when_isolation_fails(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_cm = _FakePlaywrightCM()
         with patch.object(runtime, "ensure_sync_playwright", return_value=lambda: fake_cm), patch.object(
@@ -875,7 +875,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertEqual(fake_cm.playwright.chromium.launch_calls, [])
 
     def test_macos_headed_launch_does_not_require_display_or_xvfb(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         browser_proc = _FakeProc()
         fake_cm = _FakePlaywrightCM()
@@ -911,7 +911,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertTrue(browser_proc.terminated or browser_proc.killed)
 
     def test_headed_launch_prefers_system_browser_cdp_when_available(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         browser_proc = _FakeProc()
         fake_cm = _FakePlaywrightCM()
@@ -947,7 +947,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertTrue(browser_proc.terminated or browser_proc.killed)
 
     def test_system_browser_can_use_profile_dir_directly(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         browser_proc = _FakeProc()
         fake_cm = _FakePlaywrightCM()
@@ -980,7 +980,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertTrue(browser_proc.terminated or browser_proc.killed)
 
     def test_missing_browser_channels_can_fallback_to_managed_chromium(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_cm = _FakePlaywrightCM()
         launch_calls = []
@@ -1014,7 +1014,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         launched.close()
 
     def test_require_system_browser_cdp_disables_managed_chromium_fallback(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_cm = _FakePlaywrightCM()
         with patch.object(runtime, "ensure_sync_playwright", return_value=lambda: fake_cm), patch.object(
@@ -1036,7 +1036,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         self.assertEqual(fake_cm.playwright.chromium.launch_calls, [])
 
     def test_existing_system_browser_cdp_can_be_adopted_without_relaunch(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         fake_cm = _FakePlaywrightCM()
         with patch.object(runtime, "ensure_sync_playwright", return_value=lambda: fake_cm), patch.object(
@@ -1073,7 +1073,7 @@ class TestProjectedBrowserRuntime(unittest.TestCase):
         launched.close()
 
     def test_capture_frame_uses_cdp_screencast(self) -> None:
-        from cccc.daemon.browser import projected_browser_runtime as runtime
+        from no1.daemon.browser import projected_browser_runtime as runtime
 
         page = _FakePage()
         context = _FakeContext()

@@ -16,7 +16,7 @@ class TestNomcpSessions(unittest.TestCase):
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
         os.environ["CCCC_HOME"] = td
-        os.environ["CCCC_WEB_PUBLIC_URL"] = "https://cccc.example.test/ui/"
+        os.environ["CCCC_WEB_PUBLIC_URL"] = "https://no1.example.test/ui/"
 
         def cleanup() -> None:
             td_ctx.__exit__(None, None, None)
@@ -32,26 +32,26 @@ class TestNomcpSessions(unittest.TestCase):
         return Path(td), cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _admin_token(self) -> str:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         return str(create_access_token("admin", is_admin=True).get("token") or "")
 
     def _repo(self, base: Path) -> Path:
         root = base / "repo"
         (root / "docs").mkdir(parents=True)
-        (root / "src" / "cccc").mkdir(parents=True)
+        (root / "src" / "demo_pkg").mkdir(parents=True)
         (root / "tests").mkdir(parents=True)
         (root / "web" / "src").mkdir(parents=True)
         (root / "README.md").write_text("hello README\nliteral a.b\n", encoding="utf-8")
         (root / "PROJECT.md").write_text("project brief\n", encoding="utf-8")
         (root / "docs" / "note.md").write_text("doc note\nneedle here\n", encoding="utf-8")
         (root / "docs" / "long.md").write_text("\n".join(f"line {idx}" for idx in range(1, 701)) + "\n", encoding="utf-8")
-        (root / "src" / "cccc" / "demo.py").write_text("print('demo')\n", encoding="utf-8")
+        (root / "src" / "demo_pkg" / "demo.py").write_text("print('demo')\n", encoding="utf-8")
         (root / "tests" / "test_demo.py").write_text("def test_demo():\n    assert True\n", encoding="utf-8")
         (root / "web" / "src" / "demo.ts").write_text("export const demo = 1;\n", encoding="utf-8")
         (root / ".env").write_text("SECRET=1\n", encoding="utf-8")
@@ -65,9 +65,9 @@ class TestNomcpSessions(unittest.TestCase):
         return root
 
     def _group(self, root: Path):
-        from cccc.kernel.group import attach_scope_to_group, create_group
-        from cccc.kernel.registry import load_registry
-        from cccc.kernel.scope import detect_scope
+        from no1.kernel.group import attach_scope_to_group, create_group
+        from no1.kernel.registry import load_registry
+        from no1.kernel.scope import detect_scope
 
         reg = load_registry()
         group = create_group(reg, title="nomcp-test", topic="")
@@ -92,7 +92,7 @@ class TestNomcpSessions(unittest.TestCase):
         secret = str(result.get("secret") or "")
         self.assertTrue(str(session.get("sid") or "").startswith("nomcp_"))
         self.assertTrue(secret.startswith("nomcps_"))
-        self.assertIn("https://cccc.example.test/nomcp/s/", str(session.get("session_url_with_token") or ""))
+        self.assertIn("https://no1.example.test/nomcp/s/", str(session.get("session_url_with_token") or ""))
         self.assertIn(f"token={secret}", str(session.get("session_url_with_token") or ""))
         return session, secret
 
@@ -173,7 +173,7 @@ class TestNomcpSessions(unittest.TestCase):
             session, secret = self._create_session(client, admin, group.group_id, allowed_paths=["docs"])
             sid = session["sid"]
 
-            src_resp = client.get(f"/nomcp/s/{sid}/read", params={"token": secret, "path": "src/cccc/demo.py", "format": "json"})
+            src_resp = client.get(f"/nomcp/s/{sid}/read", params={"token": secret, "path": "src/no1/demo.py", "format": "json"})
             self.assertEqual(src_resp.status_code, 403)
             env_resp = client.get(f"/nomcp/s/{sid}/read", params={"token": secret, "path": ".env", "format": "json"})
             self.assertEqual(env_resp.status_code, 403)

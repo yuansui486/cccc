@@ -3,21 +3,21 @@ import unittest
 
 class TestNodeEnv(unittest.TestCase):
     def test_appends_no_deprecation_by_default(self) -> None:
-        from cccc.util.node_env import with_node_deprecation_warnings_suppressed
+        from no1.util.node_env import with_node_deprecation_warnings_suppressed
 
         env = with_node_deprecation_warnings_suppressed({"NODE_OPTIONS": "--max-old-space-size=4096"})
 
         self.assertEqual(env["NODE_OPTIONS"], "--max-old-space-size=4096 --no-deprecation")
 
     def test_preserves_explicit_deprecation_debug_flags(self) -> None:
-        from cccc.util.node_env import with_node_deprecation_warnings_suppressed
+        from no1.util.node_env import with_node_deprecation_warnings_suppressed
 
         env = with_node_deprecation_warnings_suppressed({"NODE_OPTIONS": "--trace-deprecation"})
 
         self.assertEqual(env["NODE_OPTIONS"], "--trace-deprecation")
 
     def test_can_be_disabled(self) -> None:
-        from cccc.util.node_env import with_node_deprecation_warnings_suppressed
+        from no1.util.node_env import with_node_deprecation_warnings_suppressed
 
         env = with_node_deprecation_warnings_suppressed(
             {
@@ -29,7 +29,7 @@ class TestNodeEnv(unittest.TestCase):
         self.assertEqual(env["NODE_OPTIONS"], "--max-old-space-size=4096")
 
     def test_process_env_update_is_idempotent(self) -> None:
-        from cccc.util.node_env import suppress_node_deprecation_warnings_in_process
+        from no1.util.node_env import suppress_node_deprecation_warnings_in_process
 
         env = {"NODE_OPTIONS": "--max-old-space-size=4096"}
         suppress_node_deprecation_warnings_in_process(env)

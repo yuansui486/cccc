@@ -80,7 +80,7 @@ function eventTextMentionsTask(reminder: PetReminder, text: string): boolean {
     reminder.action.taskId ? `task_id=${String(reminder.action.taskId).trim()}` : "",
   );
   if (!taskIdToken || !normalizedText.includes(taskIdToken)) return false;
-  if (normalizedText.includes("cccc_task")) return true;
+  if (normalizedText.includes("onecolleague_task")) return true;
 
   return [
     reminder.action.title ? `title="${String(reminder.action.title).trim()}"` : "",

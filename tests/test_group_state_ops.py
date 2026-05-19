@@ -21,8 +21,8 @@ class TestGroupStateOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -55,7 +55,7 @@ class TestGroupStateOps(unittest.TestCase):
             idle, _ = self._call("group_set_state", {"group_id": group_id, "state": "idle", "by": "user"})
             self.assertTrue(idle.ok, getattr(idle, "error", None))
 
-            with patch("cccc.daemon.server.THROTTLE.clear_pending_system_notifies", return_value=1) as clear_mock:
+            with patch("no1.daemon.server.THROTTLE.clear_pending_system_notifies", return_value=1) as clear_mock:
                 active, _ = self._call("group_set_state", {"group_id": group_id, "state": "active", "by": "user"})
 
             self.assertTrue(active.ok, getattr(active, "error", None))

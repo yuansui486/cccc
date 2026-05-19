@@ -222,7 +222,7 @@ export async function createNomcpSession(args: {
     body: JSON.stringify({
       group_id: String(args.groupId || "").trim(),
       title: String(args.title || "No-MCP advisory session").trim(),
-      brief: String(args.brief || "Review the linked CCCC project context and return advisory findings.").trim(),
+      brief: String(args.brief || "Review the linked OneColleague project context and return advisory findings.").trim(),
       recipient: String(args.recipient || "user").trim() || "user",
       reply_to_event_id: String(args.replyToEventId || "").trim(),
       allowed_paths: Array.isArray(args.allowedPaths) ? args.allowedPaths : [],

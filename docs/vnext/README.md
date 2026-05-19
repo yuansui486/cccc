@@ -1,6 +1,6 @@
-# CCCC vNext Documentation
+# OneColleague vNext Documentation
 
-> CCCC = Collaborative Code Coordination Center
+> OneColleague = Collaborative Code Coordination Center
 > 
 > 一个全局的 AI Agent 协作中枢：单一 daemon 管理多个工作组，Web/CLI/IM 作为入口。
 >
@@ -13,16 +13,16 @@
 pip install -e .
 
 # 启动（daemon + web）
-cccc
+onecolleague
 
 # 打开 Web UI
 open http://127.0.0.1:8848/ui/
 
 # 或使用 CLI
-cccc attach .                    # 创建/绑定工作组
-cccc actor add agent-1 --runtime claude  # 添加 agent
-cccc group start                 # 启动所有 agents
-cccc send "Hello" --to @all      # 发送消息
+onecolleague attach .                    # 创建/绑定工作组
+onecolleague actor add agent-1 --runtime claude  # 添加 agent
+onecolleague group start                 # 启动所有 agents
+onecolleague send "Hello" --to @all      # 发送消息
 ```
 
 ## 文档结构
@@ -58,8 +58,8 @@ cccc send "Hello" --to @all      # 发送消息
 ~/.cccc/                          # CCCC_HOME
 ├── registry.json                 # 工作组索引
 ├── daemon/                       # daemon 运行时
-│   ├── ccccd.sock               # IPC socket
-│   └── ccccd.log
+│   ├── onecolleagued.sock               # IPC socket
+│   └── onecolleagued.log
 └── groups/<group_id>/
     ├── group.yaml               # 元数据
     ├── ledger.jsonl             # 事实流
@@ -76,6 +76,6 @@ cccc send "Hello" --to @all      # 发送消息
 
 ## 相关链接
 
-- 源码：`src/cccc/`
-- 老版本（v0.3.x tmux 版）：https://github.com/ChesterRa/cccc-tmux
+- 源码：`src/no1/`
+- 老版本（v0.3.x tmux 版）：https://github.com/ChesterRa/onecolleague-tmux
 - AGENTS.md（本地文件，不提交）：工作区开发规范/协作约定（可自行维护）

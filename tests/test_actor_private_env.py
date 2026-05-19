@@ -6,10 +6,10 @@ from pathlib import Path
 
 class TestActorPrivateEnv(unittest.TestCase):
     def test_private_env_user_only_permissions(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -70,10 +70,10 @@ class TestActorPrivateEnv(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_private_env_roundtrip_and_merge(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request, _merge_actor_env_with_private
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request, _merge_actor_env_with_private
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -178,8 +178,8 @@ class TestActorPrivateEnv(unittest.TestCase):
 
     def test_actor_add_can_set_env_private_before_first_start(self) -> None:
         """actor_add accepts write-only env_private (by=user) and persists it before the first start."""
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -225,9 +225,9 @@ class TestActorPrivateEnv(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_foreman_strict_clone_copies_private_env(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -314,8 +314,8 @@ class TestActorPrivateEnv(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_add_rejects_env_private_for_non_user(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         old_home = os.environ.get("CCCC_HOME")
         try:

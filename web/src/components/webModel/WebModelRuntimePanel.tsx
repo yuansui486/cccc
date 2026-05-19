@@ -169,7 +169,7 @@ function buildActivityBlock(session: WebModelBrowserSession | null, queuedCount:
       return {
         label: "Activity",
         value: String(health.delivery.label || "").trim() || "Submitting",
-        detail: String(health.delivery.reason || "").trim() || "CCCC is injecting this batch into ChatGPT.",
+        detail: String(health.delivery.reason || "").trim() || "OneColleague is injecting this batch into ChatGPT.",
         tone: "needs",
       };
     }
@@ -177,7 +177,7 @@ function buildActivityBlock(session: WebModelBrowserSession | null, queuedCount:
       return {
         label: "Activity",
         value: String(health.delivery.label || "").trim() || "Delivery unverified",
-        detail: String(health.delivery.reason || health.delivery.last_error || "").trim() || "CCCC attempted to submit the prompt, but could not verify whether ChatGPT accepted it.",
+        detail: String(health.delivery.reason || health.delivery.last_error || "").trim() || "OneColleague attempted to submit the prompt, but could not verify whether ChatGPT accepted it.",
         tone: "needs",
       };
     }
@@ -215,7 +215,7 @@ function buildActivityBlock(session: WebModelBrowserSession | null, queuedCount:
     return {
       label: "Activity",
       value: "Submitting",
-      detail: "CCCC is injecting this batch into ChatGPT.",
+      detail: "OneColleague is injecting this batch into ChatGPT.",
       tone: "needs",
     };
   }
@@ -223,7 +223,7 @@ function buildActivityBlock(session: WebModelBrowserSession | null, queuedCount:
     return {
       label: "Activity",
       value: "Delivery unverified",
-      detail: lastError || "CCCC attempted to submit the prompt, but could not verify whether ChatGPT accepted it.",
+      detail: lastError || "OneColleague attempted to submit the prompt, but could not verify whether ChatGPT accepted it.",
       tone: "needs",
     };
   }

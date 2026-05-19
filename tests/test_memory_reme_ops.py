@@ -23,8 +23,8 @@ class TestMemoryRemeOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -128,9 +128,9 @@ class TestMemoryRemeOps(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group("reme-auto-cycle")
-            from cccc.kernel.group import load_group
-            from cccc.kernel.ledger import append_event
-            from cccc.daemon.memory.memory_ops import run_auto_conversation_memory_cycle
+            from no1.kernel.group import load_group
+            from no1.kernel.ledger import append_event
+            from no1.daemon.memory.memory_ops import run_auto_conversation_memory_cycle
 
             # Seed context signals for signal_pack (coordination brief + task + agent state).
             seed_resp, _ = self._call(
@@ -323,7 +323,7 @@ class TestMemoryRemeOps(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group("reme-memory-shadow")
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             payload = {
                 "group_id": gid,
@@ -389,7 +389,7 @@ class TestMemoryRemeOps(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group("reme-signal-pack-rich")
-            from cccc.daemon.memory.memory_ops import _build_group_signal_pack
+            from no1.daemon.memory.memory_ops import _build_group_signal_pack
 
             create_resp, _ = self._call(
                 "context_sync",
@@ -471,7 +471,7 @@ class TestMemoryRemeOps(unittest.TestCase):
     def test_signal_pack_budget_drops_optional_rich_fields_before_core_hot_fields(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.memory.memory_ops import _normalize_signal_pack
+            from no1.daemon.memory.memory_ops import _normalize_signal_pack
 
             payload = {
                 "coordination_brief": {

@@ -1,11 +1,11 @@
-from cccc.daemon.messaging.chat_ops import _build_headless_delivery_text
-from cccc.daemon.messaging.actor_turn_rendering import build_actor_delivery_text
-from cccc.daemon.messaging.delivery import PendingMessage, render_single_message
-from cccc.daemon.messaging.inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
+from no1.daemon.messaging.chat_ops import _build_headless_delivery_text
+from no1.daemon.messaging.actor_turn_rendering import build_actor_delivery_text
+from no1.daemon.messaging.delivery import PendingMessage, render_single_message
+from no1.daemon.messaging.inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 
 
 def test_inbound_renderer_plain_send_matches_pty_and_headless_wrappers() -> None:
-    expected = "[cccc] user → peer1: hello"
+    expected = "[onecolleague] user → peer1: hello"
 
     assert render_actor_inbound_message(
         ActorInboundEnvelope(by="user", to=["peer1"], text="hello")
@@ -17,7 +17,7 @@ def test_inbound_renderer_plain_send_matches_pty_and_headless_wrappers() -> None
 
 
 def test_inbound_renderer_preserves_reply_quote_semantics() -> None:
-    expected = '[cccc] peer2 → peer1 (reply:abcdef12)\n> "外部用户原话": 收到，我来处理。'
+    expected = '[onecolleague] peer2 → peer1 (reply:abcdef12)\n> "外部用户原话": 收到，我来处理。'
 
     assert render_actor_inbound_message(
         ActorInboundEnvelope(
@@ -48,7 +48,7 @@ def test_inbound_renderer_preserves_reply_quote_semantics() -> None:
 
 
 def test_inbound_renderer_preserves_external_source_semantics() -> None:
-    expected = "[cccc] user[dingtalk / Alice / 1729] → peer1: 外部消息"
+    expected = "[onecolleague] user[dingtalk / Alice / 1729] → peer1: 外部消息"
 
     assert render_actor_inbound_message(
         ActorInboundEnvelope(
@@ -82,7 +82,7 @@ def test_inbound_renderer_preserves_external_source_semantics() -> None:
 
 
 def test_inbound_renderer_preserves_multiline_body() -> None:
-    expected = "[cccc] user → peer1:\nline one\nline two"
+    expected = "[onecolleague] user → peer1:\nline one\nline two"
 
     assert render_actor_inbound_message(
         ActorInboundEnvelope(by="user", to=["peer1"], text="line one\nline two")
@@ -113,7 +113,7 @@ def test_actor_delivery_text_points_attachments_to_file_read_tools() -> None:
         ],
     )
 
-    assert 'cccc_file(action="read", rel_path=...)' in text
+    assert 'onecolleague_file(action="read", rel_path=...)' in text
     assert 'action="blob_path"' in text
     assert "binary/local tools" in text
     assert "- notes.txt (12 bytes) [state/blobs/sha256_notes.txt]" in text

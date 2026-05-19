@@ -1,6 +1,6 @@
-# 一号同事相对 CCCC 的迁移保留清单
+# 一号同事相对 OneColleague 的迁移保留清单
 
-本文用于后续把最新版 `CCCC` 合并进当前 `OneColleague` 分支时，逐项确认哪些一号同事定制必须保留。
+本文用于后续把最新版 `OneColleague` 合并进当前 `OneColleague` 分支时，逐项确认哪些一号同事定制必须保留。
 
 这不是完整 changelog，而是面向 merge 的保留文档。
 
@@ -34,7 +34,7 @@
 - `79281d5 merge(main): refresh OneColleague onto cea6324`
 - `2231712 merge(main): refresh OneColleague onto c72adb0`
 
-后续 merge 最新 CCCC 时，本文只关注“一号同事相对原版 CCCC 的必保留行为”，不关注上游普通演进本身。
+后续 merge 最新 OneColleague 时，本文只关注“一号同事相对原版 OneColleague 的必保留行为”，不关注上游普通演进本身。
 
 ### 1.1 本轮（3/18）额外吸收框架
 
@@ -50,8 +50,8 @@
 
 本轮 changed-in-both 的高风险集合主要是：
 
-- `src/cccc/ports/web/app.py`
-- `src/cccc/ports/web/schemas.py`
+- `src/no1/ports/web/app.py`
+- `src/no1/ports/web/schemas.py`
 - `web/src/App.tsx`
 - `web/src/components/AgentTab.tsx`
 - `web/src/components/AppModals.tsx`
@@ -74,8 +74,8 @@
 
 这轮 changed-in-both 的高风险集合主要是：
 
-- `src/cccc/ports/web/app.py`
-- `src/cccc/ports/web/schemas.py`
+- `src/no1/ports/web/app.py`
+- `src/no1/ports/web/schemas.py`
 - `web/src/App.tsx`
 - `web/src/components/AppModals.tsx`
 - `web/src/components/AuthGate.tsx`
@@ -106,8 +106,8 @@
 
 这轮 changed-in-both 的高风险集合主要是：
 
-- `src/cccc/ports/web/app.py`
-- `src/cccc/ports/web/schemas.py`
+- `src/no1/ports/web/app.py`
+- `src/no1/ports/web/schemas.py`
 - `web/src/App.tsx`
 - `web/src/components/AppModals.tsx`
 - `web/src/components/SettingsModal.tsx`
@@ -151,7 +151,7 @@
 
 merge 风险：
 
-- 若上游改动 `index.html`、manifest 或 logo 引用路径，最容易回退到原始 CCCC 壳层。
+- 若上游改动 `index.html`、manifest 或 logo 引用路径，最容易回退到原始 OneColleague 壳层。
 - 若组件重新写死品牌名/图标路径，会让后续再升级时更容易漏改。
 
 ### 2.2 App 入口改为一号同事登录门禁
@@ -186,7 +186,7 @@ merge 风险：
 
 必须保留的行为：
 
-- 侧栏品牌区使用一号同事 logo 和品牌名，不回退到原始 `CCCC` 或旧 logo。
+- 侧栏品牌区使用一号同事 logo 和品牌名，不回退到原始 `OneColleague` 或旧 logo。
 - 桌面右上角保留账户入口，显示余额。
 - `doneHub.group === "pro"` 时，桌面右上角显示金色 `PRO` 标识。
 - 移动端菜单里也保留账户入口、余额和 `PRO` 标识。
@@ -302,7 +302,7 @@ merge 风险：
 
 必须保留的行为：
 
-- 全局主色和氛围色仍是当前的一号同事浅蓝/天空蓝体系，不回退到更早的绿色主导方案，也不回退到原始 CCCC 风格。
+- 全局主色和氛围色仍是当前的一号同事浅蓝/天空蓝体系，不回退到更早的绿色主导方案，也不回退到原始 OneColleague 风格。
 - `common.appName` 在中英日都保持为“一号同事”。
 - 账户入口、余额文案、退出登录、算力中心等相关文案继续保留当前多语言收口。
 - `formatDoneHubQuota()` 继续统一保留两位小数。
@@ -315,9 +315,9 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/app.py`
-- `src/cccc/ports/web/routes/done_hub.py`
-- `src/cccc/ports/web/schemas.py`
+- `src/no1/ports/web/app.py`
+- `src/no1/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/schemas.py`
 
 必须保留的行为：
 
@@ -329,7 +329,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 - `web/src/stores/useDoneHubStore.ts`
 - `web/src/App.tsx`
 
@@ -356,7 +356,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 - `web/src/types.ts`
 - `web/src/App.tsx`
 - `web/src/components/AppModals.tsx`
@@ -376,7 +376,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 
 必须保留的行为：
 
@@ -398,7 +398,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 
 必须保留的行为：
 
@@ -412,7 +412,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 - `tests/test_web_done_hub_routes.py`
 
 用户需求明确要求以 Windows 用户目录语义理解 `%USERPROFILE%`。
@@ -449,7 +449,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 - `tests/test_web_done_hub_routes.py`
 
 这是 merge 时必须逐字确认的点。
@@ -498,7 +498,7 @@ merge 风险：
 
 关键文件：
 
-- `src/cccc/ports/web/routes/done_hub.py`
+- `src/no1/ports/web/routes/done_hub.py`
 - `web/src/services/doneHub.ts`
 - `web/src/stores/useDoneHubStore.ts`
 
@@ -568,7 +568,7 @@ merge 风险：
 
 - 当前没有覆盖品牌/UI 收口线的前端自动化测试，所以这些点仍要靠 merge checklist 做人工核对。
 
-## 6. 合并最新版 CCCC 时的回灌检查表
+## 6. 合并最新版 OneColleague 时的回灌检查表
 
 建议后续 merge 完上游后，至少逐项检查以下内容：
 
@@ -592,7 +592,7 @@ merge 风险：
 
 ### 6.3 DoneHub 接入链
 
-- [ ] `src/cccc/ports/web/app.py` 仍注册 done-hub 路由
+- [ ] `src/no1/ports/web/app.py` 仍注册 done-hub 路由
 - [ ] `/api/v1/done_hub/login` 仍负责单次 provisioning
 - [ ] `/api/v1/done_hub/self` 仍纯刷新、无副作用
 - [ ] `session.group == "pro"` 时仍跳过本地配置写入
@@ -630,4 +630,4 @@ merge 风险：
 
 当前仍需如实保留的边界只有一条：
 
-- 品牌/UI 收口线尚未形成完整前端自动化测试，后续 merge 完最新 CCCC 后，仍建议做一轮人工浏览器视觉回归。
+- 品牌/UI 收口线尚未形成完整前端自动化测试，后续 merge 完最新 OneColleague 后，仍建议做一轮人工浏览器视觉回归。

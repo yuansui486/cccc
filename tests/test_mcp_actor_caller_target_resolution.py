@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 class TestMcpActorCallerTargetResolution(unittest.TestCase):
     def test_actor_add_uses_env_actor_as_caller(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -17,7 +17,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
                 out = mcp_server.handle_tool_call(
-                    "cccc_actor",
+                    "onecolleague_actor",
                     {
                         "action": "add",
                         "actor_id": "peer_new",
@@ -35,8 +35,8 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         self.assertEqual(args.get("actor_id"), "peer_new")
 
     def test_actor_start_uses_env_actor_as_caller(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -47,7 +47,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
                 out = mcp_server.handle_tool_call(
-                    "cccc_actor",
+                    "onecolleague_actor",
                     {
                         "action": "start",
                         "actor_id": "peer_new",
@@ -63,13 +63,13 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         self.assertEqual(args.get("actor_id"), "peer_new")
 
     def test_actor_add_requires_caller_identity(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.common import MCPError
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import MCPError
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False):
             with self.assertRaises(MCPError) as raised:
                 mcp_server.handle_tool_call(
-                    "cccc_actor",
+                    "onecolleague_actor",
                     {
                         "action": "add",
                         "group_id": "g_test",
@@ -81,8 +81,8 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         self.assertEqual(getattr(raised.exception, "code", ""), "missing_actor_id")
 
     def test_actor_add_forwards_profile_id(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -93,7 +93,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
                 out = mcp_server.handle_tool_call(
-                    "cccc_actor",
+                    "onecolleague_actor",
                     {
                         "action": "add",
                         "actor_id": "peer_new",
@@ -111,8 +111,8 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
         self.assertEqual(args.get("profile_id"), "ap_test")
 
     def test_actor_profile_list_uses_env_actor_as_caller(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         captured = []
 
@@ -126,7 +126,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
-                out = mcp_server.handle_tool_call("cccc_actor", {"action": "profile_list"})
+                out = mcp_server.handle_tool_call("onecolleague_actor", {"action": "profile_list"})
 
         self.assertIn("profiles", out)
         self.assertEqual([req.get("op") for req in captured], ["actor_profile_list", "actor_list"])

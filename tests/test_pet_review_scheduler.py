@@ -5,7 +5,7 @@ from unittest.mock import patch
 import tempfile
 import json
 
-from cccc.daemon.pet import review_scheduler
+from no1.daemon.pet import review_scheduler
 
 
 class _FakeGroup:
@@ -31,7 +31,7 @@ class TestPetReviewScheduler(unittest.TestCase):
         review_scheduler.cancel_pet_review("g-test")
 
     def test_assistive_job_registry_contains_pet_jobs(self) -> None:
-        from cccc.daemon.pet import assistive_jobs
+        from no1.daemon.pet import assistive_jobs
 
         self.assertIn(assistive_jobs.JOB_KIND_PET_REVIEW, assistive_jobs.registered_assistive_job_kinds())
         self.assertIn(assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH, assistive_jobs.registered_assistive_job_kinds())
@@ -149,8 +149,8 @@ class TestPetReviewScheduler(unittest.TestCase):
         emit_notify.assert_called_once()
 
     def test_review_packet_prefers_reason_bound_focus_task(self) -> None:
-        from cccc.kernel.context import Context, ContextStorage, Coordination, CoordinationBrief, Task, TaskStatus, WaitingOn
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.context import Context, ContextStorage, Coordination, CoordinationBrief, Task, TaskStatus, WaitingOn
+        from no1.kernel.ledger import append_event
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp) / "groups" / "g-demo")
@@ -217,8 +217,8 @@ class TestPetReviewScheduler(unittest.TestCase):
         self.assertIn("keep T031 open", str((packet.get("source_event") or {}).get("text") or ""))
 
     def test_review_packet_prefers_structured_source_task_id_over_generic_reason_pick(self) -> None:
-        from cccc.kernel.context import Context, ContextStorage, Coordination, CoordinationBrief, Task, TaskStatus, WaitingOn
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.context import Context, ContextStorage, Coordination, CoordinationBrief, Task, TaskStatus, WaitingOn
+        from no1.kernel.ledger import append_event
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp) / "groups" / "g-demo")
@@ -499,7 +499,7 @@ class TestPetReviewScheduler(unittest.TestCase):
 
 
     def test_review_reruns_after_in_flight_completion_when_new_signal_arrives(self) -> None:
-        from cccc.daemon.pet import assistive_jobs
+        from no1.daemon.pet import assistive_jobs
 
         emitted: list[tuple[str, set[str], str]] = []
 

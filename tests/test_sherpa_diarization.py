@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cccc.daemon.assistants.sherpa_diarization import normalize_diarization_segments, resolve_diarization_num_speakers
+from no1.daemon.assistants.sherpa_diarization import normalize_diarization_segments, resolve_diarization_num_speakers
 
 
 class SherpaDiarizationTests(unittest.TestCase):

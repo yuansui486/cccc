@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 class TestRunnerKindNoFallback(unittest.TestCase):
     def test_effective_runner_kind_stays_pty_even_if_backend_flag_is_false(self) -> None:
-        from cccc.daemon import server as daemon_server
-        from cccc.daemon.actors import runner_ops
+        from no1.daemon import server as daemon_server
+        from no1.daemon.actors import runner_ops
 
         with patch.object(daemon_server.pty_runner, "PTY_SUPPORTED", False, create=False), patch.object(
             runner_ops.pty_runner, "PTY_SUPPORTED", False, create=False
@@ -25,10 +25,10 @@ class TestRunnerKindNoFallback(unittest.TestCase):
         td = td_ctx.__enter__()
         os.environ["CCCC_HOME"] = td
         try:
-            from cccc.contracts.v1 import DaemonRequest
-            from cccc.daemon.server import handle_request, pty_runner as server_pty_runner
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import load_group
+            from no1.contracts.v1 import DaemonRequest
+            from no1.daemon.server import handle_request, pty_runner as server_pty_runner
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import load_group
 
             def call(op: str, args: dict):
                 return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
@@ -53,9 +53,9 @@ class TestRunnerKindNoFallback(unittest.TestCase):
             )
 
             with patch.object(server_pty_runner, "PTY_SUPPORTED", False, create=False), patch(
-                "cccc.daemon.server._ensure_mcp_installed", return_value=True
+                "no1.daemon.server._ensure_mcp_installed", return_value=True
             ), patch(
-                "cccc.daemon.group.group_lifecycle_ops.pty_runner.SUPERVISOR.start_actor",
+                "no1.daemon.group.group_lifecycle_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=RuntimeError("pty backend unavailable"),
             ):
                 start, _ = call("group_start", {"group_id": group_id, "by": "user"})
@@ -71,7 +71,7 @@ class TestRunnerKindNoFallback(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_codex_pty_uses_pty_supervisor_for_running_and_stop(self) -> None:
-        from cccc.daemon.actors import runner_ops
+        from no1.daemon.actors import runner_ops
 
         fake_group = object()
         with patch.object(runner_ops, "load_group", return_value=fake_group), patch.object(

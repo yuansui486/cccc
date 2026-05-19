@@ -31,7 +31,7 @@ class TestWebManifestStatic(unittest.TestCase):
             dist_tmp.cleanup()
             home_tmp.cleanup()
 
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app()), cleanup
 

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 class TestWebImConfigCanonicalization(unittest.TestCase):
     def test_canonicalize_wecom_env_refs(self) -> None:
-        from cccc.ports.im.config_schema import canonicalize_im_config
+        from no1.ports.im.config_schema import canonicalize_im_config
 
         result = canonicalize_im_config({
             "platform": "wecom",
@@ -22,7 +22,7 @@ class TestWebImConfigCanonicalization(unittest.TestCase):
         })
 
     def test_canonicalize_wecom_raw_values_in_env_slots_fall_back_to_value_keys(self) -> None:
-        from cccc.ports.im.config_schema import canonicalize_im_config
+        from no1.ports.im.config_schema import canonicalize_im_config
 
         result = canonicalize_im_config({
             "platform": "wecom",
@@ -37,7 +37,7 @@ class TestWebImConfigCanonicalization(unittest.TestCase):
         })
 
     def test_canonicalize_drops_legacy_weixin_command(self) -> None:
-        from cccc.ports.im.config_schema import canonicalize_im_config
+        from no1.ports.im.config_schema import canonicalize_im_config
 
         result = canonicalize_im_config({
             "platform": "weixin",
@@ -62,15 +62,15 @@ class TestWebImConfigCanonicalization(unittest.TestCase):
         return td, cleanup
 
     def _create_group(self, title: str = "im-cfg") -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title=title, topic="")
         return group.group_id
 
     def test_im_set_canonicalizes_legacy_token_fields(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -135,7 +135,7 @@ class TestWebImConfigCanonicalization(unittest.TestCase):
 
 
     def test_im_set_wecom_fields_round_trip(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:

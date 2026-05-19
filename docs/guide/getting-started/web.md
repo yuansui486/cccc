@@ -1,13 +1,13 @@
 # Web UI Quick Start
 
-Get started with CCCC using the Web interface.
+Get started with OneColleague using the Web interface.
 
-## Step 1: Start CCCC
+## Step 1: Start OneColleague
 
 Open a terminal and run:
 
 ```bash
-cccc
+onecolleague
 ```
 
 This starts both the daemon and the Web UI.
@@ -20,7 +20,7 @@ Open your browser and navigate to:
 http://127.0.0.1:8848/
 ```
 
-You should see the CCCC Web interface.
+You should see the OneColleague Web interface.
 
 ## Step 3: Create a Working Group
 
@@ -30,7 +30,7 @@ You should see the CCCC Web interface.
 ```bash
 # In another terminal
 cd /path/to/your/project
-cccc attach .
+onecolleague attach .
 ```
 
 3. Refresh the Web UI to see your new group
@@ -46,13 +46,13 @@ cccc attach .
 
 ## Step 5: Configure MCP (First Time Only)
 
-If this is your first time using CCCC with this runtime:
+If this is your first time using OneColleague with this runtime:
 
 ```bash
-cccc setup --runtime claude   # or codex, droid, etc.
+onecolleague setup --runtime claude   # or codex, droid, etc.
 ```
 
-This configures the agent to communicate with CCCC.
+This configures the agent to communicate with OneColleague.
 
 ## Step 6: Start the Agent
 
@@ -132,12 +132,12 @@ Agents can read and update this shared context.
 
 1. Check daemon is running:
    ```bash
-   cccc daemon status
+   onecolleague daemon status
    ```
 
 2. Try a different port:
    ```bash
-   CCCC_WEB_PORT=9000 cccc
+   CCCC_WEB_PORT=9000 onecolleague
    ```
 
 ### Agent won't start?
@@ -145,12 +145,12 @@ Agents can read and update this shared context.
 1. Check the terminal tab for errors
 2. Verify MCP setup:
    ```bash
-   cccc setup --runtime <name>
+   onecolleague setup --runtime <name>
    ```
 
 ### Can't see my project?
 
-Run `cccc attach .` in your project directory, then refresh the Web UI.
+Run `onecolleague attach .` in your project directory, then refresh the Web UI.
 
 ## Next Steps
 

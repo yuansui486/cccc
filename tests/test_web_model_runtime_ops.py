@@ -23,16 +23,16 @@ class TestWebModelRuntimeOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def _create_group_with_actor(self):
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
-        from cccc.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+        from no1.daemon.runner_state_ops import write_headless_state
 
         reg = load_registry()
         group = create_group(reg, title="web-model-runtime", topic="")
@@ -41,14 +41,14 @@ class TestWebModelRuntimeOps(unittest.TestCase):
         return group
 
     def _bind_chatgpt_conversation(self, group, actor_id: str = "peer1", url: str = "https://chatgpt.com/c/test-chat") -> None:
-        from cccc.ports.web_model_browser_sidecar import record_chatgpt_browser_state
+        from no1.ports.web_model_browser_sidecar import record_chatgpt_browser_state
 
         record_chatgpt_browser_state(group.group_id, actor_id, {"conversation_url": url})
 
     def _attach_repo_scope(self, group, root: Path):
-        from cccc.kernel.group import attach_scope_to_group
-        from cccc.kernel.registry import load_registry
-        from cccc.kernel.scope import detect_scope
+        from no1.kernel.group import attach_scope_to_group
+        from no1.kernel.registry import load_registry
+        from no1.kernel.scope import detect_scope
 
         root.mkdir(parents=True, exist_ok=True)
         (root / "README.md").write_text("repo context\n", encoding="utf-8")
@@ -85,9 +85,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
         }
 
     def _create_group_with_codex_actor(self):
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title="web-model-runtime-invalid", topic="")
@@ -95,9 +95,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
         return group
 
     def test_wait_next_turn_does_not_advance_cursor_until_complete(self) -> None:
-        from cccc.daemon.runner_state_ops import read_headless_state
-        from cccc.kernel.inbox import get_cursor, has_chat_ack
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.inbox import get_cursor, has_chat_ack
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:
@@ -161,7 +161,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_actor_list_reports_web_model_messages_queued_after_active_turn(self) -> None:
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:
@@ -223,8 +223,8 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_failed_complete_leaves_turn_unread_for_retry(self) -> None:
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:
@@ -286,17 +286,17 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             messages = turn.get("messages") or []
             self.assertEqual([str(item.get("kind") or "") for item in messages], ["chat.message"])
             self.assertIn("single pull task", str(turn.get("coalesced_text") or ""))
-            self.assertIn("[cccc] user → peer1", str(turn.get("coalesced_text") or ""))
+            self.assertIn("[onecolleague] user → peer1", str(turn.get("coalesced_text") or ""))
             self.assertNotIn("[#1", str(turn.get("coalesced_text") or ""))
         finally:
             cleanup()
 
     def test_browser_delivery_projected_session_submits_turn_and_commits_cursor(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.daemon.runner_state_ops import read_headless_state
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -323,7 +323,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -353,23 +353,23 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             self.assertIn("You are peer1", prompt)
             self.assertIn("Platform Invariants:", prompt)
             self.assertIn("Web transport:", prompt)
-            self.assertIn("do not call cccc_runtime_wait_next_turn", prompt)
+            self.assertIn("do not call onecolleague_runtime_wait_next_turn", prompt)
             self.assertIn("Text typed only in this web chat is not delivered", prompt)
             self.assertIn("If you respond: use MCP", prompt)
             self.assertIn("terminal output isn't delivered", prompt)
             self.assertIn("Verify reply_to/to", prompt)
             self.assertIn("avoid routine @all", prompt)
             self.assertIn("resume active work unless priority changed", prompt)
-            self.assertNotIn("When done: cccc_runtime_complete_turn(", prompt)
+            self.assertNotIn("When done: onecolleague_runtime_complete_turn(", prompt)
             self.assertNotIn("webturn:peer1:", prompt)
-            self.assertNotIn("Browser-delivered CCCC turn", prompt)
+            self.assertNotIn("Browser-delivered OneColleague turn", prompt)
             self.assertNotIn("complete=", prompt)
             self.assertNotIn("future turns are not blocked", prompt)
             self.assertNotIn("Messages:", prompt)
             self.assertNotIn("Browser-delivered message batch", prompt)
             self.assertNotIn("Work from the messages below", prompt)
             self.assertNotIn("This ChatGPT chat is the browser surface", prompt)
-            self.assertIn("[cccc] user → peer1", prompt)
+            self.assertIn("[onecolleague] user → peer1", prompt)
             self.assertNotIn("[#1", prompt)
             self.assertNotIn("Browser Web Model actor", prompt)
             self.assertTrue(
@@ -383,8 +383,8 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_does_not_include_nomcp_fallback_when_public_https_is_available(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.ledger import append_event
 
         home, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -402,7 +402,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 data={"text": "review this if MCP is unavailable", "to": ["peer1"]},
             )
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
-            os.environ["CCCC_WEB_PUBLIC_URL"] = "https://cccc.example.test/ui/"
+            os.environ["CCCC_WEB_PUBLIC_URL"] = "https://no1.example.test/ui/"
             prompts: list[str] = []
 
             def submit_via_session(**kwargs) -> dict:
@@ -414,7 +414,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -439,10 +439,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_uses_projected_chatgpt_session(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -484,7 +484,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 }
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -512,9 +512,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_builtin_browser_delivery_retries_once_after_transient_projected_page_close(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -553,10 +553,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=submit_via_session,
                 ),
-                patch("cccc.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session") as close_session,
+                patch("no1.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session") as close_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
@@ -573,9 +573,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_builtin_browser_delivery_retries_once_after_transient_hidden_input_click(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -603,10 +603,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=submit_via_session,
                 ),
-                patch("cccc.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session") as close_session,
+                patch("no1.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session") as close_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
@@ -623,9 +623,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_builtin_browser_delivery_retries_once_after_inserted_without_submit(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -653,10 +653,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=submit_via_session,
                 ),
-                patch("cccc.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session") as close_session,
+                patch("no1.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session") as close_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
 
@@ -673,9 +673,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_reseeds_legacy_bootstrap_marker_without_digest(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -705,7 +705,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 return self._projected_submit_result(delivery_id="delivery-legacy")
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -723,11 +723,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_reseeds_after_headless_actor_restart(self) -> None:
-        from cccc.daemon.actors import web_model_browser_delivery as delivery
-        from cccc.daemon.runner_state_ops import write_headless_state
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import record_chatgpt_browser_state
+        from no1.daemon.actors import web_model_browser_delivery as delivery
+        from no1.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import find_actor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -764,7 +764,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 return self._projected_submit_result(delivery_id="delivery-restart-seed")
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = delivery.submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -782,12 +782,12 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_projected_session_failure_marks_turn_failed_without_redelivery(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.daemon.runner_state_ops import read_headless_state
-        from cccc.kernel.inbox import unread_messages
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.inbox import unread_messages
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -805,7 +805,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=RuntimeError("browser unavailable"),
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -845,7 +845,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 return self._projected_submit_result(delivery_id="delivery-after-failure")
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_success,
             ):
                 result2 = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=second["id"])
@@ -864,11 +864,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_ambiguous_submit_commits_cursor_without_failed_status(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.daemon.runner_state_ops import read_headless_state
-        from cccc.kernel.inbox import get_cursor, unread_messages
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.inbox import get_cursor, unread_messages
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -886,7 +886,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=RuntimeError(
                     "ChatGPT submit action was attempted but submission could not be verified; "
                     "submission_verification=ambiguous; attempted_action=#composer-submit-button"
@@ -920,10 +920,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_weak_submit_evidence_is_unverified_not_submitted(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor, unread_messages
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor, unread_messages
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -941,7 +941,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             os.environ["CCCC_WEB_MODEL_DELIVERY_MODE"] = "browser"
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 return_value=self._projected_submit_result(
                     delivery_id="delivery-weak",
                     submission_evidence="running_without_echo",
@@ -975,10 +975,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_requires_bound_target_chat_before_claiming_turn(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.daemon.runner_state_ops import read_headless_state
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.daemon.runner_state_ops import read_headless_state
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1010,10 +1010,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_can_auto_bind_new_chat_after_first_submit(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1047,7 +1047,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -1071,10 +1071,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_new_chat_without_final_url_commits_delivered_turn(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1109,11 +1109,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=submit_via_session,
                 ),
                 patch(
-                    "cccc.daemon.actors.web_model_tool_confirm_watcher.ensure_web_model_tool_confirm_watcher",
+                    "no1.daemon.actors.web_model_tool_confirm_watcher.ensure_web_model_tool_confirm_watcher",
                     return_value=True,
                 ) as ensure_watcher,
             ):
@@ -1149,10 +1149,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_new_chat_weak_evidence_is_ambiguous_not_pending_bind(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor, unread_messages
-        from cccc.kernel.ledger import append_event, read_last_lines
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor, unread_messages
+        from no1.kernel.ledger import append_event, read_last_lines
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1187,7 +1187,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=event["id"])
@@ -1213,10 +1213,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_resolved_pending_new_chat_does_not_reseed(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1250,7 +1250,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=first_submit,
             ):
                 first_result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=first["id"])
@@ -1284,7 +1284,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=second_submit,
             ):
                 second_result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=second["id"])
@@ -1304,10 +1304,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_waits_for_pending_new_chat_resolution_before_resending(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1335,11 +1335,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_delivery.resolve_pending_chatgpt_conversation",
+                    "no1.daemon.actors.web_model_browser_delivery.resolve_pending_chatgpt_conversation",
                     return_value={"ok": True, "resolved": False, "pending": True, "submitted": True},
                 ) as resolve,
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=AssertionError("submit should not run while bind is pending"),
                 ) as submit,
             ):
@@ -1358,10 +1358,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_retries_stale_pending_new_chat_bind(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1403,11 +1403,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_delivery.resolve_pending_chatgpt_conversation",
+                    "no1.daemon.actors.web_model_browser_delivery.resolve_pending_chatgpt_conversation",
                     return_value={"ok": True, "resolved": False, "pending": True, "submitted": True},
                 ) as resolve,
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=submit_via_session,
                 ),
             ):
@@ -1431,10 +1431,10 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_resolves_pending_new_chat_then_delivers_to_bound_url(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1483,9 +1483,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 )
 
             with (
-                patch("cccc.daemon.actors.web_model_browser_delivery.resolve_pending_chatgpt_conversation", side_effect=resolve),
+                patch("no1.daemon.actors.web_model_browser_delivery.resolve_pending_chatgpt_conversation", side_effect=resolve),
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                     side_effect=submit_via_session,
                 ),
             ):
@@ -1507,9 +1507,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_retries_stale_active_turn_before_next_delivery(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.actors.web_model_browser_delivery import submit_next_web_model_browser_turn
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         old_mode = os.environ.get("CCCC_WEB_MODEL_DELIVERY_MODE")
@@ -1545,7 +1545,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
                 return self._projected_submit_result(delivery_id="delivery-2")
 
             with patch(
-                "cccc.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
+                "no1.daemon.actors.web_model_browser_session.submit_prompt_via_web_model_chatgpt_browser_session",
                 side_effect=submit_via_session,
             ):
                 result = submit_next_web_model_browser_turn(group.group_id, "peer1", trigger_event_id=new_event["id"])
@@ -1562,15 +1562,15 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_browser_delivery_schedules_even_when_previous_turn_is_active(self) -> None:
-        from cccc.daemon.actors.web_model_browser_delivery import schedule_web_model_browser_delivery
-        from cccc.daemon.runner_state_ops import update_headless_state
+        from no1.daemon.actors.web_model_browser_delivery import schedule_web_model_browser_delivery
+        from no1.daemon.runner_state_ops import update_headless_state
 
         _, cleanup = self._with_home()
         try:
             group = self._create_group_with_actor()
             update_headless_state(group.group_id, "peer1", status="working", active_turn_id="turn-active")
 
-            with patch("cccc.daemon.actors.web_model_browser_delivery.threading.Thread") as thread_cls:
+            with patch("no1.daemon.actors.web_model_browser_delivery.threading.Thread") as thread_cls:
                 scheduled = schedule_web_model_browser_delivery(group_id=group.group_id, actor_id="peer1")
 
             self.assertTrue(scheduled)
@@ -1579,7 +1579,7 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_complete_turn_can_schedule_next_browser_delivery(self) -> None:
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:
@@ -1595,11 +1595,11 @@ class TestWebModelRuntimeOps(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.daemon.actors.web_model_browser_delivery.web_model_browser_delivery_enabled",
+                    "no1.daemon.actors.web_model_browser_delivery.web_model_browser_delivery_enabled",
                     return_value=True,
                 ),
                 patch(
-                    "cccc.daemon.actors.web_model_browser_delivery.schedule_web_model_browser_delivery",
+                    "no1.daemon.actors.web_model_browser_delivery.schedule_web_model_browser_delivery",
                     return_value=True,
                 ) as schedule,
             ):
@@ -1621,8 +1621,8 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_complete_turn_closes_browser_auto_reload_window(self) -> None:
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         try:
@@ -1668,9 +1668,9 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_stopped_web_model_actor_does_not_receive_pull_turn(self) -> None:
-        from cccc.daemon.runner_state_ops import remove_headless_state
-        from cccc.kernel.actors import update_actor
-        from cccc.kernel.ledger import append_event
+        from no1.daemon.runner_state_ops import remove_headless_state
+        from no1.kernel.actors import update_actor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:
@@ -1697,8 +1697,8 @@ class TestWebModelRuntimeOps(unittest.TestCase):
             cleanup()
 
     def test_complete_rejects_non_contiguous_unread_prefix(self) -> None:
-        from cccc.kernel.inbox import get_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.inbox import get_cursor
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:

@@ -29,11 +29,11 @@ class TestWeixinSidecarPath(unittest.TestCase):
         return td, cleanup
 
     def test_resolve_weixin_sidecar_script_path_materializes_packaged_bundle(self) -> None:
-        from cccc.ports.im.weixin_sidecar import resolve_weixin_sidecar_script_path
+        from no1.ports.im.weixin_sidecar import resolve_weixin_sidecar_script_path
 
         home, cleanup = self._with_home()
         try:
-            with patch("cccc.ports.im.weixin_sidecar._repo_sidecar_path", return_value=home / "missing.mjs"):
+            with patch("no1.ports.im.weixin_sidecar._repo_sidecar_path", return_value=home / "missing.mjs"):
                 path = resolve_weixin_sidecar_script_path()
 
             self.assertEqual(path, home / "cache" / "sidecars" / "weixin_sidecar.mjs")
@@ -51,9 +51,9 @@ class TestWeixinSidecarPath(unittest.TestCase):
             cleanup()
 
     def test_resolve_weixin_sidecar_script_path_falls_back_to_repo_script(self) -> None:
-        from cccc.ports.im.weixin_sidecar import resolve_weixin_sidecar_script_path
+        from no1.ports.im.weixin_sidecar import resolve_weixin_sidecar_script_path
 
-        with patch("cccc.ports.im.weixin_sidecar._packaged_sidecar_bundle_bytes", return_value={}):
+        with patch("no1.ports.im.weixin_sidecar._packaged_sidecar_bundle_bytes", return_value={}):
             path = resolve_weixin_sidecar_script_path()
 
         self.assertTrue(path.exists())
@@ -61,7 +61,7 @@ class TestWeixinSidecarPath(unittest.TestCase):
 
     def test_packaged_sidecar_bundle_matches_repo_bundle(self) -> None:
         repo_dir = self._repo_root() / "scripts" / "im"
-        packaged_dir = self._repo_root() / "src" / "cccc" / "resources" / "im"
+        packaged_dir = self._repo_root() / "src" / "no1" / "resources" / "im"
 
         for filename in ("weixin_sidecar.mjs", "package.json", "package-lock.json"):
             with self.subTest(filename=filename):

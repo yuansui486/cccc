@@ -6,9 +6,9 @@ from pathlib import Path
 
 class TestBlobPathResolution(unittest.TestCase):
     def test_resolve_blob_attachment_path_guards_scope(self) -> None:
-        from cccc.kernel.blobs import resolve_blob_attachment_path
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.blobs import resolve_blob_attachment_path
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:

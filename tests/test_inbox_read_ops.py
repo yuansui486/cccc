@@ -20,8 +20,8 @@ class TestInboxReadOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -163,10 +163,10 @@ class TestInboxReadOps(unittest.TestCase):
             cleanup()
 
     def test_internal_pet_does_not_match_peer_or_broadcast_chat_targets(self) -> None:
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.inbox import is_message_for_actor
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.inbox import is_message_for_actor
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:

@@ -10,8 +10,8 @@ _CLEAN_ENV = {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}
 
 class TestMcpMessageSendReplyRequired(unittest.TestCase):
     def test_message_send_coerces_reply_required_string(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -22,7 +22,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_message_send",
+                "onecolleague_message_send",
                 {
                     "group_id": "g_test",
                     "actor_id": "peer1",
@@ -39,8 +39,8 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertTrue(args.get("reply_required") is True)
 
     def test_message_send_passes_refs(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -53,7 +53,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_message_send",
+                "onecolleague_message_send",
                 {
                     "group_id": "g_test",
                     "actor_id": "peer1",
@@ -69,8 +69,8 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertEqual(args.get("refs"), refs)
 
     def test_message_send_uses_cross_group_op_for_explicit_destination(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -81,7 +81,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_message_send",
+                "onecolleague_message_send",
                 {
                     "group_id": "g_runtime",
                     "dst_group_id": "g_selected",
@@ -100,8 +100,8 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertEqual(args.get("to"), ["@foreman"])
 
     def test_message_reply_passes_refs(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -114,7 +114,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_message_reply",
+                "onecolleague_message_reply",
                 {
                     "group_id": "g_test",
                     "actor_id": "peer1",
@@ -130,8 +130,8 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertEqual(args.get("refs"), refs)
 
     def test_tracked_send_passes_task_contract_args(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -143,7 +143,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_tracked_send",
+                "onecolleague_tracked_send",
                 {
                     "group_id": "g_test",
                     "actor_id": "foreman",
@@ -166,10 +166,10 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertTrue(args.get("reply_required"))
 
     def test_message_send_allows_codex_headless_actor(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -203,7 +203,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
 
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
                 out = mcp_server.handle_tool_call(
-                    "cccc_message_send",
+                    "onecolleague_message_send",
                     {
                         "group_id": group_id,
                         "actor_id": "peer1",

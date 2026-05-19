@@ -1,6 +1,6 @@
-# Releasing CCCC 0.4.x
+# Releasing OneColleague 0.4.x
 
-This repo publishes the Python package **`cccc-pair`** (CLI command: **`cccc`**).
+This repo publishes the Python package **`no1`** (CLI command: **`onecolleague`**).
 
 ## RC19 Program
 
@@ -15,8 +15,8 @@ For `v0.4.0rc19`, release execution is governed by:
 The GitHub Actions workflow builds and uploads:
 
 - Python `sdist` + `wheel`
-- Bundled Web UI assets (built from `web/` and packaged under `cccc/ports/web/dist/`)
-- Embedded MCP server (`cccc mcp`) + help playbook (`cccc_help`, sourced from `cccc/resources/cccc-help.md`)
+- Bundled Web UI assets (built from `web/` and packaged under `no1/ports/web/dist/`)
+- Embedded MCP server (`onecolleague mcp`) + help playbook (`onecolleague_help`, sourced from `no1/resources/onecolleague-help.md`)
 
 ## Tag ↔ Version conventions
 
@@ -33,12 +33,12 @@ The release workflow is tag-driven (`v*`) and enforces that the git tag matches 
 
 1. Bump `pyproject.toml` version.
 2. Build + verify:
-   - `python -m compileall -q src/cccc`
+   - `python -m compileall -q src/no1`
    - `python -m build`
    - `python -m twine check dist/*`
 3. Smoke-test the wheel:
    - `python -m pip install --force-reinstall dist/*.whl`
-   - `cccc version`
+   - `onecolleague version`
 4. Tag and push:
    - `git tag -a v0.4.0-rcN -m "v0.4.0-rcN"`
    - `git push --tags`
@@ -48,5 +48,5 @@ The release workflow is tag-driven (`v*`) and enforces that the git tag matches 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url https://test.pypi.org/simple \
-  cccc-pair==0.4.0rcN
+  no1==0.4.0rcN
 ```

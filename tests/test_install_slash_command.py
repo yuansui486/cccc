@@ -3,7 +3,7 @@ import unittest
 
 class TestInstallSlashCommand(unittest.TestCase):
     def test_accepts_multiple_target_shapes(self) -> None:
-        from cccc.daemon.messaging.install_slash_command import parse_install_slash_command
+        from no1.daemon.messaging.install_slash_command import parse_install_slash_command
 
         cases = {
             "/install https://github.com/obra/superpowers": ("https://github.com/obra/superpowers", "github"),
@@ -26,7 +26,7 @@ class TestInstallSlashCommand(unittest.TestCase):
         self.assertIsNone(parse_install_slash_command("please /install context7"))
 
     def test_task_imports_then_enables_for_group_by_default(self) -> None:
-        from cccc.daemon.messaging.install_slash_command import (
+        from no1.daemon.messaging.install_slash_command import (
             parse_install_slash_command,
             render_install_command_task,
         )
@@ -37,7 +37,7 @@ class TestInstallSlashCommand(unittest.TestCase):
 
         task = render_install_command_task(parsed)
 
-        self.assertIn("Default action: call cccc_capability_install for the target with scope=group.", task)
+        self.assertIn("Default action: call onecolleague_capability_install for the target with scope=group.", task)
         self.assertIn("The install operation must import registry records from capability ids, repos, URLs, or local SKILL.md paths", task)
         self.assertIn("enable group scope; and return use-ready capability ids.", task)
         self.assertIn("Any activate, assign, autoload, or use step must operate on the imported CCCC capability record.", task)

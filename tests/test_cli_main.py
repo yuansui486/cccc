@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 class TestCliMain(unittest.TestCase):
     def test_main_uses_default_entry_when_no_subcommand(self) -> None:
-        cli_main = importlib.import_module("cccc.cli.main")
+        cli_main = importlib.import_module("no1.cli.main")
 
         with patch.object(cli_main, "_default_entry", return_value=7) as mock_default:
             rc = cli_main.main([])
@@ -17,7 +17,7 @@ class TestCliMain(unittest.TestCase):
         mock_default.assert_called_once_with(web_host_override="", web_port_override=None)
 
     def test_main_applies_top_level_port_override_to_default_entry_only_for_invocation(self) -> None:
-        cli_main = importlib.import_module("cccc.cli.main")
+        cli_main = importlib.import_module("no1.cli.main")
 
         old_port = os.environ.get("CCCC_WEB_PORT")
 
@@ -41,7 +41,7 @@ class TestCliMain(unittest.TestCase):
         self.assertEqual(os.environ.get("CCCC_WEB_PORT"), old_port)
 
     def test_main_accepts_top_level_port_override_before_subcommand(self) -> None:
-        cli_main = importlib.import_module("cccc.cli.main")
+        cli_main = importlib.import_module("no1.cli.main")
 
         old_port = os.environ.get("CCCC_WEB_PORT")
 

@@ -311,7 +311,7 @@
     "parentTask": "親タスク",
     "pendingHandoffs": "保留中の引き継ぎ",
     "petPersonaTitle": "ペット人格",
-    "petPersonaHint": "このグループの CCCC_HELP.md 内にある `## @pet` ブロックとして保存されます。空の場合は既定シードから始まり、ここでペットの安定した連携スタイルを調整できます。",
+    "petPersonaHint": "このグループの ONECOLLEAGUE_HELP.md 内にある `## @pet` ブロックとして保存されます。空の場合は既定シードから始まり、ここでペットの安定した連携スタイルを調整できます。",
     "petPersonaPlaceholder": "Web ペットを低ノイズな調整補助として記述してください。ルーティングの作法、許可された行動、やってはいけないことに絞ってください。",
     "petPersonaSaved": "ペット人格を保存しました。",
     "personaNotes": "ペルソナメモ",

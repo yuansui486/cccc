@@ -9,11 +9,11 @@ import unittest
 
 class TestEventsStreamResumeFiltering(unittest.TestCase):
     def test_actor_view_resume_filters_visibility_and_echo(self) -> None:
-        from cccc.daemon.messaging.streaming import stream_events_to_socket
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.streaming import stream_events_to_socket
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.ledger import append_event
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -143,10 +143,10 @@ class TestEventsStreamResumeFiltering(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_resume_falls_back_to_since_ts_when_event_id_missing(self) -> None:
-        from cccc.daemon.messaging.streaming import _resume_candidates
-        from cccc.kernel.group import create_group
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.streaming import _resume_candidates
+        from no1.kernel.group import create_group
+        from no1.kernel.ledger import append_event
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:

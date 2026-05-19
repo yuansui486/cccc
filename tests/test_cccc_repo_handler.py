@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 class TestCcccRepoHandler(unittest.TestCase):
     def test_read_text_reads_only_requested_byte_limit(self) -> None:
-        from cccc.ports.mcp.handlers.cccc_repo import _read_text
+        from no1.ports.mcp.handlers.onecolleague_repo import _read_text
 
         read_sizes: list[int] = []
 
@@ -37,7 +37,7 @@ class TestCcccRepoHandler(unittest.TestCase):
         self.assertEqual(sha256, "")
 
     def test_read_text_returns_sha256_for_complete_read(self) -> None:
-        from cccc.ports.mcp.handlers.cccc_repo import _read_text
+        from no1.ports.mcp.handlers.onecolleague_repo import _read_text
 
         payload = b"small text\n"
         with (

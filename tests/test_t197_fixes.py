@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
-from cccc.ports.im.adapters.base import IMAdapter, OutboundStreamHandle
+from no1.ports.im.adapters.base import IMAdapter, OutboundStreamHandle
 
 
 class MultiSubStreamAdapter(IMAdapter):
@@ -170,9 +170,9 @@ def _make_bridge(adapter, subscriber_specs):
 
     subscriber_specs: list of dicts with keys chat_id, thread_id, verbose.
     """
-    from cccc.kernel.group import create_group
-    from cccc.kernel.registry import load_registry
-    from cccc.ports.im.bridge import IMBridge
+    from no1.kernel.group import create_group
+    from no1.kernel.registry import load_registry
+    from no1.ports.im.bridge import IMBridge
 
     old_home = os.environ.get("CCCC_HOME")
     td_ctx = tempfile.TemporaryDirectory()
@@ -391,7 +391,7 @@ class TestE2ThrottleCrossCallSurvival(unittest.TestCase):
 
     def test_card_client_is_persistent(self) -> None:
         """_get_card_client() returns the same instance across multiple calls."""
-        from cccc.ports.im.adapters.dingtalk import DingTalkAdapter
+        from no1.ports.im.adapters.dingtalk import DingTalkAdapter
 
         adapter = DingTalkAdapter.__new__(DingTalkAdapter)
         # Manually set required attributes
@@ -411,7 +411,7 @@ class TestE2ThrottleCrossCallSurvival(unittest.TestCase):
 
     def test_begin_stream_returns_none_when_card_creation_fails(self) -> None:
         """DingTalkAdapter should degrade cleanly when AI Card creation fails."""
-        from cccc.ports.im.adapters.dingtalk import DingTalkAdapter
+        from no1.ports.im.adapters.dingtalk import DingTalkAdapter
 
         class FakeCardClient:
             def create_card(self, chat_id: str, text: str) -> None:
@@ -429,7 +429,7 @@ class TestE2ThrottleCrossCallSurvival(unittest.TestCase):
 
     def test_throttle_state_dataclass_has_no_pending_task(self) -> None:
         """_ThrottleState should not have pending_task field after E2 cleanup."""
-        from cccc.ports.im.adapters.dingtalk_card import _ThrottleState
+        from no1.ports.im.adapters.dingtalk_card import _ThrottleState
 
         state = _ThrottleState()
         self.assertFalse(

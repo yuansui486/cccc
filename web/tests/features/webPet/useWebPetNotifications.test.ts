@@ -81,7 +81,7 @@ describe("shouldSuppressTaskProposalEcho", () => {
         kind: "chat.message",
         by: "user",
         data: {
-          text: 'Pet task proposal: please use cccc_task to update this task (task_id=T192, title="M1-2: Bridge 出站链路 stream_emit daemon op").',
+          text: 'Pet task proposal: please use onecolleague_task to update this task (task_id=T192, title="M1-2: Bridge 出站链路 stream_emit daemon op").',
           to: ["@foreman"],
         },
       },
@@ -199,7 +199,7 @@ describe("shouldSuppressTaskProposalEcho", () => {
         groupId: "g-1",
         operation: "update",
         taskId: "T192",
-        text: "请用 cccc_task 把 T192 标记成 waiting_on=user。",
+        text: "请用 onecolleague_task 把 T192 标记成 waiting_on=user。",
       },
     });
     const events: LedgerEvent[] = [
@@ -209,7 +209,7 @@ describe("shouldSuppressTaskProposalEcho", () => {
         kind: "chat.message",
         by: "user",
         data: {
-          text: "请用 cccc_task 把 T192 标记成 waiting_on=user。",
+          text: "请用 onecolleague_task 把 T192 标记成 waiting_on=user。",
           to: ["@foreman"],
         },
       },

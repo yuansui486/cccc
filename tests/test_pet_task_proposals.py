@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from cccc.kernel.pet_task_proposals import (
+from no1.kernel.pet_task_proposals import (
     build_task_proposal_candidates,
     build_task_proposal_summary_lines,
 )
@@ -100,7 +100,7 @@ class TestPetTaskProposals(unittest.TestCase):
         self.assertEqual(proposals[0]["action"]["task_id"], "T2")
 
     def test_build_task_proposal_candidates_suppresses_recent_user_echo_for_same_task(self) -> None:
-        with patch("cccc.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
+        with patch("no1.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
             proposals = build_task_proposal_candidates(
                 [_task("T192", title="Bridge 出站链路 stream_emit daemon op", status="active", blocked_by=["T191"])],
                 recent_chat_events=[
@@ -111,7 +111,7 @@ class TestPetTaskProposals(unittest.TestCase):
                         "ts": "2026-03-28T00:05:00Z",
                         "data": {
                             "to": ["@foreman"],
-                            "text": 'Pet task proposal: please use cccc_task to update this task (task_id=T192, title="Bridge 出站链路 stream_emit daemon op").',
+                            "text": 'Pet task proposal: please use onecolleague_task to update this task (task_id=T192, title="Bridge 出站链路 stream_emit daemon op").',
                         },
                     }
                 ],
@@ -120,7 +120,7 @@ class TestPetTaskProposals(unittest.TestCase):
         self.assertEqual(proposals, [])
 
     def test_build_task_proposal_candidates_keeps_plain_discussion_about_same_task(self) -> None:
-        with patch("cccc.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
+        with patch("no1.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
             proposals = build_task_proposal_candidates(
                 [_task("T192", title="Bridge 出站链路 stream_emit daemon op", status="active", blocked_by=["T191"])],
                 recent_chat_events=[
@@ -141,7 +141,7 @@ class TestPetTaskProposals(unittest.TestCase):
         self.assertEqual(proposals[0]["action"]["task_id"], "T192")
 
     def test_build_task_proposal_candidates_keeps_other_task_when_recent_echo_is_for_different_task(self) -> None:
-        with patch("cccc.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
+        with patch("no1.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
             proposals = build_task_proposal_candidates(
                 [
                     _task("T192", title="Bridge 出站链路 stream_emit daemon op", status="active", blocked_by=["T191"]),
@@ -155,7 +155,7 @@ class TestPetTaskProposals(unittest.TestCase):
                         "ts": "2026-03-28T00:05:00Z",
                         "data": {
                             "to": ["@foreman"],
-                            "text": 'Pet task proposal: please use cccc_task to update this task (task_id=T192, title="Bridge 出站链路 stream_emit daemon op").',
+                            "text": 'Pet task proposal: please use onecolleague_task to update this task (task_id=T192, title="Bridge 出站链路 stream_emit daemon op").',
                         },
                     }
                 ],
@@ -166,7 +166,7 @@ class TestPetTaskProposals(unittest.TestCase):
         self.assertEqual(proposals[0]["action"]["task_id"], "T193")
 
     def test_build_task_proposal_candidates_still_checks_recent_user_echo_after_non_user_chatter(self) -> None:
-        with patch("cccc.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
+        with patch("no1.kernel.pet_task_proposals.utc_now_iso", return_value="2026-03-28T00:12:00Z"):
             chatter = [
                 {
                     "id": f"evt-chatter-{idx}",
@@ -191,7 +191,7 @@ class TestPetTaskProposals(unittest.TestCase):
                         "ts": "2026-03-28T00:05:00Z",
                         "data": {
                             "to": ["@foreman"],
-                            "text": 'Pet task proposal: please use cccc_task to update this task (task_id=T192, title="Bridge 出站链路 stream_emit daemon op").',
+                            "text": 'Pet task proposal: please use onecolleague_task to update this task (task_id=T192, title="Bridge 出站链路 stream_emit daemon op").',
                         },
                     }
                 ],

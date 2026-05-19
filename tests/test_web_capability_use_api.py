@@ -25,14 +25,14 @@ class TestWebCapabilityUseApi(unittest.TestCase):
         return td, cleanup
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="web-capability-use-test", topic="").group_id
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
@@ -41,7 +41,7 @@ class TestWebCapabilityUseApi(unittest.TestCase):
         try:
             group_id = self._create_group()
             with patch(
-                "cccc.ports.web.routes.base.mcp_capability_use",
+                "no1.ports.web.routes.base.mcp_capability_use",
                 return_value={"capability_id": "skill:agent_self_proposed:triage", "tool_called": False},
             ) as use_mock:
                 resp = self._client().post(
@@ -69,7 +69,7 @@ class TestWebCapabilityUseApi(unittest.TestCase):
         try:
             group_id = self._create_group()
             with patch(
-                "cccc.ports.web.routes.base.mcp_capability_install",
+                "no1.ports.web.routes.base.mcp_capability_install",
                 return_value={"state": "ready", "use_ready_capability_ids": ["skill:github:demo:triage"]},
             ) as install_mock:
                 resp = self._client().post(
@@ -100,7 +100,7 @@ class TestWebCapabilityUseApi(unittest.TestCase):
         try:
             group_id = self._create_group()
             with patch(
-                "cccc.ports.web.routes.base.mcp_capability_use",
+                "no1.ports.web.routes.base.mcp_capability_use",
                 return_value={"capability_id": "mcp:test-server", "tool_called": True, "tool_name": "echo"},
             ) as use_mock:
                 resp = self._client().post(
@@ -134,7 +134,7 @@ class TestWebCapabilityUseApi(unittest.TestCase):
             seen: dict[str, str] = {}
 
             def fake_use(**kwargs):
-                from cccc.ports.mcp.common import _runtime_context
+                from no1.ports.mcp.common import _runtime_context
 
                 ctx = _runtime_context()
                 seen["home"] = str(ctx.home)
@@ -142,7 +142,7 @@ class TestWebCapabilityUseApi(unittest.TestCase):
                 seen["actor_id"] = str(ctx.actor_id)
                 return {"capability_id": kwargs.get("capability_id"), "tool_called": False}
 
-            with patch("cccc.ports.web.routes.base.mcp_capability_use", side_effect=fake_use):
+            with patch("no1.ports.web.routes.base.mcp_capability_use", side_effect=fake_use):
                 resp = self._client().post(
                     f"/api/v1/groups/{group_id}/capabilities/use",
                     json={"actor_id": "peer-ctx", "capability_id": "skill:agent_self_proposed:triage"},
@@ -159,7 +159,7 @@ class TestWebCapabilityUseApi(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
-            with patch("cccc.ports.web.routes.base.mcp_capability_use") as use_mock:
+            with patch("no1.ports.web.routes.base.mcp_capability_use") as use_mock:
                 resp = self._client().post(
                     f"/api/v1/groups/{group_id}/capabilities/use",
                     json={

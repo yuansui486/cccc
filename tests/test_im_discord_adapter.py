@@ -69,22 +69,22 @@ class _LoopFailure:
 
 class TestDiscordAdapterConnect(unittest.TestCase):
     def test_connect_passes_resolved_proxy_into_discord_client(self) -> None:
-        from cccc.ports.im.adapters.discord import DiscordAdapter
+        from no1.ports.im.adapters.discord import DiscordAdapter
 
         fake_discord = types.SimpleNamespace(Intents=_FakeIntents, Client=_FakeDiscordClient)
         adapter = DiscordAdapter(token="token")
 
         with patch.dict(sys.modules, {"discord": fake_discord}), patch(
-            "cccc.ports.im.adapters.discord._resolve_proxy",
+            "no1.ports.im.adapters.discord._resolve_proxy",
             return_value="http://user:pass@127.0.0.1:8080",
         ), patch(
-            "cccc.ports.im.adapters.discord.threading.Thread",
+            "no1.ports.im.adapters.discord.threading.Thread",
             _SyncThread,
         ), patch(
-            "cccc.ports.im.adapters.discord.asyncio.new_event_loop",
+            "no1.ports.im.adapters.discord.asyncio.new_event_loop",
             return_value=_LoopSuccess(),
         ), patch(
-            "cccc.ports.im.adapters.discord.asyncio.set_event_loop",
+            "no1.ports.im.adapters.discord.asyncio.set_event_loop",
             return_value=None,
         ):
             ok = adapter.connect()
@@ -98,23 +98,23 @@ class TestDiscordAdapterConnect(unittest.TestCase):
         )
 
     def test_connect_returns_false_quickly_when_client_start_fails(self) -> None:
-        from cccc.ports.im.adapters.discord import DiscordAdapter
+        from no1.ports.im.adapters.discord import DiscordAdapter
 
         fake_discord = types.SimpleNamespace(Intents=_FakeIntents, Client=_FakeDiscordClient)
         adapter = DiscordAdapter(token="token")
 
         start = time.monotonic()
         with patch.dict(sys.modules, {"discord": fake_discord}), patch(
-            "cccc.ports.im.adapters.discord._resolve_proxy",
+            "no1.ports.im.adapters.discord._resolve_proxy",
             return_value=None,
         ), patch(
-            "cccc.ports.im.adapters.discord.threading.Thread",
+            "no1.ports.im.adapters.discord.threading.Thread",
             _SyncThread,
         ), patch(
-            "cccc.ports.im.adapters.discord.asyncio.new_event_loop",
+            "no1.ports.im.adapters.discord.asyncio.new_event_loop",
             return_value=_LoopFailure(),
         ), patch(
-            "cccc.ports.im.adapters.discord.asyncio.set_event_loop",
+            "no1.ports.im.adapters.discord.asyncio.set_event_loop",
             return_value=None,
         ):
             ok = adapter.connect()

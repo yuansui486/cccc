@@ -5,15 +5,15 @@ from pathlib import Path
 
 class TestEventKindModelParity(unittest.TestCase):
     def test_standard_append_event_kinds_are_modeled(self) -> None:
-        from cccc.contracts.v1.event import _KIND_TO_MODEL
+        from no1.contracts.v1.event import _KIND_TO_MODEL
 
         repo_root = Path(__file__).resolve().parents[1]
-        cli_file = repo_root / "src" / "cccc" / "cli.py"
-        cli_main_file = repo_root / "src" / "cccc" / "cli" / "main.py"
+        cli_file = repo_root / "src" / "no1" / "cli.py"
+        cli_main_file = repo_root / "src" / "no1" / "cli" / "main.py"
         cli_source = cli_file if cli_file.exists() else cli_main_file
         files = [
-            *Path(repo_root / "src" / "cccc" / "daemon").glob("**/*.py"),
-            *Path(repo_root / "src" / "cccc" / "kernel").glob("**/*.py"),
+            *Path(repo_root / "src" / "no1" / "daemon").glob("**/*.py"),
+            *Path(repo_root / "src" / "no1" / "kernel").glob("**/*.py"),
             cli_source,
         ]
 

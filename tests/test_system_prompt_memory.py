@@ -24,8 +24,8 @@ class TestSystemPromptMemory(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -48,9 +48,9 @@ class TestSystemPromptMemory(unittest.TestCase):
         return gid, "agent1"
 
     def test_prompt_routes_to_bootstrap_and_help(self) -> None:
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
-        from cccc.kernel.system_prompt import render_system_prompt
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
+        from no1.kernel.system_prompt import render_system_prompt
 
         _, cleanup = self._with_home()
         try:
@@ -67,24 +67,24 @@ class TestSystemPromptMemory(unittest.TestCase):
             self.assertIn("Work like a sharp teammate, not a customer-service script.", prompt)
             self.assertIn("Prefer silence over low-signal chatter; speak for real changes, not filler or routine @all updates.", prompt)
             self.assertIn("No fabrication. Verify before claiming done.", prompt)
-            self.assertIn("Visible replies must go through MCP: cccc_message_send / cccc_message_reply.", prompt)
+            self.assertIn("Visible replies must go through MCP: onecolleague_message_send / onecolleague_message_reply.", prompt)
             self.assertNotIn("your final answer streams to Chat automatically", prompt)
             self.assertIn("A status message, plan, or promise is not task progress", prompt)
-            self.assertIn("Cold start or resume: use MCP tools `cccc_bootstrap`, then `cccc_help`.", prompt)
-            self.assertIn("At key transitions, sync shared control-plane state and your cccc_agent_state.", prompt)
+            self.assertIn("Cold start or resume: use MCP tools `onecolleague_bootstrap`, then `onecolleague_help`.", prompt)
+            self.assertIn("At key transitions, sync shared control-plane state and your onecolleague_agent_state.", prompt)
             self.assertIn("Once scope is approved, finish it end-to-end; do not ask to continue on obvious next steps.", prompt)
             self.assertIn("For strategy or scope discussion, align first; implement only after explicit action intent.", prompt)
             self.assertIn("Execution default:", prompt)
             self.assertIn("Reuse working paths first.", prompt)
             self.assertNotIn("Working stance:", prompt)
-            self.assertNotIn("Cold start or resume: call cccc_bootstrap first", prompt)
+            self.assertNotIn("Cold start or resume: call onecolleague_bootstrap first", prompt)
             self.assertEqual(prompt.count("Prefer silence over low-signal chatter"), 1)
             self.assertEqual(prompt.count("finish it end-to-end"), 1)
             self.assertEqual(prompt.count("Cold start or resume:"), 1)
 
             self.assertNotIn("Memory:", prompt)
             self.assertNotIn("state/memory/MEMORY.md + state/memory/daily/*.md", prompt)
-            self.assertNotIn("cccc_memory(action=search)", prompt)
+            self.assertNotIn("onecolleague_memory(action=search)", prompt)
             self.assertNotIn("Planning gate (6D)", prompt)
             self.assertNotIn("Todo discipline:", prompt)
             self.assertNotIn("Gap policy:", prompt)

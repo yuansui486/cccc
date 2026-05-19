@@ -3,11 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from cccc.daemon.assistants.voice_speaker_transcripts import (
+from no1.daemon.assistants.voice_speaker_transcripts import (
     build_offline_speaker_transcript_segments,
     build_speaker_transcript_segments,
 )
-from cccc.daemon.assistants.voice_speaker_transcript_windows import slice_pcm16_by_ms
+from no1.daemon.assistants.voice_speaker_transcript_windows import slice_pcm16_by_ms
 
 
 class VoiceSpeakerTranscriptsTests(unittest.IsolatedAsyncioTestCase):
@@ -92,7 +92,7 @@ class VoiceSpeakerTranscriptsTests(unittest.IsolatedAsyncioTestCase):
         session.transcribe_pcm16.side_effect = ["offline-1", "offline-2"]
 
         with patch(
-            "cccc.daemon.assistants.voice_speaker_transcripts.open_local_offline_asr_session",
+            "no1.daemon.assistants.voice_speaker_transcripts.open_local_offline_asr_session",
             AsyncMock(return_value=session),
         ) as open_session:
             segments = await build_offline_speaker_transcript_segments(

@@ -25,8 +25,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -52,7 +52,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         self.assertTrue(bind.ok, getattr(bind, "error", None))
 
     def test_transient_ingest_schedules_retry_instead_of_immediate_loop(self) -> None:
-        from cccc.daemon.space.group_space_provider import SpaceProviderError
+        from no1.daemon.space.group_space_provider import SpaceProviderError
 
         _, cleanup = self._with_home()
         try:
@@ -69,7 +69,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
                     degrade_provider=False,
                 )
 
-            with patch("cccc.daemon.space.group_space_runtime.provider_ingest", side_effect=_flaky_ingest):
+            with patch("no1.daemon.space.group_space_runtime.provider_ingest", side_effect=_flaky_ingest):
                 ingest, _ = self._call(
                     "group_space_ingest",
                     {
@@ -94,9 +94,9 @@ class TestGroupSpaceRuntime(unittest.TestCase):
             cleanup()
 
     def test_due_worker_processes_ready_pending_job(self) -> None:
-        from cccc.daemon.space.group_space_provider import SpaceProviderError
-        from cccc.daemon.space.group_space_runtime import process_due_space_jobs
-        from cccc.daemon.space.group_space_store import get_space_job
+        from no1.daemon.space.group_space_provider import SpaceProviderError
+        from no1.daemon.space.group_space_runtime import process_due_space_jobs
+        from no1.daemon.space.group_space_store import get_space_job
 
         _, cleanup = self._with_home()
         try:
@@ -115,8 +115,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
                     )
                 return {"ok": True}
 
-            with patch("cccc.daemon.space.group_space_runtime._RETRY_BACKOFF_SECONDS", (0, 0)):
-                with patch("cccc.daemon.space.group_space_runtime.provider_ingest", side_effect=_flaky_then_ok):
+            with patch("no1.daemon.space.group_space_runtime._RETRY_BACKOFF_SECONDS", (0, 0)):
+                with patch("no1.daemon.space.group_space_runtime.provider_ingest", side_effect=_flaky_then_ok):
                     ingest, _ = self._call(
                         "group_space_ingest",
                         {
@@ -148,8 +148,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
             cleanup()
 
     def test_due_worker_cancels_stale_work_job_after_unbind(self) -> None:
-        from cccc.daemon.space.group_space_runtime import process_due_space_jobs
-        from cccc.daemon.space.group_space_store import (
+        from no1.daemon.space.group_space_runtime import process_due_space_jobs
+        from no1.daemon.space.group_space_store import (
             enqueue_space_job,
             get_space_job,
             set_space_binding_unbound,
@@ -181,7 +181,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
 
             set_space_binding_unbound("g_stale_1", provider="notebooklm", lane="work", by="user")
 
-            with patch("cccc.daemon.space.group_space_runtime.provider_ingest") as provider_ingest:
+            with patch("no1.daemon.space.group_space_runtime.provider_ingest") as provider_ingest:
                 tick_result = process_due_space_jobs(limit=20)
             self.assertGreaterEqual(int(tick_result.get("processed") or 0), 1)
             provider_ingest.assert_not_called()
@@ -192,8 +192,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
             cleanup()
 
     def test_space_job_store_reuses_cached_jobs_doc_between_reads(self) -> None:
-        from cccc.daemon.space import group_space_store as store
-        from cccc.daemon.space.group_space_store import enqueue_space_job, list_due_space_jobs
+        from no1.daemon.space import group_space_store as store
+        from no1.daemon.space.group_space_store import enqueue_space_job, list_due_space_jobs
 
         _, cleanup = self._with_home()
         try:
@@ -229,7 +229,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         import json
         from pathlib import Path
 
-        from cccc.daemon.space.group_space_store import enqueue_space_job, get_space_job
+        from no1.daemon.space.group_space_store import enqueue_space_job, get_space_job
 
         home, cleanup = self._with_home()
         try:
@@ -268,7 +268,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         import json
         from pathlib import Path
 
-        from cccc.daemon.space.group_space_store import (
+        from no1.daemon.space.group_space_store import (
             compact_space_jobs_storage,
             enqueue_space_job,
             get_space_job,
@@ -342,8 +342,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
             cleanup()
 
     def test_write_execution_is_serialized_per_remote_space(self) -> None:
-        from cccc.daemon.space.group_space_runtime import execute_space_job
-        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
+        from no1.daemon.space.group_space_runtime import execute_space_job
+        from no1.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
 
         _, cleanup = self._with_home()
         try:
@@ -394,7 +394,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
                     active["n"] -= 1
                 return {"ok": True}
 
-            with patch("cccc.daemon.space.group_space_runtime.provider_ingest", side_effect=_slow_ingest):
+            with patch("no1.daemon.space.group_space_runtime.provider_ingest", side_effect=_slow_ingest):
                 t1 = threading.Thread(target=execute_space_job, args=(str(job1.get("job_id") or ""),))
                 t2 = threading.Thread(target=execute_space_job, args=(str(job2.get("job_id") or ""),))
                 t1.start()
@@ -407,8 +407,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
             cleanup()
 
     def test_write_execution_allows_parallelism_across_different_remotes(self) -> None:
-        from cccc.daemon.space.group_space_runtime import execute_space_job
-        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
+        from no1.daemon.space.group_space_runtime import execute_space_job
+        from no1.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
 
         _, cleanup = self._with_home()
         try:
@@ -459,7 +459,7 @@ class TestGroupSpaceRuntime(unittest.TestCase):
                     active["n"] -= 1
                 return {"ok": True}
 
-            with patch("cccc.daemon.space.group_space_runtime.provider_ingest", side_effect=_slow_ingest):
+            with patch("no1.daemon.space.group_space_runtime.provider_ingest", side_effect=_slow_ingest):
                 t1 = threading.Thread(target=execute_space_job, args=(str(job1.get("job_id") or ""),))
                 t2 = threading.Thread(target=execute_space_job, args=(str(job2.get("job_id") or ""),))
                 t1.start()
@@ -472,8 +472,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
             cleanup()
 
     def test_global_provider_write_cap_can_serialize_different_remotes(self) -> None:
-        from cccc.daemon.space.group_space_runtime import execute_space_job
-        from cccc.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
+        from no1.daemon.space.group_space_runtime import execute_space_job
+        from no1.daemon.space.group_space_store import enqueue_space_job, set_space_provider_state, upsert_space_binding
 
         _, cleanup = self._with_home()
         try:
@@ -525,8 +525,8 @@ class TestGroupSpaceRuntime(unittest.TestCase):
                 return {"ok": True}
 
             sem = threading.BoundedSemaphore(1)
-            with patch("cccc.daemon.space.group_space_runtime._provider_write_semaphore", return_value=sem):
-                with patch("cccc.daemon.space.group_space_runtime.provider_ingest", side_effect=_slow_ingest):
+            with patch("no1.daemon.space.group_space_runtime._provider_write_semaphore", return_value=sem):
+                with patch("no1.daemon.space.group_space_runtime.provider_ingest", side_effect=_slow_ingest):
                     t1 = threading.Thread(target=execute_space_job, args=(str(job1.get("job_id") or ""),))
                     t2 = threading.Thread(target=execute_space_job, args=(str(job2.get("job_id") or ""),))
                     t1.start()

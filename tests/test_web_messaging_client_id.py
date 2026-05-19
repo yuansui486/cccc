@@ -24,27 +24,27 @@ class TestWebMessagingClientId(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
     def test_send_and_reply_preserve_client_id(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
             reg = load_registry()
             group = create_group(reg, title="client-id", topic="")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 send_resp = client.post(
@@ -100,14 +100,14 @@ class TestWebMessagingClientId(unittest.TestCase):
             cleanup()
 
     def test_send_replays_existing_event_for_duplicate_client_id(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
             reg = load_registry()
             group = create_group(reg, title="client-id-replay", topic="")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
                 payload = {
                     "text": "hello once",
@@ -130,14 +130,14 @@ class TestWebMessagingClientId(unittest.TestCase):
             cleanup()
 
     def test_send_duplicate_client_id_is_scoped_to_sender(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
             reg = load_registry()
             group = create_group(reg, title="client-id-sender-scope", topic="")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
                 first_resp = client.post(
                     f"/api/v1/groups/{group.group_id}/send",
@@ -171,14 +171,14 @@ class TestWebMessagingClientId(unittest.TestCase):
             cleanup()
 
     def test_upload_routes_preserve_client_id(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
             reg = load_registry()
             group = create_group(reg, title="client-id-upload", topic="")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 send_upload_resp = client.post(

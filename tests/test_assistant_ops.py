@@ -39,8 +39,8 @@ class TestAssistantOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -67,8 +67,8 @@ class TestAssistantOps(unittest.TestCase):
         self.assertTrue(add.ok, getattr(add, "error", None))
 
     def _ensure_foreman(self, group_id: str) -> None:
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
 
         group = load_group(group_id)
         if group is not None and find_actor(group, "lead") is not None:
@@ -81,8 +81,8 @@ class TestAssistantOps(unittest.TestCase):
 
     def _enable_voice_secretary(self, group_id: str) -> None:
         self._ensure_foreman(group_id)
-        from cccc.kernel.group import load_group
-        from cccc.kernel.prompt_files import resolve_active_scope_root
+        from no1.kernel.group import load_group
+        from no1.kernel.prompt_files import resolve_active_scope_root
 
         group = load_group(group_id)
         if group is not None and resolve_active_scope_root(group) is None:
@@ -158,7 +158,7 @@ class TestAssistantOps(unittest.TestCase):
         return manifest_path
 
     def test_voice_model_http_metadata_hash_mismatch_fails_before_download(self) -> None:
-        from cccc.daemon.assistants.voice_models import VoiceModelError, _download_artifact
+        from no1.daemon.assistants.voice_models import VoiceModelError, _download_artifact
 
         class _HeadResponse:
             headers: Message
@@ -193,7 +193,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_model_install_marks_post_download_installing_phase(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants import voice_models
+            from no1.daemon.assistants import voice_models
 
             self._write_voice_model_manifest(home)
             states = []
@@ -203,7 +203,7 @@ class TestAssistantOps(unittest.TestCase):
                 states.append(dict(state))
                 original_write(model_id, state)
 
-            with patch("cccc.daemon.assistants.voice_models._write_install_state", side_effect=capture_state):
+            with patch("no1.daemon.assistants.voice_models._write_install_state", side_effect=capture_state):
                 installed = voice_models.install_voice_model("mock_asr")
 
             self.assertEqual(str(installed.get("status") or ""), "ready")
@@ -212,7 +212,7 @@ class TestAssistantOps(unittest.TestCase):
             cleanup()
 
     def test_voice_model_manifest_rejects_unsafe_install_paths(self) -> None:
-        from cccc.daemon.assistants.voice_models import VoiceModelError, load_voice_model_catalog
+        from no1.daemon.assistants.voice_models import VoiceModelError, load_voice_model_catalog
 
         digest = "a" * 64
 
@@ -246,7 +246,7 @@ class TestAssistantOps(unittest.TestCase):
                 self.assertEqual(cm.exception.code, "voice_model_manifest_invalid")
 
     def test_voice_model_archive_rejects_links_and_special_entries(self) -> None:
-        from cccc.daemon.assistants.voice_models import VoiceModelError, _safe_extract_tar
+        from no1.daemon.assistants.voice_models import VoiceModelError, _safe_extract_tar
 
         with tempfile.TemporaryDirectory() as td:
             archive_path = Path(td) / "bad.tar"
@@ -264,11 +264,11 @@ class TestAssistantOps(unittest.TestCase):
         self.assertEqual(cm.exception.code, "voice_model_archive_invalid")
 
     def test_default_voice_catalog_prefers_final_and_live_service_models(self) -> None:
-        from cccc.daemon.assistants.local_asr_model_selection import (
+        from no1.daemon.assistants.local_asr_model_selection import (
             DEFAULT_FINAL_SERVICE_MODEL_ID,
             DEFAULT_LIVE_SERVICE_MODEL_ID,
         )
-        from cccc.daemon.assistants.voice_models import load_voice_model_catalog
+        from no1.daemon.assistants.voice_models import load_voice_model_catalog
 
         catalog = load_voice_model_catalog()
         model_ids = list(catalog.keys())
@@ -286,7 +286,7 @@ class TestAssistantOps(unittest.TestCase):
         self.assertTrue(str(streaming.get("tokens") or "").endswith("tokens.txt"))
 
     def test_sherpa_streaming_model_resolution_falls_back_from_invalid_selection(self) -> None:
-        from cccc.daemon.assistants import sherpa_streaming_asr
+        from no1.daemon.assistants import sherpa_streaming_asr
 
         def _status(model_id: str) -> dict:
             if model_id == "ready_streaming":
@@ -316,7 +316,7 @@ class TestAssistantOps(unittest.TestCase):
             )
 
     def test_voice_capture_result_idle_counts_as_continuous(self) -> None:
-        from cccc.daemon.assistants.assistant_ops import _voice_capture_continuity
+        from no1.daemon.assistants.assistant_ops import _voice_capture_continuity
 
         self.assertEqual(
             _voice_capture_continuity(segment_count=2, trigger={"trigger_kind": "result_idle"}),
@@ -347,7 +347,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_state_sanitizes_legacy_chunking_config_on_read(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group_id = self._create_group()
             group = load_group(group_id)
@@ -405,7 +405,7 @@ class TestAssistantOps(unittest.TestCase):
             self._enable_voice_secretary(group_id)
 
             with patch(
-                "cccc.daemon.assistants.assistant_ops._flush_stale_voice_session_windows",
+                "no1.daemon.assistants.assistant_ops._flush_stale_voice_session_windows",
                 side_effect=AssertionError("assistant_state must not flush stale voice windows"),
             ):
                 state, _ = self._call("assistant_state", {"group_id": group_id, "assistant_id": "voice_secretary"})
@@ -690,7 +690,7 @@ class TestAssistantOps(unittest.TestCase):
             self._enable_voice_secretary(group_id)
 
             with patch(
-                "cccc.daemon.assistants.assistant_ops._flush_stale_voice_session_windows",
+                "no1.daemon.assistants.assistant_ops._flush_stale_voice_session_windows",
                 side_effect=AssertionError("document list must not flush stale voice windows"),
             ):
                 documents, _ = self._call("assistant_voice_document_list", {"group_id": group_id})
@@ -731,8 +731,8 @@ class TestAssistantOps(unittest.TestCase):
             self.assertFalse(bool(service.get("alive")))
             event = (update.result or {}).get("event") if isinstance(update.result, dict) else {}
             self.assertEqual(event.get("kind"), "assistant.settings_update")
-            from cccc.kernel.group import load_group
-            from cccc.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID, get_voice_secretary_actor
+            from no1.kernel.group import load_group
+            from no1.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID, get_voice_secretary_actor
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -743,13 +743,13 @@ class TestAssistantOps(unittest.TestCase):
             self.assertEqual(actor.get("internal_kind"), "voice_secretary")
             self.assertEqual(actor.get("runtime"), "codex")
             self.assertEqual(actor.get("runner"), "headless")
-            from cccc.kernel.system_prompt import render_system_prompt
+            from no1.kernel.system_prompt import render_system_prompt
 
             prompt = render_system_prompt(group=group, actor=actor)
             self.assertIn("Voice Secretary Runtime Actor", prompt)
             self.assertIn("not the foreman", prompt)
             self.assertIn("secretary-scope", prompt)
-            self.assertIn("use MCP tools cccc_bootstrap, then cccc_help", prompt)
+            self.assertIn("use MCP tools onecolleague_bootstrap, then onecolleague_help", prompt)
             self.assertIn("daemon-delivered input_envelope", prompt)
             self.assertIn("Work order", prompt)
             self.assertIn("Context (not task)", prompt)
@@ -760,8 +760,8 @@ class TestAssistantOps(unittest.TestCase):
             self.assertNotIn("first instruction after cold start or resume", prompt)
             self.assertNotIn("wait until the first runtime instruction", prompt)
             self.assertIn("Do not edit project code", prompt)
-            self.assertIn("cccc_voice_secretary_document", prompt)
-            self.assertIn("cccc_voice_secretary_request", prompt)
+            self.assertIn("onecolleague_voice_secretary_document", prompt)
+            self.assertIn("onecolleague_voice_secretary_request", prompt)
             self.assertIn("never copy them into user-facing markdown", prompt)
             self.assertIn("Maintain the target document incrementally", prompt)
             self.assertIn("non-lossy editorial pass", prompt)
@@ -792,11 +792,11 @@ class TestAssistantOps(unittest.TestCase):
 
             self.assertTrue(state.ok, getattr(state, "error", None))
             visible_tools = set((state.result or {}).get("visible_tools") or [])
-            self.assertIn("cccc_voice_secretary_document", visible_tools)
-            self.assertIn("cccc_voice_secretary_request", visible_tools)
-            self.assertNotIn("cccc_pet_decisions", visible_tools)
-            self.assertNotIn("cccc_message_send", visible_tools)
-            self.assertNotIn("cccc_message_reply", visible_tools)
+            self.assertIn("onecolleague_voice_secretary_document", visible_tools)
+            self.assertIn("onecolleague_voice_secretary_request", visible_tools)
+            self.assertNotIn("onecolleague_pet_decisions", visible_tools)
+            self.assertNotIn("onecolleague_message_send", visible_tools)
+            self.assertNotIn("onecolleague_message_reply", visible_tools)
         finally:
             cleanup()
 
@@ -879,9 +879,9 @@ class TestAssistantOps(unittest.TestCase):
             )
             self.assertTrue(update.ok, getattr(update, "error", None))
 
-            from cccc.daemon.actors.private_env_ops import load_actor_private_env
-            from cccc.kernel.group import load_group
-            from cccc.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID, get_voice_secretary_actor
+            from no1.daemon.actors.private_env_ops import load_actor_private_env
+            from no1.kernel.group import load_group
+            from no1.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID, get_voice_secretary_actor
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -922,9 +922,9 @@ class TestAssistantOps(unittest.TestCase):
             )
             self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
 
-            from cccc.kernel.group import load_group
-            from cccc.kernel.actors import INTERNAL_KIND_VOICE_SECRETARY
-            from cccc.kernel.voice_secretary_actor import get_voice_secretary_actor
+            from no1.kernel.group import load_group
+            from no1.kernel.actors import INTERNAL_KIND_VOICE_SECRETARY
+            from no1.kernel.voice_secretary_actor import get_voice_secretary_actor
 
             link, _ = self._call(
                 "actor_update",
@@ -983,10 +983,10 @@ class TestAssistantOps(unittest.TestCase):
             group_id = self._create_group()
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.actors.private_env_ops import load_actor_private_env, update_actor_private_env
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
-            from cccc.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID, get_voice_secretary_actor
+            from no1.daemon.actors.private_env_ops import load_actor_private_env, update_actor_private_env
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
+            from no1.kernel.voice_secretary_actor import VOICE_SECRETARY_ACTOR_ID, get_voice_secretary_actor
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -1056,9 +1056,9 @@ class TestAssistantOps(unittest.TestCase):
             )
             self.assertTrue(profile_upsert.ok, getattr(profile_upsert, "error", None))
 
-            from cccc.kernel.group import load_group
-            from cccc.kernel.voice_secretary_actor import get_voice_secretary_actor
-            from cccc.ports.mcp.server import list_tools_for_caller
+            from no1.kernel.group import load_group
+            from no1.kernel.voice_secretary_actor import get_voice_secretary_actor
+            from no1.ports.mcp.server import list_tools_for_caller
 
             update_profile, _ = self._call(
                 "actor_update",
@@ -1083,14 +1083,14 @@ class TestAssistantOps(unittest.TestCase):
             self.assertEqual(actor.get("internal_kind"), "voice_secretary")
 
             with patch.dict(os.environ, {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "voice-secretary"}, clear=False), patch(
-                "cccc.ports.mcp.server._call_daemon_or_raise",
+                "no1.ports.mcp.server._call_daemon_or_raise",
                 side_effect=RuntimeError("daemon unavailable"),
             ):
                 tools = list_tools_for_caller()
             names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-            self.assertIn("cccc_voice_secretary_document", names)
-            self.assertIn("cccc_voice_secretary_request", names)
-            self.assertIn("cccc_voice_secretary_composer", names)
+            self.assertIn("onecolleague_voice_secretary_document", names)
+            self.assertIn("onecolleague_voice_secretary_request", names)
+            self.assertIn("onecolleague_voice_secretary_composer", names)
 
             convert, _ = self._call(
                 "actor_update",
@@ -1170,8 +1170,8 @@ class TestAssistantOps(unittest.TestCase):
             self.assertFalse(transcribe.ok)
             self.assertEqual(transcribe.error.code, "asr_backend_unavailable")
         finally:
-            from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.voice_service_runtime import stop_voice_service
+            from no1.kernel.group import load_group
 
             group = load_group(group_id) if "group_id" in locals() else None
             if group is not None:
@@ -1193,8 +1193,8 @@ class TestAssistantOps(unittest.TestCase):
         os.environ["CCCC_VOICE_SECRETARY_ASR_MOCK_TEXT"] = "service transcript"
         os.environ.pop("CCCC_VOICE_SECRETARY_ASR_COMMAND", None)
         try:
-            from cccc.daemon.assistants.voice_service_runtime import read_voice_service_state, stop_voice_service
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.voice_service_runtime import read_voice_service_state, stop_voice_service
+            from no1.kernel.group import load_group
 
             group_id = self._create_group()
             self._enable_voice_secretary_service_asr(group_id)
@@ -1236,7 +1236,7 @@ class TestAssistantOps(unittest.TestCase):
             else:
                 os.environ.pop("CCCC_VOICE_SECRETARY_ASR_COMMAND", None)
             if "group" in locals() and group is not None:
-                from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
+                from no1.daemon.assistants.voice_service_runtime import stop_voice_service
 
                 stop_voice_service(group)
             cleanup()
@@ -1289,8 +1289,8 @@ class TestAssistantOps(unittest.TestCase):
         old_command = os.environ.pop("CCCC_VOICE_SECRETARY_ASR_COMMAND", None)
         group = None
         try:
-            from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.voice_service_runtime import stop_voice_service
+            from no1.kernel.group import load_group
 
             self._write_voice_model_manifest(home)
             group_id = self._create_group()
@@ -1345,7 +1345,7 @@ class TestAssistantOps(unittest.TestCase):
                 stop_voice_service(group)
         finally:
             if group is not None:
-                from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
+                from no1.daemon.assistants.voice_service_runtime import stop_voice_service
 
                 stop_voice_service(group)
             if old_mock is not None:
@@ -1410,7 +1410,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_runtime_remove_rejects_installing_runtime(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants.voice_runtime_deps import (
+            from no1.daemon.assistants.voice_runtime_deps import (
                 VOICE_RUNTIME_STATUS_INSTALLING,
                 VoiceRuntimeDepsError,
                 begin_voice_runtime_install,
@@ -1429,7 +1429,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_runtime_install_rechecks_modules_after_pip_install(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants import voice_runtime_deps
+            from no1.daemon.assistants import voice_runtime_deps
 
             runtime_id = "sherpa_onnx_streaming"
             python_path = Path(home) / "cache" / "voice-runtimes" / runtime_id / ".venv" / "bin" / "python"
@@ -1469,13 +1469,13 @@ class TestAssistantOps(unittest.TestCase):
             cleanup()
 
     def test_voice_runtime_python_selects_current_python_39_or_newer(self) -> None:
-        from cccc.daemon.assistants import voice_runtime_deps
+        from no1.daemon.assistants import voice_runtime_deps
 
         with patch.object(voice_runtime_deps.sys, "version_info", (3, 14, 0)):
             self.assertEqual(voice_runtime_deps._select_base_python(), voice_runtime_deps.sys.executable)
 
     def test_voice_runtime_python_falls_back_to_python_314(self) -> None:
-        from cccc.daemon.assistants import voice_runtime_deps
+        from no1.daemon.assistants import voice_runtime_deps
 
         with patch.object(voice_runtime_deps.sys, "version_info", (3, 8, 20)), patch.object(
             voice_runtime_deps.shutil,
@@ -1485,8 +1485,8 @@ class TestAssistantOps(unittest.TestCase):
             self.assertEqual(voice_runtime_deps._select_base_python(), "/opt/homebrew/bin/python3.14")
 
     def test_voice_runtime_python_rejects_below_39(self) -> None:
-        from cccc.daemon.assistants import voice_runtime_deps
-        from cccc.daemon.assistants.voice_runtime_deps import VoiceRuntimeDepsError
+        from no1.daemon.assistants import voice_runtime_deps
+        from no1.daemon.assistants.voice_runtime_deps import VoiceRuntimeDepsError
 
         with patch.object(voice_runtime_deps.sys, "version_info", (3, 8, 20)), patch.object(
             voice_runtime_deps.shutil,
@@ -1665,8 +1665,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_transcript_append_flush_stores_sidecar_without_legacy_proposal(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             self._add_foreman(group_id)
@@ -1745,8 +1745,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_transcript_append_creates_repo_backed_working_document_by_default(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             repo = Path(home) / "repo"
@@ -2179,8 +2179,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_stale_window_flushes_on_existing_daemon_entrypoint(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants import assistant_ops
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants import assistant_ops
+            from no1.kernel.group import load_group
 
             group_id = self._create_group()
             self._enable_voice_secretary(group_id)
@@ -2242,8 +2242,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_input_notify_is_lightweight_and_read_returns_language_intent_and_policy(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             self._enable_voice_secretary(group_id)
@@ -2385,8 +2385,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_fragmented_speech_segments_merge_into_input_stream_batch(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             self._enable_voice_secretary(group_id)
@@ -2547,7 +2547,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertIn("重点看看风险和副作用", input_text)
             self.assertIn("Recent context", input_text)
             self.assertIn("需要补验收标准", input_text)
-            self.assertIn("Use MCP tool cccc_voice_secretary_composer", input_text)
+            self.assertIn("Use MCP tool onecolleague_voice_secretary_composer", input_text)
             self.assertIn("draft_text must contain only the text to add", input_text)
             self.assertNotIn("Return only the composer text to insert", input_text)
             self.assertNotIn("Execution rules:", input_text)
@@ -2591,7 +2591,7 @@ class TestAssistantOps(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_output_completion_auto_fills_missing_composer_draft(self) -> None:
-        from cccc.daemon.assistants.voice_secretary_output_completion import complete_missing_composer_drafts
+        from no1.daemon.assistants.voice_secretary_output_completion import complete_missing_composer_drafts
 
         home, cleanup = self._with_home()
         try:
@@ -2639,7 +2639,7 @@ class TestAssistantOps(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_output_completion_refreshes_existing_composer_draft_timestamp(self) -> None:
-        from cccc.daemon.assistants.voice_secretary_output_completion import complete_missing_composer_drafts
+        from no1.daemon.assistants.voice_secretary_output_completion import complete_missing_composer_drafts
 
         home, cleanup = self._with_home()
         try:
@@ -2727,7 +2727,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertTrue(read.ok, getattr(read, "error", None))
             input_text = str((read.result or {}).get("input_text") or "")
             self.assertIn("Operation: replace_with_refined_prompt", input_text)
-            self.assertIn("Use MCP tool cccc_voice_secretary_composer", input_text)
+            self.assertIn("Use MCP tool onecolleague_voice_secretary_composer", input_text)
             self.assertIn("draft_text must contain the complete replacement prompt", input_text)
             self.assertNotIn("Do not return only an incremental addition", input_text)
             self.assertNotIn("Append mode", input_text)
@@ -2942,8 +2942,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.kernel.group import load_group
 
             started: list[dict] = []
 
@@ -2957,7 +2957,7 @@ class TestAssistantOps(unittest.TestCase):
             group.doc["running"] = False
             group.save()
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
                 resp = handle_assistant_voice_input_append(
                     {
                         "group_id": group_id,
@@ -2989,8 +2989,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.kernel.group import load_group
 
             running = {"value": False}
             submitted: list[dict] = []
@@ -3015,10 +3015,10 @@ class TestAssistantOps(unittest.TestCase):
             group.save()
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
-                patch("cccc.daemon.codex_app_sessions.SUPERVISOR.actor_running", side_effect=fake_actor_running),
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
+                patch("no1.daemon.codex_app_sessions.SUPERVISOR.actor_running", side_effect=fake_actor_running),
                 patch(
-                    "cccc.daemon.codex_app_sessions.SUPERVISOR.submit_control_message",
+                    "no1.daemon.codex_app_sessions.SUPERVISOR.submit_control_message",
                     side_effect=fake_submit_control_message,
                 ),
             ):
@@ -3063,9 +3063,9 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -3094,10 +3094,10 @@ class TestAssistantOps(unittest.TestCase):
                 return True
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
-                patch("cccc.daemon.codex_app_sessions.SUPERVISOR.actor_running", side_effect=fake_actor_running),
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
+                patch("no1.daemon.codex_app_sessions.SUPERVISOR.actor_running", side_effect=fake_actor_running),
                 patch(
-                    "cccc.daemon.codex_app_sessions.SUPERVISOR.submit_control_message",
+                    "no1.daemon.codex_app_sessions.SUPERVISOR.submit_control_message",
                     side_effect=fake_submit_control_message,
                 ),
             ):
@@ -3136,8 +3136,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -3145,7 +3145,7 @@ class TestAssistantOps(unittest.TestCase):
             group.doc["running"] = False
             group.save()
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=True):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=True):
                 old_resp = handle_assistant_voice_input_append(
                     {
                         "group_id": group_id,
@@ -3172,13 +3172,13 @@ class TestAssistantOps(unittest.TestCase):
                 return bool(running["value"])
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
                 patch(
-                    "cccc.daemon.assistants.assistant_ops._try_emit_voice_input_notify_after_input",
+                    "no1.daemon.assistants.assistant_ops._try_emit_voice_input_notify_after_input",
                     return_value=(False, "emit_failed", {}),
                 ),
-                patch("cccc.daemon.codex_app_sessions.SUPERVISOR.actor_running", side_effect=fake_actor_running),
-                patch("cccc.daemon.codex_app_sessions.SUPERVISOR.submit_control_message") as submit_control,
+                patch("no1.daemon.codex_app_sessions.SUPERVISOR.actor_running", side_effect=fake_actor_running),
+                patch("no1.daemon.codex_app_sessions.SUPERVISOR.submit_control_message") as submit_control,
             ):
                 resp = handle_assistant_voice_input_append(
                     {
@@ -3212,9 +3212,9 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
-            from cccc.kernel.actors import update_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.kernel.actors import update_actor
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -3238,10 +3238,10 @@ class TestAssistantOps(unittest.TestCase):
                 return bool(running["value"])
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
-                patch("cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", side_effect=fake_actor_running),
-                patch("cccc.daemon.messaging.delivery.queue_system_notify") as queue_system_notify,
-                patch("cccc.daemon.messaging.delivery.request_flush_pending_messages", return_value=True) as request_flush,
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
+                patch("no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", side_effect=fake_actor_running),
+                patch("no1.daemon.messaging.delivery.queue_system_notify") as queue_system_notify,
+                patch("no1.daemon.messaging.delivery.request_flush_pending_messages", return_value=True) as request_flush,
             ):
                 resp = handle_assistant_voice_input_append(
                     {
@@ -3281,8 +3281,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -3290,7 +3290,7 @@ class TestAssistantOps(unittest.TestCase):
             group.doc["running"] = False
             group.save()
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
                 resp = handle_assistant_voice_input_append(
                     {
                         "group_id": group_id,
@@ -3324,7 +3324,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_secretary_document_envelope_requires_markdown_update(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.codex_app_sessions import (
+            from no1.daemon.codex_app_sessions import (
                 _voice_secretary_control_consumed_input,
                 _voice_secretary_control_consumption_diagnostics,
             )
@@ -3391,9 +3391,9 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_secretary_completed_envelope_advances_read_cursor(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.codex_app_sessions import _voice_secretary_control_completion_state
-            from cccc.paths import ensure_home
-            from cccc.util.fs import atomic_write_json, read_json
+            from no1.daemon.codex_app_sessions import _voice_secretary_control_completion_state
+            from no1.paths import ensure_home
+            from no1.util.fs import atomic_write_json, read_json
 
             group_id = self._create_group()
             repo = Path(home) / "repo"
@@ -3475,9 +3475,9 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_secretary_does_not_retry_delivered_input_without_read_cursor(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants import assistant_ops
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.daemon.assistants import assistant_ops
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             repo = Path(home) / "repo"
@@ -3550,8 +3550,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_transcript_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_transcript_append
+            from no1.kernel.group import load_group
 
             started: list[dict] = []
 
@@ -3588,7 +3588,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertTrue(append.ok, getattr(append, "error", None))
             self.assertFalse(bool((append.result or {}).get("input_event_created")), append.result)
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
                 flush = handle_assistant_voice_transcript_append(
                     {
                         "group_id": group_id,
@@ -3630,8 +3630,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_transcript_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_transcript_append
+            from no1.kernel.group import load_group
 
             dispatched: list[dict] = []
 
@@ -3656,9 +3656,9 @@ class TestAssistantOps(unittest.TestCase):
             group.save()
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
                 patch(
-                    "cccc.daemon.assistants.assistant_ops.dispatch_system_notify_event_to_actor",
+                    "no1.daemon.assistants.assistant_ops.dispatch_system_notify_event_to_actor",
                     side_effect=fake_dispatch,
                 ),
             ):
@@ -3711,8 +3711,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_transcript_append
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_transcript_append
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -3720,7 +3720,7 @@ class TestAssistantOps(unittest.TestCase):
             group.doc["running"] = False
             group.save()
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
                 resp = handle_assistant_voice_transcript_append(
                     {
                         "group_id": group_id,
@@ -3768,8 +3768,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_document_instruction
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_document_instruction
+            from no1.kernel.group import load_group
 
             created, _ = self._call(
                 "assistant_voice_document_save",
@@ -3798,7 +3798,7 @@ class TestAssistantOps(unittest.TestCase):
             group.doc["running"] = False
             group.save()
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
                 instruction = handle_assistant_voice_document_instruction(
                     {
                         "group_id": group_id,
@@ -3835,8 +3835,8 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_document_instruction
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_document_instruction
+            from no1.kernel.group import load_group
 
             created, _ = self._call(
                 "assistant_voice_document_save",
@@ -3859,7 +3859,7 @@ class TestAssistantOps(unittest.TestCase):
             group.doc["running"] = False
             group.save()
 
-            with patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
+            with patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False):
                 resp = handle_assistant_voice_document_instruction(
                     {
                         "group_id": group_id,
@@ -3901,7 +3901,7 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
 
             first = handle_assistant_voice_input_append(
                 {
@@ -3927,8 +3927,8 @@ class TestAssistantOps(unittest.TestCase):
                 notify_reasons.append(str(reason))
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
-                patch("cccc.daemon.assistants.assistant_ops._emit_voice_input_notify", side_effect=fake_emit),
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=False),
+                patch("no1.daemon.assistants.assistant_ops._emit_voice_input_notify", side_effect=fake_emit),
             ):
                 second = handle_assistant_voice_input_append(
                     {
@@ -3959,7 +3959,7 @@ class TestAssistantOps(unittest.TestCase):
             self._attach_scope(group_id, str(repo))
             self._enable_voice_secretary(group_id)
 
-            from cccc.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
+            from no1.daemon.assistants.assistant_ops import handle_assistant_voice_input_append
 
             notify_reasons: list[str] = []
 
@@ -3967,8 +3967,8 @@ class TestAssistantOps(unittest.TestCase):
                 notify_reasons.append(str(reason))
 
             with (
-                patch("cccc.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=True),
-                patch("cccc.daemon.assistants.assistant_ops._emit_voice_input_notify", side_effect=fake_emit),
+                patch("no1.daemon.assistants.assistant_ops.is_voice_secretary_actor_running", return_value=True),
+                patch("no1.daemon.assistants.assistant_ops._emit_voice_input_notify", side_effect=fake_emit),
             ):
                 resp = handle_assistant_voice_input_append(
                     {
@@ -4107,7 +4107,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertIn("Target: secretary", input_text)
             self.assertIn(f"Request id: {request_id}", input_text)
             self.assertIn("Required output:", input_text)
-            self.assertIn("Use MCP tool cccc_voice_secretary_request(action=\"report\"", input_text)
+            self.assertIn("Use MCP tool onecolleague_voice_secretary_request(action=\"report\"", input_text)
             self.assertIn("Task:", input_text)
             self.assertIn("刚才的总结有没有遗漏", input_text)
             self.assertEqual((read.result or {}).get("documents"), [])
@@ -4115,7 +4115,7 @@ class TestAssistantOps(unittest.TestCase):
             self.assertTrue(batches)
             self.assertEqual(batches[0].get("request_kind"), "ask_request")
             self.assertTrue(batches[0].get("requires_report"))
-            self.assertEqual(batches[0].get("report_channel"), 'cccc_voice_secretary_request(action="report")')
+            self.assertEqual(batches[0].get("report_channel"), 'onecolleague_voice_secretary_request(action="report")')
 
             state, _ = self._call(
                 "assistant_state",
@@ -4355,8 +4355,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_secretary_request_uses_targeted_system_notify(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             self._enable_voice_secretary(group_id)
@@ -4905,8 +4905,8 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_document_instruction_appends_input_and_notifies_actor(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import iter_events
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import iter_events
 
             group_id = self._create_group()
             repo = Path(home) / "repo"
@@ -4965,7 +4965,7 @@ class TestAssistantOps(unittest.TestCase):
             document_input_text = str((read.result or {}).get("input_text") or "")
             self.assertIn("Mode: document", document_input_text)
             self.assertIn("Required output:", document_input_text)
-            self.assertIn("Edit the repository markdown directly, then use MCP tool cccc_voice_secretary_request", document_input_text)
+            self.assertIn("Edit the repository markdown directly, then use MCP tool onecolleague_voice_secretary_request", document_input_text)
             self.assertIn("Task:", document_input_text)
             self.assertIn("concise launch-risk summary", document_input_text)
             batches = (read.result or {}).get("input_batches") if isinstance(read.result, dict) else []
@@ -4997,7 +4997,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_idle_review_follows_input_stream_stop_and_count_triggers(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants import assistant_ops
+            from no1.daemon.assistants import assistant_ops
 
             group_id = self._create_group()
             repo = Path(home) / "repo"
@@ -5140,7 +5140,7 @@ class TestAssistantOps(unittest.TestCase):
     def test_voice_idle_review_does_not_advance_cursor_before_readable_input_exists(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.assistants import assistant_ops
+            from no1.daemon.assistants import assistant_ops
 
             group_id = self._create_group()
             repo = Path(home) / "repo"
@@ -5171,7 +5171,7 @@ class TestAssistantOps(unittest.TestCase):
             )
             self.assertTrue(append.ok, getattr(append, "error", None))
 
-            with patch("cccc.daemon.assistants.assistant_ops._append_voice_input_event", side_effect=RuntimeError("append failed")):
+            with patch("no1.daemon.assistants.assistant_ops._append_voice_input_event", side_effect=RuntimeError("append failed")):
                 dispatched = assistant_ops.dispatch_voice_idle_review(group_id, {"manual"}, "voice-input-1", "event")
             self.assertFalse(dispatched)
 

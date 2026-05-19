@@ -8,7 +8,7 @@ from pathlib import Path
 
 class TestServeOpsAutomationThread(unittest.TestCase):
     def test_automation_tick_honors_initial_delay_and_interval(self) -> None:
-        from cccc.daemon.serve_ops import start_automation_thread
+        from no1.daemon.serve_ops import start_automation_thread
 
         stop_event = threading.Event()
         tick_times: list[float] = []

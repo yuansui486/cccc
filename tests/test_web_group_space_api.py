@@ -40,29 +40,29 @@ class TestWebGroupSpaceApi(unittest.TestCase):
         return cleanup
 
     def _create_group(self, title: str = "web-space") -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title=title, topic="")
         return group.group_id
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
     def test_group_space_endpoints_work_in_normal_mode(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         cleanup_stub = self._with_env("CCCC_NOTEBOOKLM_STUB", "1")
         try:
             gid = self._create_group("web-space-normal")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = TestClient(create_app())
 
                 status = client.get(f"/api/v1/groups/{gid}/space/status")
@@ -190,7 +190,7 @@ class TestWebGroupSpaceApi(unittest.TestCase):
                 self.assertTrue(credential_update.json().get("ok"))
 
                 with patch(
-                    "cccc.daemon.space.group_space_ops.notebooklm_health_check",
+                    "no1.daemon.space.group_space_ops.notebooklm_health_check",
                     return_value={"provider": "notebooklm", "enabled": True, "compatible": True, "reason": "ok"},
                 ):
                     health = client.post("/api/v1/space/providers/notebooklm/health?by=user")
@@ -200,7 +200,7 @@ class TestWebGroupSpaceApi(unittest.TestCase):
                 self.assertEqual(bool((health_body.get("result") or {}).get("healthy")), True)
 
                 with patch(
-                    "cccc.daemon.space.group_space_ops.start_notebooklm_auth_flow",
+                    "no1.daemon.space.group_space_ops.start_notebooklm_auth_flow",
                     return_value={
                         "provider": "notebooklm",
                         "state": "running",
@@ -208,13 +208,13 @@ class TestWebGroupSpaceApi(unittest.TestCase):
                         "session_id": "nbl_auth_web",
                     },
                 ), patch(
-                    "cccc.daemon.space.group_space_ops.get_notebooklm_auth_flow_status",
+                    "no1.daemon.space.group_space_ops.get_notebooklm_auth_flow_status",
                     return_value={"provider": "notebooklm", "state": "running", "phase": "waiting_user_login"},
                 ), patch(
-                    "cccc.daemon.space.group_space_ops.cancel_notebooklm_auth_flow",
+                    "no1.daemon.space.group_space_ops.cancel_notebooklm_auth_flow",
                     return_value={"provider": "notebooklm", "state": "running", "phase": "canceling"},
                 ), patch(
-                    "cccc.daemon.space.group_space_ops.disconnect_notebooklm_auth_flow",
+                    "no1.daemon.space.group_space_ops.disconnect_notebooklm_auth_flow",
                     return_value={"provider": "notebooklm", "state": "idle", "phase": "idle"},
                 ):
                     auth_start = client.post(
@@ -246,13 +246,13 @@ class TestWebGroupSpaceApi(unittest.TestCase):
             cleanup()
 
     def test_group_space_write_endpoints_blocked_in_exhibit_mode(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         cleanup_mode = self._with_env("CCCC_WEB_MODE", "exhibit")
         try:
             gid = self._create_group("web-space-exhibit")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = TestClient(create_app())
 
                 write_resp = client.post(
@@ -353,8 +353,8 @@ class TestWebGroupSpaceApi(unittest.TestCase):
             cleanup()
 
     def test_group_space_provider_auth_browser_surface_ws_uses_large_stream_limit(self) -> None:
-        from cccc.ports.web.app import create_app
-        from cccc.ports.web.routes import space as space_routes
+        from no1.ports.web.app import create_app
+        from no1.ports.web.routes import space as space_routes
 
         _, cleanup = self._with_home()
         try:
@@ -366,11 +366,11 @@ class TestWebGroupSpaceApi(unittest.TestCase):
                 captured["limit"] = limit
                 raise RuntimeError("simulated connect failure")
 
-            with patch("cccc.ports.web.routes.space.get_daemon_endpoint", return_value={"transport": "tcp", "host": "127.0.0.1", "port": 9001}), patch(
-                "cccc.ports.web.routes.space.check_admin",
+            with patch("no1.ports.web.routes.space.get_daemon_endpoint", return_value={"transport": "tcp", "host": "127.0.0.1", "port": 9001}), patch(
+                "no1.ports.web.routes.space.check_admin",
                 return_value=None,
             ), patch(
-                "cccc.ports.web.routes.space.asyncio.open_connection",
+                "no1.ports.web.routes.space.asyncio.open_connection",
                 side_effect=fake_open_connection,
             ):
                 client = TestClient(create_app())

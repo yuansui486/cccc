@@ -1,5 +1,5 @@
 {
-  "name": "cccc-docs",
+  "name": "onecolleague-docs",
   "type": "module",
   "scripts": {
     "dev": "vitepress dev --port 5000",

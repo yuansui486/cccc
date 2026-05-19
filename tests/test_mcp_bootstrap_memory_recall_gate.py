@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
     def test_bootstrap_returns_slim_packet_and_recovery_fields(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_core, cccc_group_actor
-        from cccc.ports.mcp.handlers import context as cccc_context
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_core, onecolleague_group_actor
+        from no1.ports.mcp.handlers import context as onecolleague_context
 
         def _fake_daemon(req, *args, **kwargs):
             op = str(req.get("op") or "")
@@ -26,7 +26,7 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
             return {}
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "peer1"}, clear=False), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "group_info",
             return_value={
                 "group": {
@@ -37,15 +37,15 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
                 }
             },
         ), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "actor_list",
             return_value={"actors": [{"id": "peer1", "role": "peer", "runner": "pty"}]},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "project_info",
             return_value={"found": True, "path": "/tmp/workspace/PROJECT.md"},
         ), patch.object(
-            cccc_context,
+            onecolleague_context,
             "context_get",
             return_value={
                 "coordination": {
@@ -78,7 +78,7 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
                 }],
             },
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "inbox_list",
             return_value={
                 "messages": [
@@ -92,7 +92,7 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
                 ]
             },
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "_call_daemon_or_raise",
             side_effect=_fake_daemon,
         ):
@@ -145,14 +145,14 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
         self.assertGreaterEqual(len(hits), 1)
 
         next_calls = out["next_calls"]
-        self.assertEqual(next_calls["inbox_list"], 'cccc_inbox_list(kind_filter="all")')
+        self.assertEqual(next_calls["inbox_list"], 'onecolleague_inbox_list(kind_filter="all")')
         self.assertIn('signal_family="interrupt"', next_calls["interrupt_triage"])
         self.assertIn('resume the current task', next_calls["interrupt_triage"])
 
     def test_recall_gate_query_uses_rich_warm_cues_when_hot_cues_are_missing(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_core, cccc_group_actor
-        from cccc.ports.mcp.handlers import context as cccc_context
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_core, onecolleague_group_actor
+        from no1.ports.mcp.handlers import context as onecolleague_context
 
         captured = {"query": ""}
 
@@ -165,19 +165,19 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
             return {}
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "peer1"}, clear=False), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "group_info",
             return_value={"group": {"group_id": "g_test", "title": "temp_task", "active_scope_key": "s1", "scopes": []}},
         ), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "actor_list",
             return_value={"actors": [{"id": "peer1", "role": "peer", "runner": "pty"}]},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "project_info",
             return_value={"found": False, "path": None},
         ), patch.object(
-            cccc_context,
+            onecolleague_context,
             "context_get",
             return_value={
                 "coordination": {"brief": {"objective": "Stabilize collaboration"}, "tasks": [], "recent_decisions": [], "recent_handoffs": []},
@@ -194,11 +194,11 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
                 }],
             },
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "inbox_list",
             return_value={"messages": []},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "_call_daemon_or_raise",
             side_effect=_fake_daemon,
         ):
@@ -212,7 +212,7 @@ class TestMcpBootstrapMemoryRecallGate(unittest.TestCase):
         self.assertIn("cares about ROI and low noise", query)
 
     def test_build_bootstrap_context_preserves_mind_context_mini_under_budget_pressure(self) -> None:
-        from cccc.ports.mcp.handlers.cccc_core import _build_bootstrap_context
+        from no1.ports.mcp.handlers.onecolleague_core import _build_bootstrap_context
 
         huge_text = "very long project detail " * 160
         noisy_note = "task note " * 120

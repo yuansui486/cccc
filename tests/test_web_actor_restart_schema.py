@@ -4,7 +4,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from cccc.ports.web.schemas import ActorRestartRequest
+from no1.ports.web.schemas import ActorRestartRequest
 
 
 class TestWebActorRestartSchema(unittest.TestCase):

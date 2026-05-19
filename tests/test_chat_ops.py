@@ -36,13 +36,13 @@ class TestChatOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_try_handle_unknown_chat_op_returns_none(self) -> None:
-        from cccc.daemon.messaging.chat_ops import try_handle_chat_op
+        from no1.daemon.messaging.chat_ops import try_handle_chat_op
 
         self.assertIsNone(
             try_handle_chat_op(
@@ -59,12 +59,12 @@ class TestChatOps(unittest.TestCase):
         )
 
     def test_wake_group_on_human_message_skips_execution_time_idle_when_accept_was_active(self) -> None:
-        from cccc.daemon.messaging.chat_ops import _wake_group_on_human_message
+        from no1.daemon.messaging.chat_ops import _wake_group_on_human_message
 
         group = object()
-        with patch("cccc.daemon.messaging.chat_ops.get_group_state", return_value="idle"), patch(
-            "cccc.daemon.messaging.chat_ops.find_actor", return_value=None
-        ), patch("cccc.daemon.messaging.chat_ops.set_group_state") as set_state:
+        with patch("no1.daemon.messaging.chat_ops.get_group_state", return_value="idle"), patch(
+            "no1.daemon.messaging.chat_ops.find_actor", return_value=None
+        ), patch("no1.daemon.messaging.chat_ops.set_group_state") as set_state:
             out = _wake_group_on_human_message(
                 group,
                 by="user",
@@ -77,12 +77,12 @@ class TestChatOps(unittest.TestCase):
         set_state.assert_not_called()
 
     def test_wake_group_on_human_message_wakes_when_accept_was_idle(self) -> None:
-        from cccc.daemon.messaging.chat_ops import _wake_group_on_human_message
+        from no1.daemon.messaging.chat_ops import _wake_group_on_human_message
 
         fake_group = type("G", (), {"group_id": "g1"})()
-        with patch("cccc.daemon.messaging.chat_ops.get_group_state", return_value="idle"), patch(
-            "cccc.daemon.messaging.chat_ops.find_actor", return_value=None
-        ), patch("cccc.daemon.messaging.chat_ops.set_group_state", return_value=fake_group) as set_state:
+        with patch("no1.daemon.messaging.chat_ops.get_group_state", return_value="idle"), patch(
+            "no1.daemon.messaging.chat_ops.find_actor", return_value=None
+        ), patch("no1.daemon.messaging.chat_ops.set_group_state", return_value=fake_group) as set_state:
             out = _wake_group_on_human_message(
                 fake_group,
                 by="user",
@@ -454,7 +454,7 @@ class TestChatOps(unittest.TestCase):
     def test_send_pet_review_immediate_follows_reply_required(self) -> None:
         group_id, cleanup = self._setup_group_with_actors()
         try:
-            with patch("cccc.daemon.messaging.chat_ops.request_pet_review") as review_mock:
+            with patch("no1.daemon.messaging.chat_ops.request_pet_review") as review_mock:
                 resp, _ = self._call(
                     "send",
                     {
@@ -508,7 +508,7 @@ class TestChatOps(unittest.TestCase):
             original_event_id = str(original_event.get("id") or "").strip()
             self.assertTrue(original_event_id)
 
-            with patch("cccc.daemon.messaging.chat_ops.request_pet_review") as review_mock:
+            with patch("no1.daemon.messaging.chat_ops.request_pet_review") as review_mock:
                 reply, _ = self._call(
                     "reply",
                     {
@@ -544,7 +544,7 @@ class TestChatOps(unittest.TestCase):
             cleanup()
 
     def test_user_message_wakes_idle_group_and_clears_pending_auto_idle_notifications(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -569,7 +569,7 @@ class TestChatOps(unittest.TestCase):
             idle, _ = self._call("group_set_state", {"group_id": group_id, "state": "idle", "by": "user"})
             self.assertTrue(idle.ok, getattr(idle, "error", None))
 
-            with patch("cccc.daemon.server.THROTTLE.clear_pending_system_notifies", return_value=1) as clear_mock:
+            with patch("no1.daemon.server.THROTTLE.clear_pending_system_notifies", return_value=1) as clear_mock:
                 send, _ = self._call(
                     "send",
                     {
@@ -594,7 +594,7 @@ class TestChatOps(unittest.TestCase):
             cleanup()
 
 
-    # -- T067: cccc_message_send `to` routing bug fix tests --
+    # -- T067: onecolleague_message_send `to` routing bug fix tests --
 
     def _setup_group_with_actors(self):
         """Helper: create group with foreman + 2 peers for routing tests."""
@@ -691,10 +691,10 @@ class TestChatOps(unittest.TestCase):
             cleanup()
 
     def test_tracked_send_retries_partial_failure_without_duplicate_task(self) -> None:
-        from cccc.contracts.v1 import DaemonError, DaemonResponse
-        from cccc.daemon.messaging import chat_ops
-        from cccc.kernel.group import load_group
-        from cccc.kernel.ledger import read_last_lines
+        from no1.contracts.v1 import DaemonError, DaemonResponse
+        from no1.daemon.messaging import chat_ops
+        from no1.kernel.group import load_group
+        from no1.kernel.ledger import read_last_lines
 
         group_id, cleanup = self._setup_group_with_actors()
         real_handle_send = chat_ops.handle_send
@@ -718,7 +718,7 @@ class TestChatOps(unittest.TestCase):
                 "text": "Please recover this tracked send.",
                 "idempotency_key": "resume-request",
             }
-            with patch("cccc.daemon.messaging.chat_ops.handle_send", side_effect=fail_once):
+            with patch("no1.daemon.messaging.chat_ops.handle_send", side_effect=fail_once):
                 first, _ = self._call("tracked_send", dict(payload))
                 second, _ = self._call("tracked_send", dict(payload))
 
@@ -968,8 +968,8 @@ class TestChatOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as send_queue, patch(
-                "cccc.daemon.messaging.chat_ops.request_flush_pending_messages"
+            with patch("no1.daemon.messaging.chat_ops.queue_chat_message") as send_queue, patch(
+                "no1.daemon.messaging.chat_ops.request_flush_pending_messages"
             ) as send_flush:
                 send_resp, _ = self._call(
                     "send",
@@ -985,7 +985,7 @@ class TestChatOps(unittest.TestCase):
             send_queue.assert_called_once()
             send_flush.assert_called_once_with(unittest.mock.ANY, actor_id="peer1")
             send_delivery_text = str(send_queue.call_args.kwargs.get("text") or "")
-            self.assertIn("[cccc] References:", send_delivery_text)
+            self.assertIn("[onecolleague] References:", send_delivery_text)
             self.assertIn("P2 (slot-2) · PDF p.12 — Revenue deck", send_delivery_text)
             self.assertIn('excerpt: "Gross margin note is outdated."', send_delivery_text)
             self.assertIn("href: https://example.test/deck.pdf#page=12", send_delivery_text)
@@ -997,9 +997,9 @@ class TestChatOps(unittest.TestCase):
             reply_to = str(send_event.get("id") or "").strip()
             self.assertTrue(reply_to)
 
-            with patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as reply_queue, patch(
-                "cccc.daemon.messaging.chat_ops.request_flush_pending_messages"
-            ) as reply_flush, patch("cccc.daemon.messaging.chat_ops.flush_pending_messages") as reply_sync_flush:
+            with patch("no1.daemon.messaging.chat_ops.queue_chat_message") as reply_queue, patch(
+                "no1.daemon.messaging.chat_ops.request_flush_pending_messages"
+            ) as reply_flush, patch("no1.daemon.messaging.chat_ops.flush_pending_messages") as reply_sync_flush:
                 reply_resp, _ = self._call(
                     "reply",
                     {
@@ -1016,7 +1016,7 @@ class TestChatOps(unittest.TestCase):
             reply_flush.assert_called_once_with(unittest.mock.ANY, actor_id="peer1")
             reply_sync_flush.assert_not_called()
             reply_delivery_text = str(reply_queue.call_args.kwargs.get("text") or "")
-            self.assertIn("[cccc] References:", reply_delivery_text)
+            self.assertIn("[onecolleague] References:", reply_delivery_text)
             self.assertIn("P2 (slot-2) · PDF p.12 — Revenue deck", reply_delivery_text)
             self.assertIn("snapshot: state/blobs/sha256_demo.jpg (1440x900)", reply_delivery_text)
         finally:
@@ -1123,9 +1123,9 @@ class TestChatOps(unittest.TestCase):
 
     def test_user_default_to_stopped_foreman_does_not_route_to_peer(self) -> None:
         """Default @foreman routing must keep the stable foreman target even when stopped."""
-        from cccc.daemon.messaging.chat_ops import handle_send
-        from cccc.kernel.group import load_group
-        from cccc.util.conv import coerce_bool
+        from no1.daemon.messaging.chat_ops import handle_send
+        from no1.kernel.group import load_group
+        from no1.util.conv import coerce_bool
 
         _, cleanup = self._with_home()
         try:
@@ -1160,10 +1160,10 @@ class TestChatOps(unittest.TestCase):
                 return ["fm1"]
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit,
-                patch("cccc.daemon.messaging.chat_ops.schedule_headless_post_wake_delivery", return_value=True) as schedule_post_wake,
-                patch("cccc.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=["fm1"]),
-                patch("cccc.daemon.messaging.chat_ops.emit_system_notify") as emit_notify,
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit,
+                patch("no1.daemon.messaging.chat_ops.schedule_headless_post_wake_delivery", return_value=True) as schedule_post_wake,
+                patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=["fm1"]),
+                patch("no1.daemon.messaging.chat_ops.emit_system_notify") as emit_notify,
             ):
                 resp = handle_send(
                     {
@@ -1236,9 +1236,9 @@ class TestChatOps(unittest.TestCase):
             cleanup()
 
     def test_reply_to_stopped_headless_actor_schedules_post_wake_delivery(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_reply
-        from cccc.kernel.group import load_group
-        from cccc.util.conv import coerce_bool
+        from no1.daemon.messaging.chat_ops import handle_reply
+        from no1.kernel.group import load_group
+        from no1.util.conv import coerce_bool
 
         _, cleanup = self._with_home()
         try:
@@ -1282,10 +1282,10 @@ class TestChatOps(unittest.TestCase):
             assert group is not None
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit,
-                patch("cccc.daemon.messaging.chat_ops.schedule_headless_post_wake_delivery", return_value=True) as schedule_post_wake,
-                patch("cccc.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=["peer1"]),
-                patch("cccc.daemon.messaging.chat_ops.emit_system_notify") as emit_notify,
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit,
+                patch("no1.daemon.messaging.chat_ops.schedule_headless_post_wake_delivery", return_value=True) as schedule_post_wake,
+                patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=["peer1"]),
+                patch("no1.daemon.messaging.chat_ops.emit_system_notify") as emit_notify,
             ):
                 resp = handle_reply(
                     {
@@ -1322,7 +1322,7 @@ class TestChatOps(unittest.TestCase):
             cleanup()
 
     def test_auto_wake_reports_actor_already_being_woken_for_post_wake_delivery(self) -> None:
-        from cccc.daemon.messaging.chat_support_ops import auto_wake_recipients
+        from no1.daemon.messaging.chat_support_ops import auto_wake_recipients
 
         group = type("G", (), {"group_id": "g1"})()
         lock = threading.Lock()
@@ -1356,7 +1356,7 @@ class TestChatOps(unittest.TestCase):
         self.assertEqual(start_calls, [])
         self.assertEqual(in_progress, {("g1", "peer1")})
 
-    # -- T070: cccc_message_reply & cccc_file_send `to` string coercion tests --
+    # -- T070: onecolleague_message_reply & onecolleague_file_send `to` string coercion tests --
 
     def test_reply_to_string_is_routed_correctly(self) -> None:
         """T070: reply with string `to` should route correctly (daemon layer)."""
@@ -1415,8 +1415,8 @@ class TestMCPToCoercion(unittest.TestCase):
     """T070: Test MCP handler string→array coercion for reply and file_send."""
 
     def test_mcp_reply_handler_string_to_coercion(self) -> None:
-        """MCP cccc_message_reply handler: string `to` → single-element list."""
-        from cccc.ports.mcp.server import _handle_cccc_namespace
+        """MCP onecolleague_message_reply handler: string `to` → single-element list."""
+        from no1.ports.mcp.server import _handle_onecolleague_namespace
         from unittest.mock import patch
 
         # Capture what message_reply receives
@@ -1426,11 +1426,11 @@ class TestMCPToCoercion(unittest.TestCase):
             captured.update(kwargs)
             return {"event": {}}
 
-        with patch("cccc.ports.mcp.server.message_reply", side_effect=fake_message_reply):
-            with patch("cccc.ports.mcp.server._resolve_group_id", return_value="g_test"):
-                with patch("cccc.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
+        with patch("no1.ports.mcp.server.message_reply", side_effect=fake_message_reply):
+            with patch("no1.ports.mcp.server._resolve_group_id", return_value="g_test"):
+                with patch("no1.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
                     try:
-                        _handle_cccc_namespace("cccc_message_reply", {
+                        _handle_onecolleague_namespace("onecolleague_message_reply", {
                             "to": "peer2",
                             "event_id": "evt_123",
                             "text": "hello",
@@ -1441,8 +1441,8 @@ class TestMCPToCoercion(unittest.TestCase):
         self.assertEqual(captured.get("to"), ["peer2"])
 
     def test_mcp_reply_handler_list_to_preserved(self) -> None:
-        """MCP cccc_message_reply handler: list `to` is preserved."""
-        from cccc.ports.mcp.server import _handle_cccc_namespace
+        """MCP onecolleague_message_reply handler: list `to` is preserved."""
+        from no1.ports.mcp.server import _handle_onecolleague_namespace
         from unittest.mock import patch
 
         captured = {}
@@ -1451,11 +1451,11 @@ class TestMCPToCoercion(unittest.TestCase):
             captured.update(kwargs)
             return {"event": {}}
 
-        with patch("cccc.ports.mcp.server.message_reply", side_effect=fake_message_reply):
-            with patch("cccc.ports.mcp.server._resolve_group_id", return_value="g_test"):
-                with patch("cccc.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
+        with patch("no1.ports.mcp.server.message_reply", side_effect=fake_message_reply):
+            with patch("no1.ports.mcp.server._resolve_group_id", return_value="g_test"):
+                with patch("no1.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
                     try:
-                        _handle_cccc_namespace("cccc_message_reply", {
+                        _handle_onecolleague_namespace("onecolleague_message_reply", {
                             "to": ["peer2", "peer3"],
                             "event_id": "evt_123",
                             "text": "hello",
@@ -1466,8 +1466,8 @@ class TestMCPToCoercion(unittest.TestCase):
         self.assertEqual(captured.get("to"), ["peer2", "peer3"])
 
     def test_mcp_reply_handler_none_to_is_none(self) -> None:
-        """MCP cccc_message_reply handler: missing `to` → None."""
-        from cccc.ports.mcp.server import _handle_cccc_namespace
+        """MCP onecolleague_message_reply handler: missing `to` → None."""
+        from no1.ports.mcp.server import _handle_onecolleague_namespace
         from unittest.mock import patch
 
         captured = {}
@@ -1476,11 +1476,11 @@ class TestMCPToCoercion(unittest.TestCase):
             captured.update(kwargs)
             return {"event": {}}
 
-        with patch("cccc.ports.mcp.server.message_reply", side_effect=fake_message_reply):
-            with patch("cccc.ports.mcp.server._resolve_group_id", return_value="g_test"):
-                with patch("cccc.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
+        with patch("no1.ports.mcp.server.message_reply", side_effect=fake_message_reply):
+            with patch("no1.ports.mcp.server._resolve_group_id", return_value="g_test"):
+                with patch("no1.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
                     try:
-                        _handle_cccc_namespace("cccc_message_reply", {
+                        _handle_onecolleague_namespace("onecolleague_message_reply", {
                             "event_id": "evt_123",
                             "text": "hello",
                         })
@@ -1490,8 +1490,8 @@ class TestMCPToCoercion(unittest.TestCase):
         self.assertIsNone(captured.get("to"))
 
     def test_mcp_file_send_handler_string_to_coercion(self) -> None:
-        """MCP cccc_file_send handler: string `to` → single-element list."""
-        from cccc.ports.mcp.server import _handle_cccc_namespace
+        """MCP onecolleague_file_send handler: string `to` → single-element list."""
+        from no1.ports.mcp.server import _handle_onecolleague_namespace
         from unittest.mock import patch
 
         captured = {}
@@ -1500,11 +1500,11 @@ class TestMCPToCoercion(unittest.TestCase):
             captured.update(kwargs)
             return {"event": {}}
 
-        with patch("cccc.ports.mcp.server.file_send", side_effect=fake_file_send):
-            with patch("cccc.ports.mcp.server._resolve_group_id", return_value="g_test"):
-                with patch("cccc.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
+        with patch("no1.ports.mcp.server.file_send", side_effect=fake_file_send):
+            with patch("no1.ports.mcp.server._resolve_group_id", return_value="g_test"):
+                with patch("no1.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
                     try:
-                        _handle_cccc_namespace("cccc_file", {
+                        _handle_onecolleague_namespace("onecolleague_file", {
                             "action": "send",
                             "to": "user",
                             "path": "/tmp/test.txt",
@@ -1516,8 +1516,8 @@ class TestMCPToCoercion(unittest.TestCase):
         self.assertEqual(captured.get("to"), ["user"])
 
     def test_mcp_file_send_handler_none_to_is_none(self) -> None:
-        """MCP cccc_file_send handler: missing `to` → None."""
-        from cccc.ports.mcp.server import _handle_cccc_namespace
+        """MCP onecolleague_file_send handler: missing `to` → None."""
+        from no1.ports.mcp.server import _handle_onecolleague_namespace
         from unittest.mock import patch
 
         captured = {}
@@ -1526,11 +1526,11 @@ class TestMCPToCoercion(unittest.TestCase):
             captured.update(kwargs)
             return {"event": {}}
 
-        with patch("cccc.ports.mcp.server.file_send", side_effect=fake_file_send):
-            with patch("cccc.ports.mcp.server._resolve_group_id", return_value="g_test"):
-                with patch("cccc.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
+        with patch("no1.ports.mcp.server.file_send", side_effect=fake_file_send):
+            with patch("no1.ports.mcp.server._resolve_group_id", return_value="g_test"):
+                with patch("no1.ports.mcp.server._resolve_self_actor_id", return_value="peer1"):
                     try:
-                        _handle_cccc_namespace("cccc_file", {
+                        _handle_onecolleague_namespace("onecolleague_file", {
                             "action": "send",
                             "path": "/tmp/test.txt",
                         })
@@ -1540,7 +1540,7 @@ class TestMCPToCoercion(unittest.TestCase):
         self.assertIsNone(captured.get("to"))
 
     def test_mcp_file_read_handler_routes_to_blob_read(self) -> None:
-        from cccc.ports.mcp.server import _handle_cccc_namespace
+        from no1.ports.mcp.server import _handle_onecolleague_namespace
         from unittest.mock import patch
 
         captured = {}
@@ -1549,10 +1549,10 @@ class TestMCPToCoercion(unittest.TestCase):
             captured.update(kwargs)
             return {"text": "hello", "truncated": False}
 
-        with patch("cccc.ports.mcp.server.blob_read", side_effect=fake_blob_read):
-            with patch("cccc.ports.mcp.server._resolve_group_id", return_value="g_test"):
-                _handle_cccc_namespace(
-                    "cccc_file",
+        with patch("no1.ports.mcp.server.blob_read", side_effect=fake_blob_read):
+            with patch("no1.ports.mcp.server._resolve_group_id", return_value="g_test"):
+                _handle_onecolleague_namespace(
+                    "onecolleague_file",
                     {
                         "action": "read",
                         "rel_path": "state/blobs/demo.txt",

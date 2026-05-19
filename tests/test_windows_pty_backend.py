@@ -32,7 +32,7 @@ class _NonReentrantLock:
 
 class TestWindowsPtyBackendInternals(unittest.TestCase):
     def test_on_wake_readable_does_not_reenter_session_lock(self) -> None:
-        from cccc.runners.pty_win import PtySession
+        from no1.runners.pty_win import PtySession
 
         session = object.__new__(PtySession)
         session._wake_r = _WakeSocket()
@@ -60,7 +60,7 @@ class TestWindowsPtyBackendInternals(unittest.TestCase):
 @unittest.skipUnless(os.name == "nt", "Windows-only ConPTY backend check")
 class TestWindowsPtyBackend(unittest.TestCase):
     def test_windows_pty_backend_is_available(self) -> None:
-        from cccc.runners import pty as pty_runner
+        from no1.runners import pty as pty_runner
 
         self.assertTrue(
             bool(getattr(pty_runner, "PTY_SUPPORTED", False)),
@@ -68,7 +68,7 @@ class TestWindowsPtyBackend(unittest.TestCase):
         )
 
     def test_conpty_session_smoke_echo_output(self) -> None:
-        from cccc.runners import pty as pty_runner
+        from no1.runners import pty as pty_runner
 
         self.assertTrue(bool(getattr(pty_runner, "PTY_SUPPORTED", False)))
 

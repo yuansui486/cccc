@@ -1,6 +1,6 @@
 # Operations Runbook
 
-This page is for operators who need reliable day-to-day CCCC execution.
+This page is for operators who need reliable day-to-day OneColleague execution.
 
 ## 1) Runtime Topology
 
@@ -9,8 +9,8 @@ Default runtime home:
 
 Key paths:
 - `~/.cccc/registry.json`
-- `~/.cccc/daemon/ccccd.sock`
-- `~/.cccc/daemon/ccccd.log`
+- `~/.cccc/daemon/onecolleagued.sock`
+- `~/.cccc/daemon/onecolleagued.log`
 - `~/.cccc/groups/<group_id>/group.yaml`
 - `~/.cccc/groups/<group_id>/ledger.jsonl`
 
@@ -19,15 +19,15 @@ Key paths:
 ### Start
 
 ```bash
-cccc
+onecolleague
 ```
 
 ### Health Baseline
 
 ```bash
-cccc doctor
-cccc daemon status
-cccc groups
+onecolleague doctor
+onecolleague daemon status
+onecolleague groups
 ```
 
 Expected:
@@ -48,10 +48,10 @@ When a group appears stuck:
 Useful commands:
 
 ```bash
-cccc daemon status
-cccc actor list
-cccc inbox --actor-id <actor_id>
-cccc tail -n 100 -f
+onecolleague daemon status
+onecolleague actor list
+onecolleague inbox --actor-id <actor_id>
+onecolleague tail -n 100 -f
 ```
 
 ## 4) Fast Recovery Playbook
@@ -59,7 +59,7 @@ cccc tail -n 100 -f
 ### Actor-level recovery (preferred)
 
 ```bash
-cccc actor restart <actor_id>
+onecolleague actor restart <actor_id>
 ```
 
 Use this before group-level restart.
@@ -67,15 +67,15 @@ Use this before group-level restart.
 ### Group-level recovery
 
 ```bash
-cccc group stop
-cccc group start
+onecolleague group stop
+onecolleague group start
 ```
 
 ### Daemon-level recovery (last resort)
 
 ```bash
-cccc daemon stop
-cccc daemon start
+onecolleague daemon stop
+onecolleague daemon start
 ```
 
 ## 5) Secure Remote Access
@@ -99,15 +99,15 @@ Do not:
 ### Upgrade
 
 ```bash
-python -m pip install -U cccc-pair
+python -m pip install -U no1
 ```
 
 ### After upgrade
 
 ```bash
-cccc doctor
-cccc daemon status
-cccc mcp
+onecolleague doctor
+onecolleague daemon status
+onecolleague mcp
 ```
 
 Run a small end-to-end smoke:
@@ -129,11 +129,11 @@ Backup `CCCC_HOME`:
 
 1. Stop daemon.
 2. Restore `CCCC_HOME` directory.
-3. Start daemon and verify with `cccc doctor`.
+3. Start daemon and verify with `onecolleague doctor`.
 
 ## 8) Operational Guardrails
 
-- Keep one source of truth: decisions should be in CCCC messages.
+- Keep one source of truth: decisions should be in OneColleague messages.
 - Use `reply_required` for critical asks.
 - Prefer explicit recipients over broad broadcast when scope is narrow.
 - Keep automation focused on objective reminders, not chat noise.
@@ -146,7 +146,7 @@ If an issue repeats:
    - group id
    - actor id
    - event ids
-   - recent `cccc tail -n 100`
+   - recent `onecolleague tail -n 100`
 2. Capture reproducible sequence.
 3. Classify severity (`P0/P1/P2`).
 4. Register fix or risk in release findings.
@@ -157,14 +157,14 @@ If an issue repeats:
 
 ```bash
 export CCCC_NOTEBOOKLM_REAL=1
-cccc daemon restart
+onecolleague daemon restart
 ```
 
 ### Validate control plane
 
 ```bash
-cccc space credential status
-cccc space health
+onecolleague space credential status
+onecolleague space health
 ```
 
 ### Validate curated context export path
@@ -172,7 +172,7 @@ cccc space health
 After a `context_sync` update (`vision.update` / `overview.manual.update` / `task.*` / `agent.*`), check queue:
 
 ```bash
-cccc space jobs list --state pending
+onecolleague space jobs list --state pending
 ```
 
 Expected: a `kind=context_sync` job appears for bound groups.
@@ -180,7 +180,7 @@ Expected: a `kind=context_sync` job appears for bound groups.
 ### Validate repo `space/` reconciliation
 
 ```bash
-cccc space sync --force
+onecolleague space sync --force
 ```
 
 Expected: result reports `converged=true` and `unsynced_count=0` when provider is healthy.
@@ -189,17 +189,17 @@ Expected: result reports `converged=true` and `unsynced_count=0` when provider i
 
 ```bash
 unset CCCC_NOTEBOOKLM_REAL
-cccc daemon restart
+onecolleague daemon restart
 ```
 
 Expected after rollback:
 
 - Group Space operations may return degraded/disabled provider results.
-- Core CCCC chat/task/actor workflows continue normally.
+- Core OneColleague chat/task/actor workflows continue normally.
 
 Optional throughput tuning:
 
 ```bash
-export CCCC_SPACE_PROVIDER_MAX_INFLIGHT=1   # safer
-export CCCC_SPACE_PROVIDER_MAX_INFLIGHT=4   # faster
+export OneColleague_SPACE_PROVIDER_MAX_INFLIGHT=1   # safer
+export OneColleague_SPACE_PROVIDER_MAX_INFLIGHT=4   # faster
 ```

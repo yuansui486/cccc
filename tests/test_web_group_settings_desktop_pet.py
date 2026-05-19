@@ -15,10 +15,10 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
 
         def cleanup() -> None:
             try:
-                from cccc.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
-                from cccc.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
-                from cccc.runners import headless as headless_runner
-                from cccc.runners import pty as pty_runner
+                from no1.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from no1.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from no1.runners import headless as headless_runner
+                from no1.runners import pty as pty_runner
 
                 codex_app_supervisor.stop_all()
                 claude_app_supervisor.stop_all()
@@ -35,15 +35,15 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
         return td, cleanup
 
     def _create_group(self):
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title="web-pet-test", topic="")
         return group.group_id
 
     def _seed_pet_group(self, group_id: str, *, state: str) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         group = load_group(group_id)
         assert group is not None
@@ -66,7 +66,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
         group.save()
 
     def test_get_settings_desktop_pet_defaults_to_false(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -86,8 +86,8 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             cleanup()
 
     def test_get_settings_desktop_pet_enabled_after_manual_set(self) -> None:
-        from cccc.kernel.group import load_group
-        from cccc.ports.web.app import create_app
+        from no1.kernel.group import load_group
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -108,8 +108,8 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             cleanup()
 
     def test_get_settings_tolerates_dirty_desktop_pet_value(self) -> None:
-        from cccc.kernel.group import load_group
-        from cccc.ports.web.app import create_app
+        from no1.kernel.group import load_group
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -134,7 +134,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
 
     def test_schema_accepts_desktop_pet_enabled_field(self) -> None:
         """Verify GroupSettingsRequest schema includes desktop_pet_enabled."""
-        from cccc.ports.web.schemas import GroupSettingsRequest
+        from no1.ports.web.schemas import GroupSettingsRequest
 
         req = GroupSettingsRequest(desktop_pet_enabled=True)
         self.assertTrue(req.desktop_pet_enabled)
@@ -146,8 +146,8 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
         self.assertIsNone(req3.desktop_pet_enabled)
 
     def test_launch_token_endpoint_returns_current_scoped_token(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.ports.web.app import create_app
+        from no1.kernel.access_tokens import create_access_token
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -168,7 +168,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             cleanup()
 
     def test_launch_token_endpoint_allows_empty_token_when_no_access_tokens_exist(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -185,8 +185,8 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             cleanup()
 
     def test_launch_token_endpoint_respects_group_scope(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.ports.web.app import create_app
+        from no1.kernel.access_tokens import create_access_token
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -205,7 +205,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             cleanup()
 
     def test_pet_review_route_allows_idle_group(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -214,7 +214,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             app = create_app()
             client = TestClient(app)
 
-            with patch("cccc.ports.web.routes.groups.request_manual_pet_review", return_value=True) as manual_review:
+            with patch("no1.ports.web.routes.groups.request_manual_pet_review", return_value=True) as manual_review:
                 resp = client.post(f"/api/v1/groups/{group_id}/pet-context/review")
 
             self.assertEqual(resp.status_code, 200)
@@ -226,7 +226,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             cleanup()
 
     def test_pet_review_route_rejects_paused_group(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -235,7 +235,7 @@ class TestWebGroupSettingsDesktopPet(unittest.TestCase):
             app = create_app()
             client = TestClient(app)
 
-            with patch("cccc.ports.web.routes.groups.request_manual_pet_review", return_value=True) as manual_review:
+            with patch("no1.ports.web.routes.groups.request_manual_pet_review", return_value=True) as manual_review:
                 resp = client.post(f"/api/v1/groups/{group_id}/pet-context/review")
 
             self.assertEqual(resp.status_code, 200)

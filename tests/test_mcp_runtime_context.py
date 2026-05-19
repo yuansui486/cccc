@@ -10,22 +10,22 @@ from unittest.mock import patch
 
 class TestMcpRuntimeContext(unittest.TestCase):
     def test_iter_ancestor_pids_uses_windows_parent_chain(self) -> None:
-        from cccc.ports.mcp.common import _iter_ancestor_pids
+        from no1.ports.mcp.common import _iter_ancestor_pids
 
         chain = {900: 700, 700: 500, 500: 0}
-        with patch("cccc.ports.mcp.common.os.name", "nt"), patch(
-            "cccc.ports.mcp.common.os.getpid",
+        with patch("no1.ports.mcp.common.os.name", "nt"), patch(
+            "no1.ports.mcp.common.os.getpid",
             return_value=900,
         ), patch(
-            "cccc.ports.mcp.common._proc_parent_pid_windows",
+            "no1.ports.mcp.common._proc_parent_pid_windows",
             side_effect=lambda pid: chain.get(pid, 0),
         ):
             self.assertEqual(_iter_ancestor_pids(), [900, 700, 500])
 
     def test_runtime_context_recovers_from_ancestor_env(self) -> None:
-        from cccc.ports.mcp.common import _runtime_context
+        from no1.ports.mcp.common import _runtime_context
 
-        fake_home = Path("/tmp/cccc-runtime-home").resolve()
+        fake_home = Path("/tmp/onecolleague-runtime-home").resolve()
 
         def _fake_proc_environ(pid: int) -> dict[str, str]:
             if pid == 42:
@@ -37,13 +37,13 @@ class TestMcpRuntimeContext(unittest.TestCase):
             return {}
 
         with patch.dict(os.environ, {}, clear=True), patch(
-            "cccc.ports.mcp.common._iter_ancestor_pids",
+            "no1.ports.mcp.common._iter_ancestor_pids",
             return_value=[100, 42, 1],
         ), patch(
-            "cccc.ports.mcp.common._proc_environ",
+            "no1.ports.mcp.common._proc_environ",
             side_effect=_fake_proc_environ,
         ), patch(
-            "cccc.ports.mcp.common.cccc_home",
+            "no1.ports.mcp.common.onecolleague_home",
             return_value=fake_home,
         ):
             ctx = _runtime_context()
@@ -53,9 +53,9 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(ctx.actor_id, "foreman-ancestor")
 
     def test_runtime_context_explicit_empty_env_suppresses_ancestor_recovery(self) -> None:
-        from cccc.ports.mcp.common import _runtime_context
+        from no1.ports.mcp.common import _runtime_context
 
-        fake_home = Path("/tmp/cccc-runtime-home").resolve()
+        fake_home = Path("/tmp/onecolleague-runtime-home").resolve()
 
         def _fake_proc_environ(pid: int) -> dict[str, str]:
             if pid == 42:
@@ -67,13 +67,13 @@ class TestMcpRuntimeContext(unittest.TestCase):
             return {}
 
         with patch.dict(os.environ, {"CCCC_HOME": "", "CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=True), patch(
-            "cccc.ports.mcp.common._iter_ancestor_pids",
+            "no1.ports.mcp.common._iter_ancestor_pids",
             return_value=[100, 42, 1],
         ), patch(
-            "cccc.ports.mcp.common._proc_environ",
+            "no1.ports.mcp.common._proc_environ",
             side_effect=_fake_proc_environ,
         ), patch(
-            "cccc.ports.mcp.common.cccc_home",
+            "no1.ports.mcp.common.onecolleague_home",
             return_value=fake_home,
         ):
             ctx = _runtime_context()
@@ -83,7 +83,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(ctx.actor_id, "")
 
     def test_runtime_context_falls_back_to_pty_state(self) -> None:
-        from cccc.ports.mcp.common import _runtime_context
+        from no1.ports.mcp.common import _runtime_context
 
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp).resolve()
@@ -103,13 +103,13 @@ class TestMcpRuntimeContext(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {}, clear=True), patch(
-                "cccc.ports.mcp.common._iter_ancestor_pids",
+                "no1.ports.mcp.common._iter_ancestor_pids",
                 return_value=[100, 42, 1],
             ), patch(
-                "cccc.ports.mcp.common._proc_environ",
+                "no1.ports.mcp.common._proc_environ",
                 return_value={},
             ), patch(
-                "cccc.ports.mcp.common.cccc_home",
+                "no1.ports.mcp.common.onecolleague_home",
                 return_value=home,
             ):
                 ctx = _runtime_context()
@@ -119,7 +119,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(ctx.actor_id, "管理员")
 
     def test_runtime_context_explicit_empty_env_suppresses_pty_state_recovery(self) -> None:
-        from cccc.ports.mcp.common import _runtime_context
+        from no1.ports.mcp.common import _runtime_context
 
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp).resolve()
@@ -139,13 +139,13 @@ class TestMcpRuntimeContext(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {"CCCC_HOME": "", "CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=True), patch(
-                "cccc.ports.mcp.common._iter_ancestor_pids",
+                "no1.ports.mcp.common._iter_ancestor_pids",
                 return_value=[100, 42, 1],
             ), patch(
-                "cccc.ports.mcp.common._proc_environ",
+                "no1.ports.mcp.common._proc_environ",
                 return_value={},
             ), patch(
-                "cccc.ports.mcp.common.cccc_home",
+                "no1.ports.mcp.common.onecolleague_home",
                 return_value=home,
             ):
                 ctx = _runtime_context()
@@ -155,9 +155,9 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(ctx.actor_id, "")
 
     def test_call_daemon_uses_recovered_home(self) -> None:
-        from cccc.ports.mcp.common import _RuntimeContext, _call_daemon_or_raise
+        from no1.ports.mcp.common import _RuntimeContext, _call_daemon_or_raise
 
-        fake_home = Path("/tmp/cccc-daemon-home").resolve()
+        fake_home = Path("/tmp/onecolleague-daemon-home").resolve()
         captured: dict[str, object] = {}
 
         def _fake_call_daemon(req, **kwargs):
@@ -166,10 +166,10 @@ class TestMcpRuntimeContext(unittest.TestCase):
             return {"ok": True, "result": {"pong": True}}
 
         with patch(
-            "cccc.ports.mcp.common._runtime_context",
+            "no1.ports.mcp.common._runtime_context",
             return_value=_RuntimeContext(home=str(fake_home), group_id="g1", actor_id="a1"),
         ), patch(
-            "cccc.ports.mcp.common.call_daemon",
+            "no1.ports.mcp.common.call_daemon",
             side_effect=_fake_call_daemon,
         ):
             out = _call_daemon_or_raise({"op": "ping"})
@@ -180,9 +180,9 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(str(getattr(paths, "home", "")), str(fake_home))
 
     def test_actor_add_uses_recovered_context_when_env_missing(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.common import _RuntimeContext
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import _RuntimeContext
 
         captured = {}
 
@@ -191,15 +191,15 @@ class TestMcpRuntimeContext(unittest.TestCase):
             return {"ok": True, "result": {"ok": True}}
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False), patch(
-            "cccc.ports.mcp.common._runtime_context",
-            return_value=_RuntimeContext(home="/tmp/cccc", group_id="g_runtime", actor_id="管理员"),
+            "no1.ports.mcp.common._runtime_context",
+            return_value=_RuntimeContext(home="/tmp/onecolleague", group_id="g_runtime", actor_id="管理员"),
         ), patch.object(
             mcp_common,
             "call_daemon",
             side_effect=_fake_call_daemon,
         ):
             out = mcp_server.handle_tool_call(
-                "cccc_actor",
+                "onecolleague_actor",
                 {
                     "action": "add",
                     "actor_id": "peer_new",
@@ -215,38 +215,38 @@ class TestMcpRuntimeContext(unittest.TestCase):
         self.assertEqual(args.get("group_id"), "g_runtime")
         self.assertEqual(args.get("by"), "管理员")
 
-    def test_cccc_help_uses_recovered_actor_notes_when_env_missing(self) -> None:
-        from cccc.kernel.prompt_files import PromptFile
-        from cccc.ports.mcp.common import _RuntimeContext
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_uses_recovered_actor_notes_when_env_missing(self) -> None:
+        from no1.kernel.prompt_files import PromptFile
+        from no1.ports.mcp.common import _RuntimeContext
+        from no1.ports.mcp.server import handle_tool_call
 
         prompt = "## @actor: 管理员\n只有你知道的密码base1234\n"
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False), patch(
-            "cccc.ports.mcp.server._runtime_context",
-            return_value=_RuntimeContext(home="/tmp/cccc", group_id="g_help", actor_id="管理员"),
+            "no1.ports.mcp.server._runtime_context",
+            return_value=_RuntimeContext(home="/tmp/onecolleague", group_id="g_help", actor_id="管理员"),
         ), patch(
-            "cccc.ports.mcp.server.load_group",
+            "no1.ports.mcp.server.load_group",
             return_value=object(),
         ), patch(
-            "cccc.ports.mcp.server.get_effective_role",
+            "no1.ports.mcp.server.get_effective_role",
             return_value="foreman",
         ), patch(
-            "cccc.ports.mcp.server.read_group_prompt_file",
+            "no1.ports.mcp.server.read_group_prompt_file",
             return_value=PromptFile(
-                filename="CCCC_HELP.md",
-                path="/tmp/CCCC_HELP.md",
+                filename="ONECOLLEAGUE_HELP.md",
+                path="/tmp/ONECOLLEAGUE_HELP.md",
                 found=True,
                 content=prompt,
             ),
         ), patch(
-            "cccc.ports.mcp.server._append_runtime_help_addenda",
+            "no1.ports.mcp.server._append_runtime_help_addenda",
             side_effect=lambda markdown, group_id, actor_id: markdown,
         ), patch(
-            "cccc.ports.mcp.server._call_daemon_or_raise",
+            "no1.ports.mcp.server._call_daemon_or_raise",
             return_value={},
         ):
-            out = handle_tool_call("cccc_help", {})
+            out = handle_tool_call("onecolleague_help", {})
 
         markdown = str(out.get("markdown") or "")
         self.assertIn("## Notes for you", markdown)

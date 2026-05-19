@@ -142,7 +142,7 @@ function formatVncFallbackReason(raw: string, texts: { [key: string]: string }):
   if (lower.includes("x11vnc_not_found")) return texts.viewerReasonX11vncNotFound;
   if (lower.includes("wayland")) return texts.viewerReasonWaylandEnv;
   if (lower.includes("missing_display")) return texts.viewerReasonMissingDisplay;
-  if (lower.includes("display_not_cccc_owned")) return texts.viewerReasonDisplayNotOwned;
+  if (lower.includes("display_not_onecolleague_owned")) return texts.viewerReasonDisplayNotOwned;
   if (lower.includes("disabled")) return texts.viewerReasonDisabled;
   if (lower.includes("unsupported_platform")) return texts.viewerReasonUnsupportedPlatform;
   if (lower.includes("endpoint did not become ready") || lower.includes("startup_timeout")) {
@@ -230,7 +230,7 @@ export function ProjectedBrowserSurfacePanel({
       labels?.viewerReasonMissingDisplay || t("presentationBrowserViewerReasonMissingDisplay", { defaultValue: "No X display" }),
     viewerReasonDisplayNotOwned:
       labels?.viewerReasonDisplayNotOwned ||
-      t("presentationBrowserViewerReasonDisplayNotOwned", { defaultValue: "Display is not CCCC-owned" }),
+      t("presentationBrowserViewerReasonDisplayNotOwned", { defaultValue: "Display is not OneColleague-owned" }),
     viewerReasonDisabled:
       labels?.viewerReasonDisabled || t("presentationBrowserViewerReasonDisabled", { defaultValue: "VNC disabled" }),
     viewerReasonUnsupportedPlatform:

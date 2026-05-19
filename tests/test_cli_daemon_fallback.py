@@ -24,15 +24,15 @@ class TestCliDaemonFallback(unittest.TestCase):
         return td, cleanup
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title="cli-daemon-fallback", topic="")
         return group.group_id
 
     def test_send_does_not_fallback_after_daemon_rejection(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         _, cleanup = self._with_home()
         try:
@@ -61,7 +61,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             cleanup()
 
     def test_send_keeps_local_fallback_for_daemon_unavailable(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         _, cleanup = self._with_home()
         try:
@@ -90,7 +90,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             cleanup()
 
     def test_send_defaults_to_actor_env_inside_runtime(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         _, cleanup = self._with_home()
         try:
@@ -119,10 +119,10 @@ class TestCliDaemonFallback(unittest.TestCase):
             cleanup()
 
     def test_reply_defaults_to_actor_env_inside_runtime(self) -> None:
-        from cccc import cli
-        from cccc.contracts.v1 import ChatMessageData
-        from cccc.kernel.group import load_group
-        from cccc.kernel.ledger import append_event
+        from no1 import cli
+        from no1.contracts.v1 import ChatMessageData
+        from no1.kernel.group import load_group
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:
@@ -161,7 +161,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             cleanup()
 
     def test_tracked_send_defaults_to_actor_env_inside_runtime(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         _, cleanup = self._with_home()
         try:
@@ -197,7 +197,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             cleanup()
 
     def test_actor_add_does_not_fallback_after_daemon_rejection(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         _, cleanup = self._with_home()
         try:
@@ -229,7 +229,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             cleanup()
 
     def test_group_update_does_not_fallback_after_daemon_rejection(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         _, cleanup = self._with_home()
         try:

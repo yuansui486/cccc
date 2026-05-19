@@ -24,25 +24,25 @@ class TestWebGroupRoutesLocal(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _app(self):
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return create_app()
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="group-local-read", topic="local topic").group_id
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
@@ -52,7 +52,7 @@ class TestWebGroupRoutesLocal(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
-            with patch("cccc.ports.web.app.call_daemon", side_effect=AssertionError("group_show should not call daemon")):
+            with patch("no1.ports.web.app.call_daemon", side_effect=AssertionError("group_show should not call daemon")):
                 with self._client() as client:
                     resp = client.get(f"/api/v1/groups/{group_id}")
                     self.assertEqual(resp.status_code, 200)
@@ -83,7 +83,7 @@ class TestWebGroupRoutesLocal(unittest.TestCase):
             cleanup()
 
     def test_group_copy_export_preview_import_routes(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -103,7 +103,7 @@ class TestWebGroupRoutesLocal(unittest.TestCase):
                 group.doc["active_scope_key"] = "s_test"
                 group.save()
 
-                with patch("cccc.ports.web.app.call_daemon", side_effect=AssertionError("copy routes should not call daemon IPC")):
+                with patch("no1.ports.web.app.call_daemon", side_effect=AssertionError("copy routes should not call daemon IPC")):
                     with self._client() as client:
                         export_resp = client.get(f"/api/v1/groups/{group_id}/copy/export")
                         self.assertEqual(export_resp.status_code, 200)
@@ -140,8 +140,8 @@ class TestWebGroupRoutesLocal(unittest.TestCase):
     def test_headless_snapshot_replays_recent_completed_turn(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.headless_events import append_headless_event
+            from no1.kernel.group import load_group
+            from no1.kernel.headless_events import append_headless_event
 
             group_id = self._create_group()
             group = load_group(group_id)
@@ -186,8 +186,8 @@ class TestWebGroupRoutesLocal(unittest.TestCase):
     def test_headless_snapshot_replays_recent_completed_control_turn(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.headless_events import append_headless_event
+            from no1.kernel.group import load_group
+            from no1.kernel.headless_events import append_headless_event
 
             group_id = self._create_group()
             group = load_group(group_id)

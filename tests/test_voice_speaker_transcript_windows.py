@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cccc.daemon.assistants.voice_speaker_transcript_windows import (
+from no1.daemon.assistants.voice_speaker_transcript_windows import (
     merge_adjacent_speaker_turns,
     merge_display_transcript_segments,
     normalized_speaker_turns,

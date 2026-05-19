@@ -160,22 +160,22 @@ for file in "${changed_files[@]}"; do
       append_unique_python_source "$file"
       append_unique_test "$file"
       ;;
-    src/cccc/daemon/codex_app_sessions.py|src/cccc/daemon/claude_app_sessions.py)
+    src/no1/daemon/codex_app_sessions.py|src/no1/daemon/claude_app_sessions.py)
       needs_python=1
       append_unique_python_source "$file"
       append_unique_test "tests/test_codex_app_flow.py"
       ;;
-    src/cccc/daemon/space/*|src/cccc/providers/notebooklm/*)
+    src/no1/daemon/space/*|src/no1/providers/notebooklm/*)
       needs_python=1
       append_unique_python_source "$file"
       append_unique_test "tests/test_group_space_ops.py"
       ;;
-    src/cccc/daemon/assistants/voice_*|src/cccc/daemon/assistants/local_*asr*.py|src/cccc/daemon/assistants/sherpa_*.py)
+    src/no1/daemon/assistants/voice_*|src/no1/daemon/assistants/local_*asr*.py|src/no1/daemon/assistants/sherpa_*.py)
       needs_python=1
       append_unique_python_source "$file"
       append_unique_test "tests/test_assistant_ops.py"
       ;;
-    src/cccc/**/*.py|src/cccc/*.py|pyproject.toml|uv.lock)
+    src/no1/**/*.py|src/no1/*.py|pyproject.toml|uv.lock)
       needs_python=1
       append_unique_python_source "$file"
       ;;

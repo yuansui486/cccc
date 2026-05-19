@@ -1,6 +1,6 @@
-# CCCC vNext — Architecture
+# OneColleague vNext — Architecture
 
-> CCCC = Collaborative Code Coordination Center
+> OneColleague = Collaborative Code Coordination Center
 >
 > 全局唯一的 AI Agent 协作中枢：单一 daemon 管理多个工作组，Web/CLI/IM 作为入口。
 >
@@ -34,9 +34,9 @@
 ~/.cccc/
 ├── registry.json                 # 工作组索引
 ├── daemon/
-│   ├── ccccd.pid
-│   ├── ccccd.log
-│   └── ccccd.sock               # IPC socket
+│   ├── onecolleagued.pid
+│   ├── onecolleagued.log
+│   └── onecolleagued.sock               # IPC socket
 └── groups/<group_id>/
     ├── group.yaml               # 元数据
     ├── ledger.jsonl             # 事实流（append-only）
@@ -52,7 +52,7 @@
 │                      Ports (入口)                        │
 │   Web UI (React)  │  CLI  │  IM Bridge  │  MCP Server   │
 ├─────────────────────────────────────────────────────────┤
-│                    Daemon (ccccd)                        │
+│                    Daemon (onecolleagued)                        │
 │   IPC Server  │  Delivery  │  Automation  │  Runners    │
 ├─────────────────────────────────────────────────────────┤
 │                      Kernel                              │
@@ -66,7 +66,7 @@
 ### 3.1 Contracts（契约层）
 
 - Pydantic models 定义所有数据结构
-- 版本化：`src/cccc/contracts/v1/`
+- 版本化：`src/no1/contracts/v1/`
 - 稳定边界，不引入业务实现
 
 ### 3.2 Kernel（内核）
@@ -181,29 +181,29 @@ class ChatMessageData:
 
 MCP 工具按能力命名空间组织（工具数量会随版本迭代）：
 
-### 7.1 cccc.* (协作控制面)
+### 7.1 onecolleague.* (协作控制面)
 
-- `cccc_inbox_list` / `cccc_inbox_mark_read`
-- `cccc_message_send` / `cccc_message_reply`
-- `cccc_group_info` / `cccc_actor_list`
-- `cccc_actor_add/remove/start/stop/restart`
-- `cccc_runtime_list` / `cccc_project_info`
+- `onecolleague_inbox_list` / `onecolleague_inbox_mark_read`
+- `onecolleague_message_send` / `onecolleague_message_reply`
+- `onecolleague_group_info` / `onecolleague_actor_list`
+- `onecolleague_actor_add/remove/start/stop/restart`
+- `onecolleague_runtime_list` / `onecolleague_project_info`
 
 ### 7.2 context.* (状态同步)
 
-- `cccc_context_get` / `cccc_context_sync`
-- `cccc_vision_update` / `cccc_sketch_update`
-- `cccc_milestone_*` / `cccc_task_*`
-- `cccc_note_*` / `cccc_reference_*`
+- `onecolleague_context_get` / `onecolleague_context_sync`
+- `onecolleague_vision_update` / `onecolleague_sketch_update`
+- `onecolleague_milestone_*` / `onecolleague_task_*`
+- `onecolleague_note_*` / `onecolleague_reference_*`
 
 ### 7.3 headless.* (Headless runner)
 
-- `cccc_headless_status` / `cccc_headless_set_status`
-- `cccc_headless_ack_message`
+- `onecolleague_headless_status` / `onecolleague_headless_set_status`
+- `onecolleague_headless_ack_message`
 
 ### 7.4 notify.* (系统通知)
 
-- `cccc_notify_send` / `cccc_notify_ack`
+- `onecolleague_notify_send` / `onecolleague_notify_ack`
 
 ## 8. 技术栈
 
@@ -217,7 +217,7 @@ MCP 工具按能力命名空间组织（工具数量会随版本迭代）：
 ## 9. 源码结构
 
 ```
-src/cccc/
+src/no1/
 ├── contracts/v1/          # 契约层
 ├── kernel/                # 内核
 ├── daemon/                # 守护进程

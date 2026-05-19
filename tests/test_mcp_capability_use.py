@@ -23,12 +23,12 @@ class TestMcpCapabilityUse(unittest.TestCase):
         return td, cleanup
 
     def test_capability_use_calls_core_tool_without_capability_enable(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
             return_value={"ok": True},
         ) as call_mock:
             result = capability_use(
@@ -36,7 +36,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="",
-                tool_name="cccc_agent_state",
+                tool_name="onecolleague_agent_state",
                 tool_arguments={"action": "update", "actor_id": "peer-1", "focus": "work"},
             )
 
@@ -47,13 +47,13 @@ class TestMcpCapabilityUse(unittest.TestCase):
         call_mock.assert_called_once()
 
     def test_capability_use_infers_pack_and_calls_tool(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "runnable", "refresh_required": True, "enabled": True},
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
             return_value={"ok": True},
         ) as call_mock:
             result = capability_use(
@@ -61,7 +61,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="",
-                tool_name="cccc_space",
+                tool_name="onecolleague_space",
                 tool_arguments={"action": "status"},
             )
 
@@ -76,13 +76,13 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertEqual(str(tool_args.get("actor_id") or ""), "peer-1")
 
     def test_capability_use_does_not_inject_actor_id_into_space_query(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "runnable", "refresh_required": False, "enabled": True},
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
             return_value={"ok": True},
         ) as call_mock:
             result = capability_use(
@@ -90,7 +90,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="",
-                tool_name="cccc_space",
+                tool_name="onecolleague_space",
                 tool_arguments={"action": "query", "lane": "work", "query": "status?"},
             )
 
@@ -105,20 +105,20 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertNotIn("actor_id", tool_args)
 
     def test_capability_use_returns_not_ready_when_enable_not_ready(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "blocked", "refresh_required": False, "enabled": False, "reason": "blocked_by_group_policy"},
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
         ) as call_mock:
             result = capability_use(
                 group_id="g1",
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="mcp:test",
-                tool_name="cccc_ext_deadbeef_echo",
+                tool_name="onecolleague_ext_deadbeef_echo",
                 tool_arguments={"message": "hello"},
             )
 
@@ -128,10 +128,10 @@ class TestMcpCapabilityUse(unittest.TestCase):
         call_mock.assert_not_called()
 
     def test_capability_use_retries_on_retryable_diagnostics(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             side_effect=[
                 {
                     "state": "blocked",
@@ -148,7 +148,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 },
             ],
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
         ) as call_mock:
             result = capability_use(
                 group_id="g1",
@@ -165,10 +165,10 @@ class TestMcpCapabilityUse(unittest.TestCase):
         call_mock.assert_not_called()
 
     def test_capability_use_failed_result_contains_resolution_plan(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={
                 "state": "blocked",
                 "enabled": False,
@@ -183,14 +183,14 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 ],
             },
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
         ) as call_mock:
             result = capability_use(
                 group_id="g1",
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="mcp:test",
-                tool_name="cccc_ext_test_tool",
+                tool_name="onecolleague_ext_test_tool",
                 tool_arguments={},
             )
 
@@ -209,10 +209,10 @@ class TestMcpCapabilityUse(unittest.TestCase):
         call_mock.assert_not_called()
 
     def test_capability_use_passes_skill_payload_when_no_tool_call(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={
                 "state": "runnable",
                 "refresh_required": False,
@@ -223,7 +223,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 },
             },
         ) as enable_mock, patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
         ) as call_mock:
             result = capability_use(
                 group_id="g1",
@@ -248,7 +248,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertIn("active_capsule_skills", runtime_visible_in)
         self.assertIn("active_capsule_skills", str(result.get("runtime_activation_evidence") or ""))
         self.assertIn("dynamic_tools", str(result.get("next_step_hint") or ""))
-        self.assertIn("CCCC capability runtime", str(result.get("next_step_hint") or ""))
+        self.assertIn("OneColleague capability runtime", str(result.get("next_step_hint") or ""))
         self.assertNotIn("Codex's skills directory", str(result.get("next_step_hint") or ""))
         self.assertNotIn("CODEX_HOME", str(result.get("next_step_hint") or ""))
         enable_mock.assert_called_once()
@@ -256,10 +256,10 @@ class TestMcpCapabilityUse(unittest.TestCase):
         call_mock.assert_not_called()
 
     def test_capability_use_skill_failure_contains_runtime_contract_fields(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={
                 "state": "blocked",
                 "enabled": False,
@@ -284,15 +284,15 @@ class TestMcpCapabilityUse(unittest.TestCase):
         runtime_visible_in = result.get("runtime_visible_in") if isinstance(result.get("runtime_visible_in"), list) else []
         self.assertIn("active_capsule_skills", runtime_visible_in)
         self.assertIn("active_capsule_skills", str(result.get("runtime_activation_evidence") or ""))
-        self.assertIn("CCCC capability runtime", str(result.get("next_step_hint") or ""))
+        self.assertIn("OneColleague capability runtime", str(result.get("next_step_hint") or ""))
         self.assertNotIn("Codex's skills directory", str(result.get("next_step_hint") or ""))
         self.assertNotIn("CODEX_HOME", str(result.get("next_step_hint") or ""))
 
     def test_capability_use_legacy_self_proposed_skill_points_to_migration_path(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={
                 "state": "blocked",
                 "enabled": False,
@@ -304,7 +304,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                         "retryable": False,
                         "action_hints": [
                             "reimport_the_capsule_under_skill_agent_self_proposed_stable_slug",
-                            "call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration",
+                            "call_onecolleague_capability_uninstall_on_the_legacy_capability_id_after_migration",
                         ],
                     }
                 ],
@@ -326,13 +326,13 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertEqual(str(plan.get("status") or ""), "needs_agent_action")
         actions = plan.get("agent_actions") if isinstance(plan.get("agent_actions"), list) else []
         self.assertIn("reimport_the_capsule_under_skill_agent_self_proposed_stable_slug", actions)
-        self.assertIn("call_cccc_capability_uninstall_on_the_legacy_capability_id_after_migration", actions)
+        self.assertIn("call_onecolleague_capability_uninstall_on_the_legacy_capability_id_after_migration", actions)
 
     def test_capability_use_builtin_runtime_bootstrap_inproc_enables_skill_and_dependencies(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         def _fake_call_daemon(req, timeout_s=None, **kwargs):
             _ = timeout_s
@@ -379,7 +379,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 clear=False,
             ):
                 search_result = mcp_server.handle_tool_call(
-                    "cccc_capability_search",
+                    "onecolleague_capability_search",
                     {"query": "mcp injection", "kind": "skill", "include_external": False, "limit": 10},
                 )
                 items = search_result.get("items") if isinstance(search_result.get("items"), list) else []
@@ -387,7 +387,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 self.assertIn("skill:cccc:runtime-bootstrap", ids)
 
                 use_result = mcp_server.handle_tool_call(
-                    "cccc_capability_use",
+                    "onecolleague_capability_use",
                     {"capability_id": "skill:cccc:runtime-bootstrap", "scope": "session"},
                 )
                 self.assertTrue(bool(use_result.get("enabled")))
@@ -399,7 +399,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
                 self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
 
-                state_result = mcp_server.handle_tool_call("cccc_capability_state", {})
+                state_result = mcp_server.handle_tool_call("onecolleague_capability_state", {})
                 enabled = set(state_result.get("enabled_capabilities") or [])
                 self.assertIn("skill:cccc:runtime-bootstrap", enabled)
                 self.assertIn("pack:diagnostics", enabled)
@@ -408,8 +408,8 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 active_ids = {str(item.get("capability_id") or "") for item in active_skills if isinstance(item, dict)}
                 self.assertIn("skill:cccc:runtime-bootstrap", active_ids)
                 visible = set(state_result.get("visible_tools") or [])
-                self.assertIn("cccc_terminal", visible)
-                self.assertIn("cccc_actor", visible)
+                self.assertIn("onecolleague_terminal", visible)
+                self.assertIn("onecolleague_actor", visible)
         finally:
             cleanup()
 
@@ -421,22 +421,22 @@ class TestMcpCapabilityUse(unittest.TestCase):
         causing memory_search to filter by caller's actor_id unintentionally.
         Read-only memory tools should search across all actors by default.
         """
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         read_only_tools = [
-            ("cccc_memory", {"action": "search", "query": "test"}),
-            ("cccc_memory", {"action": "layout_get"}),
-            ("cccc_memory", {"action": "get", "path": "/tmp/memory.md"}),
-            ("cccc_memory_admin", {"action": "index_sync"}),
-            ("cccc_memory_admin", {"action": "context_check", "messages": [{"role": "user", "content": "x"}]}),
+            ("onecolleague_memory", {"action": "search", "query": "test"}),
+            ("onecolleague_memory", {"action": "layout_get"}),
+            ("onecolleague_memory", {"action": "get", "path": "/tmp/memory.md"}),
+            ("onecolleague_memory_admin", {"action": "index_sync"}),
+            ("onecolleague_memory_admin", {"action": "context_check", "messages": [{"role": "user", "content": "x"}]}),
         ]
         for tool_name, tool_arguments in read_only_tools:
             with self.subTest(tool=tool_name):
                 with patch(
-                    "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+                    "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
                     return_value={"state": "runnable", "refresh_required": True, "enabled": True},
                 ), patch(
-                    "cccc.ports.mcp.server.handle_tool_call",
+                    "no1.ports.mcp.server.handle_tool_call",
                     return_value={"ok": True},
                 ) as call_mock:
                     capability_use(
@@ -456,19 +456,19 @@ class TestMcpCapabilityUse(unittest.TestCase):
 
     def test_memory_write_tools_still_inject_actor_id(self) -> None:
         """capability_use should still inject actor_id for write memory tools."""
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         write_tools = [
-            ("cccc_memory", {"action": "write", "target": "memory", "content": "test"}),
-            ("cccc_memory", {"action": "write", "target": "daily", "date": "2026-03-03", "content": "test"}),
+            ("onecolleague_memory", {"action": "write", "target": "memory", "content": "test"}),
+            ("onecolleague_memory", {"action": "write", "target": "daily", "date": "2026-03-03", "content": "test"}),
         ]
         for tool_name, tool_arguments in write_tools:
             with self.subTest(tool=tool_name):
                 with patch(
-                    "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+                    "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
                     return_value={"state": "runnable", "refresh_required": True, "enabled": True},
                 ), patch(
-                    "cccc.ports.mcp.server.handle_tool_call",
+                    "no1.ports.mcp.server.handle_tool_call",
                     return_value={"ok": True},
                 ) as call_mock:
                     capability_use(
@@ -488,13 +488,13 @@ class TestMcpCapabilityUse(unittest.TestCase):
 
     def test_memory_read_tool_with_explicit_actor_id_preserved(self) -> None:
         """If caller explicitly passes actor_id, it should be preserved even for read tools."""
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "runnable", "refresh_required": True, "enabled": True},
         ), patch(
-            "cccc.ports.mcp.server.handle_tool_call",
+            "no1.ports.mcp.server.handle_tool_call",
             return_value={"ok": True},
         ) as call_mock:
             capability_use(
@@ -502,7 +502,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="pack:context-advanced",
-                tool_name="cccc_memory",
+                tool_name="onecolleague_memory",
                 tool_arguments={"action": "search", "query": "test", "actor_id": "specific-actor"},
             )
 
@@ -512,13 +512,13 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertEqual(str(tool_args.get("actor_id") or ""), "specific-actor")
 
     def test_capability_use_external_mcp_calls_daemon_capability_tool_call(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "runnable", "refresh_required": True, "enabled": True},
         ) as enable_mock, patch(
-            "cccc.ports.mcp.handlers.cccc_capability._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"result": {"ok": True}},
         ) as daemon_call:
             result = capability_use(
@@ -545,24 +545,24 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertEqual(str(called_args.get("actor_id") or ""), "peer-1")
 
     def test_capability_use_infers_external_capability_from_dynamic_tool_name(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_state",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
             return_value={
                 "dynamic_tools": [
                     {
-                        "name": "cccc_ext_deadbeef_echo",
+                        "name": "onecolleague_ext_deadbeef_echo",
                         "real_tool_name": "echo",
                         "capability_id": "mcp:test-server",
                     }
                 ]
             },
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "runnable", "refresh_required": True, "enabled": True},
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_capability._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"result": {"ok": True}},
         ):
             result = capability_use(
@@ -570,7 +570,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 by="peer-1",
                 actor_id="peer-1",
                 capability_id="",
-                tool_name="cccc_ext_deadbeef_echo",
+                tool_name="onecolleague_ext_deadbeef_echo",
                 tool_arguments={"message": "hello"},
             )
 
@@ -578,24 +578,24 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertTrue(bool(result.get("tool_called")))
 
     def test_capability_use_infers_external_capability_from_hyphen_underscore_alias(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_state",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
             return_value={
                 "dynamic_tools": [
                     {
-                        "name": "cccc_ext_deadbeef_resolve_library_id",
+                        "name": "onecolleague_ext_deadbeef_resolve_library_id",
                         "real_tool_name": "resolve_library_id",
                         "capability_id": "mcp:io.github.upstash/context7",
                     }
                 ]
             },
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
             return_value={"state": "runnable", "refresh_required": True, "enabled": True},
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_capability._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"result": {"ok": True}},
         ):
             result = capability_use(
@@ -611,15 +611,15 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertTrue(bool(result.get("tool_called")))
 
     def test_capability_use_skips_reenable_when_capability_already_enabled_for_tool_call(self) -> None:
-        from cccc.ports.mcp.server import capability_use
+        from no1.ports.mcp.server import capability_use
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_state",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
             return_value={"enabled_capabilities": ["mcp:test-server"]},
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_capability.capability_enable",
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
         ) as enable_mock, patch(
-            "cccc.ports.mcp.handlers.cccc_capability._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"result": {"ok": True}},
         ):
             result = capability_use(
@@ -639,14 +639,14 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertFalse(bool(result.get("refresh_required")))
 
     def test_mcp_router_capability_use_accepts_actor_id_without_by(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False), patch(
-            "cccc.ports.mcp.server.capability_use",
+            "no1.ports.mcp.server.capability_use",
             return_value={"ok": True},
         ) as use_mock:
             out = mcp_server.handle_tool_call(
-                "cccc_capability_use",
+                "onecolleague_capability_use",
                 {
                     "group_id": "g_test",
                     "actor_id": "peer-1",

@@ -1,6 +1,6 @@
-# CCCC Context Ops Contract v3
+# OneColleague Context Ops Contract v3
 
-Status: Active (for CCCC v0.5.x ecosystem)
+Status: Active (for OneColleague v0.5.x ecosystem)
 
 This document defines the operation list and payload shapes for daemon IPC:
 - `context_sync` (see `docs/standards/CCCC_DAEMON_IPC_V1.md`)

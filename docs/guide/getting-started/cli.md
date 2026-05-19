@@ -1,6 +1,6 @@
 # CLI Quick Start
 
-Get started with CCCC using the command line.
+Get started with OneColleague using the command line.
 
 ## Step 1: Navigate to Your Project
 
@@ -11,7 +11,7 @@ cd /path/to/your/project
 ## Step 2: Create a Working Group
 
 ```bash
-cccc attach .
+onecolleague attach .
 ```
 
 This binds the current directory as a "scope" and creates a working group.
@@ -19,15 +19,15 @@ This binds the current directory as a "scope" and creates a working group.
 ## Step 3: Configure MCP for Your Runtime
 
 ```bash
-cccc setup --runtime claude   # or codex, droid, gemini, kimi
+onecolleague setup --runtime claude   # or codex, droid, gemini, kimi
 ```
 
-This configures the MCP (Model Context Protocol) so agents can interact with CCCC.
+This configures the MCP (Model Context Protocol) so agents can interact with OneColleague.
 
 ## Step 4: Add Your First Agent
 
 ```bash
-cccc actor add assistant --runtime claude
+onecolleague actor add assistant --runtime claude
 ```
 
 The first enabled actor automatically becomes the "foreman" (coordinator).
@@ -35,19 +35,19 @@ The first enabled actor automatically becomes the "foreman" (coordinator).
 ## Step 5: Start the Agent
 
 ```bash
-cccc group start
+onecolleague group start
 ```
 
 Or start a specific agent:
 
 ```bash
-cccc actor start assistant
+onecolleague actor start assistant
 ```
 
 ## Step 6: Send a Message
 
 ```bash
-cccc send "Hello! Please introduce yourself."
+onecolleague send "Hello! Please introduce yourself."
 ```
 
 ## Step 7: View Responses
@@ -55,13 +55,13 @@ cccc send "Hello! Please introduce yourself."
 Watch the ledger in real-time:
 
 ```bash
-cccc tail -f
+onecolleague tail -f
 ```
 
 Or check inbox:
 
 ```bash
-cccc inbox --actor-id assistant
+onecolleague inbox --actor-id assistant
 ```
 
 ## Adding More Agents
@@ -69,23 +69,23 @@ cccc inbox --actor-id assistant
 Add a second agent:
 
 ```bash
-cccc actor add reviewer --runtime codex
-cccc actor start reviewer
+onecolleague actor add reviewer --runtime codex
+onecolleague actor start reviewer
 ```
 
 Send to specific agents:
 
 ```bash
-cccc send "Please implement the feature" --to assistant
-cccc send "Please review the code" --to reviewer
-cccc send "Please coordinate the next step" --to @foreman
-cccc send "Team-wide constraint: pause deploys until CI is green" --to @all
+onecolleague send "Please implement the feature" --to assistant
+onecolleague send "Please review the code" --to reviewer
+onecolleague send "Please coordinate the next step" --to @foreman
+onecolleague send "Team-wide constraint: pause deploys until CI is green" --to @all
 ```
 
 Use task-backed delegation when the work should survive chat context switches and needs an owner, outcome, or completion evidence:
 
 ```bash
-cccc tracked-send "Please implement the feature and reply with validation evidence." \
+onecolleague tracked-send "Please implement the feature and reply with validation evidence." \
   --to assistant \
   --title "Implement feature" \
   --outcome "Feature is implemented and validation evidence is reported"
@@ -94,8 +94,8 @@ cccc tracked-send "Please implement the feature and reply with validation eviden
 ## Reply to Messages
 
 ```bash
-# Find the event ID from cccc tail
-cccc reply evt_abc123 "Thanks, that looks good!"
+# Find the event ID from onecolleague tail
+onecolleague reply evt_abc123 "Thanks, that looks good!"
 ```
 
 ## Common Commands
@@ -103,45 +103,45 @@ cccc reply evt_abc123 "Thanks, that looks good!"
 ### Group Management
 
 ```bash
-cccc groups              # List all groups
-cccc use <group_id>      # Switch group
-cccc active              # Show active group
-cccc group show <group_id> # Show group metadata
-cccc group start         # Start all agents
-cccc group stop          # Stop all agents
+onecolleague groups              # List all groups
+onecolleague use <group_id>      # Switch group
+onecolleague active              # Show active group
+onecolleague group show <group_id> # Show group metadata
+onecolleague group start         # Start all agents
+onecolleague group stop          # Stop all agents
 ```
 
 ### Actor Management
 
 ```bash
-cccc actor list                    # List actors
-cccc actor add <id> --runtime <r>  # Add actor
-cccc actor start <id>              # Start actor
-cccc actor stop <id>               # Stop actor
-cccc actor restart <id>            # Restart actor
-cccc actor remove <id>             # Remove actor
+onecolleague actor list                    # List actors
+onecolleague actor add <id> --runtime <r>  # Add actor
+onecolleague actor start <id>              # Start actor
+onecolleague actor stop <id>               # Stop actor
+onecolleague actor restart <id>            # Restart actor
+onecolleague actor remove <id>             # Remove actor
 ```
 
 ### Messaging
 
 ```bash
-cccc send "message"                # No --to: default recipient policy applies (default: foreman)
-cccc send "msg" --to assistant     # To specific actor
-cccc send "msg" --to @foreman      # Ask the coordinator
-cccc send "msg" --to @all          # Explicit broadcast, not default task dispatch
-cccc tracked-send "work" --to assistant --title "Task title" --outcome "Done criterion"
-cccc reply <event_id> "response"   # Reply to message
-cccc inbox --actor-id assistant    # View unread for one actor
-cccc tail -n 50                    # Recent events
-cccc tail -f                       # Follow events
+onecolleague send "message"                # No --to: default recipient policy applies (default: foreman)
+onecolleague send "msg" --to assistant     # To specific actor
+onecolleague send "msg" --to @foreman      # Ask the coordinator
+onecolleague send "msg" --to @all          # Explicit broadcast, not default task dispatch
+onecolleague tracked-send "work" --to assistant --title "Task title" --outcome "Done criterion"
+onecolleague reply <event_id> "response"   # Reply to message
+onecolleague inbox --actor-id assistant    # View unread for one actor
+onecolleague tail -n 50                    # Recent events
+onecolleague tail -f                       # Follow events
 ```
 
 ### Daemon Control
 
 ```bash
-cccc daemon status    # Check status
-cccc daemon start     # Start daemon
-cccc daemon stop      # Stop daemon
+onecolleague daemon status    # Check status
+onecolleague daemon start     # Start daemon
+onecolleague daemon stop      # Stop daemon
 ```
 
 ## Start Web UI (Optional)
@@ -149,13 +149,13 @@ cccc daemon stop      # Stop daemon
 While using CLI, you can also open the Web UI:
 
 ```bash
-cccc   # Starts daemon + Web UI
+onecolleague   # Starts daemon + Web UI
 ```
 
 Or just the Web UI (if daemon is already running):
 
 ```bash
-cccc web
+onecolleague web
 ```
 
 Access at http://127.0.0.1:8848/
@@ -167,34 +167,34 @@ Access at http://127.0.0.1:8848/
 | `CCCC_HOME` | `~/.cccc` | Runtime directory |
 | `CCCC_WEB_PORT` | `8848` | Web UI port |
 | `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Web startup readiness timeout for slower machines |
-| `CCCC_LOG_LEVEL` | `INFO` | Log verbosity |
+| `CCCC_WEB_LOG_LEVEL` | `INFO` | Web log verbosity |
 
 ## Example Workflow
 
 ```bash
 # Setup
 cd ~/projects/my-app
-cccc attach .
-cccc setup --runtime claude
-cccc actor add dev --runtime claude
+onecolleague attach .
+onecolleague setup --runtime claude
+onecolleague actor add dev --runtime claude
 
 # Work
-cccc group start
-cccc send "Please plan the smallest safe authentication task." --to @foreman
-cccc tracked-send "Please implement the first authentication task and reply with validation evidence." \
+onecolleague group start
+onecolleague send "Please plan the smallest safe authentication task." --to @foreman
+onecolleague tracked-send "Please implement the first authentication task and reply with validation evidence." \
   --to dev \
   --title "Implement first authentication slice" \
   --outcome "Implementation is complete and validation evidence is reported"
 
 # Monitor
-cccc tail -f
+onecolleague tail -f
 
 # Interact
-cccc reply evt_123 "Use JWT tokens please"
-cccc send "What's the progress?" --to dev
+onecolleague reply evt_123 "Use JWT tokens please"
+onecolleague send "What's the progress?" --to dev
 
 # Cleanup
-cccc group stop
+onecolleague group stop
 ```
 
 ## Troubleshooting
@@ -202,33 +202,33 @@ cccc group stop
 ### Daemon not starting?
 
 ```bash
-cccc daemon status
-cccc daemon stop      # Stop any stuck instance
-cccc daemon start
+onecolleague daemon status
+onecolleague daemon stop      # Stop any stuck instance
+onecolleague daemon start
 ```
 
 ### Agent not responding?
 
 ```bash
 # Check agent status
-cccc actor list
+onecolleague actor list
 
 # Restart the agent
-cccc actor restart <actor_id>
+onecolleague actor restart <actor_id>
 
 # Check MCP setup
-cccc setup --runtime <name>
+onecolleague setup --runtime <name>
 ```
 
 ### Can't find my group?
 
 ```bash
 # List all groups
-cccc groups
+onecolleague groups
 
 # Re-attach if needed
 cd /path/to/project
-cccc attach .
+onecolleague attach .
 ```
 
 ## Next Steps

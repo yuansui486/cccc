@@ -21,7 +21,7 @@ class TestAccessTokens(unittest.TestCase):
         return Path(td), cleanup
 
     def test_create_lookup_list_delete_access_token(self) -> None:
-        from cccc.kernel.access_tokens import (
+        from no1.kernel.access_tokens import (
             create_access_token,
             delete_access_token,
             list_access_tokens,
@@ -54,7 +54,7 @@ class TestAccessTokens(unittest.TestCase):
             cleanup()
 
     def test_load_access_tokens_tolerates_invalid_yaml(self) -> None:
-        from cccc.kernel.access_tokens import load_access_tokens
+        from no1.kernel.access_tokens import load_access_tokens
 
         home, cleanup = self._with_home()
         try:
@@ -64,7 +64,7 @@ class TestAccessTokens(unittest.TestCase):
             cleanup()
 
     def test_create_access_token_requires_user_id(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:

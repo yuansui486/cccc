@@ -67,7 +67,7 @@ class TestWebBindPreflight(unittest.TestCase):
         return td, cleanup
 
     def test_in_use_port_reports_clear_message(self) -> None:
-        from cccc.ports.web.bind_preflight import ensure_tcp_port_bindable
+        from no1.ports.web.bind_preflight import ensure_tcp_port_bindable
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
@@ -81,11 +81,11 @@ class TestWebBindPreflight(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn(f"Web port {port} is unavailable", message)
         self.assertIn("already using that port", message)
-        self.assertIn("cccc --port 9000", message)
-        self.assertIn("CCCC_WEB_PORT=9000 cccc", message)
+        self.assertIn("onecolleague --port 9000", message)
+        self.assertIn("CCCC_WEB_PORT=9000 onecolleague", message)
 
     def test_windows_access_denied_points_to_excluded_port_ranges(self) -> None:
-        from cccc.ports.web import bind_preflight
+        from no1.ports.web import bind_preflight
 
         with patch.object(bind_preflight.sys, "platform", "win32"), patch.object(
             bind_preflight.socket,
@@ -98,11 +98,11 @@ class TestWebBindPreflight(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("excluded TCP port range", message)
         self.assertIn("netsh interface ipv4 show excludedportrange protocol=tcp", message)
-        self.assertIn("cccc --port 9000", message)
-        self.assertIn("$env:CCCC_WEB_PORT=9000; cccc", message)
+        self.assertIn("onecolleague --port 9000", message)
+        self.assertIn("$env:CCCC_WEB_PORT=9000; onecolleague", message)
 
     def test_windows_addr_in_use_without_listener_points_to_excluded_port_ranges(self) -> None:
-        from cccc.ports.web import bind_preflight
+        from no1.ports.web import bind_preflight
 
         with patch.object(bind_preflight.sys, "platform", "win32"), patch.object(
             bind_preflight.socket,
@@ -120,7 +120,7 @@ class TestWebBindPreflight(unittest.TestCase):
         self.assertNotIn("Another process is already using that port", message)
 
     def test_posix_preflight_sets_reuseaddr(self) -> None:
-        from cccc.ports.web import bind_preflight
+        from no1.ports.web import bind_preflight
 
         fake_socket = _CaptureSocket()
         with patch.object(bind_preflight.sys, "platform", "linux"), patch.object(
@@ -134,7 +134,7 @@ class TestWebBindPreflight(unittest.TestCase):
         self.assertIn((socket.SOL_SOCKET, socket.SO_REUSEADDR, 1), fake_socket.setsockopt_calls)
 
     def test_web_main_returns_error_when_preflight_fails(self) -> None:
-        from cccc.ports.web import main as web_main
+        from no1.ports.web import main as web_main
 
         stderr = io.StringIO()
         with patch.object(web_main, "_check_daemon_running", return_value=True), patch.object(
@@ -148,7 +148,7 @@ class TestWebBindPreflight(unittest.TestCase):
         self.assertIn("boom", stderr.getvalue())
 
     def test_web_main_uses_fast_shutdown_timeout(self) -> None:
-        from cccc.ports.web import main as web_main
+        from no1.ports.web import main as web_main
 
         server_instance = unittest.mock.Mock()
         with patch.object(web_main.uvicorn, "Config") as mock_config, patch.object(
@@ -164,8 +164,8 @@ class TestWebBindPreflight(unittest.TestCase):
         server_instance.run.assert_called_once_with()
 
     def test_web_main_uses_shared_binding_defaults(self) -> None:
-        from cccc.kernel.settings import update_remote_access_settings
-        from cccc.ports.web import main as web_main
+        from no1.kernel.settings import update_remote_access_settings
+        from no1.ports.web import main as web_main
 
         _, cleanup = self._with_home()
         proc = unittest.mock.Mock()

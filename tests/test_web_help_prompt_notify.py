@@ -23,14 +23,14 @@ class TestWebHelpPromptNotify(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
@@ -58,7 +58,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
         return group_id
 
     def test_structured_common_update_notifies_all_running_actors(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -82,7 +82,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
                     notify_calls.append(req)
                 return self._local_call_daemon(req)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_daemon):
                 client = TestClient(create_app())
                 resp = client.put(
                     f"/api/v1/groups/{group_id}/prompts/help",
@@ -110,7 +110,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
             cleanup()
 
     def test_structured_actor_update_notifies_only_running_target_actor(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -134,7 +134,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
                     notify_calls.append(req)
                 return self._local_call_daemon(req)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_daemon):
                 client = TestClient(create_app())
                 resp = client.put(
                     f"/api/v1/groups/{group_id}/prompts/help",
@@ -160,7 +160,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
             cleanup()
 
     def test_structured_help_update_notifies_only_running_target_scope(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -184,7 +184,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
                     notify_calls.append(req)
                 return self._local_call_daemon(req)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_daemon):
                 client = TestClient(create_app())
                 resp = client.put(
                     f"/api/v1/groups/{group_id}/prompts/help",
@@ -211,7 +211,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
             cleanup()
 
     def test_structured_voice_secretary_update_notifies_only_voice_secretary(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -240,7 +240,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
                     notify_calls.append(req)
                 return self._local_call_daemon(req)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_daemon):
                 client = TestClient(create_app())
                 resp = client.put(
                     f"/api/v1/groups/{group_id}/prompts/help",
@@ -266,7 +266,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
             cleanup()
 
     def test_raw_help_update_notifies_all_running_actors(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -290,7 +290,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
                     notify_calls.append(req)
                 return self._local_call_daemon(req)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_daemon):
                 client = TestClient(create_app())
                 resp = client.put(
                     f"/api/v1/groups/{group_id}/prompts/help",
@@ -314,7 +314,7 @@ class TestWebHelpPromptNotify(unittest.TestCase):
             cleanup()
 
     def test_help_update_dispatches_notify_to_running_pty_target(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -335,10 +335,10 @@ class TestWebHelpPromptNotify(unittest.TestCase):
                     }
                 return self._local_call_daemon(req)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_daemon), patch(
-                "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
-            ), patch("cccc.daemon.messaging.delivery.queue_system_notify") as queue_mock, patch(
-                "cccc.daemon.messaging.delivery.flush_pending_messages", return_value=True
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_daemon), patch(
+                "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+            ), patch("no1.daemon.messaging.delivery.queue_system_notify") as queue_mock, patch(
+                "no1.daemon.messaging.delivery.flush_pending_messages", return_value=True
             ) as flush_mock:
                 client = TestClient(create_app())
                 resp = client.put(

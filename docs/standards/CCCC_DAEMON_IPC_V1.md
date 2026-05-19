@@ -1,12 +1,12 @@
-# CCCC Daemon API/IPC Contract v1
+# OneColleague Daemon API/IPC Contract v1
 
-Status: Draft (for CCCC v0.4.x ecosystem)
+Status: Draft (for OneColleague v0.4.x ecosystem)
 
-This document defines the **daemon-facing client contract** for CCCC: how a client (CLI/Web/MCP bridge/SDK) discovers the daemon endpoint, frames requests, and calls daemon operations.
+This document defines the **daemon-facing client contract** for OneColleague: how a client (CLI/Web/MCP bridge/SDK) discovers the daemon endpoint, frames requests, and calls daemon operations.
 
 It is intentionally narrow:
 - **CCCS v1** (`docs/standards/CCCS_V1.md`) defines the *semantic collaboration substrate* (event envelope + kinds + attention/ack).
-- This document defines the *transport + RPC layer* used by CCCC today (newline-delimited JSON over a local socket/TCP).
+- This document defines the *transport + RPC layer* used by OneColleague today (newline-delimited JSON over a local socket/TCP).
 
 ## 0. Conformance Language
 
@@ -40,7 +40,7 @@ Daemon IPC v1 does NOT standardize:
 
 Clients MUST discover the daemon endpoint via a daemon-written descriptor file:
 
-- Path: `${CCCC_HOME}/daemon/ccccd.addr.json`
+- Path: `${CCCC_HOME}/daemon/onecolleagued.addr.json`
 
 `CCCC_HOME` resolution:
 - If the `CCCC_HOME` environment variable is set, clients MUST use it as the base directory.
@@ -48,9 +48,9 @@ Clients MUST discover the daemon endpoint via a daemon-written descriptor file:
 
 If the descriptor file is missing or invalid, a client MAY fall back to:
 
-- Unix socket default: `${CCCC_HOME}/daemon/ccccd.sock` (only if AF_UNIX is supported)
+- Unix socket default: `${CCCC_HOME}/daemon/onecolleagued.sock` (only if AF_UNIX is supported)
 
-### 3.1 `ccccd.addr.json` Schema
+### 3.1 `onecolleagued.addr.json` Schema
 
 The daemon writes a JSON object with the following fields:
 
@@ -58,7 +58,7 @@ The daemon writes a JSON object with the following fields:
 {
   "v": 1,
   "transport": "unix",
-  "path": "/home/alice/.cccc/daemon/ccccd.sock",
+  "path": "/home/alice/.cccc/daemon/onecolleagued.sock",
   "host": "",
   "port": 0,
   "pid": 12345,
@@ -76,11 +76,11 @@ Rules:
 
 ### 3.2 Daemon Runtime Files (Non-normative)
 
-CCCC uses these files under `${CCCC_HOME}/daemon/`:
-- `ccccd.addr.json`: endpoint descriptor (this spec)
-- `ccccd.sock`: Unix socket path (POSIX default)
-- `ccccd.pid`: daemon process id (best-effort)
-- `ccccd.log`: daemon log file (best-effort)
+OneColleague uses these files under `${CCCC_HOME}/daemon/`:
+- `onecolleagued.addr.json`: endpoint descriptor (this spec)
+- `onecolleagued.sock`: Unix socket path (POSIX default)
+- `onecolleagued.pid`: daemon process id (best-effort)
+- `onecolleagued.log`: daemon log file (best-effort)
 
 ### 3.3 Endpoint Configuration (Non-normative)
 
@@ -106,7 +106,7 @@ For all non-streaming operations, requests and responses are framed as:
 - **One JSON object per line**, delimited by a single `\n` (newline).
 - Encoding MUST be UTF‑8.
 
-Baseline behavior (implemented by CCCC v0.4.x):
+Baseline behavior (implemented by OneColleague v0.4.x):
 - Each connection processes exactly **one** request line and produces exactly **one** response line.
 - The daemon then closes the connection.
 
@@ -133,7 +133,7 @@ Clients SHOULD treat truncated/invalid JSON as a transport failure.
 
 After upgrade, the stream is **not** NDJSON.
 
-The stream semantics are implementation-defined but, in CCCC today:
+The stream semantics are implementation-defined but, in OneColleague today:
 - The client receives raw PTY output bytes.
 - The client MAY write raw bytes as input.
 - The daemon MAY allow only one writer at a time (others become read-only).
@@ -179,7 +179,7 @@ After upgrade:
 - Only one active controller MAY be attached at a time for a given slot browser surface session.
 - If a matching `*_vnc_attach` operation succeeds, the connection upgrades into a raw RFB/VNC byte stream instead of NDJSON. VNC attach is an optional viewer transport; browser control and delivery semantics remain owned by the daemon runtime.
 
-Recommended daemon-to-client items (CCCC v0.4.x behavior):
+Recommended daemon-to-client items (OneColleague v0.4.x behavior):
 ```ts
 type PresentationBrowserStreamItem =
   | {
@@ -215,7 +215,7 @@ type PresentationBrowserStreamItem =
     }
 ```
 
-Recommended client-to-daemon commands (CCCC v0.4.x behavior):
+Recommended client-to-daemon commands (OneColleague v0.4.x behavior):
 ```ts
 type PresentationBrowserCommand =
   | { t: "ping" }
@@ -237,7 +237,7 @@ Rules:
 
 ## 5. Request/Response Envelope (Normative)
 
-Daemon IPC v1 uses the envelope defined in `src/cccc/contracts/v1/ipc.py`.
+Daemon IPC v1 uses the envelope defined in `src/no1/contracts/v1/ipc.py`.
 
 ### 5.1 Request
 
@@ -251,7 +251,7 @@ interface DaemonRequestV1 {
 
 Rules:
 - `v` MUST be `1`.
-- `op` MUST be a non-empty string (snake_case in CCCC v0.4.x).
+- `op` MUST be a non-empty string (snake_case in OneColleague v0.4.x).
 - Clients MUST NOT send unknown top-level fields (the daemon is strict at the envelope level).
 
 ### 5.2 Response
@@ -288,7 +288,7 @@ The error envelope shape in §5.2 is **normative**: daemons MUST return errors u
 - `error.details` MUST be a JSON object (may be empty).
 - The set of `error.code` values is an open set; clients MUST handle unknown codes gracefully.
 
-Common codes used by CCCC v0.4.x include (non-exhaustive):
+Common codes used by OneColleague v0.4.x include (non-exhaustive):
 - `invalid_request`, `unknown_op`
 - `missing_group_id`, `group_not_found`
 - `missing_actor_id`, `actor_not_found`, `actor_not_running`, `not_pty_actor`
@@ -304,10 +304,10 @@ Many operations accept:
 - `actor_id`: target actor identifier (string)
 - `by`: principal string indicating who is acting (default varies by op)
 
-Authorization is enforced by the daemon (see implementation in `src/cccc/kernel/permissions.py`).
+Authorization is enforced by the daemon (see implementation in `src/no1/kernel/permissions.py`).
 Daemon IPC v1 has **no authentication**. The practical trust boundary is OS-level access control to the local socket / localhost port.
 
-Local-trust model (CCCC v0.4.x behavior):
+Local-trust model (OneColleague v0.4.x behavior):
 - If an operation accepts `args.by`, the daemon treats it as a caller-provided principal hint and uses it for attribution (ledger `event.by`) and permission checks.
 - If `by` is omitted or blank, the daemon uses an operation-specific default (often `"user"`).
 
@@ -317,7 +317,7 @@ Security note:
 
 ### 7.2 Event Objects
 
-Many operations return or include ledger events. Event envelopes follow the CCCC/CCCS v1 shape (see `src/cccc/contracts/v1/event.py` and `docs/standards/CCCS_V1.md`).
+Many operations return or include ledger events. Event envelopes follow the OneColleague/CCCS v1 shape (see `src/no1/contracts/v1/event.py` and `docs/standards/CCCS_V1.md`).
 
 ## 8. Operation Catalog (Normative for v1)
 
@@ -921,7 +921,7 @@ Operational notes:
    - `CCCC_CAPABILITY_CLAWSKILLS_DATA_URL` (default `https://clawskills.co/skills-data.js`)
 7. Allowlist override env/path compatibility (`CCCC_CAPABILITY_ALLOWLIST_PATH` and
    `CCCC_HOME/config/capability-allowlist.yaml`) is removed. Policy now always uses:
-   - packaged default: `cccc.resources/capability-allowlist.default.yaml`
+   - packaged default: `no1.resources/capability-allowlist.default.yaml`
    - user overlay: `CCCC_HOME/config/capability-allowlist.user.yaml`
    - effective policy: deterministic merge (`default <- overlay`).
 
@@ -1361,7 +1361,7 @@ Args:
 { group_id: string; by?: string; patch: Record<string, unknown> }
 ```
 
-Patch keys used by CCCC v0.4.x include:
+Patch keys used by OneColleague v0.4.x include:
 - Messaging: `default_send_to`
 - Delivery: `min_interval_seconds`, `auto_mark_on_delivery`
 - Automation: `nudge_after_seconds`, `reply_required_nudge_after_seconds`, `attention_ack_nudge_after_seconds`, `unread_nudge_after_seconds`, `nudge_digest_min_interval_seconds`, `nudge_max_repeats_per_obligation`, `nudge_escalate_after_repeats`, `actor_idle_timeout_seconds`, `keepalive_delay_seconds`, `keepalive_max_per_actor`, `silence_timeout_seconds`, `help_nudge_interval_seconds`, `help_nudge_min_messages`
@@ -1489,7 +1489,7 @@ Result:
 #### `assistant_voice_model_install`
 
 Download and verify a daemon-managed local Voice Secretary ASR model into
-CCCC-owned cache storage. Built-in releases include a default model manifest;
+OneColleague-owned cache storage. Built-in releases include a default model manifest;
 tests and local development may add a local overlay at
 `CCCC_HOME/config/voice-models.json`. Each artifact entry must include a fixed
 URL and `sha256`.
@@ -1626,7 +1626,7 @@ available, the daemon emits a targeted `system.notify` to `voice-secretary` with
 `context.kind="voice_secretary_input"` and a daemon-owned `input_envelope`. The
 envelope is the canonical work item delivered to both PTY and headless runtimes;
 `assistant_voice_document_input_read` /
-`cccc_voice_secretary_document(action="read_new_input")` remains a legacy,
+`onecolleague_voice_secretary_document(action="read_new_input")` remains a legacy,
 recovery, and debugging entrypoint. Input append is durable before runtime actor
 wake-up; if wake-up fails, the input remains readable and the API reports the
 best-effort wake error separately. If wake-up succeeds after the notify was
@@ -2098,7 +2098,7 @@ Args:
 }
 ```
 
-Patch keys used by CCCC v0.4.x include:
+Patch keys used by OneColleague v0.4.x include:
 - Identity/UI: `title`
 - Runtime: `runtime`, `runner`, `command`, `submit`
 - Scope: `default_scope_key`
@@ -2166,13 +2166,13 @@ Result:
 ```
 
 Notes:
-- CCCC does not create or select a separate Hermes profile.
+- OneColleague does not create or select a separate Hermes profile.
 - `HERMES_HOME`, when supplied by the user, is treated as ordinary runtime environment.
-- `mcp.env` must persist `${CCCC_HOME}`, `${CCCC_GROUP_ID}`, and `${CCCC_ACTOR_ID}` placeholders so each actor process resolves its own CCCC identity.
+- `mcp.env` must persist `${CCCC_HOME}`, `${CCCC_GROUP_ID}`, and `${CCCC_ACTOR_ID}` placeholders so each actor process resolves its own OneColleague identity.
 
 #### `runtime_hermes_prepare`
 
-Configure the `cccc` MCP server in the selected Hermes profile through Hermes' official MCP setup flow.
+Configure the `onecolleague` MCP server in the selected Hermes profile through Hermes' official MCP setup flow.
 
 Args:
 ```ts
@@ -2194,12 +2194,12 @@ Result:
 ```
 
 Notes:
-- Setup MAY invoke `hermes mcp add cccc ...` and answer Hermes' discovery prompt only when `auto_enable_tools`/`yes` is true.
-- Discovery uses concrete CCCC env values, then CCCC normalizes saved Hermes MCP env back to actor-time placeholders.
+- Setup MAY invoke `hermes mcp add onecolleague ...` and answer Hermes' discovery prompt only when `auto_enable_tools`/`yes` is true.
+- Discovery uses concrete OneColleague env values, then OneColleague normalizes saved Hermes MCP env back to actor-time placeholders.
 
 #### `runtime_hermes_mcp_test`
 
-Run Hermes' MCP test command for the configured `cccc` server with probe CCCC actor env.
+Run Hermes' MCP test command for the configured `onecolleague` server with probe OneColleague actor env.
 
 Args:
 ```ts
@@ -2686,7 +2686,7 @@ type ContextOpV1 = { op: string } & Record<string, unknown>
 
 Notes:
 - Unknown op names SHOULD be rejected.
-- See `docs/standards/CCCC_CONTEXT_OPS_V1.md` for the v2 operation list.
+- See `docs/standards/OneColleague_CONTEXT_OPS_V1.md` for the v2 operation list.
 
 Result:
 ```ts
@@ -2985,7 +2985,7 @@ Args:
 
 Result:
 ```ts
-{ state: Record<string, unknown> } // see src/cccc/contracts/v1/actor.py HeadlessState
+{ state: Record<string, unknown> } // see src/no1/contracts/v1/actor.py HeadlessState
 ```
 
 #### `headless_set_status`
@@ -3080,7 +3080,7 @@ Tail daemon/web/im-bridge log files (developer mode).
 
 Args:
 ```ts
-{ component: "daemon" | "ccccd" | "web" | "im" | "im_bridge"; group_id?: string; by?: string; lines?: number }
+{ component: "daemon" | "onecolleagued" | "web" | "im" | "im_bridge"; group_id?: string; by?: string; lines?: number }
 ```
 
 Result:
@@ -3094,7 +3094,7 @@ Truncate daemon/web/im-bridge log files (developer mode).
 
 Args:
 ```ts
-{ component: "daemon" | "ccccd" | "web" | "im" | "im_bridge"; group_id?: string; by?: string }
+{ component: "daemon" | "onecolleagued" | "web" | "im" | "im_bridge"; group_id?: string; by?: string }
 ```
 
 Result:
@@ -3230,7 +3230,7 @@ Handshake result:
 
 Streaming mode:
 - The daemon pushes NDJSON `EventStreamItem` lines (see §4.5).
-- A daemon may initially emit only a subset of event kinds. CCCC v0.4.x streams these kinds:
+- A daemon may initially emit only a subset of event kinds. OneColleague v0.4.x streams these kinds:
   - `chat.message`, `chat.ack`, `system.notify`, `system.notify_ack`
 - When `kinds` is provided, only matching event kinds SHOULD be emitted.
 - If `by` identifies an `actor_id`, a daemon MAY apply the same visibility rules as inbox delivery (e.g., only deliver `chat.message`/`system.notify` addressed to that actor and exclude the actor’s own `chat.message` events).
@@ -4130,7 +4130,7 @@ Streaming mode:
 
 ### 8.20 Copy Groups
 
-Copy Groups operations export/import durable CCCC group state as a zip package. Copy packages contain CCCC group state only; workspace repository files are not included.
+Copy Groups operations export/import durable OneColleague group state as a zip package. Copy packages contain OneColleague group state only; workspace repository files are not included.
 
 #### `group_copy_export`
 
@@ -4169,7 +4169,7 @@ Result:
 Notes:
 - Export MUST exclude live runtime state, browser profiles, credentials, connector secrets, lock files, and rebuildable caches.
 - Export MUST scrub actor environment secrets from packaged `group.yaml`.
-- `contains_secrets: false` means CCCC-managed live credentials and auth sessions are excluded. The package can still contain user-provided sensitive content such as ledger history, memory, blobs, and attachments.
+- `contains_secrets: false` means OneColleague-managed live credentials and auth sessions are excluded. The package can still contain user-provided sensitive content such as ledger history, memory, blobs, and attachments.
 
 #### `group_copy_preview_import`
 
@@ -4205,7 +4205,7 @@ Result:
 ```
 
 Errors:
-- `invalid_group_copy` when the payload is not a valid supported CCCC group copy.
+- `invalid_group_copy` when the payload is not a valid supported OneColleague group copy.
 - `contains_secrets: false` in the preview has the same meaning as export: system credentials are excluded, but user content in ledger history, memory, blobs, and attachments can still be sensitive.
 
 #### `group_copy_import`
@@ -4221,6 +4221,130 @@ Args:
   by?: string
 }
 ```
+
+### 8.21 Group Templates
+
+Group Template operations export/import a portable team configuration. Templates cover actors, settings,
+automation rules/snippets, and guidance overrides. Ledger history is not modified by template replace.
+
+#### `group_template_export`
+
+Export one group's team configuration as YAML text.
+
+Args:
+```ts
+{
+  group_id: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  template: string
+  filename: string
+}
+```
+
+Errors:
+- `missing_group_id` when `group_id` is omitted.
+- `group_not_found` when the group does not exist.
+- `template_export_failed` when the template cannot be built.
+
+#### `group_template_preview`
+
+Preview replacing a group's team configuration from a template without writing state.
+
+Args:
+```ts
+{
+  group_id: string
+  template: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  preview: Record<string, unknown>
+}
+```
+
+Errors:
+- `missing_group_id` when `group_id` is omitted.
+- `missing_template` when `template` is empty.
+- `group_not_found` when the group does not exist.
+- `permission_denied` when `by` cannot update the group.
+- `invalid_template` when the template cannot be parsed.
+
+#### `group_template_import_replace`
+
+Replace a group's team configuration from a template.
+
+Args:
+```ts
+{
+  group_id: string
+  confirm: string
+  template: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  applied: true
+  removed: string[]
+  added: string[]
+  updated: string[]
+  settings_patch: Record<string, unknown>
+  prompt_paths: Record<string, string>
+  automation: Record<string, unknown>
+}
+```
+
+Errors:
+- `missing_group_id` when `group_id` is omitted.
+- `confirmation_required` when `confirm` does not equal `group_id`.
+- `missing_template` when `template` is empty.
+- `group_not_found` when the group does not exist.
+- `permission_denied` when `by` cannot update the group.
+- `invalid_template` when validation fails.
+
+#### `group_create_from_template`
+
+Create a new group attached to a local path, then apply a team configuration template.
+
+Args:
+```ts
+{
+  path: string
+  template: string
+  title?: string
+  topic?: string
+  by?: string
+}
+```
+
+Result:
+```ts
+{
+  group_id: string
+  applied: true
+}
+```
+
+Errors:
+- `missing_path` when `path` is omitted.
+- `missing_template` when `template` is empty.
+- `scope_path_create_failed` when the path cannot be created.
+- `invalid_path` when `path` is not a directory.
+- `invalid_template` when the template cannot be parsed or applied.
+- `scope_already_attached` when the target path already has a working group.
 
 Result:
 ```ts

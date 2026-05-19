@@ -23,8 +23,8 @@ class TestCodexAppThreadOps(unittest.TestCase):
         return td, cleanup
 
     def test_existing_codex_thread_resumes(self) -> None:
-        from cccc.daemon.codex_app_thread_ops import start_codex_app_thread
-        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+        from no1.daemon.codex_app_thread_ops import start_codex_app_thread
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:

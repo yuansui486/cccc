@@ -32,13 +32,13 @@ class TestWebContextRoutesCache(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="context-cache-test", topic="").group_id
@@ -51,10 +51,10 @@ class TestWebContextRoutesCache(unittest.TestCase):
             summary_payload = {"coordination": {"tasks": []}, "meta": {"summary_snapshot": {"state": "hit"}}}
 
             with patch(
-                "cccc.ports.web.routes.groups._read_context_summary_local",
+                "no1.ports.web.routes.groups._read_context_summary_local",
                 return_value={"ok": True, "result": summary_payload},
             ) as mock_local, patch(
-                "cccc.ports.web.app.call_daemon",
+                "no1.ports.web.app.call_daemon",
                 side_effect=AssertionError("summary context should not call daemon"),
             ):
                 with self._client() as client:
@@ -84,7 +84,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"coordination": {"tasks": []}, "agent_states": [], "meta": {}}}
                 return {"ok": True, "result": {}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/context?detail=full"
 
@@ -132,7 +132,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"version": "fresh"}}
                 return {"ok": True, "result": {}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/context?detail=full"
 
@@ -165,9 +165,9 @@ class TestWebContextRoutesCache(unittest.TestCase):
             call_lock = threading.Lock()
             first_read_release = threading.Event()
 
-            from cccc.kernel.group import attach_scope_to_group, load_group
-            from cccc.kernel.registry import load_registry
-            from cccc.kernel.scope import detect_scope
+            from no1.kernel.group import attach_scope_to_group, load_group
+            from no1.kernel.registry import load_registry
+            from no1.kernel.scope import detect_scope
 
             with tempfile.TemporaryDirectory() as scope_root:
                 reg = load_registry()
@@ -190,7 +190,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
                         return {"ok": True, "result": {"version": "fresh"}}
                     return {"ok": True, "result": {}}
 
-                with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+                with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                     with self._client() as client:
                         path = f"/api/v1/groups/{group_id}/context?detail=full"
 
@@ -240,7 +240,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"coordination": {"tasks": []}, "meta": {"version": "fresh"}}}
                 return {"ok": True, "result": {}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/context?detail=full"
 
@@ -285,7 +285,7 @@ class TestWebContextRoutesCache(unittest.TestCase):
                     return {"ok": True, "result": {"actor_id": "peer-1"}}
                 return {"ok": True, "result": {}}
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     path = f"/api/v1/groups/{group_id}/context?detail=full"
 

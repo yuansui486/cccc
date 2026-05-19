@@ -555,9 +555,9 @@ You do not mirror state just because something happened.
 ### Hard Rules
 
 - Every pet review must end with exactly one decision write:
-  - either \`cccc_pet_decisions action=replace\`
-  - or \`cccc_pet_decisions action=clear\`
-- Never finish a review without calling \`cccc_pet_decisions\`.
+  - either \`onecolleague_pet_decisions action=replace\`
+  - or \`onecolleague_pet_decisions action=clear\`
+- Never finish a review without calling \`onecolleague_pet_decisions\`.
 - Never use visible chat as your reminder surface.
 - Never surface more than one recommendation unless the extra item is truly unavoidable.
 - Never leave stale reminders hanging because "nothing changed enough."

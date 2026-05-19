@@ -23,17 +23,17 @@ class TestWebGroupSettingsPartialUpdate(unittest.TestCase):
         return td, cleanup
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
     def test_delivery_partial_update_preserves_hidden_min_interval(self) -> None:
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
-        from cccc.ports.web.app import create_app
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
@@ -50,7 +50,7 @@ class TestWebGroupSettingsPartialUpdate(unittest.TestCase):
             }
             loaded.save()
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 app = create_app()
                 client = TestClient(app)
                 resp = client.put(

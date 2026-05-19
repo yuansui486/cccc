@@ -1,5 +1,5 @@
-from cccc.kernel.pty_terminal_state import derive_pty_terminal_override
-from cccc.kernel.working_state import derive_effective_working_state
+from no1.kernel.pty_terminal_state import derive_pty_terminal_override
+from no1.kernel.working_state import derive_effective_working_state
 
 
 def test_codex_terminal_text_is_not_used_for_working_state() -> None:

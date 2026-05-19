@@ -1,6 +1,6 @@
 # Discord Setup
 
-Connect your CCCC working group to Discord for community access.
+Connect your OneColleague working group to Discord for community access.
 
 ## Overview
 
@@ -14,13 +14,13 @@ Discord integration is great for:
 ## Prerequisites
 
 - A Discord server where you have admin rights
-- CCCC installed and running
+- OneColleague installed and running
 
 ## Step 1: Create a Discord Application
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Click **New Application**
-3. Enter a name (e.g., "CCCC Bot")
+3. Enter a name (e.g., "OneColleague Bot")
 4. Accept the terms and click **Create**
 
 ## Step 2: Create a Bot
@@ -91,11 +91,11 @@ Never share your bot token. If exposed, regenerate it immediately.
 export DISCORD_BOT_TOKEN="your-bot-token-here"
 ```
 
-## Step 7: Configure CCCC
+## Step 7: Configure OneColleague
 
 ### Option A: Via Web UI
 
-1. Open the CCCC Web UI at `http://127.0.0.1:8848/`
+1. Open the OneColleague Web UI at `http://127.0.0.1:8848/`
 2. Go to **Settings** (gear icon in header)
 3. Navigate to the **IM Bridge** section
 4. Select **Discord** as the platform
@@ -106,7 +106,7 @@ export DISCORD_BOT_TOKEN="your-bot-token-here"
 ### Option B: Via CLI
 
 ```bash
-cccc im set discord --token-env DISCORD_BOT_TOKEN
+onecolleague im set discord --token-env DISCORD_BOT_TOKEN
 ```
 
 Both methods save to `group.yaml`:
@@ -120,7 +120,7 @@ im:
 ## Step 8: Start the Bridge
 
 ```bash
-cccc im start
+onecolleague im start
 ```
 
 ## Step 9: Subscribe in Discord
@@ -172,21 +172,21 @@ Use `/verbose` to toggle whether you see agent-to-agent messages.
 
 ### Thread Support
 
-Create threads for focused discussions. CCCC tracks thread context.
+Create threads for focused discussions. OneColleague tracks thread context.
 
 ### File Attachments
 
-Attach files to your message. They're stored in CCCC's blob storage, then forwarded to agents.
+Attach files to your message. They're stored in OneColleague's blob storage, then forwarded to agents.
 
 ### Embeds
 
-CCCC formats responses with Discord embeds for better readability when appropriate.
+OneColleague formats responses with Discord embeds for better readability when appropriate.
 
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `/subscribe` | Start receiving messages from CCCC |
+| `/subscribe` | Start receiving messages from OneColleague |
 | `/unsubscribe` | Stop receiving messages |
 | `/send <message>` | Send to foreman (default) |
 | `/send @<actor> <message>` | Send to a specific agent |
@@ -208,9 +208,9 @@ Register application commands for better UX:
 
 Example slash command structure:
 ```
-/cccc send <message>
-/cccc status
-/cccc agents
+/onecolleague send <message>
+/onecolleague status
+/onecolleague agents
 ```
 
 ## Troubleshooting
@@ -236,12 +236,12 @@ Enable Message Content Intent:
 
 1. Check the bridge is running:
    ```bash
-   cccc im status
+   onecolleague im status
    ```
 
 2. Verify the token:
    ```bash
-   cccc im logs -f
+   onecolleague im logs -f
    ```
 
 3. Regenerate token if needed

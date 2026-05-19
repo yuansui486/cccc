@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cccc.daemon.assistants.voice_final_document_apply import (
+from no1.daemon.assistants.voice_final_document_apply import (
     build_final_transcript_append_request,
     final_speaker_transcript_text,
 )

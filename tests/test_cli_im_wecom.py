@@ -22,9 +22,9 @@ class TestCliImWecom(unittest.TestCase):
         return td, cleanup
 
     def test_im_set_wecom_cli_writes_bot_id_and_secret(self) -> None:
-        from cccc.cli.main import main
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.cli.main import main
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:

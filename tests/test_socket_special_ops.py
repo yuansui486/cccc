@@ -1,7 +1,7 @@
 import unittest
 
-from cccc.contracts.v1 import DaemonRequest
-from cccc.daemon.ops.socket_special_ops import try_handle_socket_special_op
+from no1.contracts.v1 import DaemonRequest
+from no1.daemon.ops.socket_special_ops import try_handle_socket_special_op
 
 
 class _FakeConn:
@@ -155,7 +155,7 @@ class TestSocketSpecialOps(unittest.TestCase):
 
     @staticmethod
     def _error_payload(code: str, message: str, details=None):
-        from cccc.contracts.v1 import DaemonError, DaemonResponse
+        from no1.contracts.v1 import DaemonError, DaemonResponse
 
         return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
 

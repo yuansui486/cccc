@@ -261,7 +261,7 @@ function PresentationViewer({
     defaultValue: "Standard mode is lightweight. If links jump out or the page cannot load, switch to enhanced mode.",
   });
   const interactiveModeHelp = t("presentationInteractiveModeHelp", {
-    defaultValue: "Enhanced mode works better for local or private pages and tries to keep navigation inside CCCC.",
+    defaultValue: "Enhanced mode works better for local or private pages and tries to keep navigation inside OneColleague.",
   });
 
   const modalHeaderActions = (

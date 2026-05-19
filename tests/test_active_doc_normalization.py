@@ -5,8 +5,8 @@ import unittest
 
 class TestActiveDocNormalization(unittest.TestCase):
     def test_load_active_normalizes_non_dict_payload(self) -> None:
-        from cccc.kernel.active import active_path, load_active
-        from cccc.util.fs import atomic_write_json, read_json
+        from no1.kernel.active import active_path, load_active
+        from no1.util.fs import atomic_write_json, read_json
 
         old_home = os.environ.get("CCCC_HOME")
         try:

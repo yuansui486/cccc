@@ -36,7 +36,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
         return td, cleanup
 
     def test_acquire_default_entry_lock_reports_existing_owner(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -48,7 +48,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_stop_existing_web_runtime_terminates_live_pid(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -65,13 +65,13 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_stop_existing_daemon_shuts_down_and_cleans_state(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
             daemon_dir = home / "daemon"
             daemon_dir.mkdir(parents=True, exist_ok=True)
-            for name in ("ccccd.sock", "ccccd.addr.json", "ccccd.pid"):
+            for name in ("onecolleagued.sock", "onecolleagued.addr.json", "onecolleagued.pid"):
                 (daemon_dir / name).write_text("1234", encoding="utf-8")
 
             with patch.object(
@@ -88,20 +88,20 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
 
             self.assertTrue(ok)
             mock_terminate.assert_not_called()
-            self.assertFalse((daemon_dir / "ccccd.sock").exists())
-            self.assertFalse((daemon_dir / "ccccd.addr.json").exists())
-            self.assertFalse((daemon_dir / "ccccd.pid").exists())
+            self.assertFalse((daemon_dir / "onecolleagued.sock").exists())
+            self.assertFalse((daemon_dir / "onecolleagued.addr.json").exists())
+            self.assertFalse((daemon_dir / "onecolleagued.pid").exists())
         finally:
             cleanup()
 
     def test_stop_existing_daemon_kills_stale_pid_file_when_ping_unavailable(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
             daemon_dir = home / "daemon"
             daemon_dir.mkdir(parents=True, exist_ok=True)
-            (daemon_dir / "ccccd.pid").write_text("2468", encoding="utf-8")
+            (daemon_dir / "onecolleagued.pid").write_text("2468", encoding="utf-8")
 
             with patch.object(common, "call_daemon", return_value={"ok": False}), patch.object(
                 common, "pid_is_alive", return_value=True
@@ -110,12 +110,12 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
 
             self.assertTrue(ok)
             mock_terminate.assert_called_once_with(2468, timeout_s=2.0, include_group=True, force=True)
-            self.assertFalse((daemon_dir / "ccccd.pid").exists())
+            self.assertFalse((daemon_dir / "onecolleagued.pid").exists())
         finally:
             cleanup()
 
     def test_stop_existing_daemon_terminates_same_home_orphans(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -139,7 +139,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_stop_existing_daemon_fails_when_orphan_termination_fails(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -153,13 +153,13 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_same_home_daemon_pids_falls_back_to_lock_holders_when_proc_missing(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
             daemon_dir = home / "daemon"
             daemon_dir.mkdir(parents=True, exist_ok=True)
-            lock_path = daemon_dir / "ccccd.lock"
+            lock_path = daemon_dir / "onecolleagued.lock"
             lock_path.write_text("", encoding="utf-8")
 
             with patch.object(common, "ensure_home", return_value=home), patch.object(common.Path, "is_dir", return_value=False), patch.object(
@@ -182,7 +182,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_default_entry_ctrl_c_while_waiting_for_web_child_stops_web_and_daemon(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -197,7 +197,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
                     return None
 
             with patch.object(common, "_is_first_run", return_value=False), patch(
-                "cccc.paths.ensure_home", return_value=home
+                "no1.paths.ensure_home", return_value=home
             ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
                 common, "_stop_existing_web_runtime", return_value=True
             ), patch.object(common, "_stop_existing_daemon", return_value=True), patch.object(
@@ -221,13 +221,13 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_default_entry_registers_sigint_and_sigbreak_handlers(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
             sigbreak_value = 21
             with patch.object(common, "_is_first_run", return_value=False), patch(
-                "cccc.paths.ensure_home", return_value=home
+                "no1.paths.ensure_home", return_value=home
             ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
                 common, "_stop_existing_web_runtime", return_value=False
             ), patch.object(common, "release_lockfile"), patch.object(
@@ -245,7 +245,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_default_entry_starts_daemon_with_supervised_process_kwargs(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -260,7 +260,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
                     return None
 
             with patch.object(common, "_is_first_run", return_value=False), patch(
-                "cccc.paths.ensure_home", return_value=home
+                "no1.paths.ensure_home", return_value=home
             ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
                 common, "_stop_existing_web_runtime", return_value=True
             ), patch.object(common, "_stop_existing_daemon", return_value=True), patch.object(
@@ -287,7 +287,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_default_entry_applies_invocation_port_override_to_initial_web_start(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -302,7 +302,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
                     return None
 
             with patch.object(common, "_is_first_run", return_value=False), patch(
-                "cccc.paths.ensure_home", return_value=home
+                "no1.paths.ensure_home", return_value=home
             ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
                 common, "_stop_existing_web_runtime", return_value=True
             ), patch.object(common, "_stop_existing_daemon", return_value=True), patch.object(
@@ -323,7 +323,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             cleanup()
 
     def test_default_entry_keeps_invocation_port_override_on_web_restart(self) -> None:
-        from cccc.cli import common
+        from no1.cli import common
 
         home, cleanup = self._with_home()
         try:
@@ -343,7 +343,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
                 return restarted_web_proc, "0.0.0.0", 9000
 
             with patch.object(common, "_is_first_run", return_value=False), patch(
-                "cccc.paths.ensure_home", return_value=home
+                "no1.paths.ensure_home", return_value=home
             ), patch.object(common, "_acquire_default_entry_lock", return_value=("lock", None)), patch.object(
                 common, "_stop_existing_web_runtime", return_value=True
             ), patch.object(common, "_stop_existing_daemon", return_value=True), patch.object(

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cccc.daemon.im.im_bridge_ops import (
+from no1.daemon.im.im_bridge_ops import (
     cleanup_invalid_im_bridges,
     read_live_im_bridge_pid,
     stop_all_im_bridges,
@@ -56,8 +56,8 @@ class TestImBridgeOps(unittest.TestCase):
             pid_path.write_text("4321", encoding="utf-8")
 
             with (
-                patch("cccc.daemon.im.im_bridge_ops.os.waitpid", side_effect=ChildProcessError()),
-                patch("cccc.daemon.im.im_bridge_ops.pid_is_alive", return_value=False),
+                patch("no1.daemon.im.im_bridge_ops.os.waitpid", side_effect=ChildProcessError()),
+                patch("no1.daemon.im.im_bridge_ops.pid_is_alive", return_value=False),
             ):
                 pid = read_live_im_bridge_pid(pid_path)
 
@@ -71,7 +71,7 @@ class TestImBridgeOps(unittest.TestCase):
             pid_path = Path(td) / "im_bridge.pid"
             pid_path.write_text("4321", encoding="utf-8")
 
-            with patch("cccc.daemon.im.im_bridge_ops.os.waitpid", return_value=(4321, 0)):
+            with patch("no1.daemon.im.im_bridge_ops.os.waitpid", return_value=(4321, 0)):
                 pid = read_live_im_bridge_pid(pid_path)
 
             self.assertIsNone(pid)
@@ -114,15 +114,15 @@ class TestImUnsetOrphanScan(unittest.TestCase):
             # Mock _resolve_group_id to return our test group_id
             # Mock ensure_home to return our temp dir
             with (
-                patch("cccc.cli.im_cmds._im_find_bridge_pids_by_script", return_value=[orphan_pid]),
-                patch("cccc.cli.im_cmds._resolve_group_id", return_value=group_id),
-                patch("cccc.cli.im_cmds.best_effort_signal_pid", side_effect=mock_signal),
-                patch("cccc.kernel.group.ensure_home", return_value=home),
-                patch("cccc.cli.im_cmds.ensure_home", return_value=home),
+                patch("no1.cli.im_cmds._im_find_bridge_pids_by_script", return_value=[orphan_pid]),
+                patch("no1.cli.im_cmds._resolve_group_id", return_value=group_id),
+                patch("no1.cli.im_cmds.best_effort_signal_pid", side_effect=mock_signal),
+                patch("no1.kernel.group.ensure_home", return_value=home),
+                patch("no1.cli.im_cmds.ensure_home", return_value=home),
             ):
                 import argparse
 
-                from cccc.cli.im_cmds import cmd_im_unset
+                from no1.cli.im_cmds import cmd_im_unset
 
                 args = argparse.Namespace(group=group_id)
                 rc = cmd_im_unset(args)

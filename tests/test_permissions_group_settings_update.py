@@ -20,10 +20,10 @@ class TestGroupSettingsUpdatePermission(unittest.TestCase):
         return td, cleanup
 
     def test_group_settings_update_foreman_allowed_peer_denied(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
-        from cccc.kernel.permissions import require_group_permission
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
+        from no1.kernel.permissions import require_group_permission
 
         _, cleanup = self._with_home()
         try:

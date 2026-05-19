@@ -35,13 +35,13 @@ class TestWebMessagingSubmitSemantics(unittest.TestCase):
         return cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def test_reply_surfaces_daemon_error_even_if_async_env_requested(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup_home = self._with_home()
         cleanup_mode = self._with_env("CCCC_WEB_MESSAGE_SUBMIT_MODE", "async")
@@ -59,7 +59,7 @@ class TestWebMessagingSubmitSemantics(unittest.TestCase):
                     },
                 }
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 client = self._client()
                 resp = client.post(
                     f"/api/v1/groups/{group.group_id}/reply",

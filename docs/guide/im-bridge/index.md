@@ -1,6 +1,6 @@
 # IM Bridge Overview
 
-Bridge your CCCC working group to popular IM platforms for mobile access.
+Bridge your OneColleague working group to popular IM platforms for mobile access.
 
 ## What is IM Bridge?
 
@@ -57,28 +57,28 @@ Reserve `/send @all <message>` for true broadcasts, announcements, or urgent sha
 
 ```bash
 # Configure (platform-specific, see each guide)
-cccc im set <platform> --token-env <ENV_VAR>
+onecolleague im set <platform> --token-env <ENV_VAR>
 
 # Configure WeCom with long-connection Bot ID / Secret
-cccc im set wecom --wecom-bot-id WECOM_BOT_ID --wecom-secret WECOM_SECRET
+onecolleague im set wecom --wecom-bot-id WECOM_BOT_ID --wecom-secret WECOM_SECRET
 
 # Control
-cccc im start        # Start IM bridge
-cccc im stop         # Stop IM bridge
-cccc im status       # Check bridge status
-cccc im logs         # View logs
-cccc im logs -f      # Follow logs
+onecolleague im start        # Start IM bridge
+onecolleague im stop         # Stop IM bridge
+onecolleague im status       # Check bridge status
+onecolleague im logs         # View logs
+onecolleague im logs -f      # Follow logs
 ```
 
 ::: tip WeCom Note
-WeCom uses the long-connection Bot ID / Secret flow. Credentials can be saved from either the Web UI or `cccc im set wecom --wecom-bot-id ... --wecom-secret ...`.
+WeCom uses the long-connection Bot ID / Secret flow. Credentials can be saved from either the Web UI or `onecolleague im set wecom --wecom-bot-id ... --wecom-secret ...`.
 :::
 
 ## Quick Start
 
 1. Choose a platform from the list above
 2. Follow the setup guide to create a bot
-3. Configure CCCC with the bot credentials
+3. Configure OneColleague with the bot credentials
 4. Start the bridge and subscribe in your chat
 
 ## Next Steps

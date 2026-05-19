@@ -9,8 +9,8 @@ import yaml  # type: ignore
 
 class TestGroupTemplatePortableFields(unittest.TestCase):
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -27,7 +27,7 @@ class TestGroupTemplatePortableFields(unittest.TestCase):
         return group_id
 
     def test_export_includes_actor_autoload_and_feature_toggles(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -153,7 +153,7 @@ class TestGroupTemplatePortableFields(unittest.TestCase):
                 self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
 
                 template = """
-kind: cccc.group_template
+kind: no1.group_template
 v: 1
 actors:
   - id: peer1
@@ -192,7 +192,7 @@ automation:
                 os.environ["CCCC_HOME"] = old_home
 
     def test_import_replace_applies_actor_autoload_and_feature_toggles(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -210,7 +210,7 @@ automation:
                 self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
 
                 template = """
-kind: cccc.group_template
+kind: no1.group_template
 v: 1
 actors:
   - id: peer1
@@ -280,7 +280,7 @@ automation:
                 )
                 self.assertTrue(sync_resp.ok, getattr(sync_resp, "error", None))
 
-                from cccc.daemon.context.context_ops import _rebuild_summary_snapshot
+                from no1.daemon.context.context_ops import _rebuild_summary_snapshot
 
                 _rebuild_summary_snapshot(group_id)
 
@@ -292,7 +292,7 @@ automation:
                 self.assertTrue(before_version.startswith("ctxv:"))
 
                 template = """
-kind: cccc.group_template
+kind: no1.group_template
 v: 1
 actors: []
 prompts: {}
@@ -321,14 +321,14 @@ automation:
                 self.assertTrue(full_after.ok, getattr(full_after, "error", None))
                 self.assertEqual((full_after.result or {}).get("agent_states") or [], [])
 
-                from cccc.kernel.group import load_group
+                from no1.kernel.group import load_group
 
                 group = load_group(group_id)
                 assert group is not None
                 snapshot_path = Path(group.path) / "context" / "summary_snapshot.json"
                 self.assertTrue(snapshot_path.exists())
 
-                from cccc.daemon.context.context_ops import _wait_for_summary_snapshot_rebuild
+                from no1.daemon.context.context_ops import _wait_for_summary_snapshot_rebuild
 
                 _wait_for_summary_snapshot_rebuild(group_id, timeout_s=2.0)
         finally:
@@ -356,7 +356,7 @@ automation:
                 self.assertTrue(add_peer2.ok, getattr(add_peer2, "error", None))
 
                 template = """
-kind: cccc.group_template
+kind: no1.group_template
 v: 1
 actors:
   - id: peer2
@@ -371,7 +371,7 @@ automation:
   snippets: {}
 """
                 with patch(
-                    "cccc.daemon.ops.template_ops._schedule_summary_snapshot_rebuild",
+                    "no1.daemon.ops.template_ops._schedule_summary_snapshot_rebuild",
                     return_value=True,
                 ) as mock_schedule:
                     import_resp, _ = self._call(

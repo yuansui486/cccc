@@ -37,8 +37,8 @@ class TestRemoteAccessOps(unittest.TestCase):
         return cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -83,7 +83,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_manual_start_stop_roundtrip(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -199,7 +199,7 @@ class TestRemoteAccessOps(unittest.TestCase):
                     "by": "user",
                     "provider": "manual",
                     "require_access_token": False,
-                    "web_public_url": "https://cccc.example.com/ui/",
+                    "web_public_url": "https://no1.example.com/ui/",
                 },
             )
             self.assertFalse(blocked.ok)
@@ -216,7 +216,7 @@ class TestRemoteAccessOps(unittest.TestCase):
                 {
                     "by": "user",
                     "provider": "tailscale",
-                    "web_public_url": "https://cccc.example.com/ui/",
+                    "web_public_url": "https://no1.example.com/ui/",
                 },
             )
             self.assertFalse(blocked.ok)
@@ -225,7 +225,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_start_manual_rejects_loopback_binding_without_override(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         cleanup_loopback_override = self._with_env("CCCC_REMOTE_ALLOW_LOOPBACK", None)
@@ -297,7 +297,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_state_uses_remote_placeholder_endpoint_for_wildcard_host(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -321,7 +321,7 @@ class TestRemoteAccessOps(unittest.TestCase):
     def test_remote_access_state_mentions_wsl_private_network_requirement(self) -> None:
         _, cleanup = self._with_home()
         try:
-            with patch("cccc.daemon.ops.remote_access_ops._running_in_wsl", return_value=True):
+            with patch("no1.daemon.ops.remote_access_ops._running_in_wsl", return_value=True):
                 cfg, _ = self._call(
                     "remote_access_configure",
                     {
@@ -342,8 +342,8 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_state_surfaces_supervised_live_runtime_mismatch(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.ports.web.runtime_control import write_web_runtime_state
+        from no1.kernel.access_tokens import create_access_token
+        from no1.ports.web.runtime_control import write_web_runtime_state
 
         home, cleanup = self._with_home()
         try:
@@ -383,8 +383,8 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_state_surfaces_unsupervised_live_runtime_mismatch(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.ports.web.runtime_control import write_web_runtime_state
+        from no1.kernel.access_tokens import create_access_token
+        from no1.ports.web.runtime_control import write_web_runtime_state
 
         home, cleanup = self._with_home()
         try:
@@ -424,7 +424,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_start_tailscale_reports_not_installed(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -438,7 +438,7 @@ class TestRemoteAccessOps(unittest.TestCase):
                 },
             )
             self.assertTrue(cfg.ok, getattr(cfg, "error", None))
-            with patch("cccc.daemon.ops.remote_access_ops._tailscale_installed", return_value=False):
+            with patch("no1.daemon.ops.remote_access_ops._tailscale_installed", return_value=False):
                 start, _ = self._call("remote_access_start", {"by": "user"})
             self.assertFalse(start.ok)
             self.assertEqual(str(getattr(start, "error", None).code), "remote_access_not_installed")
@@ -446,7 +446,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_state_tailscale_not_installed_status(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -456,7 +456,7 @@ class TestRemoteAccessOps(unittest.TestCase):
                 {"by": "user", "provider": "tailscale", "enabled": True, "web_host": "192.168.68.52"},
             )
             self.assertTrue(cfg.ok, getattr(cfg, "error", None))
-            with patch("cccc.daemon.ops.remote_access_ops._tailscale_installed", return_value=False):
+            with patch("no1.daemon.ops.remote_access_ops._tailscale_installed", return_value=False):
                 state_resp, _ = self._call("remote_access_state", {"by": "user"})
             self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
             remote = (state_resp.result or {}).get("remote_access") if isinstance(state_resp.result, dict) else {}
@@ -465,7 +465,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cleanup()
 
     def test_remote_access_configure_reports_access_token_count(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -478,7 +478,7 @@ class TestRemoteAccessOps(unittest.TestCase):
                     "provider": "manual",
                     "web_host": "10.0.0.8",
                     "web_port": 8899,
-                    "web_public_url": "https://cccc.example.com/ui/",
+                    "web_public_url": "https://no1.example.com/ui/",
                 },
             )
             self.assertTrue(cfg.ok, getattr(cfg, "error", None))
@@ -486,7 +486,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             cfg_doc = remote.get("config") if isinstance(remote.get("config"), dict) else {}
             self.assertEqual(str(cfg_doc.get("web_host") or ""), "10.0.0.8")
             self.assertEqual(int(cfg_doc.get("web_port") or 0), 8899)
-            self.assertEqual(str(cfg_doc.get("web_public_url") or ""), "https://cccc.example.com/ui/")
+            self.assertEqual(str(cfg_doc.get("web_public_url") or ""), "https://no1.example.com/ui/")
             self.assertEqual(bool(cfg_doc.get("access_token_configured")), True)
             self.assertEqual(int(cfg_doc.get("access_token_count") or 0), 2)
         finally:

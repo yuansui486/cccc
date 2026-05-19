@@ -23,7 +23,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
         return td, cleanup
 
     def _create_client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
@@ -40,7 +40,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_create_and_list_access_tokens(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -114,7 +114,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_admin_access_token_ignores_allowed_groups_on_create(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -134,7 +134,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_admin_access_token_ignores_allowed_groups_on_update(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -158,7 +158,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_delete_access_token_by_token_id(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -184,7 +184,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_delete_current_session_access_token_marks_session_deleted(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -206,7 +206,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_delete_nonexistent_access_token_returns_404(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -222,7 +222,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_full_raw_token_is_not_a_valid_route_identifier(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -241,7 +241,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
 
 
     def test_scoped_access_token_requires_allowed_groups_on_create(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -259,7 +259,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_scoped_access_token_requires_allowed_groups_on_update(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -280,7 +280,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_admin_token_cannot_be_downgraded_without_allowed_groups(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -301,7 +301,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             cleanup()
 
     def test_non_admin_cannot_create_or_list_access_tokens(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:

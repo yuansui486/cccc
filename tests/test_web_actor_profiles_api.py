@@ -23,33 +23,33 @@ class TestWebActorProfilesApi(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="web-actor-profile-test", topic="").group_id
 
     def test_profiles_routes_support_my_and_all_views(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             admin = str(create_access_token("admin-user", is_admin=True).get("token") or "")
             member = str(create_access_token("member-user", is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 create_my = client.put(
@@ -107,13 +107,13 @@ class TestWebActorProfilesApi(unittest.TestCase):
             cleanup()
 
     def test_legacy_actor_profiles_routes_remain_global_compatible(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             admin = str(create_access_token("admin-user", is_admin=True).get("token") or "")
             member = str(create_access_token("member-user", is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 create_global = client.post(
@@ -148,13 +148,13 @@ class TestWebActorProfilesApi(unittest.TestCase):
             cleanup()
 
     def test_member_can_manage_own_profile_secrets_via_profiles_routes(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             member = str(create_access_token("member-user", is_admin=False).get("token") or "")
             other = str(create_access_token("other-user", is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 create_my = client.put(
@@ -205,13 +205,13 @@ class TestWebActorProfilesApi(unittest.TestCase):
             cleanup()
 
     def test_standard_web_allows_claude_headless_profile_and_actor(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
             member = str(create_access_token("member-user", is_admin=False, allowed_groups=[group_id]).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 create_profile = client.put(
@@ -270,7 +270,7 @@ class TestWebActorProfilesApi(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 global_profile = self._local_call_daemon(
@@ -332,7 +332,7 @@ class TestWebActorProfilesApi(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 created_actor = self._local_call_daemon(
@@ -401,13 +401,13 @@ class TestWebActorProfilesApi(unittest.TestCase):
             cleanup()
 
     def test_actor_create_rejects_user_scoped_headless_profile_even_with_non_owner_token(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
             viewer_token = str(create_access_token("viewer-user", is_admin=False, allowed_groups=[group_id]).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
 
                 self._local_call_daemon(

@@ -21,16 +21,16 @@ class TestLedgerSearchIndex(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_search_messages_without_query_uses_index_path(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import search_messages
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import search_messages
 
             create, _ = self._call("group_create", {"title": "search-index", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -53,7 +53,7 @@ class TestLedgerSearchIndex(unittest.TestCase):
             self.assertIsNotNone(group)
             assert group is not None
 
-            with patch("cccc.kernel.inbox.iter_events", side_effect=AssertionError("indexed search should avoid ledger scan")):
+            with patch("no1.kernel.inbox.iter_events", side_effect=AssertionError("indexed search should avoid ledger scan")):
                 events, has_more = search_messages(group, query="", kind_filter="all", limit=3)
             self.assertEqual(len(events), 3)
             self.assertTrue(has_more)
@@ -64,8 +64,8 @@ class TestLedgerSearchIndex(unittest.TestCase):
     def test_search_messages_with_query_uses_indexed_text_path(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import search_messages
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import search_messages
 
             create, _ = self._call("group_create", {"title": "search-index-query", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -88,7 +88,7 @@ class TestLedgerSearchIndex(unittest.TestCase):
             self.assertIsNotNone(group)
             assert group is not None
 
-            with patch("cccc.kernel.inbox.iter_events", side_effect=AssertionError("indexed text search should avoid ledger scan")):
+            with patch("no1.kernel.inbox.iter_events", side_effect=AssertionError("indexed text search should avoid ledger scan")):
                 events, has_more = search_messages(group, query="hello", kind_filter="all", limit=10)
             self.assertFalse(has_more)
             self.assertEqual(len(events), 2)
@@ -100,8 +100,8 @@ class TestLedgerSearchIndex(unittest.TestCase):
     def test_search_messages_avoids_per_event_lookup_round_trips(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.inbox import search_messages
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import search_messages
 
             create, _ = self._call("group_create", {"title": "search-batch-lookup", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -124,7 +124,7 @@ class TestLedgerSearchIndex(unittest.TestCase):
             self.assertIsNotNone(group)
             assert group is not None
 
-            with patch("cccc.kernel.inbox.lookup_event_by_id", side_effect=AssertionError("search should use batched event lookup")):
+            with patch("no1.kernel.inbox.lookup_event_by_id", side_effect=AssertionError("search should use batched event lookup")):
                 events, has_more = search_messages(group, query="", kind_filter="all", limit=4)
             self.assertEqual(len(events), 4)
             self.assertTrue(has_more)

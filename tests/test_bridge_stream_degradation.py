@@ -4,7 +4,7 @@ import unittest
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
-from cccc.ports.im.adapters.base import IMAdapter, OutboundStreamHandle
+from no1.ports.im.adapters.base import IMAdapter, OutboundStreamHandle
 
 
 class FailBeginAdapter(IMAdapter):
@@ -100,9 +100,9 @@ class TestBridgeStreamDegradation(unittest.TestCase):
         import os
         import tempfile
 
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
-        from cccc.ports.im.bridge import IMBridge
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+        from no1.ports.im.bridge import IMBridge
 
         old_home = os.environ.get("CCCC_HOME")
         td_ctx = tempfile.TemporaryDirectory()

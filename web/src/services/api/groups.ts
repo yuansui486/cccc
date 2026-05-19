@@ -1517,7 +1517,7 @@ export async function exportGroupCopy(groupId: string): Promise<ApiResponse<{ bl
     }
     const header = resp.headers.get("content-disposition") || "";
     const match = /filename="?([^";]+)"?/i.exec(header);
-    const filename = match?.[1] || `cccc-group-${groupId}.zip`;
+    const filename = match?.[1] || `onecolleague-group-${groupId}.zip`;
     return { ok: true, result: { blob: await resp.blob(), filename } };
   } catch (error) {
     return {

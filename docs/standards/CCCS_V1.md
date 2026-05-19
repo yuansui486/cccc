@@ -1,10 +1,10 @@
-# CCCC Collaboration Standard (CCCS) v1
+# OneColleague Collaboration Standard (CCCS) v1
 
-Status: Draft (proposed for CCCC v0.4.x ecosystem)
+Status: Draft (proposed for OneColleague v0.4.x ecosystem)
 
 This document defines **CCCS v1**, a small, transport-agnostic standard for multi-agent collaboration built around an append-only event ledger.
 It is designed to be **stable**, **extensible**, and **implementable** by:
-- CCCC itself (daemon + web UI + MCP/IM bridges)
+- OneColleague itself (daemon + web UI + MCP/IM bridges)
 - Client SDKs (TypeScript/Python/Go/etc.)
 - External tools and integrations (CI, IM bots, IDE plugins, automation)
 
@@ -40,7 +40,7 @@ CCCS v1 does NOT standardize:
 - **Actor**: A named agent identity within a group (e.g., `foreman`, `peer-1`).
 - **Principal**: Any entity that can write events (`user`, an `actor_id`, `system`, or `svc:<name>`).
   - Service principals SHOULD use a stable namespace (RECOMMENDED: `svc:com.example.mybot` when disambiguation is needed).
-  - The `svc:cccc.` prefix is RESERVED for CCCC ecosystem services.
+  - The `svc:cccc.` prefix is RESERVED for OneColleague ecosystem services.
 - **Ledger**: An append-only sequence of events for a group.
 - **Client**: Any process/UI/bot that reads or writes events via a daemon.
 - **Daemon**: A single-writer authority that appends events and enforces permissions.
@@ -134,7 +134,7 @@ Chat message routing uses `to: string[]` with these token types:
 ### 5.2 Empty `to`
 
 If `to` is absent or an empty list, the message is a **broadcast**.
-For compatibility with CCCC v0.4.x semantics, broadcast SHOULD be treated as equivalent to `@all`.
+For compatibility with OneColleague v0.4.x semantics, broadcast SHOULD be treated as equivalent to `@all`.
 
 ### 5.3 Permission and Visibility
 
