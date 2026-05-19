@@ -21,13 +21,13 @@ def _apply_invocation_web_overrides(args: argparse.Namespace) -> tuple[dict[str,
     host = str(getattr(args, "web_host", "") or "").strip()
     port = getattr(args, "web_port", None)
     if host:
-        previous["CCCC_WEB_HOST"] = os.environ.get("CCCC_WEB_HOST")
-        os.environ["CCCC_WEB_HOST"] = host
-        applied["CCCC_WEB_HOST"] = host
+        previous["ONECOLLEAGUE_WEB_HOST"] = os.environ.get("ONECOLLEAGUE_WEB_HOST")
+        os.environ["ONECOLLEAGUE_WEB_HOST"] = host
+        applied["ONECOLLEAGUE_WEB_HOST"] = host
     if port is not None:
-        previous["CCCC_WEB_PORT"] = os.environ.get("CCCC_WEB_PORT")
-        os.environ["CCCC_WEB_PORT"] = str(int(port))
-        applied["CCCC_WEB_PORT"] = str(int(port))
+        previous["ONECOLLEAGUE_WEB_PORT"] = os.environ.get("ONECOLLEAGUE_WEB_PORT")
+        os.environ["ONECOLLEAGUE_WEB_PORT"] = str(int(port))
+        applied["ONECOLLEAGUE_WEB_PORT"] = str(int(port))
     return previous, applied
 
 

@@ -190,6 +190,7 @@ def spawn_web_child(
 
     env = os.environ.copy()
     env["CCCC_HOME"] = str(home)
+    env["ONECOLLEAGUE_WEB_MODE"] = str(mode or "normal")
     env["CCCC_WEB_MODE"] = str(mode or "normal")
     env["CCCC_WEB_SUPERVISED"] = "1"
     env["CCCC_WEB_EFFECTIVE_HOST"] = str(host)

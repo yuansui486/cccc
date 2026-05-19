@@ -421,13 +421,19 @@ def get_web_branding_settings() -> Dict[str, Any]:
     return _merge_web_branding(settings.get("web_branding"))
 
 
+def _onecolleague_env(name: str) -> str:
+    new_name = f"ONECOLLEAGUE_{name}"
+    old_name = f"CCCC_{name}"
+    return str(os.environ.get(new_name) or os.environ.get(old_name) or "").strip()
+
+
 def resolve_remote_access_web_binding() -> Dict[str, Any]:
     """Resolve effective Web binding with explicit settings/env/default precedence."""
     settings = load_settings()
     raw = settings.get("remote_access") if isinstance(settings.get("remote_access"), dict) else {}
 
     raw_host = str(raw.get("web_host") or "").strip()
-    env_host = str(os.environ.get("CCCC_WEB_HOST") or "").strip()
+    env_host = _onecolleague_env("WEB_HOST")
     host_source = "settings" if raw_host else ("env" if env_host else "default")
     host = raw_host or env_host or "127.0.0.1"
 
@@ -435,7 +441,7 @@ def resolve_remote_access_web_binding() -> Dict[str, Any]:
     # merged default and preserve env fallback behavior.
     raw_port = raw.get("web_port")
     raw_port_s = str(raw_port or "").strip()
-    env_port_raw = os.environ.get("CCCC_WEB_PORT")
+    env_port_raw = _onecolleague_env("WEB_PORT")
     env_port_s = str(env_port_raw or "").strip()
     if raw_port_s:
         port = _as_int(raw_port, int(DEFAULT_REMOTE_ACCESS["web_port"]), min_value=1, max_value=65535)
@@ -448,7 +454,7 @@ def resolve_remote_access_web_binding() -> Dict[str, Any]:
         port_source = "default"
 
     raw_public_url = str(raw.get("web_public_url") or "").strip()
-    env_public_url = str(os.environ.get("CCCC_WEB_PUBLIC_URL") or "").strip()
+    env_public_url = _onecolleague_env("WEB_PUBLIC_URL")
     public_url_source = "settings" if raw_public_url else ("env" if env_public_url else "none")
     public_url = raw_public_url or env_public_url
 

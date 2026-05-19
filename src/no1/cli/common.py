@@ -65,6 +65,10 @@ from ..util.process import (
 _SPACE_QUERY_OPTION_KEYS = {"source_ids"}
 
 
+def _onecolleague_env(name: str) -> str:
+    return str(os.environ.get(f"ONECOLLEAGUE_{name}") or os.environ.get(f"CCCC_{name}") or "").strip()
+
+
 def _display_local_host(host: str) -> str:
     h = str(host or "").strip()
     if h in {"0.0.0.0", "::", "[::]"}:
@@ -677,7 +681,7 @@ def _default_entry(*, web_host_override: str = "", web_port_override: Optional[i
             home=home,
             host=host,
             port=port,
-            mode=str(os.environ.get("CCCC_WEB_MODE") or "normal"),
+            mode=_onecolleague_env("WEB_MODE") or "normal",
             reload=reload_mode,
             log_level=log_level,
             launch_source="default_entry",
@@ -696,7 +700,7 @@ def _default_entry(*, web_host_override: str = "", web_port_override: Optional[i
                     home=home,
                     previous_host=current_host,
                     previous_port=current_port,
-                    mode=str(os.environ.get("CCCC_WEB_MODE") or "normal"),
+                    mode=_onecolleague_env("WEB_MODE") or "normal",
                     reload=reload_mode,
                     log_level=log_level,
                     launch_source="default_entry",

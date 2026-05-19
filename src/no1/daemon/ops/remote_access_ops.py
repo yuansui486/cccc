@@ -24,12 +24,12 @@ def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None)
 
 
 def _allow_insecure_remote() -> bool:
-    v = str(os.environ.get("CCCC_REMOTE_ALLOW_INSECURE") or "").strip().lower()
+    v = str(os.environ.get("ONECOLLEAGUE_REMOTE_ALLOW_INSECURE") or os.environ.get("CCCC_REMOTE_ALLOW_INSECURE") or "").strip().lower()
     return v in ("1", "true", "yes", "y", "on")
 
 
 def _allow_loopback_remote() -> bool:
-    v = str(os.environ.get("CCCC_REMOTE_ALLOW_LOOPBACK") or "").strip().lower()
+    v = str(os.environ.get("ONECOLLEAGUE_REMOTE_ALLOW_LOOPBACK") or os.environ.get("CCCC_REMOTE_ALLOW_LOOPBACK") or "").strip().lower()
     return v in ("1", "true", "yes", "y", "on")
 
 
@@ -59,7 +59,7 @@ def _mode_supported(mode: str) -> bool:
 
 def _safe_web_port(raw: Any = None) -> int:
     if raw is None:
-        raw = os.environ.get("CCCC_WEB_PORT")
+        raw = os.environ.get("ONECOLLEAGUE_WEB_PORT") or os.environ.get("CCCC_WEB_PORT")
     raw_s = str(raw or "").strip() or "8848"
     try:
         n = int(raw_s)
@@ -265,7 +265,7 @@ def _remote_next_steps(*, provider: str, status: str, diagnostics: Dict[str, Any
             out.append("Save stores the target Web binding. When the Web service starts, it will use that binding.")
         return out
     if not bool(diagnostics.get("web_bind_reachable")):
-        out.append("Set Web host/public URL in Settings > Web Access (or set CCCC_WEB_HOST/CCCC_WEB_PUBLIC_URL).")
+        out.append("Set Web host/public URL in Settings > Web Access (or set ONECOLLEAGUE_WEB_HOST/ONECOLLEAGUE_WEB_PUBLIC_URL).")
     if provider == "tailscale":
         if status == "not_installed":
             out.append("Install Tailscale and make sure 'tailscale' is in PATH.")
@@ -312,10 +312,10 @@ def _remote_unreachable_error(*, provider: str, diagnostics: Dict[str, Any]) -> 
     if provider == "tailscale":
         msg = (
             "web server binding is not reachable from tailnet "
-            "(set CCCC_WEB_HOST to a non-loopback address or set CCCC_WEB_PUBLIC_URL)"
+            "(set ONECOLLEAGUE_WEB_HOST to a non-loopback address or set ONECOLLEAGUE_WEB_PUBLIC_URL)"
         )
     else:
-        msg = "web server binding is not remotely reachable (set CCCC_WEB_HOST or CCCC_WEB_PUBLIC_URL)"
+        msg = "web server binding is not remotely reachable (set ONECOLLEAGUE_WEB_HOST or ONECOLLEAGUE_WEB_PUBLIC_URL)"
     return _error(
         "remote_access_unreachable",
         msg,
@@ -324,7 +324,7 @@ def _remote_unreachable_error(*, provider: str, diagnostics: Dict[str, Any]) -> 
             "web_host": host,
             "web_port": port,
             "web_public_url": (public_url or None),
-            "allow_loopback_override_env": "CCCC_REMOTE_ALLOW_LOOPBACK=1",
+            "allow_loopback_override_env": "ONECOLLEAGUE_REMOTE_ALLOW_LOOPBACK=1",
         },
     )
 

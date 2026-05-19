@@ -99,16 +99,20 @@ def _is_truthy_env(value: str) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
+def _onecolleague_env(name: str) -> str:
+    return str(os.environ.get(f"ONECOLLEAGUE_{name}") or os.environ.get(f"CCCC_{name}") or "").strip()
+
+
 def _web_mode() -> Literal["normal", "exhibit"]:
     """Return the web server mode.
 
     - normal: read/write control plane (default)
     - exhibit: read-only "public console" mode
     """
-    mode = str(os.environ.get("CCCC_WEB_MODE") or "").strip().lower()
+    mode = _onecolleague_env("WEB_MODE").lower()
     if mode in ("exhibit", "readonly", "read-only", "ro"):
         return "exhibit"
-    if _is_truthy_env(str(os.environ.get("CCCC_WEB_READONLY") or "")):
+    if _is_truthy_env(_onecolleague_env("WEB_READONLY")):
         return "exhibit"
     return "normal"
 

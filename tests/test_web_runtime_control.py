@@ -138,6 +138,9 @@ class TestWebRuntimeControl(unittest.TestCase):
             self.assertEqual(kwargs.get("creationflags"), 0x208)
             self.assertEqual(kwargs.get("stdin"), runtime_control.subprocess.DEVNULL)
             self.assertEqual(kwargs.get("cwd"), str(home))
+            env = kwargs.get("env") or {}
+            self.assertEqual(env.get("ONECOLLEAGUE_WEB_MODE"), "normal")
+            self.assertEqual(env.get("CCCC_WEB_MODE"), "normal")
             self.assertTrue(str(getattr(kwargs.get("stdout"), "name", "")).endswith("onecolleague-web.log"))
             self.assertIs(kwargs.get("stdout"), kwargs.get("stderr"))
 

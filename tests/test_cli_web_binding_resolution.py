@@ -39,8 +39,8 @@ class TestCliWebBindingResolution(unittest.TestCase):
         from no1.kernel.settings import update_remote_access_settings
 
         _, cleanup = self._with_home()
-        cleanup_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
-        cleanup_port = self._with_env("CCCC_WEB_PORT", "9999")
+        cleanup_host = self._with_env("ONECOLLEAGUE_WEB_HOST", "10.0.0.8")
+        cleanup_port = self._with_env("ONECOLLEAGUE_WEB_PORT", "9999")
         try:
             update_remote_access_settings({"web_host": "0.0.0.0", "web_port": 9001})
             self.assertEqual(_resolve_web_server_binding(), ("0.0.0.0", 9001))
@@ -53,6 +53,19 @@ class TestCliWebBindingResolution(unittest.TestCase):
         from no1.cli.common import _resolve_web_server_binding
 
         _, cleanup = self._with_home()
+        cleanup_host = self._with_env("ONECOLLEAGUE_WEB_HOST", "10.0.0.8")
+        cleanup_port = self._with_env("ONECOLLEAGUE_WEB_PORT", "9999")
+        try:
+            self.assertEqual(_resolve_web_server_binding(), ("10.0.0.8", 9999))
+        finally:
+            cleanup_port()
+            cleanup_host()
+            cleanup()
+
+    def test_resolve_web_server_binding_falls_back_to_legacy_env(self) -> None:
+        from no1.cli.common import _resolve_web_server_binding
+
+        _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
         cleanup_port = self._with_env("CCCC_WEB_PORT", "9999")
         try:
@@ -62,15 +75,36 @@ class TestCliWebBindingResolution(unittest.TestCase):
             cleanup_host()
             cleanup()
 
+    def test_resolve_web_server_binding_prefers_onecolleague_env(self) -> None:
+        from no1.cli.common import _resolve_web_server_binding
+
+        _, cleanup = self._with_home()
+        cleanup_old_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
+        cleanup_old_port = self._with_env("CCCC_WEB_PORT", "9999")
+        cleanup_new_host = self._with_env("ONECOLLEAGUE_WEB_HOST", "0.0.0.0")
+        cleanup_new_port = self._with_env("ONECOLLEAGUE_WEB_PORT", "7777")
+        try:
+            self.assertEqual(_resolve_web_server_binding(), ("0.0.0.0", 7777))
+        finally:
+            cleanup_new_port()
+            cleanup_new_host()
+            cleanup_old_port()
+            cleanup_old_host()
+            cleanup()
+
     def test_resolve_web_server_binding_uses_defaults_without_settings_or_env(self) -> None:
         from no1.cli.common import _resolve_web_server_binding
 
         _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", None)
         cleanup_port = self._with_env("CCCC_WEB_PORT", None)
+        cleanup_new_host = self._with_env("ONECOLLEAGUE_WEB_HOST", None)
+        cleanup_new_port = self._with_env("ONECOLLEAGUE_WEB_PORT", None)
         try:
             self.assertEqual(_resolve_web_server_binding(), ("127.0.0.1", 8848))
         finally:
+            cleanup_new_port()
+            cleanup_new_host()
             cleanup_port()
             cleanup_host()
             cleanup()
@@ -78,13 +112,13 @@ class TestCliWebBindingResolution(unittest.TestCase):
 
     def test_update_settings_does_not_shadow_env_port(self) -> None:
         """Regression: toggling 'enabled' must not persist default web_port=8848,
-        which would shadow CCCC_WEB_PORT env fallback."""
+        which would shadow ONECOLLEAGUE_WEB_PORT env fallback."""
         from no1.cli.common import _resolve_web_server_binding
         from no1.kernel.settings import update_remote_access_settings
 
         _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", None)
-        cleanup_port = self._with_env("CCCC_WEB_PORT", "7777")
+        cleanup_port = self._with_env("ONECOLLEAGUE_WEB_PORT", "7777")
         try:
             # Simulate UI toggling enabled without touching port
             update_remote_access_settings({"provider": "manual", "enabled": True, "web_host": "0.0.0.0"})
