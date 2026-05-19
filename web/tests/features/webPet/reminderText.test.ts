@@ -111,7 +111,7 @@ describe("getPetReminderActionPreviewText", () => {
           },
         }),
       ),
-    ).toBe("建议用 cccc_task move (task_id=T315, status=active)。");
+    ).toBe("建议用 onecolleague_task move (task_id=T315, status=active)。");
   });
 });
 

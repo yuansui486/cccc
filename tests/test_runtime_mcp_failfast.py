@@ -21,8 +21,8 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -56,8 +56,8 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
             )
             self.assertTrue(disable.ok, getattr(disable, "error", None))
 
-            with patch("cccc.daemon.server._ensure_mcp_installed", return_value=False), patch(
-                "cccc.daemon.server._REQUEST_DISPATCH_DEPS", None
+            with patch("no1.daemon.server._ensure_mcp_installed", return_value=False), patch(
+                "no1.daemon.server._REQUEST_DISPATCH_DEPS", None
             ):
                 start, _ = self._call("actor_start", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
 
@@ -70,7 +70,7 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
     def test_actor_restart_fails_when_mcp_install_reports_false_for_pty(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "actor-restart-mcp-fail", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -99,8 +99,8 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
             group.doc["running"] = True
             group.save()
 
-            with patch("cccc.daemon.server._ensure_mcp_installed", return_value=False), patch(
-                "cccc.daemon.server._REQUEST_DISPATCH_DEPS", None
+            with patch("no1.daemon.server._ensure_mcp_installed", return_value=False), patch(
+                "no1.daemon.server._REQUEST_DISPATCH_DEPS", None
             ):
                 restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
 
@@ -113,7 +113,7 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
     def test_actor_update_enable_fails_when_mcp_install_reports_false_for_pty(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "actor-update-mcp-fail", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -148,8 +148,8 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
             group.doc["running"] = True
             group.save()
 
-            with patch("cccc.daemon.server._ensure_mcp_installed", return_value=False), patch(
-                "cccc.daemon.server._REQUEST_DISPATCH_DEPS", None
+            with patch("no1.daemon.server._ensure_mcp_installed", return_value=False), patch(
+                "no1.daemon.server._REQUEST_DISPATCH_DEPS", None
             ):
                 enable, _ = self._call(
                     "actor_update",
@@ -186,8 +186,8 @@ class TestRuntimeMcpFailFast(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            with patch("cccc.daemon.server._ensure_mcp_installed", return_value=False), patch(
-                "cccc.daemon.server._REQUEST_DISPATCH_DEPS", None
+            with patch("no1.daemon.server._ensure_mcp_installed", return_value=False), patch(
+                "no1.daemon.server._REQUEST_DISPATCH_DEPS", None
             ):
                 start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
 

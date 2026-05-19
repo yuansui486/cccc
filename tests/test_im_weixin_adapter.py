@@ -13,13 +13,13 @@ from unittest.mock import AsyncMock
 
 class TestWeixinAdapterInit(unittest.TestCase):
     def test_default_account_id(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         adapter = WeixinAdapter()
         self.assertEqual(adapter.account_id, "")
 
     def test_custom_account_id(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         adapter = WeixinAdapter(account_id="bot_1")
         self.assertEqual(adapter.account_id, "bot_1")
@@ -27,7 +27,7 @@ class TestWeixinAdapterInit(unittest.TestCase):
 
 class TestWeixinAdapterPoll(unittest.TestCase):
     def test_poll_returns_queued_messages(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         adapter = WeixinAdapter()
         msg = {"chat_id": "u1", "text": "hi", "from_user": "u1", "message_id": "m1"}
@@ -40,7 +40,7 @@ class TestWeixinAdapterPoll(unittest.TestCase):
 
 class TestWeixinAdapterContextCache(unittest.TestCase):
     def test_persists_context_tokens(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         with tempfile.TemporaryDirectory() as td:
             context_path = Path(td) / "ctx.json"
@@ -54,7 +54,7 @@ class TestWeixinAdapterContextCache(unittest.TestCase):
             self.assertEqual(payload.get("chat-1"), "ctx-token-1")
 
     def test_loaded_context_tokens_hydrate_sdk_cache_on_connect(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         class FakeBot:
             last: "FakeBot | None" = None
@@ -110,7 +110,7 @@ class TestWeixinAdapterContextCache(unittest.TestCase):
 
 class TestWeixinAdapterSendMessage(unittest.TestCase):
     def test_send_message_calls_bot_send(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         adapter = WeixinAdapter()
         adapter._connected = True
@@ -131,7 +131,7 @@ class TestWeixinAdapterSendMessage(unittest.TestCase):
             loop.close()
 
     def test_send_message_returns_false_when_disconnected(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         adapter = WeixinAdapter()
         adapter._connected = False
@@ -141,7 +141,7 @@ class TestWeixinAdapterSendMessage(unittest.TestCase):
 
 class TestWeixinAdapterSendFile(unittest.TestCase):
     def test_send_file_sends_image_via_send_media(self) -> None:
-        from cccc.ports.im.adapters.weixin import WeixinAdapter
+        from no1.ports.im.adapters.weixin import WeixinAdapter
 
         adapter = WeixinAdapter()
         adapter._connected = True

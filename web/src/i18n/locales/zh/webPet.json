@@ -87,7 +87,7 @@
       "escalatedWaitingUser": "{{taskId}} 已连续多轮表现为 waiting_user，建议立即收口用户依赖{{suffix}}"
     },
     "draft": {
-      "prefix": "建议用 cccc_task {{operation}}{{refs}}。{{reason}}",
+      "prefix": "建议用 onecolleague_task {{operation}}{{refs}}。{{reason}}",
       "moveActive": "{{actorId}} 已经挂载这条任务，建议把任务状态同步到 active。",
       "syncWaitingUser": "{{actorId}} 当前焦点是 {{focus}}，建议补齐 waiting_on=user，并记录用户依赖。",
       "syncWaitingUserClose": "{{actorId}} 当前焦点是 {{focus}}，建议显式收口 waiting_on=user，并明确下一步 owner。",

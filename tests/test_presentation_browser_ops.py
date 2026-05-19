@@ -21,8 +21,8 @@ class TestPresentationBrowserOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -34,7 +34,7 @@ class TestPresentationBrowserOps(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "")
 
             with patch(
-                "cccc.daemon.group.presentation_browser_ops.open_browser_surface_session",
+                "no1.daemon.group.presentation_browser_ops.open_browser_surface_session",
                 return_value={
                     "active": True,
                     "state": "ready",
@@ -101,7 +101,7 @@ class TestPresentationBrowserOps(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "")
 
             with patch(
-                "cccc.daemon.group.presentation_browser_ops.close_browser_surface_session",
+                "no1.daemon.group.presentation_browser_ops.close_browser_surface_session",
                 return_value={
                     "closed": True,
                     "browser_surface": {

@@ -20,7 +20,7 @@ class TestActorProfileResolver(unittest.TestCase):
         return td, cleanup
 
     def test_legacy_upsert_defaults_to_global_scope(self) -> None:
-        from cccc.daemon.actors.actor_profile_store import get_actor_profile, list_actor_profiles, upsert_actor_profile
+        from no1.daemon.actors.actor_profile_store import get_actor_profile, list_actor_profiles, upsert_actor_profile
 
         _, cleanup = self._with_home()
         try:
@@ -50,8 +50,8 @@ class TestActorProfileResolver(unittest.TestCase):
             cleanup()
 
     def test_resolver_supports_duplicate_ids_across_scope_and_owner(self) -> None:
-        from cccc.contracts.v1 import ActorProfile, ActorProfileRef
-        from cccc.daemon.actors.actor_profile_store import ProfileResolver, get_actor_profile
+        from no1.contracts.v1 import ActorProfile, ActorProfileRef
+        from no1.daemon.actors.actor_profile_store import ProfileResolver, get_actor_profile
 
         _, cleanup = self._with_home()
         try:
@@ -109,8 +109,8 @@ class TestActorProfileResolver(unittest.TestCase):
             cleanup()
 
     def test_resolver_enforces_save_delete_permissions(self) -> None:
-        from cccc.contracts.v1 import ActorProfile, ActorProfileRef
-        from cccc.daemon.actors.actor_profile_store import ProfileResolver
+        from no1.contracts.v1 import ActorProfile, ActorProfileRef
+        from no1.daemon.actors.actor_profile_store import ProfileResolver
 
         _, cleanup = self._with_home()
         try:

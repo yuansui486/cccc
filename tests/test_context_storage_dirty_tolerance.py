@@ -22,9 +22,9 @@ class TestContextStorageDirtyTolerance(unittest.TestCase):
         return td, cleanup
 
     def _new_storage(self):
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
-        from cccc.kernel.context import ContextStorage
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+        from no1.kernel.context import ContextStorage
 
         reg = load_registry()
         group = create_group(reg, title="context-dirty", topic="")

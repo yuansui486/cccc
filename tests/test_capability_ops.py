@@ -29,8 +29,8 @@ class TestCapabilityOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -91,7 +91,7 @@ class TestCapabilityOps(unittest.TestCase):
         *,
         capability_id: str = "mcp:test-server",
         url: str = "http://127.0.0.1:9900/mcp",
-        synthetic_tool_name: str = "cccc_ext_deadbeef_echo",
+        synthetic_tool_name: str = "onecolleague_ext_deadbeef_echo",
         real_tool_name: str = "echo",
         state: str = "installed",
         last_error: str = "",
@@ -147,10 +147,10 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
             result = state_resp.result if isinstance(state_resp.result, dict) else {}
             visible = result.get("visible_tools") if isinstance(result.get("visible_tools"), list) else []
-            self.assertIn("cccc_help", visible)
-            self.assertIn("cccc_capability_search", visible)
-            self.assertIn("cccc_file", visible)
-            self.assertNotIn("cccc_space", visible)
+            self.assertIn("onecolleague_help", visible)
+            self.assertIn("onecolleague_capability_search", visible)
+            self.assertIn("onecolleague_file", visible)
+            self.assertNotIn("onecolleague_space", visible)
         finally:
             cleanup()
 
@@ -209,7 +209,7 @@ class TestCapabilityOps(unittest.TestCase):
                     return {"items": [dict(platform_record)]}
                 raise AssertionError(f"unexpected url: {url}")
 
-            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
+            with patch("no1.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
                 update_resp, _ = self._call(
                     "capability_source_config_update",
                     {"subscription_link": "http://skills.local/api/v1/skill-library", "enabled": True, "by": "user"},
@@ -251,7 +251,7 @@ class TestCapabilityOps(unittest.TestCase):
             ).hexdigest()
             platform_record["content_hash"] = platform_hash
 
-            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
+            with patch("no1.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
                 refresh_resp, _ = self._call("capability_source_refresh", {"by": "user"})
                 self.assertTrue(refresh_resp.ok, getattr(refresh_resp, "error", None))
                 summary = (refresh_resp.result or {}).get("summary") or {}
@@ -293,9 +293,9 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_onecolleague_skill_store_web_flow_surfaces_import_and_enable_state(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.ports.web.app import create_app
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.ports.web.app import create_app
         from fastapi.testclient import TestClient
 
         _, cleanup = self._with_home()
@@ -356,8 +356,8 @@ class TestCapabilityOps(unittest.TestCase):
                 return resp.model_dump()
 
             with (
-                patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj),
-                patch("cccc.ports.web.app.call_daemon", side_effect=local_call_daemon),
+                patch("no1.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj),
+                patch("no1.ports.web.app.call_daemon", side_effect=local_call_daemon),
             ):
                 with TestClient(create_app()) as client:
                     source_resp = client.get("/api/v1/capabilities/sources/onecolleague_skill_library")
@@ -415,7 +415,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_onecolleague_skill_package_confirm_installs_after_refresh_only(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         home, cleanup = self._with_home()
         old_codex_home = os.environ.get("CODEX_HOME")
@@ -484,8 +484,8 @@ class TestCapabilityOps(unittest.TestCase):
                     return {"source_id": "onecolleague_skill_library"}
                 raise AssertionError(f"unexpected url: {url}")
 
-            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj), patch(
-                "cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes",
+            with patch("no1.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj), patch(
+                "no1.daemon.ops.capability_ops._skill_packages._download_package_bytes",
                 return_value=package_bytes,
             ) as download:
                 refresh_resp, _ = self._call("capability_source_refresh", {"by": "user", "subscription_link": "http://skills.local/api/v1/skill-library"})
@@ -563,7 +563,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_skill_package_rejects_zip_slip_and_symlink(self) -> None:
-        from cccc.daemon.ops.capability_ops import ensure_codex_skill_package_installed
+        from no1.daemon.ops.capability_ops import ensure_codex_skill_package_installed
 
         _, cleanup = self._with_home()
         try:
@@ -581,7 +581,7 @@ class TestCapabilityOps(unittest.TestCase):
                     "skill_slug": "bad",
                 },
             }
-            with patch("cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=zip_slip):
+            with patch("no1.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=zip_slip):
                 with self.assertRaisesRegex(ValueError, "unsafe package path"):
                     ensure_codex_skill_package_installed(rec)
 
@@ -596,7 +596,7 @@ class TestCapabilityOps(unittest.TestCase):
             symlink_zip = buf.getvalue()
             rec["install_spec"]["package_sha256"] = hashlib.sha256(symlink_zip).hexdigest()
             rec["install_spec"]["package_size"] = len(symlink_zip)
-            with patch("cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=symlink_zip):
+            with patch("no1.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=symlink_zip):
                 with self.assertRaisesRegex(ValueError, "unsupported package entry type"):
                     ensure_codex_skill_package_installed(rec)
         finally:
@@ -691,7 +691,7 @@ class TestCapabilityOps(unittest.TestCase):
             pending_path.parent.mkdir(parents=True, exist_ok=True)
             pending_path.write_text(json.dumps(pending_doc), encoding="utf-8")
 
-            with patch("cccc.daemon.ops.capability_ops._skill_packages._download_package_bytes") as download:
+            with patch("no1.daemon.ops.capability_ops._skill_packages._download_package_bytes") as download:
                 confirm_resp, _ = self._call(
                     "capability_source_pending_confirm",
                     {"group_id": gid, "by": "user", "actor_id": "user", "pending_ids": ["p1"]},
@@ -765,7 +765,7 @@ class TestCapabilityOps(unittest.TestCase):
                     }
                 raise AssertionError(f"unexpected url: {url}")
 
-            with patch("cccc.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
+            with patch("no1.daemon.ops.capability_ops._onecolleague_source._http_get_json_obj", side_effect=fake_get_json_obj):
                 update_resp, _ = self._call(
                     "capability_source_config_update",
                     {"subscription_link": "http://skills.local/api/v1/skill-library", "enabled": True, "by": "user"},
@@ -787,8 +787,8 @@ class TestCapabilityOps(unittest.TestCase):
     def test_pet_capability_state_uses_minimal_core_surface(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.pet_actor import ensure_pet_actor
+            from no1.kernel.group import load_group
+            from no1.kernel.pet_actor import ensure_pet_actor
 
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
@@ -802,21 +802,21 @@ class TestCapabilityOps(unittest.TestCase):
             visible = set(result.get("visible_tools") or [])
             autoload = set(result.get("autoload_capabilities") or [])
 
-            self.assertIn("cccc_help", visible)
-            self.assertIn("cccc_context_get", visible)
-            self.assertIn("cccc_agent_state", visible)
+            self.assertIn("onecolleague_help", visible)
+            self.assertIn("onecolleague_context_get", visible)
+            self.assertIn("onecolleague_agent_state", visible)
             self.assertIn("pack:pet", autoload)
-            self.assertNotIn("cccc_message_send", visible)
-            self.assertNotIn("cccc_message_reply", visible)
-            self.assertNotIn("cccc_file", visible)
+            self.assertNotIn("onecolleague_message_send", visible)
+            self.assertNotIn("onecolleague_message_reply", visible)
+            self.assertNotIn("onecolleague_file", visible)
             self.assertNotIn("cccc_coordination", visible)
-            self.assertNotIn("cccc_task", visible)
+            self.assertNotIn("onecolleague_task", visible)
         finally:
             cleanup()
 
     def test_group_scope_enable_updates_group_capability_defaults(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
-        from cccc.kernel.group import load_group
+        from no1.daemon.ops import capability_ops as ops
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -882,7 +882,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_group_settings_update_persists_capability_defaults(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -941,7 +941,7 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
             result = state_resp.result if isinstance(state_resp.result, dict) else {}
             visible = result.get("visible_tools") if isinstance(result.get("visible_tools"), list) else []
-            self.assertIn("cccc_space", visible)
+            self.assertIn("onecolleague_space", visible)
             self.assertIn("pack:space", result.get("enabled_capabilities") or [])
         finally:
             cleanup()
@@ -1145,7 +1145,7 @@ class TestCapabilityOps(unittest.TestCase):
                 {},
             )
             tool_names = pack.get("tool_names") if isinstance(pack.get("tool_names"), list) else []
-            self.assertIn("cccc_space", tool_names)
+            self.assertIn("onecolleague_space", tool_names)
             self.assertGreaterEqual(int(pack.get("tool_count") or 0), len(tool_names))
         finally:
             cleanup()
@@ -1237,7 +1237,7 @@ class TestCapabilityOps(unittest.TestCase):
         try:
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
-            with patch("cccc.daemon.ops.capability_ops._auto_sync_catalog", return_value=False) as auto_sync:
+            with patch("no1.daemon.ops.capability_ops._auto_sync_catalog", return_value=False) as auto_sync:
                 resp, _ = self._call(
                     "capability_search",
                     {
@@ -1259,7 +1259,7 @@ class TestCapabilityOps(unittest.TestCase):
         try:
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
-            with patch("cccc.daemon.ops.capability_ops._auto_sync_catalog", return_value=False) as auto_sync:
+            with patch("no1.daemon.ops.capability_ops._auto_sync_catalog", return_value=False) as auto_sync:
                 resp, _ = self._call(
                     "capability_search",
                     {
@@ -1282,7 +1282,7 @@ class TestCapabilityOps(unittest.TestCase):
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
             with patch.dict(os.environ, {"CCCC_CAPABILITY_SEARCH_AUTO_SYNC": "1"}, clear=False), patch(
-                "cccc.daemon.ops.capability_ops._auto_sync_catalog",
+                "no1.daemon.ops.capability_ops._auto_sync_catalog",
                 return_value=False,
             ) as auto_sync:
                 resp, _ = self._call(
@@ -1302,7 +1302,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_sync_anthropic_skills_accepts_github_list_payload(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         class _Resp:
             def __init__(self, text: str) -> None:
@@ -1327,9 +1327,9 @@ class TestCapabilityOps(unittest.TestCase):
             "body\n"
         )
         with patch(
-            "cccc.daemon.ops.capability_ops._http_get_json",
+            "no1.daemon.ops.capability_ops._http_get_json",
             return_value=[{"type": "dir", "name": "example-skill", "sha": "abc123"}],
-        ), patch("cccc.daemon.ops.capability_ops.urlopen", return_value=_Resp(skill_md)):
+        ), patch("no1.daemon.ops.capability_ops.urlopen", return_value=_Resp(skill_md)):
             upserted = ops._sync_anthropic_skills_source(catalog, force=True)
 
         self.assertEqual(upserted, 1)
@@ -1340,7 +1340,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(source_state.get("sync_state"), "fresh")
 
     def test_auto_sync_respects_source_enable_flags(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         catalog = ops._new_catalog_doc()
         with patch.dict(
@@ -1350,8 +1350,8 @@ class TestCapabilityOps(unittest.TestCase):
                 "CCCC_CAPABILITY_SOURCE_ANTHROPIC_SKILLS_ENABLED": "0",
             },
             clear=False,
-        ), patch("cccc.daemon.ops.capability_ops._sync_mcp_registry_source", return_value=0), patch(
-            "cccc.daemon.ops.capability_ops._sync_anthropic_skills_source",
+        ), patch("no1.daemon.ops.capability_ops._sync_mcp_registry_source", return_value=0), patch(
+            "no1.daemon.ops.capability_ops._sync_anthropic_skills_source",
             side_effect=AssertionError("anthropic source should be disabled"),
         ):
             changed = ops._auto_sync_catalog(catalog)
@@ -1363,18 +1363,18 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(anthropic.get("error"), "source_disabled_by_policy")
 
     def test_sync_capability_catalog_once_saves_when_changed(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         fake_path = Path("/tmp/fake-capability-catalog.json")
         fake_doc = ops._new_catalog_doc()
         with patch(
-            "cccc.daemon.ops.capability_ops._load_catalog_doc",
+            "no1.daemon.ops.capability_ops._load_catalog_doc",
             return_value=(fake_path, fake_doc),
         ), patch(
-            "cccc.daemon.ops.capability_ops._sync_catalog",
+            "no1.daemon.ops.capability_ops._sync_catalog",
             return_value={"changed": True, "upserted_total": 2, "upserted": {"mcp_registry_official": 2}},
         ), patch(
-            "cccc.daemon.ops.capability_ops._save_catalog_doc",
+            "no1.daemon.ops.capability_ops._save_catalog_doc",
         ) as save_doc:
             result = ops.sync_capability_catalog_once(force=True)
 
@@ -1384,7 +1384,7 @@ class TestCapabilityOps(unittest.TestCase):
         save_doc.assert_called_once_with(fake_path, fake_doc)
 
     def test_external_enable_succeeds_for_qualified_external(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1408,8 +1408,8 @@ class TestCapabilityOps(unittest.TestCase):
                 "last_error": "",
                 "updated_at": "2026-02-25T00:00:00Z",
             }
-            with patch("cccc.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+            with patch("no1.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=installed,
             ):
                 resp, _ = self._call(
@@ -1431,7 +1431,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_external_enable_installs_and_exposes_dynamic_tools(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1453,7 +1453,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "invoker": {"type": "remote_http", "url": "http://127.0.0.1:9900/mcp"},
                 "tools": [
                     {
-                        "name": "cccc_ext_deadbeef_echo",
+                        "name": "onecolleague_ext_deadbeef_echo",
                         "real_tool_name": "echo",
                         "description": "echo tool",
                         "inputSchema": {"type": "object", "properties": {}, "required": []},
@@ -1462,8 +1462,8 @@ class TestCapabilityOps(unittest.TestCase):
                 "last_error": "",
                 "updated_at": "2026-02-25T00:00:00Z",
             }
-            with patch("cccc.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+            with patch("no1.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=installed,
             ):
                 enable_resp, _ = self._call(
@@ -1485,15 +1485,15 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
             state = state_resp.result if isinstance(state_resp.result, dict) else {}
             visible = state.get("visible_tools") if isinstance(state.get("visible_tools"), list) else []
-            self.assertIn("cccc_ext_deadbeef_echo", visible)
+            self.assertIn("onecolleague_ext_deadbeef_echo", visible)
             dynamic = state.get("dynamic_tools") if isinstance(state.get("dynamic_tools"), list) else []
             names = {str(x.get("name") or "") for x in dynamic if isinstance(x, dict)}
-            self.assertIn("cccc_ext_deadbeef_echo", names)
+            self.assertIn("onecolleague_ext_deadbeef_echo", names)
         finally:
             cleanup()
 
     def test_external_enable_reports_degraded_install_state(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1518,8 +1518,8 @@ class TestCapabilityOps(unittest.TestCase):
                 "last_error_code": "probe_timeout",
                 "updated_at": "2026-02-25T00:00:00Z",
             }
-            with patch("cccc.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+            with patch("no1.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=installed,
             ):
                 resp, _ = self._call(
@@ -1544,7 +1544,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_tool_call_invokes_enabled_dynamic_tool(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1577,7 +1577,7 @@ class TestCapabilityOps(unittest.TestCase):
             ops._save_runtime_doc(runtime_path, runtime_doc)
 
             with patch(
-                "cccc.daemon.ops.capability_ops._invoke_installed_external_tool",
+                "no1.daemon.ops.capability_ops._invoke_installed_external_tool",
                 return_value={"content": [{"type": "text", "text": "ok"}]},
             ):
                 resp, _ = self._call(
@@ -1586,7 +1586,7 @@ class TestCapabilityOps(unittest.TestCase):
                         "group_id": gid,
                         "actor_id": "peer-1",
                         "by": "peer-1",
-                        "tool_name": "cccc_ext_deadbeef_echo",
+                        "tool_name": "onecolleague_ext_deadbeef_echo",
                         "arguments": {"message": "hello"},
                     },
                 )
@@ -1599,7 +1599,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_tool_call_accepts_real_tool_name_with_capability_hint(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1632,7 +1632,7 @@ class TestCapabilityOps(unittest.TestCase):
             ops._save_runtime_doc(runtime_path, runtime_doc)
 
             with patch(
-                "cccc.daemon.ops.capability_ops._invoke_installed_external_tool",
+                "no1.daemon.ops.capability_ops._invoke_installed_external_tool",
                 return_value={"content": [{"type": "text", "text": "ok"}]},
             ):
                 resp, _ = self._call(
@@ -1649,13 +1649,13 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             result = resp.result if isinstance(resp.result, dict) else {}
             self.assertEqual(str(result.get("capability_id") or ""), "mcp:test-server")
-            self.assertEqual(str(result.get("resolved_tool_name") or ""), "cccc_ext_deadbeef_echo")
+            self.assertEqual(str(result.get("resolved_tool_name") or ""), "onecolleague_ext_deadbeef_echo")
             self.assertEqual(str(result.get("real_tool_name") or ""), "echo")
         finally:
             cleanup()
 
     def test_capability_tool_call_real_name_requires_capability_when_ambiguous(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1680,14 +1680,14 @@ class TestCapabilityOps(unittest.TestCase):
                 ops,
                 runtime_doc,
                 capability_id="mcp:test-server-a",
-                synthetic_tool_name="cccc_ext_deadbeef_echo_a",
+                synthetic_tool_name="onecolleague_ext_deadbeef_echo_a",
                 real_tool_name="echo",
             )
             artifact_b = self._seed_runtime_external_install(
                 ops,
                 runtime_doc,
                 capability_id="mcp:test-server-b",
-                synthetic_tool_name="cccc_ext_deadbeef_echo_b",
+                synthetic_tool_name="onecolleague_ext_deadbeef_echo_b",
                 real_tool_name="echo",
             )
             ops._set_runtime_actor_binding(
@@ -1726,7 +1726,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_disable_external_capability_hides_dynamic_tools(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1776,7 +1776,7 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(before_resp.ok, getattr(before_resp, "error", None))
             before_state = before_resp.result if isinstance(before_resp.result, dict) else {}
             before_visible = before_state.get("visible_tools") if isinstance(before_state.get("visible_tools"), list) else []
-            self.assertIn("cccc_ext_deadbeef_echo", before_visible)
+            self.assertIn("onecolleague_ext_deadbeef_echo", before_visible)
 
             disable_resp, _ = self._call(
                 "capability_enable",
@@ -1798,12 +1798,12 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(after_resp.ok, getattr(after_resp, "error", None))
             after_state = after_resp.result if isinstance(after_resp.result, dict) else {}
             after_visible = after_state.get("visible_tools") if isinstance(after_state.get("visible_tools"), list) else []
-            self.assertNotIn("cccc_ext_deadbeef_echo", after_visible)
+            self.assertNotIn("onecolleague_ext_deadbeef_echo", after_visible)
         finally:
             cleanup()
 
     def test_external_install_failure_persists_runtime_failure_state(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1822,7 +1822,7 @@ class TestCapabilityOps(unittest.TestCase):
             ops._save_catalog_doc(catalog_path, catalog_doc)
 
             with patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 side_effect=RuntimeError("probe_failed"),
             ):
                 resp, _ = self._call(
@@ -1856,7 +1856,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_external_install_failure_classifies_runtime_dependency_missing(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1875,7 +1875,7 @@ class TestCapabilityOps(unittest.TestCase):
             ops._save_catalog_doc(catalog_path, catalog_doc)
 
             with patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 side_effect=RuntimeError("stdio mcp exited with code 1: Error: Cannot find module 'foo'"),
             ):
                 resp, _ = self._call(
@@ -1903,7 +1903,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_tool_call_rejects_tool_when_capability_not_enabled(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1928,7 +1928,7 @@ class TestCapabilityOps(unittest.TestCase):
                     "group_id": gid,
                     "actor_id": "peer-1",
                     "by": "peer-1",
-                    "tool_name": "cccc_ext_deadbeef_echo",
+                    "tool_name": "onecolleague_ext_deadbeef_echo",
                     "arguments": {"message": "hello"},
                 },
             )
@@ -1938,7 +1938,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_tool_call_requires_actor_runtime_binding(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -1968,7 +1968,7 @@ class TestCapabilityOps(unittest.TestCase):
                     "group_id": gid,
                     "actor_id": "peer-1",
                     "by": "peer-1",
-                    "tool_name": "cccc_ext_deadbeef_echo",
+                    "tool_name": "onecolleague_ext_deadbeef_echo",
                     "arguments": {"message": "hello"},
                 },
             )
@@ -1978,7 +1978,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_tool_call_accepts_hyphen_underscore_alias(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2002,7 +2002,7 @@ class TestCapabilityOps(unittest.TestCase):
                 ops,
                 runtime_doc,
                 capability_id="mcp:test-server",
-                synthetic_tool_name="cccc_ext_deadbeef_resolve_library_id",
+                synthetic_tool_name="onecolleague_ext_deadbeef_resolve_library_id",
                 real_tool_name="resolve_library_id",
                 state="installed",
             )
@@ -2018,7 +2018,7 @@ class TestCapabilityOps(unittest.TestCase):
             ops._save_runtime_doc(runtime_path, runtime_doc)
 
             with patch(
-                "cccc.daemon.ops.capability_ops._invoke_installed_external_tool_with_aliases",
+                "no1.daemon.ops.capability_ops._invoke_installed_external_tool_with_aliases",
                 return_value=({"ok": True}, "resolve_library_id"),
             ):
                 resp, _ = self._call(
@@ -2029,7 +2029,7 @@ class TestCapabilityOps(unittest.TestCase):
                         "by": "peer-1",
                         "capability_id": "mcp:test-server",
                         "tool_name": "resolve-library-id",
-                        "arguments": {"libraryName": "cccc"},
+                        "arguments": {"libraryName": "onecolleague"},
                     },
                 )
             self.assertTrue(resp.ok, getattr(resp, "error", None))
@@ -2039,7 +2039,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_enable_emits_action_id_and_audit_event(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2075,7 +2075,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_search_supports_source_trust_and_qualification_filters(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2288,7 +2288,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_search_hides_indexed_capability_by_default_policy(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2334,7 +2334,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_enable_rejects_indexed_policy_level(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2378,7 +2378,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_ensure_curated_catalog_records_refreshes_existing_entry(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         catalog = ops._new_catalog_doc()
         policy_v1 = ops._compile_allowlist_policy(
@@ -2424,7 +2424,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(str((rec_v2 or {}).get("description_short") or ""), "v2")
 
     def test_ensure_curated_catalog_records_includes_builtin_runtime_bootstrap_skill(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         catalog = ops._new_catalog_doc()
         policy = ops._compile_allowlist_policy({})
@@ -2439,7 +2439,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(requires, ["pack:diagnostics", "pack:group-runtime"])
 
     def test_capability_state_reports_scope_mismatch_and_unavailable_hidden_reasons(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2561,7 +2561,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_uninstall_revokes_binding_and_removes_installation(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2632,7 +2632,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_uninstall_isolated_to_target_group(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2715,12 +2715,12 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(state_b_resp.ok, getattr(state_b_resp, "error", None))
             state_b = state_b_resp.result if isinstance(state_b_resp.result, dict) else {}
             visible_b = state_b.get("visible_tools") if isinstance(state_b.get("visible_tools"), list) else []
-            self.assertIn("cccc_ext_deadbeef_echo", visible_b)
+            self.assertIn("onecolleague_ext_deadbeef_echo", visible_b)
         finally:
             cleanup()
 
     def test_capability_state_dynamic_tools_respects_visibility_limit(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2745,19 +2745,19 @@ class TestCapabilityOps(unittest.TestCase):
                 runtime_doc,
                 tools=[
                     {
-                        "name": "cccc_ext_deadbeef_a",
+                        "name": "onecolleague_ext_deadbeef_a",
                         "real_tool_name": "a",
                         "description": "a",
                         "inputSchema": {"type": "object", "properties": {}, "required": []},
                     },
                     {
-                        "name": "cccc_ext_deadbeef_b",
+                        "name": "onecolleague_ext_deadbeef_b",
                         "real_tool_name": "b",
                         "description": "b",
                         "inputSchema": {"type": "object", "properties": {}, "required": []},
                     },
                     {
-                        "name": "cccc_ext_deadbeef_c",
+                        "name": "onecolleague_ext_deadbeef_c",
                         "real_tool_name": "c",
                         "description": "c",
                         "inputSchema": {"type": "object", "properties": {}, "required": []},
@@ -2790,7 +2790,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_group_block_by_foreman_revokes_binding_and_hides_tools(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -2989,7 +2989,7 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
 
             with patch(
-                "cccc.daemon.ops.capability_ops._search._render_source_states",
+                "no1.daemon.ops.capability_ops._search._render_source_states",
                 side_effect=AssertionError("slash command state must not render full source states"),
             ):
                 state_resp, _ = self._call(
@@ -3019,7 +3019,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_overview_includes_recent_success_entry(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3106,7 +3106,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_skill_enable_session_reports_active_skill_and_applies_dependencies(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3219,13 +3219,13 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertIn("Restate the exact symptom", str(active_row.get("capsule_preview") or ""))
             self.assertIn("Gather evidence first", str(active_row.get("capsule_preview") or ""))
             visible_tools = set(state.get("visible_tools") or [])
-            self.assertIn("cccc_terminal", visible_tools)
-            self.assertIn("cccc_actor", visible_tools)
+            self.assertIn("onecolleague_terminal", visible_tools)
+            self.assertIn("onecolleague_actor", visible_tools)
         finally:
             cleanup()
 
     def test_skill_actor_scope_enable_is_active_not_autoload(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3292,7 +3292,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_actor_autoload_skill_is_reported_in_autoload_skills(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3378,7 +3378,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_disable_with_cleanup_removes_cached_installation(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3424,7 +3424,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_disable_with_cleanup_skips_when_capability_still_bound_elsewhere(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3484,7 +3484,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_catalog_prune_respects_configured_limit(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         catalog = ops._new_catalog_doc()
         for i in range(205):
@@ -3510,7 +3510,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(int(source_state.get("record_count") or 0), 200)
 
     def test_search_remote_fallback_augments_catalog(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3532,7 +3532,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "metadata": {"nextCursor": ""},
             }
             with patch(
-                "cccc.daemon.ops.capability_ops._http_get_json_obj",
+                "no1.daemon.ops.capability_ops._http_get_json_obj",
                 return_value=registry_payload,
             ), patch.dict(
                 os.environ,
@@ -3576,7 +3576,7 @@ class TestCapabilityOps(unittest.TestCase):
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
             with patch.dict(os.environ, {"CCCC_CAPABILITY_SEARCH_REMOTE_FALLBACK": "0"}, clear=False), patch(
-                "cccc.daemon.ops.capability_ops._http_get_json_obj",
+                "no1.daemon.ops.capability_ops._http_get_json_obj",
                 side_effect=AssertionError("remote fallback must be disabled"),
             ):
                 resp, _ = self._call(
@@ -3598,7 +3598,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_search_remote_fallback_augments_skill_from_openclaw(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -3626,13 +3626,13 @@ class TestCapabilityOps(unittest.TestCase):
                 raise AssertionError(f"unexpected github URL: {url}")
 
             with patch(
-                "cccc.daemon.ops.capability_ops._http_get_json_obj",
+                "no1.daemon.ops.capability_ops._http_get_json_obj",
                 side_effect=_fake_github_json,
             ), patch(
-                "cccc.daemon.ops.capability_ops._http_get_text",
+                "no1.daemon.ops.capability_ops._http_get_text",
                 return_value=openclaw_markdown,
             ), patch.dict(
-                "cccc.daemon.ops.capability_ops._OPENCLAW_TREE_CACHE",
+                "no1.daemon.ops.capability_ops._OPENCLAW_TREE_CACHE",
                 {"fetched_at": 0.0, "paths": []},
                 clear=True,
             ), patch.dict(
@@ -3712,10 +3712,10 @@ class TestCapabilityOps(unittest.TestCase):
                 },
                 clear=False,
             ), patch(
-                "cccc.daemon.ops.capability_ops._http_get_json_obj",
+                "no1.daemon.ops.capability_ops._http_get_json_obj",
                 side_effect=AssertionError("openclaw remote fallback must be disabled"),
             ), patch(
-                "cccc.daemon.ops.capability_ops._http_get_text",
+                "no1.daemon.ops.capability_ops._http_get_text",
                 side_effect=AssertionError("skillsmp/clawhub/clawskills remote fallback must be disabled"),
             ):
                 resp, _ = self._call(
@@ -3738,7 +3738,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_parse_skillsmp_proxy_search_markdown(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         markdown = (
             '[claudeception.md 1.7k ### export claudeception from "blader/Claudeception" '
@@ -3754,10 +3754,10 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertIn("Continuous learning skill", str(first.get("description_short") or ""))
 
     def test_remote_search_skill_records_aggregates_sources(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         with patch(
-            "cccc.daemon.ops.capability_ops._remote_search_skillsmp_records",
+            "no1.daemon.ops.capability_ops._remote_search_skillsmp_records",
             return_value=[
                 {
                     "capability_id": "skill:skillsmp:a",
@@ -3768,7 +3768,7 @@ class TestCapabilityOps(unittest.TestCase):
                 }
             ],
         ), patch(
-            "cccc.daemon.ops.capability_ops._remote_search_openclaw_skill_records",
+            "no1.daemon.ops.capability_ops._remote_search_openclaw_skill_records",
             return_value=[
                 {
                     "capability_id": "skill:openclaw:b",
@@ -3779,7 +3779,7 @@ class TestCapabilityOps(unittest.TestCase):
                 }
             ],
         ), patch(
-            "cccc.daemon.ops.capability_ops._remote_search_clawhub_records",
+            "no1.daemon.ops.capability_ops._remote_search_clawhub_records",
             return_value=[
                 {
                     "capability_id": "skill:clawhub:d",
@@ -3790,7 +3790,7 @@ class TestCapabilityOps(unittest.TestCase):
                 }
             ],
         ), patch(
-            "cccc.daemon.ops.capability_ops._remote_search_clawskills_records",
+            "no1.daemon.ops.capability_ops._remote_search_clawskills_records",
             return_value=[
                 {
                     "capability_id": "skill:clawskills:c",
@@ -3810,10 +3810,10 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertIn("skill:clawskills:c", ids)
 
     def test_remote_search_skill_records_honors_source_filter(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         with patch(
-            "cccc.daemon.ops.capability_ops._remote_search_skillsmp_records",
+            "no1.daemon.ops.capability_ops._remote_search_skillsmp_records",
             return_value=[
                 {
                     "capability_id": "skill:skillsmp:a",
@@ -3824,7 +3824,7 @@ class TestCapabilityOps(unittest.TestCase):
                 }
             ],
         ), patch(
-            "cccc.daemon.ops.capability_ops._remote_search_openclaw_skill_records",
+            "no1.daemon.ops.capability_ops._remote_search_openclaw_skill_records",
             return_value=[
                 {
                     "capability_id": "skill:openclaw:b",
@@ -3835,7 +3835,7 @@ class TestCapabilityOps(unittest.TestCase):
                 }
             ],
         ), patch(
-            "cccc.daemon.ops.capability_ops._remote_search_clawhub_records",
+            "no1.daemon.ops.capability_ops._remote_search_clawhub_records",
             return_value=[
                 {
                     "capability_id": "skill:clawhub:d",
@@ -3846,7 +3846,7 @@ class TestCapabilityOps(unittest.TestCase):
                 }
             ],
         ), patch(
-            "cccc.daemon.ops.capability_ops._remote_search_clawskills_records",
+            "no1.daemon.ops.capability_ops._remote_search_clawskills_records",
             return_value=[
                 {
                     "capability_id": "skill:clawskills:c",
@@ -3862,7 +3862,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(str(rows[0].get("source_id") or ""), "openclaw_skills_remote")
 
     def test_parse_clawskills_data_js(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         script = (
             "// Auto-generated from awesome-openclaw-skills README.md\n"
@@ -3879,7 +3879,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertTrue(str(first.get("capability_id") or "").startswith("skill:clawskills:"))
 
     def test_clawhub_item_to_record(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         record = ops._clawhub_item_to_record(
             {
@@ -3927,10 +3927,10 @@ class TestCapabilityOps(unittest.TestCase):
                 "updated_at": "2026-02-25T00:00:00Z",
             }
             with patch(
-                "cccc.daemon.ops.capability_ops._http_get_json_obj",
+                "no1.daemon.ops.capability_ops._http_get_json_obj",
                 return_value=registry_payload,
             ), patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=installed,
             ):
                 resp, _ = self._call(
@@ -3951,7 +3951,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_supported_external_install_record_accepts_pypi_and_oci(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         supported_pypi, reason_pypi = ops._supported_external_install_record(
             {
@@ -4030,7 +4030,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(reason_command, "")
 
     def test_install_external_capability_pypi_prefers_uvx(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4045,7 +4045,7 @@ class TestCapabilityOps(unittest.TestCase):
         }
 
         with patch(
-            "cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip",
+            "no1.daemon.ops.capability_ops._stdio_mcp_roundtrip",
             return_value=[
                 {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "search"}]}},
             ],
@@ -4062,7 +4062,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertTrue(isinstance(called_cmd, list) and called_cmd and str(called_cmd[0]) == "uvx")
 
     def test_install_external_capability_oci_builds_container_command(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4078,7 +4078,7 @@ class TestCapabilityOps(unittest.TestCase):
         }
 
         with patch.dict(os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": "dummy-token"}, clear=False), patch(
-            "cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip",
+            "no1.daemon.ops.capability_ops._stdio_mcp_roundtrip",
             return_value=[
                 {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "create_issue"}]}},
             ],
@@ -4097,7 +4097,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertTrue(isinstance(called_cmd, list) and called_cmd and str(called_cmd[0]) == "docker")
 
     def test_install_external_capability_fails_fast_when_required_env_missing(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4114,7 +4114,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertIn("missing_required_env:BRAVE_API_KEY", str(ctx.exception))
 
     def test_install_external_capability_command_mode_installs(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "command",
@@ -4124,7 +4124,7 @@ class TestCapabilityOps(unittest.TestCase):
         }
 
         with patch(
-            "cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip",
+            "no1.daemon.ops.capability_ops._stdio_mcp_roundtrip",
             return_value=[
                 {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "demo"}]}},
             ],
@@ -4142,7 +4142,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertTrue(isinstance(called_cmd, list) and called_cmd and str(called_cmd[0]) == "npx")
 
     def test_install_external_capability_package_falls_back_to_command_candidates(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4154,7 +4154,7 @@ class TestCapabilityOps(unittest.TestCase):
         }
 
         with patch(
-            "cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip",
+            "no1.daemon.ops.capability_ops._stdio_mcp_roundtrip",
             return_value=[
                 {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "demo"}]}},
             ],
@@ -4166,7 +4166,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(str(install.get("fallback_from") or ""), "package")
 
     def test_preflight_external_install_detects_missing_env_and_binary(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec_missing_env = {
             "install_mode": "command",
@@ -4199,7 +4199,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertIn("definitely-missing-runtime-binary", missing_binaries)
 
     def test_preflight_external_install_detects_invalid_remote_url(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "remote_only",
@@ -4213,7 +4213,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(str(preflight.get("code") or ""), "invalid_remote_url")
 
     def test_capability_enable_returns_preflight_failed_for_missing_runtime_binary(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -4261,7 +4261,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_install_external_capability_package_falls_back_to_next_runner(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4278,7 +4278,7 @@ class TestCapabilityOps(unittest.TestCase):
                 raise RuntimeError("uvx failed")
             return [{"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "demo"}]}}]
 
-        with patch("cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=_roundtrip):
+        with patch("no1.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=_roundtrip):
             install = ops._install_external_capability(rec, capability_id="mcp:demo/runner-fallback")
 
         self.assertEqual(str(install.get("installer") or ""), "pypi_pipx")
@@ -4287,7 +4287,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertTrue(command and str(command[0]) == "pipx")
 
     def test_install_external_capability_npm_retries_with_safe_env_flags(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4305,7 +4305,7 @@ class TestCapabilityOps(unittest.TestCase):
                 raise RuntimeError("stdio mcp exited with code 1: Error: Cannot find module 'puppeteer'")
             return [{"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "demo"}]}}]
 
-        with patch("cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=_roundtrip):
+        with patch("no1.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=_roundtrip):
             install = ops._install_external_capability(rec, capability_id="mcp:example/npm-autofix")
 
         self.assertEqual(str(install.get("state") or ""), "installed")
@@ -4318,7 +4318,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertGreaterEqual(call_count["n"], 2)
 
     def test_install_external_capability_npm_falls_back_to_unpinned_version(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4335,7 +4335,7 @@ class TestCapabilityOps(unittest.TestCase):
                 raise RuntimeError("stdio mcp exited with code 1: Error: Cannot find module 'broken-version'")
             return [{"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "demo"}]}}]
 
-        with patch("cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=_roundtrip):
+        with patch("no1.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=_roundtrip):
             install = ops._install_external_capability(rec, capability_id="mcp:example/npm-unpinned-fallback")
 
         self.assertEqual(str(install.get("state") or ""), "installed")
@@ -4346,7 +4346,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertNotIn("@example/mcp-server@1.0.0", cmd_token)
 
     def test_install_external_capability_degrades_when_probe_times_out(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         rec = {
             "install_mode": "package",
@@ -4357,8 +4357,8 @@ class TestCapabilityOps(unittest.TestCase):
             },
         }
 
-        with patch("cccc.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=TimeoutError("stdio mcp request timed out")), patch(
-            "cccc.daemon.ops.capability_ops._choose_available_command",
+        with patch("no1.daemon.ops.capability_ops._stdio_mcp_roundtrip", side_effect=TimeoutError("stdio mcp request timed out")), patch(
+            "no1.daemon.ops.capability_ops._choose_available_command",
             return_value=[["npx", "-y", "@example/mcp-server"]],
         ):
             install = ops._install_external_capability(rec, capability_id="mcp:example/timeout")
@@ -4373,7 +4373,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(str(install.get("last_error_code") or ""), "probe_timeout")
 
     def test_classify_external_install_error_detects_runtime_permission_denied(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         info = ops._classify_external_install_error(
             RuntimeError(
@@ -4383,7 +4383,7 @@ class TestCapabilityOps(unittest.TestCase):
         self.assertEqual(str(info.get("code") or ""), "runtime_permission_denied")
 
     def test_capability_uninstall_skill_removes_bindings(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -4452,7 +4452,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_dry_run_does_not_persist_record(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -4573,7 +4573,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_self_evolution_curated_skills_have_actionable_capsules(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -4595,7 +4595,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_agent_self_proposed_skill_persists_enables_and_is_visible(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -4868,7 +4868,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_agent_self_proposed_invalid_update_preserves_active_record(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -4975,7 +4975,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_agent_self_proposed_skill_reimport_updates_same_record(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -5036,7 +5036,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_agent_self_proposed_reimport_preserves_origin_group(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -5213,7 +5213,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_legacy_agent_self_proposed_skill_namespace_is_not_enableable(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -5416,7 +5416,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_uninstall_self_proposed_skill_removes_record_and_references(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -5972,7 +5972,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_mcp_persists_record_and_enables(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -5987,7 +5987,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "invoker": {"type": "remote_http", "url": "http://127.0.0.1:9900/mcp"},
                 "tools": [
                     {
-                        "name": "cccc_ext_deadbeef_echo",
+                        "name": "onecolleague_ext_deadbeef_echo",
                         "real_tool_name": "echo",
                         "description": "Echo tool",
                         "inputSchema": {"type": "object", "properties": {}, "required": []},
@@ -5996,7 +5996,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "updated_at": "2026-03-01T00:00:00Z",
             }
             with patch(
-                "cccc.daemon.ops.capability_ops._install_external_capability",
+                "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=install_payload,
             ):
                 resp, _ = self._call(
@@ -6047,7 +6047,7 @@ class TestCapabilityOps(unittest.TestCase):
             cleanup()
 
     def test_capability_import_skill_persists_and_enables(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:

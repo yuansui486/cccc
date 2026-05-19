@@ -8,12 +8,12 @@ from unittest.mock import patch
 
 class TestAutomationNudgeDigest(unittest.TestCase):
     def test_min_interval_prevents_repeat_count_growth(self) -> None:
-        from cccc.contracts.v1 import ChatMessageData
-        from cccc.daemon.automation import AutomationManager, _cfg
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.registry import load_registry
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.automation import AutomationManager, _cfg
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.ledger import append_event
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -59,7 +59,7 @@ class TestAutomationNudgeDigest(unittest.TestCase):
                 cfg = _cfg(group)
                 t0 = datetime.now(timezone.utc)
 
-                with patch("cccc.daemon.automation.pty_runner.SUPERVISOR.actor_running", return_value=True):
+                with patch("no1.daemon.automation.pty_runner.SUPERVISOR.actor_running", return_value=True):
                     manager._check_nudge(group, cfg, t0)
 
                     state_path = group.path / "state" / "automation.json"

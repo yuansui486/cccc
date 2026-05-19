@@ -21,8 +21,8 @@ class TestUnreadIndex(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -68,7 +68,7 @@ class TestUnreadIndex(unittest.TestCase):
             self.assertEqual(len(first), 1)
             self.assertEqual(int(first[0].get("unread_count") or 0), 0)
 
-            with patch("cccc.kernel.inbox.iter_events", side_effect=AssertionError("snapshot path should not rescan ledger")):
+            with patch("no1.kernel.inbox.iter_events", side_effect=AssertionError("snapshot path should not rescan ledger")):
                 second = self._actor_list(group_id, include_unread=True)
             self.assertEqual(int(second[0].get("unread_count") or 0), 0)
         finally:
@@ -97,7 +97,7 @@ class TestUnreadIndex(unittest.TestCase):
             )
             self.assertTrue(sent.ok, getattr(sent, "error", None))
 
-            with patch("cccc.kernel.inbox.batch_unread_counts", side_effect=AssertionError("delta path should avoid full rebuild")):
+            with patch("no1.kernel.inbox.batch_unread_counts", side_effect=AssertionError("delta path should avoid full rebuild")):
                 actors = self._actor_list(group_id, include_unread=True)
             by_id = {str(item.get("id") or ""): item for item in actors}
             self.assertEqual(int(by_id["peer1"].get("unread_count") or 0), peer1_before + 1)
@@ -142,7 +142,7 @@ class TestUnreadIndex(unittest.TestCase):
     def test_actor_list_include_unread_can_restore_from_ledger_snapshot_after_compact(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group_id = self._create_group()
             self._add_actor(group_id, "peer1", "Peer 1")
@@ -170,7 +170,7 @@ class TestUnreadIndex(unittest.TestCase):
             unread_index_path = group.path / "state" / "unread_index.json"
             unread_index_path.unlink(missing_ok=True)
 
-            with patch("cccc.kernel.inbox.batch_unread_counts", side_effect=AssertionError("ledger snapshot should seed unread state")):
+            with patch("no1.kernel.inbox.batch_unread_counts", side_effect=AssertionError("ledger snapshot should seed unread state")):
                 restored = self._actor_list(group_id, include_unread=True)
             self.assertEqual(int(restored[0].get("unread_count") or 0), 1)
         finally:

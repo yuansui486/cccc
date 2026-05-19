@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from cccc.ports.mcp.handlers import cccc_group_actor as actor_handler
+from no1.ports.mcp.handlers import onecolleague_group_actor as actor_handler
 
 
 class TestMcpActorRunnerSurface(unittest.TestCase):

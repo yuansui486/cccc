@@ -20,11 +20,11 @@ class TestInboxReverseLookup(unittest.TestCase):
         return td, cleanup
 
     def test_find_event_with_chat_ack_prefers_recent_tail_scan(self) -> None:
-        from cccc.contracts.v1 import ChatMessageData, DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.inbox import find_event_with_chat_ack
+        from no1.contracts.v1 import ChatMessageData, DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
+        from no1.kernel.ledger import append_event
+        from no1.kernel.inbox import find_event_with_chat_ack
 
         _, cleanup = self._with_home()
         try:

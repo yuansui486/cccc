@@ -1,23 +1,23 @@
 # SDK Overview
 
-Use the official SDK when you need to integrate CCCC with external applications and services.
+Use the official SDK when you need to integrate OneColleague with external applications and services.
 
 ## Official SDK
 
-- Repository: [ChesterRa/cccc-sdk](https://github.com/ChesterRa/cccc-sdk)
-- Python package: `cccc-sdk` (import as `cccc_sdk`)
-- TypeScript package: `cccc-sdk`
+- Repository: [ChesterRa/onecolleague-sdk](https://github.com/ChesterRa/onecolleague-sdk)
+- Python package: `onecolleague-sdk` (import as `onecolleague_sdk`)
+- TypeScript package: `onecolleague-sdk`
 
 ## Install
 
 ```bash
-pip install -U cccc-sdk
-npm install cccc-sdk
+pip install -U onecolleague-sdk
+npm install onecolleague-sdk
 ```
 
-## Relationship to CCCC Core
+## Relationship to OneColleague Core
 
-- CCCC core (`cccc-pair`) is the runtime control plane (daemon + ledger + ports).
+- OneColleague core (`no1`) is the runtime control plane (daemon + ledger + ports).
 - SDK is a client interface to that running control plane.
 - SDK does not replace core and does not persist state on its own.
 

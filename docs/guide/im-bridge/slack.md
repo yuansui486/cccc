@@ -1,6 +1,6 @@
 # Slack Setup
 
-Connect your CCCC working group to Slack for team collaboration.
+Connect your OneColleague working group to Slack for team collaboration.
 
 ## Overview
 
@@ -13,14 +13,14 @@ Slack integration uses Socket Mode for real-time messaging. It's ideal for:
 ## Prerequisites
 
 - A Slack workspace where you have admin rights
-- CCCC installed and running
+- OneColleague installed and running
 
 ## Step 1: Create a Slack App
 
 1. Go to [Slack API Apps](https://api.slack.com/apps)
 2. Click **Create New App**
 3. Choose **From scratch**
-4. Enter app name (e.g., "CCCC Bot")
+4. Enter app name (e.g., "OneColleague Bot")
 5. Select your workspace
 6. Click **Create App**
 
@@ -31,7 +31,7 @@ Socket Mode allows the bot to receive events without exposing a public URL.
 1. In your app settings, go to **Socket Mode**
 2. Toggle **Enable Socket Mode** to ON
 3. Click **Generate** to create an app-level token
-4. Name it (e.g., "cccc-socket-token")
+4. Name it (e.g., "onecolleague-socket-token")
 5. Add the scope `connections:write`
 6. Click **Generate**
 7. **Copy the token** (starts with `xapp-`)
@@ -93,11 +93,11 @@ Slack requires both tokens:
 - **App Token** (`xapp-`): For Socket Mode connection
 :::
 
-## Step 7: Configure CCCC
+## Step 7: Configure OneColleague
 
 ### Option A: Via Web UI
 
-1. Open the CCCC Web UI at `http://127.0.0.1:8848/`
+1. Open the OneColleague Web UI at `http://127.0.0.1:8848/`
 2. Go to **Settings** (gear icon in header)
 3. Navigate to the **IM Bridge** section
 4. Select **Slack** as the platform
@@ -109,7 +109,7 @@ Slack requires both tokens:
 ### Option B: Via CLI
 
 ```bash
-cccc im set slack \
+onecolleague im set slack \
   --bot-token-env SLACK_BOT_TOKEN \
   --app-token-env SLACK_APP_TOKEN
 ```
@@ -126,7 +126,7 @@ im:
 ## Step 8: Start the Bridge
 
 ```bash
-cccc im start
+onecolleague im start
 ```
 
 ## Step 9: Subscribe in Slack
@@ -166,7 +166,7 @@ In direct messages with the bot, you can use `/send` directly:
 
 ### Targeting Specific Agents
 
-Use `@mention` syntax with the `/send` command (use CCCC's syntax, not Slack's):
+Use `@mention` syntax with the `/send` command (use OneColleague's syntax, not Slack's):
 
 ```
 /send @foreman Review the latest commits
@@ -185,17 +185,17 @@ Use `/verbose` to toggle whether you see agent-to-agent messages.
 
 ### Thread Replies
 
-Reply in threads to keep conversations organized. CCCC preserves thread context.
+Reply in threads to keep conversations organized. OneColleague preserves thread context.
 
 ### File Sharing
 
-Attach files to your message. They're uploaded to CCCC's blob storage, then forwarded to agents.
+Attach files to your message. They're uploaded to OneColleague's blob storage, then forwarded to agents.
 
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `/subscribe` | Start receiving messages from CCCC |
+| `/subscribe` | Start receiving messages from OneColleague |
 | `/unsubscribe` | Stop receiving messages |
 | `/send <message>` | Send to foreman (default) |
 | `/send @<actor> <message>` | Send to a specific agent |
@@ -234,11 +234,11 @@ Add the required scope:
 
 ### Connection drops
 
-Socket Mode connections may drop occasionally. CCCC auto-reconnects, but if issues persist:
+Socket Mode connections may drop occasionally. OneColleague auto-reconnects, but if issues persist:
 
 ```bash
-cccc im stop
-cccc im start
+onecolleague im stop
+onecolleague im start
 ```
 
 ## Advanced Configuration

@@ -25,7 +25,7 @@ fi
 classify_tier() {
   local p="$1"
   case "$p" in
-    src/cccc/*|web/src/*|.github/workflows/*|pyproject.toml|README.md|README.zh-CN.md|README.ja.md)
+    src/no1/*|web/src/*|.github/workflows/*|pyproject.toml|README.md|README.zh-CN.md|README.ja.md)
       echo "A"
       ;;
     tests/*|scripts/*|docker/*|docs/guide/*|docs/reference/*|docs/standards/*|docs/index.md|docs/.vitepress/*|docs/vnext/RELEASE.md|docs/vnext/STATUS.md|docs/vnext/FEATURES.md|docs/vnext/README.md)
@@ -46,14 +46,14 @@ classify_tier() {
 classify_domain() {
   local p="$1"
   case "$p" in
-    src/cccc/contracts/*) echo "contracts" ;;
-    src/cccc/kernel/*) echo "kernel" ;;
-    src/cccc/daemon/*) echo "daemon" ;;
-    src/cccc/ports/web/*) echo "port-web" ;;
-    src/cccc/ports/mcp/*) echo "port-mcp" ;;
-    src/cccc/ports/im/*) echo "port-im" ;;
-    src/cccc/runners/*) echo "runners" ;;
-    src/cccc/*) echo "core-other" ;;
+    src/no1/contracts/*) echo "contracts" ;;
+    src/no1/kernel/*) echo "kernel" ;;
+    src/no1/daemon/*) echo "daemon" ;;
+    src/no1/ports/web/*) echo "port-web" ;;
+    src/no1/ports/mcp/*) echo "port-mcp" ;;
+    src/no1/ports/im/*) echo "port-im" ;;
+    src/no1/runners/*) echo "runners" ;;
+    src/no1/*) echo "core-other" ;;
     web/src/*) echo "web-ui" ;;
     tests/*) echo "tests" ;;
     docs/standards/*) echo "docs-standards" ;;

@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from cccc.daemon.client_ops import DaemonClientError, send_daemon_request
+from no1.daemon.client_ops import DaemonClientError, send_daemon_request
 
 
 class TestClientOps(unittest.TestCase):
@@ -16,7 +16,7 @@ class TestClientOps(unittest.TestCase):
                     {"transport": "tcp", "host": "127.0.0.1", "port": 0},
                     {"op": "ping", "args": {}},
                     timeout_s=0.1,
-                    sock_path_default=Path(td) / "ccccd.sock",
+                    sock_path_default=Path(td) / "onecolleagued.sock",
                 )
         self.assertEqual(ctx.exception.phase, "endpoint")
         self.assertEqual(ctx.exception.reason, "invalid_endpoint")
@@ -29,14 +29,14 @@ class TestClientOps(unittest.TestCase):
                     {"transport": "unix", "path": str(Path(td) / "missing.sock")},
                     {"op": "ping", "args": {}},
                     timeout_s=0.1,
-                    sock_path_default=Path(td) / "ccccd.sock",
+                    sock_path_default=Path(td) / "onecolleagued.sock",
                 )
         self.assertEqual(ctx.exception.phase, "connect")
         self.assertEqual(ctx.exception.transport, "unix")
 
     def test_unix_read_eof_raises_read_phase(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            sock_path = Path(td) / "ccccd.sock"
+            sock_path = Path(td) / "onecolleagued.sock"
             thread = self._start_unix_server(
                 sock_path,
                 lambda conn: conn.recv(4096),
@@ -56,7 +56,7 @@ class TestClientOps(unittest.TestCase):
 
     def test_unix_invalid_json_raises_decode_phase(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            sock_path = Path(td) / "ccccd.sock"
+            sock_path = Path(td) / "onecolleagued.sock"
             thread = self._start_unix_server(
                 sock_path,
                 lambda conn: self._send_response(conn, b"not-json\n"),
@@ -76,7 +76,7 @@ class TestClientOps(unittest.TestCase):
 
     def test_unix_read_timeout_raises_read_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            sock_path = Path(td) / "ccccd.sock"
+            sock_path = Path(td) / "onecolleagued.sock"
             thread = self._start_unix_server(
                 sock_path,
                 lambda conn: self._sleep_without_reply(conn, 0.2),

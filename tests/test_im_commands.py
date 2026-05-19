@@ -1,6 +1,6 @@
 import unittest
 
-from cccc.ports.im.commands import format_status
+from no1.ports.im.commands import format_status
 
 
 class TestImFormatStatus(unittest.TestCase):

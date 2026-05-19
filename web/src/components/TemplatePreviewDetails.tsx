@@ -127,8 +127,8 @@ export function TemplatePreviewDetails({
   };
 
   const formatPromptLabel = (kind: TemplatePromptKind) => {
-    if (kind === "help") return "CCCC_HELP.md";
-    return "CCCC_PREAMBLE.md";
+    if (kind === "help") return "ONECOLLEAGUE_HELP.md";
+    return "ONECOLLEAGUE_PREAMBLE.md";
   };
 
   const formatSource = (s: unknown): string => {

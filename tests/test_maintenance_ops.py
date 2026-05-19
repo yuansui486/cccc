@@ -20,8 +20,8 @@ class TestMaintenanceOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -92,8 +92,8 @@ class TestMaintenanceOps(unittest.TestCase):
     def test_ledger_snapshot_and_compact(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.ledger_index import lookup_event_by_id
+            from no1.kernel.group import load_group
+            from no1.kernel.ledger_index import lookup_event_by_id
 
             create, _ = self._call("group_create", {"title": "ledger", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))

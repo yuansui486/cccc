@@ -23,7 +23,7 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
         return cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
@@ -31,9 +31,9 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
         cleanup = self._with_home()
         try:
             with patch(
-                "cccc.ports.web.routes.groups._read_groups_local",
+                "no1.ports.web.routes.groups._read_groups_local",
                 return_value={"ok": True, "result": {"groups": [{"group_id": "g1", "title": "T"}], "registry_health": {}}},
-            ), patch("cccc.ports.web.app.call_daemon", side_effect=AssertionError("daemon should not be called")):
+            ), patch("no1.ports.web.app.call_daemon", side_effect=AssertionError("daemon should not be called")):
                 with self._client() as client:
                     resp = client.get("/api/v1/groups")
                     self.assertEqual(resp.status_code, 200)
@@ -45,11 +45,11 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
     def test_groups_route_marks_headless_codex_group_running_from_local_supervisor(self) -> None:
         cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import create_group, load_group
-            from cccc.kernel.registry import load_registry
-            from cccc.daemon.runner_state_ops import headless_state_path
-            from cccc.util.fs import atomic_write_json
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import create_group, load_group
+            from no1.kernel.registry import load_registry
+            from no1.daemon.runner_state_ops import headless_state_path
+            from no1.util.fs import atomic_write_json
 
             reg = load_registry()
             gid = create_group(reg, title="codex-running", topic="").group_id
@@ -84,10 +84,10 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
     def test_groups_route_marks_web_model_marker_running(self) -> None:
         cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import write_headless_state
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import create_group, load_group
-            from cccc.kernel.registry import load_registry
+            from no1.daemon.runner_state_ops import write_headless_state
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import create_group, load_group
+            from no1.kernel.registry import load_registry
 
             reg = load_registry()
             gid = create_group(reg, title="web-model-running", topic="").group_id
@@ -111,13 +111,13 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
     def test_groups_route_prefers_group_level_supervisor_running_signal(self) -> None:
         cleanup = self._with_home()
         try:
-            from cccc.kernel.group import create_group
-            from cccc.kernel.registry import load_registry
+            from no1.kernel.group import create_group
+            from no1.kernel.registry import load_registry
 
             reg = load_registry()
             gid = create_group(reg, title="group-running-supervisor", topic="").group_id
 
-            with patch("cccc.ports.web.routes.groups.codex_app_supervisor.group_running", return_value=True):
+            with patch("no1.ports.web.routes.groups.codex_app_supervisor.group_running", return_value=True):
                 with self._client() as client:
                     resp = client.get("/api/v1/groups")
 
@@ -132,11 +132,11 @@ class TestWebGroupsLocalProjection(unittest.TestCase):
     def test_groups_route_treats_codex_pty_actor_as_internal_headless_on_restart(self) -> None:
         cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import create_group, load_group
-            from cccc.kernel.registry import load_registry
-            from cccc.daemon.runner_state_ops import headless_state_path
-            from cccc.util.fs import atomic_write_json
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import create_group, load_group
+            from no1.kernel.registry import load_registry
+            from no1.daemon.runner_state_ops import headless_state_path
+            from no1.util.fs import atomic_write_json
 
             reg = load_registry()
             gid = create_group(reg, title="codex-pty-restarts-running", topic="").group_id

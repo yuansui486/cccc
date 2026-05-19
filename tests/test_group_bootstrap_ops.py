@@ -20,8 +20,8 @@ class TestGroupBootstrapOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -55,7 +55,7 @@ class TestGroupBootstrapOps(unittest.TestCase):
             cleanup()
 
     def test_unknown_op_returns_none(self) -> None:
-        from cccc.daemon.group.group_bootstrap_ops import try_handle_group_bootstrap_op
+        from no1.daemon.group.group_bootstrap_ops import try_handle_group_bootstrap_op
 
         self.assertIsNone(try_handle_group_bootstrap_op("not_bootstrap", {}))
 

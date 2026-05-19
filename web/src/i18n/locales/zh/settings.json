@@ -194,8 +194,8 @@
     "operationFailedReason": "操作未生效（{{reason}}）。",
     "enableScope": {
       "session": "会话",
-        "actor": "智能体",
-        "group": "工作组"
+      "actor": "智能体",
+      "group": "工作组"
     },
     "store": {
       "title": "OneColleague Skill 商店",
@@ -828,7 +828,11 @@
   },
   "guidance": {
     "openFromGroup": "请从工作组中打开此标签页。",
+    "overridesHint": "引导覆盖保存在 <0>CCCC_HOME</0>（按工作组）。",
+    "preambleTitle": "启动引导（Preamble）",
+    "preambleHint": "启动或重启后的第一次投递前会自动注入。",
     "helpTitle": "帮助（参考）",
+    "helpHint": "由 onecolleague_help 按需返回。",
     "overrideBadge": "覆盖",
     "builtinBadge": "内置",
     "expand": "展开",
@@ -848,6 +852,9 @@
     "structuredView": "结构化",
     "rawView": "原始 Markdown",
     "commonAndRolesTitle": "角色提示词",
+    "commonNotesTitle": "通用提示词",
+    "commonNotesHint": "未加标签、会共享给所有 actor 的 help 内容。",
+    "commonNotesPlaceholder": "在这里维护共享引导、工作流程细节和附录……",
     "foremanNotesTitle": "Foreman 提示词",
     "foremanNotesHint": "只有 foreman actor 会收到这一段。",
     "foremanNotesPlaceholder": "负责结果质量、审阅 peer 输出，并保持共享方向一致……",

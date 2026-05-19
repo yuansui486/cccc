@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 class TestActorRuntimeOps(unittest.TestCase):
     def test_model_from_runtime_command_reads_env_model_after_command(self) -> None:
-        from cccc.daemon.actors.actor_runtime_ops import model_from_runtime_command
+        from no1.daemon.actors.actor_runtime_ops import model_from_runtime_command
 
         self.assertEqual(
             model_from_runtime_command([], {"ANTHROPIC_MODEL": "deepseek-v4-pro[1m]"}),
@@ -25,7 +25,7 @@ class TestActorRuntimeOps(unittest.TestCase):
     def test_resolve_launch_spec_uses_user_hermes_home_by_default(self) -> None:
         import os
 
-        from cccc.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
 
         old_home = os.environ.get("CCCC_HOME")
         with tempfile.TemporaryDirectory() as td:
@@ -71,7 +71,7 @@ class TestActorRuntimeOps(unittest.TestCase):
     def test_resolve_launch_spec_preserves_explicit_hermes_profile(self) -> None:
         import os
 
-        from cccc.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_spec
 
         old_home = os.environ.get("CCCC_HOME")
         with tempfile.TemporaryDirectory() as td:
@@ -116,7 +116,7 @@ class TestActorRuntimeOps(unittest.TestCase):
         self.assertEqual(spec["effective_command"], ["hermes", "--profile", "other", "--tui", "--yolo"])
 
     def test_web_model_actor_start_schedules_chatgpt_browser_warmup(self) -> None:
-        from cccc.daemon.actors import actor_runtime_ops
+        from no1.daemon.actors import actor_runtime_ops
 
         with tempfile.TemporaryDirectory() as td:
             ledger_path = Path(td) / "ledger.jsonl"
@@ -140,11 +140,11 @@ class TestActorRuntimeOps(unittest.TestCase):
                 patch.object(actor_runtime_ops, "runtime_start_preflight_error", return_value=""),
                 patch.object(actor_runtime_ops, "request_pet_review"),
                 patch(
-                    "cccc.daemon.actors.web_model_browser_delivery.web_model_browser_delivery_enabled",
+                    "no1.daemon.actors.web_model_browser_delivery.web_model_browser_delivery_enabled",
                     return_value=True,
                 ) as delivery_enabled,
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.schedule_web_model_chatgpt_browser_session_warmup",
+                    "no1.daemon.actors.web_model_browser_session.schedule_web_model_chatgpt_browser_session_warmup",
                     return_value=True,
                 ) as warmup,
             ):

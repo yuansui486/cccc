@@ -23,8 +23,8 @@ class TestContextV2Ops(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -107,9 +107,9 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.context import ContextStorage
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import add_actor
+            from no1.kernel.context import ContextStorage
+            from no1.kernel.group import load_group
 
             group = load_group(gid)
             self.assertIsNotNone(group)
@@ -119,8 +119,8 @@ class TestContextV2Ops(unittest.TestCase):
             storage = ContextStorage(group)  # type: ignore[arg-type]
             storage.update_agent_state("peer1", "Implement feature", active_task_id="T123")
 
-            with patch("cccc.daemon.context.context_ops.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                "cccc.daemon.context.context_ops.pty_runner.SUPERVISOR.idle_seconds",
+            with patch("no1.daemon.context.context_ops.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                "no1.daemon.context.context_ops.pty_runner.SUPERVISOR.idle_seconds",
                 return_value=8.0,
             ):
                 ctx, _ = self._context(gid)
@@ -139,8 +139,8 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import load_group
 
             group = load_group(gid)
             self.assertIsNotNone(group)
@@ -148,9 +148,9 @@ class TestContextV2Ops(unittest.TestCase):
             group.save()  # type: ignore[union-attr]
 
             with (
-                patch("cccc.daemon.context.context_ops.pty_runner.SUPERVISOR.actor_running", return_value=True),
-                patch("cccc.daemon.context.context_ops.pty_runner.SUPERVISOR.idle_seconds", return_value=0.6),
-                patch("cccc.daemon.context.context_ops.pty_runner.SUPERVISOR.tail_output", return_value=b""),
+                patch("no1.daemon.context.context_ops.pty_runner.SUPERVISOR.actor_running", return_value=True),
+                patch("no1.daemon.context.context_ops.pty_runner.SUPERVISOR.idle_seconds", return_value=0.6),
+                patch("no1.daemon.context.context_ops.pty_runner.SUPERVISOR.tail_output", return_value=b""),
             ):
                 ctx, _ = self._context(gid)
 
@@ -166,7 +166,7 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            with patch("cccc.daemon.context.context_ops.request_pet_review") as review_mock:
+            with patch("no1.daemon.context.context_ops.request_pet_review") as review_mock:
                 resp, _ = self._sync(
                     gid,
                     [
@@ -201,7 +201,7 @@ class TestContextV2Ops(unittest.TestCase):
             task_id = str((tasks[0] if tasks else {}).get("id") or "").strip()
             self.assertTrue(task_id)
 
-            with patch("cccc.daemon.context.context_ops.request_pet_review") as review_mock:
+            with patch("no1.daemon.context.context_ops.request_pet_review") as review_mock:
                 update_resp, _ = self._sync(
                     gid,
                     [{"op": "task.update", "task_id": task_id, "notes": "Add more implementation detail."}],
@@ -215,7 +215,7 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            with patch("cccc.daemon.context.context_ops.request_pet_review") as review_mock:
+            with patch("no1.daemon.context.context_ops.request_pet_review") as review_mock:
                 resp, _ = self._sync(
                     gid,
                     [{"op": "coordination.brief.update", "current_focus": "Need user confirmation"}],
@@ -236,7 +236,7 @@ class TestContextV2Ops(unittest.TestCase):
                 [{"op": "coordination.brief.update", "current_focus": "Stable focus"}],
             )
             self.assertTrue(first_resp.ok, getattr(first_resp, "error", None))
-            with patch("cccc.daemon.context.context_ops.request_pet_review") as review_mock:
+            with patch("no1.daemon.context.context_ops.request_pet_review") as review_mock:
                 second_resp, _ = self._sync(
                     gid,
                     [{"op": "coordination.brief.update", "current_focus": "Stable focus"}],
@@ -263,9 +263,9 @@ class TestContextV2Ops(unittest.TestCase):
             )
             self.assertTrue(ok_resp.ok, getattr(ok_resp, "error", None))
 
-            from cccc.daemon.context.context_ops import _rebuild_summary_snapshot
+            from no1.daemon.context.context_ops import _rebuild_summary_snapshot
 
-            from cccc.kernel.context import ContextStorage
+            from no1.kernel.context import ContextStorage
 
             _rebuild_summary_snapshot(gid)
 
@@ -319,9 +319,9 @@ class TestContextV2Ops(unittest.TestCase):
             )
             self.assertTrue(seed_resp.ok, getattr(seed_resp, "error", None))
 
-            from cccc.daemon.context.context_ops import _rebuild_summary_snapshot
+            from no1.daemon.context.context_ops import _rebuild_summary_snapshot
 
-            from cccc.kernel.context import ContextStorage
+            from no1.kernel.context import ContextStorage
 
             _rebuild_summary_snapshot(gid)
 
@@ -335,7 +335,7 @@ class TestContextV2Ops(unittest.TestCase):
                 patch.object(ContextStorage, "load_agents", autospec=True, side_effect=original_load_agents) as mock_load_agents,
                 patch.object(ContextStorage, "load_context", autospec=True, side_effect=original_load_context) as mock_load_context,
                 patch.object(ContextStorage, "compute_version", autospec=True, side_effect=original_compute_version) as mock_compute_version,
-                patch("cccc.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule,
+                patch("no1.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule,
             ):
                 first, _ = self._summary_context(gid)
                 self.assertTrue(first.ok, getattr(first, "error", None))
@@ -386,7 +386,7 @@ class TestContextV2Ops(unittest.TestCase):
         try:
             gid = self._create_group()
 
-            from cccc.kernel.context import ContextStorage
+            from no1.kernel.context import ContextStorage
 
             original_list_tasks = ContextStorage.list_tasks
             original_load_agents = ContextStorage.load_agents
@@ -396,7 +396,7 @@ class TestContextV2Ops(unittest.TestCase):
                 patch.object(ContextStorage, "list_tasks", autospec=True, side_effect=original_list_tasks) as mock_list_tasks,
                 patch.object(ContextStorage, "load_agents", autospec=True, side_effect=original_load_agents) as mock_load_agents,
                 patch.object(ContextStorage, "load_context", autospec=True, side_effect=original_load_context) as mock_load_context,
-                patch("cccc.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule,
+                patch("no1.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule,
             ):
                 summary, _ = self._summary_context(gid)
                 self.assertTrue(summary.ok, getattr(summary, "error", None))
@@ -414,7 +414,7 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            with patch("cccc.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule:
+            with patch("no1.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule:
                 resp, _ = self._sync(
                     gid,
                     [{"op": "coordination.brief.update", "objective": "Schedule rebuild"}],
@@ -428,7 +428,7 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            with patch("cccc.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule:
+            with patch("no1.daemon.context.context_ops._schedule_summary_snapshot_rebuild", return_value=True) as mock_schedule:
                 resp, _ = self._call(
                     "context_sync",
                     {
@@ -457,8 +457,8 @@ class TestContextV2Ops(unittest.TestCase):
             )
             self.assertTrue(sync_resp.ok, getattr(sync_resp, "error", None))
 
-            from cccc.daemon.context.context_ops import _rebuild_summary_snapshot
-            from cccc.kernel.context import ContextStorage
+            from no1.daemon.context.context_ops import _rebuild_summary_snapshot
+            from no1.kernel.context import ContextStorage
 
             stable_basis = {"context_rev": 1, "tasks_rev": 0, "agents_rev": 0, "actors_rev": 0}
             newer_basis = {"context_rev": 2, "tasks_rev": 0, "agents_rev": 0, "actors_rev": 0}
@@ -868,8 +868,8 @@ class TestContextV2Ops(unittest.TestCase):
     def test_context_get_agent_states_follow_group_actor_order(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import load_group
 
             gid = self._create_group()
             group = load_group(gid)
@@ -927,7 +927,7 @@ class TestContextV2Ops(unittest.TestCase):
     def test_agent_state_update_tracks_mind_context_touch_and_hot_only_churn(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             gid = self._create_group()
             initial_resp, _ = self._sync(
@@ -977,7 +977,7 @@ class TestContextV2Ops(unittest.TestCase):
     def test_agent_state_clear_resets_mind_context_touch_runtime_state(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             gid = self._create_group()
             seed_resp, _ = self._sync(
@@ -1014,8 +1014,8 @@ class TestContextV2Ops(unittest.TestCase):
     def test_foreman_cannot_mutate_peer_agent_state(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import load_group
 
             gid = self._create_group()
             group = load_group(gid)
@@ -1074,8 +1074,8 @@ class TestContextV2Ops(unittest.TestCase):
     def test_peer_cannot_mutate_unassigned_task_but_can_restore_own_archived_task(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import load_group
 
             gid = self._create_group()
             group = load_group(gid)
@@ -1147,9 +1147,9 @@ class TestContextV2Ops(unittest.TestCase):
     def test_legacy_role_notes_set_updates_help_actor_block_without_touching_persona_notes(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import add_actor
-            from cccc.kernel.group import load_group
-            from cccc.kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
+            from no1.kernel.actors import add_actor
+            from no1.kernel.group import load_group
+            from no1.kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
 
             gid = self._create_group()
             group = load_group(gid)
@@ -1235,7 +1235,7 @@ class TestContextV2Ops(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            with patch("cccc.daemon.pet.profile_refresh.assistive_jobs.mark_job_completed") as mark_completed:
+            with patch("no1.daemon.pet.profile_refresh.assistive_jobs.mark_job_completed") as mark_completed:
                 resp, _ = self._sync(
                     gid,
                     [{"op": "agent_state.update", "actor_id": "pet-peer", "user_model": "direct and brief"}],

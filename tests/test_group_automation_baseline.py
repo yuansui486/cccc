@@ -5,9 +5,9 @@ import unittest
 
 class TestGroupAutomationBaseline(unittest.TestCase):
     def test_group_create_exposes_default_standup_and_preserves_builtin_after_clear(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -45,7 +45,7 @@ class TestGroupAutomationBaseline(unittest.TestCase):
                 standup_snippet = str(snippets.get("standup") or "")
                 self.assertIn("Keep this short.", standup_snippet)
                 self.assertIn("coordination interrupt", standup_snippet)
-                self.assertIn("cccc_help", standup_snippet)
+                self.assertIn("onecolleague_help", standup_snippet)
                 self.assertNotIn("Checklist:", standup_snippet)
                 self.assertNotIn("Recall:", standup_snippet)
 
@@ -93,9 +93,9 @@ class TestGroupAutomationBaseline(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_legacy_flat_snippets_migrate_to_custom_and_builtin_override_layers(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import _DEFAULT_AUTOMATION_STANDUP_SNIPPET, load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import _DEFAULT_AUTOMATION_STANDUP_SNIPPET, load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -150,9 +150,9 @@ class TestGroupAutomationBaseline(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_explicit_snippet_override_wins_over_legacy_flat_builtin_copy(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import _DEFAULT_AUTOMATION_STANDUP_SNIPPET, load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import _DEFAULT_AUTOMATION_STANDUP_SNIPPET, load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:

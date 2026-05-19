@@ -1,6 +1,6 @@
 # Features
 
-Detailed feature documentation for CCCC.
+Detailed feature documentation for OneColleague.
 
 ## IM-Style Messaging
 
@@ -15,21 +15,21 @@ Detailed feature documentation for CCCC.
 
 ```bash
 # CLI
-cccc send "Hello"                 # No --to: default recipient policy applies (default foreman)
-cccc send "Hello" --to @foreman
-cccc send "Announcement" --to @all # Explicit broadcast
-cccc tracked-send "Delegated work" --to assistant --title "Task title" --outcome "Done criterion"
-cccc reply <event_id> "Reply text"
+onecolleague send "Hello"                 # No --to: default recipient policy applies (default foreman)
+onecolleague send "Hello" --to @foreman
+onecolleague send "Announcement" --to @all # Explicit broadcast
+onecolleague tracked-send "Delegated work" --to assistant --title "Task title" --outcome "Done criterion"
+onecolleague reply <event_id> "Reply text"
 
 # MCP
-cccc_message_send(text="Hello", to=["@foreman"])
-cccc_tracked_send(title="Task title", text="Delegated work", to=["assistant"], outcome="Done criterion")
-cccc_message_reply(reply_to="evt_xxx", text="Reply")
+onecolleague_message_send(text="Hello", to=["@foreman"])
+onecolleague_tracked_send(title="Task title", text="Delegated work", to=["assistant"], outcome="Done criterion")
+onecolleague_message_reply(reply_to="evt_xxx", text="Reply")
 ```
 
 ### Read Receipts
 
-- Agents call `cccc_inbox_mark_read(event_id)` to mark as read
+- Agents call `onecolleague_inbox_mark_read(event_id)` to mark as read
 - Read is cumulative: marking X means X and all before are read
 - Cursors stored in `state/read_cursors.json`
 
@@ -49,8 +49,8 @@ Wait for agent to call mark_read
 
 Delivery format:
 ```
-[cccc] user → peer-a: Please implement the login feature
-[cccc] user → peer-a (reply to evt_abc): OK, please continue
+[onecolleague] user → peer-a: Please implement the login feature
+[onecolleague] user → peer-a (reply to evt_abc): OK, please continue
 ```
 
 ## IM Bridge
@@ -120,11 +120,11 @@ Notes:
 ### CLI Commands
 
 ```bash
-cccc im set telegram --token-env TELEGRAM_BOT_TOKEN
-cccc im start
-cccc im stop
-cccc im status
-cccc im logs -f
+onecolleague im set telegram --token-env TELEGRAM_BOT_TOKEN
+onecolleague im start
+onecolleague im stop
+onecolleague im status
+onecolleague im logs -f
 ```
 
 ## Agent Guidance
@@ -135,13 +135,13 @@ cccc im logs -f
 System Prompt (thin layer)
 ├── Who you are: Actor ID, role
 ├── Where you are: Working Group, Scope
-└── What you can do: MCP tool list + key reminders (see cccc_help)
+└── What you can do: MCP tool list + key reminders (see onecolleague_help)
 
 MCP Tools (authoritative playbook + execution interface)
-├── cccc_help: Operation guide (playbook)
-├── cccc_project_info: Get PROJECT.md
-├── cccc_inbox_list / cccc_inbox_mark_read: Inbox
-└── cccc_message_send / cccc_message_reply: Send/reply
+├── onecolleague_help: Operation guide (playbook)
+├── onecolleague_project_info: Get PROJECT.md
+├── onecolleague_inbox_list / onecolleague_inbox_mark_read: Inbox
+└── onecolleague_message_send / onecolleague_message_reply: Send/reply
 
 Ledger (complete memory)
 └── All historical messages and events
@@ -149,7 +149,7 @@ Ledger (complete memory)
 
 ### Core Principles
 
-- **Do**: One authoritative playbook (`cccc_help`)
+- **Do**: One authoritative playbook (`onecolleague_help`)
 - **Do**: Kernel enforcement (RBAC by daemon)
 - **Do**: Minimal startup handshake (Bootstrap)
 - **Don't**: Write three versions of the same copy
@@ -158,16 +158,16 @@ Ledger (complete memory)
 
 ```
 1. Receive SYSTEM injection → Know who you are
-2. Call cccc_inbox_list → Get unread messages
+2. Call onecolleague_inbox_list → Get unread messages
 3. Process messages → Execute tasks
-4. Call cccc_inbox_mark_read → Mark as read
-5. Call cccc_message_reply → Reply with results
+4. Call onecolleague_inbox_mark_read → Mark as read
+5. Call onecolleague_message_reply → Reply with results
 6. Wait for next message
 ```
 
 ## Automation
 
-Automation in CCCC combines built-in automation and user-defined rules.
+Automation in OneColleague combines built-in automation and user-defined rules.
 
 Built-in automation covers system-managed follow-ups and collaboration health loops.
 
@@ -210,7 +210,7 @@ Notes:
 | Actor idle | `actor_idle_timeout_seconds` | 0s | Optional actor idle notification to foreman; `0` disables it by default |
 | Keepalive | `keepalive_delay_seconds` | 120s | Follow-up after an actor declares a next step and then goes quiet |
 | Silence check | `silence_timeout_seconds` | 0s | Optional group-level silence review and idle transition; `0` disables it |
-| Help nudge | `help_nudge_interval_seconds` / `help_nudge_min_messages` | 600s / 10 | Prompt actor to revisit `cccc_help` and refresh working context |
+| Help nudge | `help_nudge_interval_seconds` / `help_nudge_min_messages` | 600s / 10 | Prompt actor to revisit `onecolleague_help` and refresh working context |
 
 ### Delivery Policy
 
@@ -222,7 +222,7 @@ Low-level delivery throttling via `min_interval_seconds` remains supported in da
 
 ## Runtime-Only Actor Secrets
 
-CCCC supports per-actor private environment variables for runtime customization (different model/API stacks per actor).
+OneColleague supports per-actor private environment variables for runtime customization (different model/API stacks per actor).
 
 - Stored in runtime state under `CCCC_HOME/state/secrets/actors/`
 - Not written into the group ledger
@@ -232,16 +232,16 @@ CCCC supports per-actor private environment variables for runtime customization 
 CLI surface:
 
 ```bash
-cccc actor secrets <actor_id> --set KEY=VALUE
-cccc actor secrets <actor_id> --unset KEY
-cccc actor secrets <actor_id> --keys
+onecolleague actor secrets <actor_id> --set KEY=VALUE
+onecolleague actor secrets <actor_id> --unset KEY
+onecolleague actor secrets <actor_id> --keys
 ```
 
 ## Copy Groups
 
-CCCC Web supports Copy Groups export/import for durable group copy, migration, and backup.
+OneColleague Web supports Copy Groups export/import for durable group copy, migration, and backup.
 
-- Export creates a zip package with durable CCCC group state: ledger history, actors, context, blobs, memory, assistants, automation, and settings.
+- Export creates a zip package with durable OneColleague group state: ledger history, actors, context, blobs, memory, assistants, automation, and settings.
 - Workspace repository/project files are not included. Users provide or remap the workspace root during import.
 - System credentials, browser profiles, provider auth, live runtime state, locks, and rebuildable caches are excluded. Copy packages still contain user content such as ledger history, memory, and attachments, so they should be handled as sensitive data.
 - Imported groups start idle with actors stopped. If the packaged group id already exists, import creates a new copy and does not steal the existing workspace default mapping.
@@ -250,11 +250,11 @@ CCCC Web supports Copy Groups export/import for durable group copy, migration, a
 ### MCP Management Surface
 
 ```text
-cccc_automation_state
-cccc_automation_manage(op=create|update|enable|disable|delete|replace_all, ...)
+onecolleague_automation
+onecolleague_automation(action="manage", op=create|update|enable|disable|delete|replace_all, ...)
 ```
 
-`cccc_automation_manage` is optimized for reminder management by agents:
+`onecolleague_automation` is optimized for reminder management by agents:
 - Foreman can manage all notify reminders and full replace.
 - Peer can manage only own-personal or shared notify reminders.
 - Operational actions (`group_state`, `actor_control`) stay Web/Admin-facing.
@@ -297,7 +297,7 @@ Recommended options:
 
 - **Tailscale (VPN)**
   - Clear security boundary (Tailnet ACL)
-  - Recommend binding to tailnet IP only: `CCCC_WEB_HOST=$TAILSCALE_IP cccc`
+  - Recommend binding to tailnet IP only: `CCCC_WEB_HOST=$TAILSCALE_IP onecolleague`
 
 ## Multi-Runtime Support
 
@@ -313,30 +313,30 @@ Recommended options:
 | gemini | `gemini` | Gemini CLI |
 | kimi | `kimi --yolo` | Kimi CLI |
 | neovate | `neovate` | Neovate Code |
-| web_model | Remote MCP + browser delivery | ChatGPT Web conversation with an MCP-capable GPT-5.x session; GPT-5.x Pro is advisory-only and has no reliable CCCC local access |
+| web_model | Remote MCP + browser delivery | ChatGPT Web conversation with an MCP-capable GPT-5.x session; GPT-5.x Pro is advisory-only and has no reliable OneColleague local access |
 | custom | Custom | Any command |
 
-CCCC first-class runtime support is the nine named runtimes above. `custom` remains the manual fallback for any other command.
+OneColleague first-class runtime support is the nine named runtimes above. `custom` remains the manual fallback for any other command.
 
 ### Setup Commands
 
 ```bash
-cccc setup --runtime claude   # Configure MCP (auto)
-cccc setup --runtime codex
-cccc setup --runtime droid
-cccc setup --runtime amp
-cccc setup --runtime auggie
-cccc setup --runtime neovate
-cccc setup --runtime gemini
-cccc setup --runtime kimi
-cccc setup --runtime custom
+onecolleague setup --runtime claude   # Configure MCP (auto)
+onecolleague setup --runtime codex
+onecolleague setup --runtime droid
+onecolleague setup --runtime amp
+onecolleague setup --runtime auggie
+onecolleague setup --runtime neovate
+onecolleague setup --runtime gemini
+onecolleague setup --runtime kimi
+onecolleague setup --runtime custom
 ```
 
-`web_model` does not use `cccc setup`; create the single `ChatGPT Web Model` actor, copy its remote MCP URL from Web Settings, and bind one specific ChatGPT conversation.
+`web_model` does not use `onecolleague setup`; create the single `ChatGPT Web Model` actor, copy its remote MCP URL from Web Settings, and bind one specific ChatGPT conversation.
 
 ### Runtime Detection
 
 ```bash
-cccc doctor        # Environment check + runtime detection
-cccc runtime list  # List available runtimes (JSON)
+onecolleague doctor        # Environment check + runtime detection
+onecolleague runtime list  # List available runtimes (JSON)
 ```

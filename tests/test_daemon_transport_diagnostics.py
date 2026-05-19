@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from cccc.daemon.client_ops import DaemonClientError
-from cccc.daemon import server
+from no1.daemon.client_ops import DaemonClientError
+from no1.daemon import server
 
 
 class TestDaemonTransportDiagnostics(unittest.TestCase):
@@ -14,7 +14,7 @@ class TestDaemonTransportDiagnostics(unittest.TestCase):
             phase="read",
             reason="timeout",
             transport="unix",
-            endpoint={"transport": "unix", "path": "/tmp/ccccd.sock"},
+            endpoint={"transport": "unix", "path": "/tmp/onecolleagued.sock"},
             op="ping",
             timeout_s=0.5,
             cause=TimeoutError("timed out"),
@@ -38,7 +38,7 @@ class TestDaemonTransportDiagnostics(unittest.TestCase):
             phase="read",
             reason="timeout",
             transport="unix",
-            endpoint={"transport": "unix", "path": "/tmp/ccccd.sock"},
+            endpoint={"transport": "unix", "path": "/tmp/onecolleagued.sock"},
             op="group_show",
             timeout_s=0.5,
             cause=TimeoutError("timed out"),
@@ -59,7 +59,7 @@ class TestDaemonTransportDiagnostics(unittest.TestCase):
             phase="read",
             reason="timeout",
             transport="unix",
-            endpoint={"transport": "unix", "path": "/tmp/ccccd.sock"},
+            endpoint={"transport": "unix", "path": "/tmp/onecolleagued.sock"},
             op="group_show",
             timeout_s=0.5,
             cause=TimeoutError("timed out"),

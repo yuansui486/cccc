@@ -7,12 +7,12 @@ from unittest.mock import patch
 
 class TestMcpToolsListChanged(unittest.TestCase):
     def setUp(self) -> None:
-        from cccc.ports.mcp.main import _reset_session_state_for_tests
+        from no1.ports.mcp.main import _reset_session_state_for_tests
 
         _reset_session_state_for_tests()
 
     def test_initialize_advertises_tools_list_changed(self) -> None:
-        from cccc.ports.mcp.main import handle_request
+        from no1.ports.mcp.main import handle_request
 
         resp = handle_request(
             {
@@ -28,7 +28,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         self.assertTrue(bool(tools_caps.get("listChanged")))
 
     def test_capability_enable_enqueues_list_changed_notification_when_supported(self) -> None:
-        from cccc.ports.mcp.main import _drain_pending_notifications, handle_request
+        from no1.ports.mcp.main import _drain_pending_notifications, handle_request
 
         # Client negotiates support first.
         handle_request(
@@ -41,7 +41,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.main.handle_tool_call",
+            "no1.ports.mcp.main.handle_tool_call",
             return_value={"refresh_required": True, "state": "runnable"},
         ):
             call_resp = handle_request(
@@ -49,7 +49,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "tools/call",
-                    "params": {"name": "cccc_capability_enable", "arguments": {}},
+                    "params": {"name": "onecolleague_capability_enable", "arguments": {}},
                 }
             )
         self.assertEqual(call_resp.get("id"), 2)
@@ -64,11 +64,11 @@ class TestMcpToolsListChanged(unittest.TestCase):
         self.assertEqual(notes[0].get("method"), "notifications/tools/list_changed")
 
     def test_capability_enable_does_not_enqueue_notification_without_support(self) -> None:
-        from cccc.ports.mcp.main import _drain_pending_notifications, handle_request
+        from no1.ports.mcp.main import _drain_pending_notifications, handle_request
 
         # No initialize => no negotiated support.
         with patch(
-            "cccc.ports.mcp.main.handle_tool_call",
+            "no1.ports.mcp.main.handle_tool_call",
             return_value={"refresh_required": True, "state": "runnable"},
         ):
             handle_request(
@@ -76,14 +76,14 @@ class TestMcpToolsListChanged(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 3,
                     "method": "tools/call",
-                    "params": {"name": "cccc_capability_enable", "arguments": {}},
+                    "params": {"name": "onecolleague_capability_enable", "arguments": {}},
                 }
             )
         notes = _drain_pending_notifications()
         self.assertEqual(notes, [])
 
     def test_capability_uninstall_enqueues_list_changed_notification_when_supported(self) -> None:
-        from cccc.ports.mcp.main import _drain_pending_notifications, handle_request
+        from no1.ports.mcp.main import _drain_pending_notifications, handle_request
 
         handle_request(
             {
@@ -95,7 +95,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.main.handle_tool_call",
+            "no1.ports.mcp.main.handle_tool_call",
             return_value={"refresh_required": True, "state": "runnable"},
         ):
             handle_request(
@@ -103,7 +103,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 11,
                     "method": "tools/call",
-                    "params": {"name": "cccc_capability_uninstall", "arguments": {}},
+                    "params": {"name": "onecolleague_capability_uninstall", "arguments": {}},
                 }
             )
         notes = _drain_pending_notifications()
@@ -111,7 +111,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         self.assertEqual(notes[0].get("method"), "notifications/tools/list_changed")
 
     def test_capability_import_enqueues_list_changed_notification_when_supported(self) -> None:
-        from cccc.ports.mcp.main import _drain_pending_notifications, handle_request
+        from no1.ports.mcp.main import _drain_pending_notifications, handle_request
 
         handle_request(
             {
@@ -123,7 +123,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.main.handle_tool_call",
+            "no1.ports.mcp.main.handle_tool_call",
             return_value={"refresh_required": True, "state": "runnable"},
         ):
             handle_request(
@@ -131,7 +131,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 16,
                     "method": "tools/call",
-                    "params": {"name": "cccc_capability_import", "arguments": {}},
+                    "params": {"name": "onecolleague_capability_import", "arguments": {}},
                 }
             )
         notes = _drain_pending_notifications()
@@ -139,7 +139,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         self.assertEqual(notes[0].get("method"), "notifications/tools/list_changed")
 
     def test_capability_install_enqueues_list_changed_notification_when_supported(self) -> None:
-        from cccc.ports.mcp.main import _drain_pending_notifications, handle_request
+        from no1.ports.mcp.main import _drain_pending_notifications, handle_request
 
         handle_request(
             {
@@ -151,7 +151,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.main.handle_tool_call",
+            "no1.ports.mcp.main.handle_tool_call",
             return_value={"refresh_required": True, "state": "ready"},
         ):
             handle_request(
@@ -159,7 +159,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 18,
                     "method": "tools/call",
-                    "params": {"name": "cccc_capability_install", "arguments": {}},
+                    "params": {"name": "onecolleague_capability_install", "arguments": {}},
                 }
             )
         notes = _drain_pending_notifications()
@@ -167,7 +167,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         self.assertEqual(notes[0].get("method"), "notifications/tools/list_changed")
 
     def test_capability_use_enqueues_list_changed_notification_when_supported(self) -> None:
-        from cccc.ports.mcp.main import _drain_pending_notifications, handle_request
+        from no1.ports.mcp.main import _drain_pending_notifications, handle_request
 
         handle_request(
             {
@@ -179,7 +179,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.main.handle_tool_call",
+            "no1.ports.mcp.main.handle_tool_call",
             return_value={"enable_result": {"refresh_required": True}, "enabled": True},
         ):
             handle_request(
@@ -187,7 +187,7 @@ class TestMcpToolsListChanged(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 21,
                     "method": "tools/call",
-                    "params": {"name": "cccc_capability_use", "arguments": {}},
+                    "params": {"name": "onecolleague_capability_use", "arguments": {}},
                 }
             )
         notes = _drain_pending_notifications()

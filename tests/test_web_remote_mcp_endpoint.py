@@ -30,16 +30,16 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _create_group_with_actor(self, root: str | None = None):
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import attach_scope_to_group, create_group
-        from cccc.kernel.registry import load_registry
-        from cccc.kernel.scope import detect_scope
-        from cccc.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import attach_scope_to_group, create_group
+        from no1.kernel.registry import load_registry
+        from no1.kernel.scope import detect_scope
+        from no1.daemon.runner_state_ops import write_headless_state
 
         reg = load_registry()
         group = create_group(reg, title="web-model-mcp", topic="")
@@ -50,10 +50,10 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         return group
 
     def _create_group_with_web_model_peer(self):
-        from cccc.daemon.runner_state_ops import write_headless_state
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title="web-model-mcp-peer", topic="")
@@ -63,9 +63,9 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         return group
 
     def _create_group_with_codex_actor(self):
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title="web-model-mcp-invalid", topic="")
@@ -73,8 +73,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         return group
 
     def _local_call_daemon(self, req: dict, **_kwargs):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(DaemonRequest.model_validate(req))
         return resp.model_dump(exclude_none=True)
@@ -94,7 +94,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         return connector_id, secret
 
     def test_web_model_mcp_endpoint_rejects_non_connector_token(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -110,9 +110,9 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_endpoint_serves_actor_scoped_mcp(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.ledger import append_event
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.ledger import append_event
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         try:
@@ -216,7 +216,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertEqual(browser_state.get("auto_reload_last_progress_reason"), "mcp_tool")
             self.assertEqual(browser_state.get("auto_reload_last_progress_detail"), "onecolleague_help")
 
-            with patch("cccc.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
                 wait_resp = client.post(
                     f"/mcp/web-model/{connector_id}",
                     headers={"Authorization": f"Bearer {secret}"},
@@ -251,7 +251,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_peer_schema_hides_foreman_and_pack_tools(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -295,7 +295,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertTrue(bool((actor_call.json().get("result") or {}).get("isError")))
             self.assertIn("requires a Web Model foreman actor", actor_call.text)
 
-            with patch("cccc.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
                 cap_call = client.post(
                     f"/mcp/web-model/{connector_id}",
                     headers={"Authorization": f"Bearer {secret}"},
@@ -316,7 +316,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_foreman_uses_capability_use_for_pack_tools(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -355,7 +355,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertTrue(bool((direct_actor_call.json().get("result") or {}).get("isError")))
             self.assertIn("is not available to Web Model actors", direct_actor_call.text)
 
-            with patch("cccc.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
                 actor_call = client.post(
                     f"/mcp/web-model/{connector_id}",
                     headers={"Authorization": f"Bearer {secret}"},
@@ -380,7 +380,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             result = payload.get("tool_result") or {}
             self.assertEqual((result.get("actors") or [{}])[0].get("id"), "peer1")
 
-            with patch("cccc.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.mcp.common.call_daemon", side_effect=self._local_call_daemon):
                 cap_call = client.post(
                     f"/mcp/web-model/{connector_id}",
                     headers={"Authorization": f"Bearer {secret}"},
@@ -401,7 +401,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_rejects_non_web_model_actor(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -419,13 +419,13 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_url_prefers_public_web_url(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
         from urllib.parse import parse_qs, quote, urlparse
 
         _, cleanup = self._with_home()
         old_public_url = os.environ.get("CCCC_WEB_PUBLIC_URL")
         try:
-            os.environ["CCCC_WEB_PUBLIC_URL"] = "https://cccc.example.test/ui/"
+            os.environ["CCCC_WEB_PUBLIC_URL"] = "https://no1.example.test/ui/"
             group = self._create_group_with_actor()
             admin = str(create_access_token("admin", is_admin=True).get("token") or "")
             client = self._client()
@@ -440,7 +440,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             secret = str(result.get("secret") or "")
             self.assertEqual(
                 connector.get("connector_url"),
-                f"https://cccc.example.test/mcp/web-model/{connector.get('connector_id')}",
+                f"https://no1.example.test/mcp/web-model/{connector.get('connector_id')}",
             )
             created_url = str(connector.get("connector_url_with_token") or "")
             created_parsed = urlparse(created_url)
@@ -476,7 +476,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_repo_tool_is_active_scope_bound(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         home, cleanup = self._with_home()
         try:
@@ -541,7 +541,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_local_power_tools_are_active_scope_bound(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         home, cleanup = self._with_home()
         try:
@@ -875,7 +875,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_revoke_blocks_mcp_endpoint(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -908,7 +908,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_create_rotates_actor_active_connector(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -954,7 +954,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_legacy_duplicate_active_entries_use_latest(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         home, cleanup = self._with_home()
         try:
@@ -995,9 +995,9 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_revalidates_actor_lifecycle_before_serving_mcp(self) -> None:
-        from cccc.daemon.runner_state_ops import remove_headless_state
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.actors import update_actor
+        from no1.daemon.runner_state_ops import remove_headless_state
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.actors import update_actor
 
         _, cleanup = self._with_home()
         try:
@@ -1020,8 +1020,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_connector_revalidates_actor_runtime_before_serving_mcp(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.actors import update_actor
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.actors import update_actor
 
         _, cleanup = self._with_home()
         try:
@@ -1043,7 +1043,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_browser_session_routes_bind_to_web_model_actor(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -1054,22 +1054,22 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
                     side_effect=AssertionError("deep inspection should not run for browser-session status"),
                 ),
-                patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
+                patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_cached_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_cached_status",
                     return_value={"active": False, "tab_url": "https://chatgpt.com/c/test-chat"},
                 ),
-                patch("cccc.ports.web_model_browser_sidecar.record_chatgpt_browser_state") as record_browser_state,
-                patch("cccc.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state", return_value={"active": False, "state": "idle"}),
+                patch("no1.ports.web_model_browser_sidecar.record_chatgpt_browser_state") as record_browser_state,
+                patch("no1.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state", return_value={"active": False, "state": "idle"}),
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.open_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.open_web_model_chatgpt_browser_session",
                     return_value={"active": True, "state": "ready", "metadata": {"cdp_port": 9222}},
                 ) as open_session,
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.close_web_model_chatgpt_browser_session",
                     return_value={"closed": True, "browser_surface": {"active": False, "state": "idle"}},
                 ) as close_session,
             ):
@@ -1082,8 +1082,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                 status_browser = status_result.get("browser_session") or {}
                 self.assertFalse(bool(status_browser.get("active")))
                 self.assertEqual((status_result.get("browser_surface") or {}).get("state"), "idle")
-                self.assertEqual((status_result.get("health_snapshot") or {}).get("schema"), "cccc.web_model.health.v1")
-                self.assertEqual((status_browser.get("health_snapshot") or {}).get("schema"), "cccc.web_model.health.v1")
+                self.assertEqual((status_result.get("health_snapshot") or {}).get("schema"), "no1.web_model.health.v1")
+                self.assertEqual((status_browser.get("health_snapshot") or {}).get("schema"), "no1.web_model.health.v1")
                 self.assertEqual(((status_result.get("health_snapshot") or {}).get("next_action") or {}).get("recommended"), "open_chatgpt")
 
                 opened = client.post(
@@ -1136,7 +1136,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_browser_session_fast_status_skips_deep_inspection(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -1147,12 +1147,12 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
                     side_effect=AssertionError("deep inspection should not run"),
                 ) as deep_status,
-                patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
+                patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_cached_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_cached_status",
                     return_value={
                         "active": True,
                         "ready": False,
@@ -1161,7 +1161,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
                     },
                 ) as cached_status,
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state",
+                    "no1.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state",
                     return_value={"active": True, "state": "ready", "url": "https://chatgpt.com/c/test-chat"},
                 ),
             ):
@@ -1178,12 +1178,12 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             self.assertTrue(bool(browser.get("active")))
             self.assertEqual(browser.get("conversation_url"), "https://chatgpt.com/c/test-chat")
             self.assertEqual((result.get("browser_surface") or {}).get("state"), "ready")
-            self.assertEqual((result.get("health_snapshot") or {}).get("schema"), "cccc.web_model.health.v1")
+            self.assertEqual((result.get("health_snapshot") or {}).get("schema"), "no1.web_model.health.v1")
         finally:
             cleanup()
 
     def test_web_model_browser_session_can_open_global_setup_surface_without_actor(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -1193,12 +1193,12 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
                     return_value={"active": True, "tab_url": "https://chatgpt.com/", "ready": False},
                 ),
-                patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
+                patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
                 patch(
-                    "cccc.daemon.actors.web_model_browser_session.open_web_model_chatgpt_browser_session",
+                    "no1.daemon.actors.web_model_browser_session.open_web_model_chatgpt_browser_session",
                     return_value={"active": True, "state": "ready", "metadata": {"cdp_port": 9222}},
                 ) as open_session,
             ):
@@ -1217,7 +1217,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_browser_session_can_arm_new_chat_auto_bind(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -1227,12 +1227,12 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
                     return_value={"active": True, "tab_url": "https://chatgpt.com/"},
                 ),
-                patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
-                patch("cccc.ports.web_model_browser_sidecar.record_chatgpt_browser_state") as record_browser_state,
-                patch("cccc.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state", return_value={"active": True, "state": "ready"}),
+                patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
+                patch("no1.ports.web_model_browser_sidecar.record_chatgpt_browser_state") as record_browser_state,
+                patch("no1.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state", return_value={"active": True, "state": "ready"}),
             ):
                 resp = client.post(
                     "/api/v1/web-model/browser-session/bind-current",
@@ -1255,7 +1255,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_browser_session_new_chat_ignores_current_conversation_url(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -1265,12 +1265,12 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
 
             with (
                 patch(
-                    "cccc.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
+                    "no1.ports.web_model_browser_sidecar.chatgpt_browser_session_status",
                     return_value={"active": True, "tab_url": "https://chatgpt.com/c/old-chat"},
                 ),
-                patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
-                patch("cccc.ports.web_model_browser_sidecar.record_chatgpt_browser_state") as record_browser_state,
-                patch("cccc.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state", return_value={"active": True, "state": "ready"}),
+                patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon),
+                patch("no1.ports.web_model_browser_sidecar.record_chatgpt_browser_state") as record_browser_state,
+                patch("no1.daemon.actors.web_model_browser_session.get_web_model_chatgpt_browser_session_state", return_value={"active": True, "state": "ready"}),
             ):
                 resp = client.post(
                     "/api/v1/web-model/browser-session/bind-current",
@@ -1287,7 +1287,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_browser_session_rejects_non_web_model_actor(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -1305,7 +1305,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_web_model_browser_session_websocket_bridges_daemon_socket(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         class _FakeReader:
             def __init__(self) -> None:
@@ -1350,8 +1350,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
 
             client = self._client()
             with (
-                patch("cccc.daemon.server.get_daemon_endpoint", return_value={"transport": "unix", "path": "/tmp/ccccd.sock"}),
-                patch("cccc.ports.web.routes.base.asyncio.open_unix_connection", side_effect=fake_open_unix_connection),
+                patch("no1.daemon.server.get_daemon_endpoint", return_value={"transport": "unix", "path": "/tmp/onecolleagued.sock"}),
+                patch("no1.ports.web.routes.base.asyncio.open_unix_connection", side_effect=fake_open_unix_connection),
             ):
                 with client.websocket_connect(
                     f"/api/v1/web-model/browser-session/ws?group_id={group.group_id}&actor_id=peer1&token={admin}"
@@ -1375,7 +1375,7 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
             cleanup()
 
     def test_browser_surface_raw_proxy_bridges_binary_vnc_bytes(self) -> None:
-        from cccc.ports.web.routes.browser_surface_proxy import proxy_daemon_raw_stream_to_websocket
+        from no1.ports.web.routes.browser_surface_proxy import proxy_daemon_raw_stream_to_websocket
 
         async def run_proxy() -> tuple[list[bytes], list[bytes], bool]:
             done = asyncio.Event()
@@ -1434,8 +1434,8 @@ class TestWebRemoteMcpEndpoint(unittest.TestCase):
         self.assertTrue(closed)
 
     def test_web_model_connector_supports_streamable_http_probe_and_options(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.web_model_connectors import load_web_model_connectors
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.web_model_connectors import load_web_model_connectors
 
         _, cleanup = self._with_home()
         try:

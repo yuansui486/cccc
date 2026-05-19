@@ -23,8 +23,8 @@ class TestRootTaskCompleteMemoryHook(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -70,7 +70,7 @@ class TestRootTaskCompleteMemoryHook(unittest.TestCase):
             )
             self.assertTrue(complete_resp.ok, getattr(complete_resp, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -110,7 +110,7 @@ class TestRootTaskCompleteMemoryHook(unittest.TestCase):
             )
             self.assertTrue(resp.ok, getattr(resp, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -142,7 +142,7 @@ class TestRootTaskCompleteMemoryHook(unittest.TestCase):
             )
             self.assertTrue(resp.ok, getattr(resp, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -189,7 +189,7 @@ class TestRootTaskCompleteMemoryHook(unittest.TestCase):
             dry_result = dry_resp.result if isinstance(dry_resp.result, dict) else {}
             self.assertTrue(bool(dry_result.get("dry_run")))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)

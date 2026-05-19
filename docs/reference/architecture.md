@@ -1,6 +1,6 @@
 # Architecture
 
-> CCCC = Collaborative Code Coordination Center
+> OneColleague = Collaborative Code Coordination Center
 >
 > A global AI Agent collaboration hub: a single daemon manages multiple working groups, with Web/CLI/IM as entry points.
 
@@ -32,9 +32,9 @@ Default: `CCCC_HOME=~/.cccc`
 ~/.cccc/
 ├── registry.json                 # Working group index
 ├── daemon/
-│   ├── ccccd.pid
-│   ├── ccccd.log
-│   └── ccccd.sock               # IPC socket
+│   ├── onecolleagued.pid
+│   ├── onecolleagued.log
+│   └── onecolleagued.sock               # IPC socket
 └── groups/<group_id>/
     ├── group.yaml               # Metadata
     ├── ledger.jsonl             # Event stream (append-only)
@@ -50,7 +50,7 @@ Default: `CCCC_HOME=~/.cccc`
 │                      Ports (Entry)                       │
 │   Web UI (React)  │  CLI  │  IM Bridge  │  MCP Server   │
 ├─────────────────────────────────────────────────────────┤
-│                    Daemon (ccccd)                        │
+│                    Daemon (onecolleagued)                        │
 │   IPC Server  │  Delivery  │  Automation  │  Runners    │
 │               │            │              │  Browser    │
 ├─────────────────────────────────────────────────────────┤
@@ -65,7 +65,7 @@ Default: `CCCC_HOME=~/.cccc`
 ### Contracts Layer
 
 - Pydantic models define all data structures
-- Versioned: `src/cccc/contracts/v1/`
+- Versioned: `src/no1/contracts/v1/`
 - Stable boundary, no business implementation
 
 ### Kernel
@@ -203,18 +203,18 @@ The surface is best understood as capability groups instead of a fixed namespace
 
 ### Core Collaboration Capability Groups
 
-- Session and guidance: `cccc_bootstrap`, `cccc_help`, `cccc_project_info`
-- Messaging and files: `cccc_inbox_list`, `cccc_inbox_mark_read`, `cccc_message_send`, `cccc_message_reply`, `cccc_file`
-- Group and actor control: `cccc_group`, `cccc_actor`
-- Coordination and state: `cccc_context_get`, `cccc_coordination`, `cccc_task`, `cccc_agent_state`, `cccc_context_sync`
-- Automation and memory: `cccc_automation`, `cccc_automation_manage`, `cccc_memory`, `cccc_memory_admin`
+- Session and guidance: `onecolleague_bootstrap`, `onecolleague_help`, `onecolleague_project_info`
+- Messaging and files: `onecolleague_inbox_list`, `onecolleague_inbox_mark_read`, `onecolleague_message_send`, `onecolleague_message_reply`, `onecolleague_file`
+- Group and actor control: `onecolleague_group`, `onecolleague_actor`
+- Coordination and state: `onecolleague_context_get`, `onecolleague_coordination`, `onecolleague_task`, `onecolleague_agent_state`, `onecolleague_context_sync`
+- Automation and memory: `onecolleague_automation`, `onecolleague_automation`, `onecolleague_memory`, `onecolleague_memory_admin`
 
 ### Capability-Managed and Optional Groups
 
-- These capability groups expand the surface without hardcoding a fixed namespace count. The current grouped tools include lifecycle and pack control (`cccc_capability_search`, `cccc_capability_enable`, `cccc_capability_block`, `cccc_capability_state`, `cccc_capability_import`, `cccc_capability_uninstall`, `cccc_capability_use`).
-- Space / notebook integrations: `cccc_space`
-- Terminal and diagnostics: `cccc_terminal`, `cccc_terminal_tail`, `cccc_debug_*`
-- IM binding: `cccc_im_bind`
+- These capability groups expand the surface without hardcoding a fixed namespace count. The current grouped tools include lifecycle and pack control (`onecolleague_capability_search`, `onecolleague_capability_enable`, `onecolleague_capability_block`, `onecolleague_capability_state`, `onecolleague_capability_import`, `onecolleague_capability_uninstall`, `onecolleague_capability_use`).
+- Space / notebook integrations: `onecolleague_space`
+- Terminal and diagnostics: `onecolleague_terminal`, `onecolleague_terminal`, `onecolleague_debug`
+- IM binding: `onecolleague_im_bind`
 
 ## Tech Stack
 
@@ -228,7 +228,7 @@ The surface is best understood as capability groups instead of a fixed namespace
 ## Source Structure
 
 ```
-src/cccc/
+src/no1/
 ├── contracts/v1/          # Contracts layer
 ├── kernel/                # Kernel
 ├── daemon/                # Daemon process

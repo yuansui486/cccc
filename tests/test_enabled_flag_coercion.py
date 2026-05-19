@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 class TestEnabledFlagCoercion(unittest.TestCase):
     def _create_group(self) -> str:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -21,8 +21,8 @@ class TestEnabledFlagCoercion(unittest.TestCase):
         return gid
 
     def _add_actor(self, group_id: str, actor_id: str) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -41,10 +41,10 @@ class TestEnabledFlagCoercion(unittest.TestCase):
         self.assertTrue(resp.ok, getattr(resp, "error", None))
 
     def test_roles_and_recipients_treat_string_false_as_disabled(self) -> None:
-        from cccc.kernel.actors import find_actor, find_foreman, get_effective_role
-        from cccc.kernel.group import load_group
-        from cccc.kernel.messaging import disabled_recipient_actor_ids, enabled_recipient_actor_ids
-        from cccc.kernel.system_prompt import render_system_prompt
+        from no1.kernel.actors import find_actor, find_foreman, get_effective_role
+        from no1.kernel.group import load_group
+        from no1.kernel.messaging import disabled_recipient_actor_ids, enabled_recipient_actor_ids
+        from no1.kernel.system_prompt import render_system_prompt
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -95,12 +95,12 @@ class TestEnabledFlagCoercion(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_auto_wake_treats_string_false_as_disabled(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon import server as daemon_server
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
-        from cccc.util.conv import coerce_bool
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon import server as daemon_server
+        from no1.daemon.server import handle_request
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
+        from no1.util.conv import coerce_bool
 
         old_home = os.environ.get("CCCC_HOME")
         try:

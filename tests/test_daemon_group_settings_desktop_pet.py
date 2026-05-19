@@ -18,8 +18,8 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
             os.environ["CCCC_HOME"] = self._old_home
 
     def _create_group(self) -> str:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -30,8 +30,8 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         return str((resp.result or {}).get("group_id") or "").strip()
 
     def _add_foreman(self, group_id: str) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -53,10 +53,10 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
     def test_enabling_desktop_pet_inherits_foreman_profile_private_env(self) -> None:
         from pathlib import Path
 
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
-        from cccc.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
+        from no1.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 
         group_id = self._create_group()
 
@@ -152,7 +152,7 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
 
             return _Session()
 
-        with patch("cccc.daemon.actors.actor_runtime_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
+        with patch("no1.daemon.actors.actor_runtime_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
             enable_resp, _ = handle_request(
                 DaemonRequest.model_validate(
                     {
@@ -188,8 +188,8 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertEqual(dict(pet_actor.get("env") or {}), {})
 
     def test_desktop_pet_enabled_defaults_to_false(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         group_id = self._create_group()
 
@@ -206,9 +206,9 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertFalse(settings.get("desktop_pet_enabled"))
 
     def test_desktop_pet_enabled_requires_foreman_actor(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         group_id = self._create_group()
 
@@ -230,10 +230,10 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertFalse(bool(features.get("desktop_pet_enabled")))
 
     def test_desktop_pet_enabled_can_be_set_to_true(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
+        from no1.kernel.group import load_group
 
         group_id = self._create_group()
         self._add_foreman(group_id)
@@ -259,11 +259,11 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertEqual(str((pet_actor or {}).get("id") or ""), PET_ACTOR_ID)
 
     def test_enabling_desktop_pet_bootstraps_profile_refresh_from_existing_user_history(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.daemon.pet.profile_refresh import PET_PROFILE_BOOTSTRAP_MIN_ELIGIBLE
-        from cccc.kernel.group import load_group
-        from cccc.kernel.inbox import iter_events
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.daemon.pet.profile_refresh import PET_PROFILE_BOOTSTRAP_MIN_ELIGIBLE
+        from no1.kernel.group import load_group
+        from no1.kernel.inbox import iter_events
 
         group_id = self._create_group()
         self._add_foreman(group_id)
@@ -317,8 +317,8 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertEqual(len(profile_refresh_notifies), 1)
 
     def test_desktop_pet_enabled_can_be_toggled_back_to_false(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         group_id = self._create_group()
         self._add_foreman(group_id)
@@ -348,9 +348,9 @@ class TestDaemonGroupSettingsDesktopPet(unittest.TestCase):
         self.assertIs(((event.get("data") or {}).get("patch") or {}).get("desktop_pet_enabled"), False)
 
     def test_desktop_pet_enabled_tolerates_dirty_value(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         group_id = self._create_group()
 

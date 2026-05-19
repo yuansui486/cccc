@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 class TestServeOps(unittest.TestCase):
     def test_start_supervisor_watchdog_sets_stop_event_when_supervisor_exits(self) -> None:
-        from cccc.daemon import serve_ops
+        from no1.daemon import serve_ops
 
         stop_event = threading.Event()
         states = [True, False]
@@ -34,7 +34,7 @@ class TestServeOps(unittest.TestCase):
         self.assertTrue(stop_event.is_set())
 
     def test_start_supervisor_watchdog_returns_none_without_pid(self) -> None:
-        from cccc.daemon import serve_ops
+        from no1.daemon import serve_ops
 
         stop_event = threading.Event()
 
@@ -48,10 +48,10 @@ class TestServeOps(unittest.TestCase):
         self.assertIsNone(thread)
 
     def test_actor_activity_ledger_append_failure_is_logged(self) -> None:
-        from cccc.daemon import serve_ops
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon import serve_ops
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         with tempfile.TemporaryDirectory() as home:
@@ -84,8 +84,8 @@ class TestServeOps(unittest.TestCase):
                         return True
 
                 stop_event = threading.Event()
-                with patch("cccc.kernel.ledger.append_event", side_effect=RuntimeError("disk denied")), \
-                     self.assertLogs("cccc.daemon.serve_ops", level="WARNING") as logs:
+                with patch("no1.kernel.ledger.append_event", side_effect=RuntimeError("disk denied")), \
+                     self.assertLogs("no1.daemon.serve_ops", level="WARNING") as logs:
                     thread = serve_ops.start_actor_activity_thread(
                         stop_event=stop_event,
                         home=Path(home),
@@ -112,11 +112,11 @@ class TestServeOps(unittest.TestCase):
                     os.environ["CCCC_HOME"] = old_home
 
     def test_actor_activity_prewarms_running_web_model_browser_session(self) -> None:
-        from cccc.daemon import serve_ops
-        from cccc.daemon.runner_state_ops import write_headless_state
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon import serve_ops
+        from no1.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         with tempfile.TemporaryDirectory() as home:
@@ -144,7 +144,7 @@ class TestServeOps(unittest.TestCase):
 
                 stop_event = threading.Event()
                 with patch(
-                    "cccc.daemon.actors.web_model_browser_session.schedule_web_model_chatgpt_browser_session_warmup",
+                    "no1.daemon.actors.web_model_browser_session.schedule_web_model_chatgpt_browser_session_warmup",
                     return_value=True,
                 ) as warmup:
                     thread = serve_ops.start_actor_activity_thread(
@@ -176,11 +176,11 @@ class TestServeOps(unittest.TestCase):
                     os.environ["CCCC_HOME"] = old_home
 
     def test_actor_activity_does_not_prewarm_pull_web_model_browser_session(self) -> None:
-        from cccc.daemon import serve_ops
-        from cccc.daemon.runner_state_ops import write_headless_state
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon import serve_ops
+        from no1.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         with tempfile.TemporaryDirectory() as home:
@@ -208,7 +208,7 @@ class TestServeOps(unittest.TestCase):
 
                 stop_event = threading.Event()
                 with patch(
-                    "cccc.daemon.actors.web_model_browser_session.schedule_web_model_chatgpt_browser_session_warmup",
+                    "no1.daemon.actors.web_model_browser_session.schedule_web_model_chatgpt_browser_session_warmup",
                     return_value=True,
                 ) as warmup:
                     thread = serve_ops.start_actor_activity_thread(

@@ -1,6 +1,6 @@
 # Use Cases
 
-This page focuses on high-ROI, real-world CCCC workflows.
+This page focuses on high-ROI, real-world OneColleague workflows.
 
 ## How to Read This Page
 
@@ -21,12 +21,12 @@ Increase delivery quality without adding human review bottlenecks.
 
 ```bash
 cd /path/to/repo
-cccc attach .
-cccc setup --runtime claude
-cccc setup --runtime codex
-cccc actor add builder --runtime claude
-cccc actor add reviewer --runtime codex
-cccc group start
+onecolleague attach .
+onecolleague setup --runtime claude
+onecolleague setup --runtime codex
+onecolleague actor add builder --runtime claude
+onecolleague actor add reviewer --runtime codex
+onecolleague group start
 ```
 
 ### Execution Flow
@@ -58,11 +58,11 @@ Split one medium project into parallel tracks while keeping alignment.
 ### Minimal Setup
 
 ```bash
-cccc actor add foreman --runtime claude
-cccc actor add frontend --runtime codex
-cccc actor add backend --runtime gemini
-cccc actor add qa --runtime kimi
-cccc group start
+onecolleague actor add foreman --runtime claude
+onecolleague actor add frontend --runtime codex
+onecolleague actor add backend --runtime gemini
+onecolleague actor add qa --runtime kimi
+onecolleague group start
 ```
 
 ### Execution Flow
@@ -94,8 +94,8 @@ Operate long-running groups from phone while keeping a reliable audit trail.
 ### Minimal Setup
 
 ```bash
-cccc im set telegram --token-env TELEGRAM_BOT_TOKEN
-cccc im start
+onecolleague im set telegram --token-env TELEGRAM_BOT_TOKEN
+onecolleague im start
 ```
 
 Then `/subscribe` in your IM chat.
@@ -105,7 +105,7 @@ Then `/subscribe` in your IM chat.
 1. Receive progress/error notifications in IM.
 2. Send escalation commands to `@foreman` from mobile.
 3. Switch to Web UI for deep debugging only when needed.
-4. Keep all critical decisions in CCCC messages (not only in IM thread).
+4. Keep all critical decisions in OneColleague messages (not only in IM thread).
 
 ### Success Criteria
 

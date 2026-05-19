@@ -27,7 +27,7 @@ class _FakeSelector:
 
 class TestPtyAttachSelectorEvents(unittest.TestCase):
     def test_non_writer_client_registers_with_read_event_even_without_backlog(self) -> None:
-        from cccc.runners import pty as pty_runner
+        from no1.runners import pty as pty_runner
 
         session = pty_runner.PtySession.__new__(pty_runner.PtySession)
         session._lock = threading.Lock()

@@ -12,10 +12,10 @@ class TestActorProfilesOps(unittest.TestCase):
 
         def cleanup() -> None:
             try:
-                from cccc.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
-                from cccc.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
-                from cccc.runners import headless as headless_runner
-                from cccc.runners import pty as pty_runner
+                from no1.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from no1.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from no1.runners import headless as headless_runner
+                from no1.runners import pty as pty_runner
 
                 codex_app_supervisor.stop_all()
                 claude_app_supervisor.stop_all()
@@ -32,8 +32,8 @@ class TestActorProfilesOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -472,7 +472,7 @@ class TestActorProfilesOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            from cccc.daemon.actors.actor_profile_store import delete_actor_profile, delete_actor_profile_secrets
+            from no1.daemon.actors.actor_profile_store import delete_actor_profile, delete_actor_profile_secrets
 
             delete_actor_profile(pid)
             delete_actor_profile_secrets(pid)
@@ -959,7 +959,7 @@ class TestActorProfilesOps(unittest.TestCase):
             cleanup()
 
     def test_actor_start_uses_persisted_global_profile_ref(self) -> None:
-        from cccc.daemon.actors.private_env_ops import load_actor_private_env
+        from no1.daemon.actors.private_env_ops import load_actor_private_env
 
         _, cleanup = self._with_home()
         try:
@@ -1068,7 +1068,7 @@ class TestActorProfilesOps(unittest.TestCase):
             cleanup()
 
     def test_actor_start_uses_explicit_user_scope_profile_ref(self) -> None:
-        from cccc.daemon.actors.private_env_ops import load_actor_private_env
+        from no1.daemon.actors.private_env_ops import load_actor_private_env
 
         _, cleanup = self._with_home()
         try:
@@ -1152,7 +1152,7 @@ class TestActorProfilesOps(unittest.TestCase):
             cleanup()
 
     def test_explicit_non_owner_cannot_start_actor_with_user_scope_profile(self) -> None:
-        from cccc.daemon.actors.private_env_ops import load_actor_private_env, update_actor_private_env
+        from no1.daemon.actors.private_env_ops import load_actor_private_env, update_actor_private_env
 
         _, cleanup = self._with_home()
         try:

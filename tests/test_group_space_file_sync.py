@@ -40,8 +40,8 @@ class TestGroupSpaceFileSync(unittest.TestCase):
         return cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -155,13 +155,13 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 remote.pop(source_id, None)
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -175,11 +175,11 @@ class TestGroupSpaceFileSync(unittest.TestCase):
             entries = doc.get("entries") if isinstance(doc.get("entries"), dict) else {}
             self.assertEqual(set(entries.keys()), {"a.txt", "b.txt"})
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 second = sync_group_space_files(gid, provider="notebooklm", force=False)
             self.assertTrue(bool(second.get("ok")))
             self.assertEqual(bool(second.get("skipped")), True)
@@ -216,13 +216,13 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 _ = provider, remote_space_id, source_id
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -273,13 +273,13 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 _ = provider, remote_space_id, source_id
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -334,24 +334,24 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 remote.pop(source_id, None)
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 first = sync_group_space_files(gid, provider="notebooklm", force=True)
             self.assertTrue(bool(first.get("ok")))
             self.assertEqual(len(remote), 1)
 
             target.unlink(missing_ok=True)
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 second = sync_group_space_files(gid, provider="notebooklm", force=True)
             self.assertTrue(bool(second.get("ok")))
             self.assertEqual(bool(second.get("converged")), True)
@@ -411,14 +411,14 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                     "char_count": 11,
                 }
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 first = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(first.get("ok")))
@@ -428,12 +428,12 @@ class TestGroupSpaceFileSync(unittest.TestCase):
             shutil.rmtree(space_dir)
             self.assertFalse(space_dir.exists())
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 second = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(second.get("ok")))
@@ -525,15 +525,15 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                     "char_count": 18,
                 }
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts), \
-                 patch("cccc.daemon.space.group_space_sync.provider_download_artifact", side_effect=_download_artifact):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts), \
+                 patch("no1.daemon.space.group_space_sync.provider_download_artifact", side_effect=_download_artifact):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -613,19 +613,19 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 _ = provider, remote_space_id, source_id
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_provider import SpaceProviderError
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_provider import SpaceProviderError
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
             def _get_source_fulltext(provider: str, *, remote_space_id: str, source_id: str):
                 _ = provider, remote_space_id, source_id
                 raise SpaceProviderError("space_provider_upstream_error", "fulltext fetch failed")
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -697,14 +697,14 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                     "char_count": 0,
                 }
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -835,14 +835,14 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                     "char_count": 16,
                 }
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_get_source_fulltext", side_effect=_get_source_fulltext), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", side_effect=_list_artifacts):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))
@@ -892,7 +892,7 @@ class TestGroupSpaceFileSync(unittest.TestCase):
 
             def _add_file_fail(provider: str, *, remote_space_id: str, file_path: str):
                 _ = provider, remote_space_id, file_path
-                from cccc.daemon.space.group_space_provider import SpaceProviderError
+                from no1.daemon.space.group_space_provider import SpaceProviderError
 
                 raise SpaceProviderError("space_provider_upstream_error", "upstream add failed")
 
@@ -914,14 +914,14 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 remote.pop(source_id, None)
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file_fail), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}), \
-                 patch("cccc.daemon.space.group_space_sync.emit_system_notify") as emit_notify_mock:
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file_fail), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}), \
+                 patch("no1.daemon.space.group_space_sync.emit_system_notify") as emit_notify_mock:
                 failed = sync_group_space_files(gid, provider="notebooklm", force=True, by="peer1")
 
             self.assertTrue(bool(failed.get("ok")))
@@ -948,12 +948,12 @@ class TestGroupSpaceFileSync(unittest.TestCase):
             self.assertEqual(str(state_doc.get("state") or ""), "error")
             self.assertGreaterEqual(int(state_doc.get("failed_count") or 0), 1)
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file_ok), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}), \
-                 patch("cccc.daemon.space.group_space_sync.emit_system_notify") as emit_notify_mock:
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file_ok), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}), \
+                 patch("no1.daemon.space.group_space_sync.emit_system_notify") as emit_notify_mock:
                 recovered = sync_group_space_files(gid, provider="notebooklm", force=True, by="peer1")
 
             self.assertTrue(bool(recovered.get("ok")))
@@ -1039,13 +1039,13 @@ class TestGroupSpaceFileSync(unittest.TestCase):
                 _ = provider, remote_space_id, source_id
                 return {"deleted": True}
 
-            from cccc.daemon.space.group_space_sync import sync_group_space_files
+            from no1.daemon.space.group_space_sync import sync_group_space_files
 
-            with patch("cccc.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
-                 patch("cccc.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
-                 patch("cccc.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
-                 patch("cccc.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
-                 patch("cccc.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
+            with patch("no1.daemon.space.group_space_sync.provider_list_sources", side_effect=_list_sources), \
+                 patch("no1.daemon.space.group_space_sync.provider_add_file_source", side_effect=_add_file), \
+                 patch("no1.daemon.space.group_space_sync.provider_rename_source", side_effect=_rename), \
+                 patch("no1.daemon.space.group_space_sync.provider_delete_source", side_effect=_delete), \
+                 patch("no1.daemon.space.group_space_sync.provider_list_artifacts", return_value={"artifacts": []}):
                 result = sync_group_space_files(gid, provider="notebooklm", force=True)
 
             self.assertTrue(bool(result.get("ok")))

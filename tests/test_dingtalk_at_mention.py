@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cccc.ports.im.adapters.dingtalk import DINGTALK_MAX_MESSAGE_LENGTH, DingTalkAdapter
+from no1.ports.im.adapters.dingtalk import DINGTALK_MAX_MESSAGE_LENGTH, DingTalkAdapter
 
 
 # ── fixtures ─────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ class TestWebhookAtMention:
             resp.__exit__ = lambda s, *a: None
             return resp
 
-        with patch("cccc.ports.im.adapters.dingtalk.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("no1.ports.im.adapters.dingtalk.urllib.request.urlopen", side_effect=mock_urlopen):
             ok = adapter._send_via_webhook(
                 "https://webhook.example.com",
                 "Hello group",
@@ -179,7 +179,7 @@ class TestWebhookAtMention:
             resp.__exit__ = lambda s, *a: None
             return resp
 
-        with patch("cccc.ports.im.adapters.dingtalk.urllib.request.urlopen", side_effect=mock_urlopen):
+        with patch("no1.ports.im.adapters.dingtalk.urllib.request.urlopen", side_effect=mock_urlopen):
             ok = adapter._send_via_webhook(
                 "https://webhook.example.com",
                 "Hello group",

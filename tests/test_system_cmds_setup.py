@@ -7,15 +7,15 @@ from unittest.mock import patch
 
 class TestSystemCmdsSetup(unittest.TestCase):
     def test_cmd_setup_codex_reports_added_via_shared_install_helper(self) -> None:
-        from cccc.cli import system_cmds
+        from no1.cli import system_cmds
 
         args = argparse.Namespace(runtime="codex", path=".")
 
-        with patch("cccc.kernel.runtime.get_cccc_mcp_stdio_command", return_value=[r"C:\CCCC\cccc.exe", "mcp"]), patch(
-            "cccc.kernel.runtime.detect_runtime",
+        with patch("no1.kernel.runtime.get_onecolleague_mcp_stdio_command", return_value=[r"C:\CCCC\no1.exe", "mcp"]), patch(
+            "no1.kernel.runtime.detect_runtime",
             return_value=SimpleNamespace(available=True, path=r"C:\Tools\codex.cmd"),
-        ), patch("cccc.daemon.mcp_install.is_mcp_installed", return_value=False), patch(
-            "cccc.daemon.mcp_install.ensure_mcp_installed",
+        ), patch("no1.daemon.mcp_install.is_mcp_installed", return_value=False), patch(
+            "no1.daemon.mcp_install.ensure_mcp_installed",
             return_value=True,
         ) as mock_ensure, patch.object(
             system_cmds,
@@ -37,15 +37,15 @@ class TestSystemCmdsSetup(unittest.TestCase):
         self.assertEqual(codex.get("status"), "added")
 
     def test_cmd_setup_kimi_reports_present_when_already_configured(self) -> None:
-        from cccc.cli import system_cmds
+        from no1.cli import system_cmds
 
         args = argparse.Namespace(runtime="kimi", path=".")
 
-        with patch("cccc.kernel.runtime.get_cccc_mcp_stdio_command", return_value=[r"C:\CCCC\cccc.exe", "mcp"]), patch(
-            "cccc.kernel.runtime.detect_runtime",
+        with patch("no1.kernel.runtime.get_onecolleague_mcp_stdio_command", return_value=[r"C:\CCCC\no1.exe", "mcp"]), patch(
+            "no1.kernel.runtime.detect_runtime",
             return_value=SimpleNamespace(available=True, path=r"C:\Users\tester\.local\bin\kimi.exe"),
-        ), patch("cccc.daemon.mcp_install.is_mcp_installed", return_value=True), patch(
-            "cccc.daemon.mcp_install.ensure_mcp_installed",
+        ), patch("no1.daemon.mcp_install.is_mcp_installed", return_value=True), patch(
+            "no1.daemon.mcp_install.ensure_mcp_installed",
             return_value=True,
         ), patch.object(
             system_cmds,
@@ -62,19 +62,19 @@ class TestSystemCmdsSetup(unittest.TestCase):
         self.assertEqual(kimi.get("status"), "present")
 
     def test_cmd_setup_claude_manual_hint_uses_resolved_executable_path(self) -> None:
-        from cccc.cli import system_cmds
+        from no1.cli import system_cmds
 
         args = argparse.Namespace(runtime="claude", path=".")
-        resolved_cmd = [r"C:\Users\tester\.local\bin\claude.exe", "mcp", "add", "-s", "user", "cccc", "--", r"C:\CCCC\cccc.exe", "mcp"]
+        resolved_cmd = [r"C:\Users\tester\.local\bin\claude.exe", "mcp", "add", "-s", "user", "onecolleague", "--", r"C:\CCCC\no1.exe", "mcp"]
 
-        with patch("cccc.kernel.runtime.get_cccc_mcp_stdio_command", return_value=[r"C:\CCCC\cccc.exe", "mcp"]), patch(
-            "cccc.daemon.mcp_install.build_mcp_add_command",
-            return_value=["claude", "mcp", "add", "-s", "user", "cccc", "--", r"C:\CCCC\cccc.exe", "mcp"],
+        with patch("no1.kernel.runtime.get_onecolleague_mcp_stdio_command", return_value=[r"C:\CCCC\no1.exe", "mcp"]), patch(
+            "no1.daemon.mcp_install.build_mcp_add_command",
+            return_value=["claude", "mcp", "add", "-s", "user", "onecolleague", "--", r"C:\CCCC\no1.exe", "mcp"],
         ), patch(
-            "cccc.kernel.runtime.detect_runtime",
+            "no1.kernel.runtime.detect_runtime",
             return_value=SimpleNamespace(available=True, path=resolved_cmd[0]),
-        ), patch("cccc.daemon.mcp_install.is_mcp_installed", return_value=False), patch(
-            "cccc.daemon.mcp_install.ensure_mcp_installed",
+        ), patch("no1.daemon.mcp_install.is_mcp_installed", return_value=False), patch(
+            "no1.daemon.mcp_install.ensure_mcp_installed",
             return_value=False,
         ), patch.object(
             system_cmds,

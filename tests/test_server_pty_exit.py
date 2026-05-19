@@ -22,18 +22,18 @@ class TestServerPtyExit(unittest.TestCase):
         return Path(td), cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_pty_process_exit_persists_visible_actor_as_stopped(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import pty_state_path, write_pty_state
-            from cccc.daemon.server import _handle_pty_session_exit
-            from cccc.kernel.actors import add_actor, find_actor, update_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.runner_state_ops import pty_state_path, write_pty_state
+            from no1.daemon.server import _handle_pty_session_exit
+            from no1.kernel.actors import add_actor, find_actor, update_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "pty-exit", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -73,10 +73,10 @@ class TestServerPtyExit(unittest.TestCase):
     def test_codex_app_server_backed_pty_exit_does_not_disable_actor(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import pty_state_path, write_pty_state
-            from cccc.daemon.server import _handle_pty_session_exit
-            from cccc.kernel.actors import add_actor, find_actor, update_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.runner_state_ops import pty_state_path, write_pty_state
+            from no1.daemon.server import _handle_pty_session_exit
+            from no1.kernel.actors import add_actor, find_actor, update_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "pty-app-server-exit", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -115,10 +115,10 @@ class TestServerPtyExit(unittest.TestCase):
     def test_stale_pty_process_exit_does_not_disable_restarted_actor(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import pty_state_path, write_pty_state
-            from cccc.daemon.server import _handle_pty_session_exit
-            from cccc.kernel.actors import add_actor, find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.runner_state_ops import pty_state_path, write_pty_state
+            from no1.daemon.server import _handle_pty_session_exit
+            from no1.kernel.actors import add_actor, find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "pty-stale-exit", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -168,9 +168,9 @@ class TestServerPtyExit(unittest.TestCase):
     def test_pty_process_exit_does_not_disable_internal_assistant_actor(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.server import _handle_pty_session_exit
-            from cccc.kernel.actors import INTERNAL_KIND_PET, add_actor, find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.server import _handle_pty_session_exit
+            from no1.kernel.actors import INTERNAL_KIND_PET, add_actor, find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "pty-internal-exit", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -203,10 +203,10 @@ class TestServerPtyExit(unittest.TestCase):
     def test_daemon_shutdown_pty_cleanup_does_not_disable_actor(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.runner_state_ops import pty_state_path, write_pty_state
-            from cccc.daemon.server import _handle_pty_session_exit
-            from cccc.kernel.actors import add_actor, find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.runner_state_ops import pty_state_path, write_pty_state
+            from no1.daemon.server import _handle_pty_session_exit
+            from no1.kernel.actors import add_actor, find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "pty-shutdown", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -237,9 +237,9 @@ class TestServerPtyExit(unittest.TestCase):
     def test_headless_process_exit_uses_same_persistent_stop_semantics(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.actors.actor_exit_ops import persist_actor_process_exit_stopped
-            from cccc.kernel.actors import add_actor, find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.actors.actor_exit_ops import persist_actor_process_exit_stopped
+            from no1.kernel.actors import add_actor, find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "headless-exit", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))

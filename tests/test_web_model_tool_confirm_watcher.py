@@ -21,7 +21,7 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
         return td, cleanup
 
     def test_interval_defaults_to_five_seconds_and_clamps(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
 
         old = os.environ.get("CCCC_WEB_MODEL_AUTO_CONFIRM_INTERVAL_SECONDS")
         try:
@@ -38,7 +38,7 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
                 os.environ["CCCC_WEB_MODEL_AUTO_CONFIRM_INTERVAL_SECONDS"] = old
 
     def test_auto_confirm_can_be_disabled_by_env(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
 
         old = os.environ.get("CCCC_WEB_MODEL_AUTO_CONFIRM_TOOLS")
         try:
@@ -52,7 +52,7 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
                 os.environ["CCCC_WEB_MODEL_AUTO_CONFIRM_TOOLS"] = old
 
     def test_ensure_watcher_starts_only_when_cdp_is_active(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
 
         _, cleanup = self._with_home()
         try:
@@ -76,8 +76,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             cleanup()
 
     def test_scan_diagnostics_are_recorded_when_click_fails(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         try:
@@ -100,8 +100,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             cleanup()
 
     def test_reload_window_state_helpers_start_progress_and_close(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state
 
         _, cleanup = self._with_home()
         try:
@@ -120,10 +120,10 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             self.assertEqual(state.get("auto_reload_last_delivery_id"), "delivery-1")
             self.assertEqual(state.get("auto_reload_last_event_ids"), ["e1"])
 
-            self.assertTrue(watcher.record_web_model_browser_progress("g-test", "peer1", reason="mcp_tool", detail="cccc_code_exec"))
+            self.assertTrue(watcher.record_web_model_browser_progress("g-test", "peer1", reason="mcp_tool", detail="onecolleague_code_exec"))
             state = read_chatgpt_browser_state("g-test", "peer1")
             self.assertEqual(state.get("auto_reload_last_progress_reason"), "mcp_tool")
-            self.assertEqual(state.get("auto_reload_last_progress_detail"), "cccc_code_exec")
+            self.assertEqual(state.get("auto_reload_last_progress_detail"), "onecolleague_code_exec")
 
             self.assertTrue(watcher.close_web_model_browser_reload_window("g-test", "peer1", reason="complete_turn:done"))
             state = read_chatgpt_browser_state("g-test", "peer1")
@@ -133,8 +133,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             cleanup()
 
     def test_stale_reload_window_refreshes_bound_chatgpt_page(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         class FakePage:
             url = "https://chatgpt.com/c/test"
@@ -205,8 +205,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             cleanup()
 
     def test_stale_reload_window_uses_stored_target_when_conversation_is_pending(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports.web_model_browser_sidecar import read_chatgpt_browser_state, record_chatgpt_browser_state
 
         class FakePage:
             url = "https://chatgpt.com/"
@@ -277,8 +277,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             cleanup()
 
     def test_auto_confirm_scan_does_not_block_stale_reload(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports import web_model_browser_sidecar as sidecar
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports import web_model_browser_sidecar as sidecar
 
         _, cleanup = self._with_home()
         try:
@@ -327,8 +327,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             cleanup()
 
     def test_auto_confirm_skips_while_browser_delivery_is_submitting(self) -> None:
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports import web_model_browser_sidecar as sidecar
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports import web_model_browser_sidecar as sidecar
 
         _, cleanup = self._with_home()
         try:
@@ -355,8 +355,8 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
     def test_stale_reload_window_skips_during_browser_delivery_submit(self) -> None:
         from datetime import datetime, timezone
 
-        from cccc.daemon.actors import web_model_tool_confirm_watcher as watcher
-        from cccc.ports.web_model_browser_sidecar import record_chatgpt_browser_state
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+        from no1.ports.web_model_browser_sidecar import record_chatgpt_browser_state
 
         class FakeBrowser:
             contexts = []

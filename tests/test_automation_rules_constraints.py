@@ -22,8 +22,8 @@ class TestAutomationRulesConstraints(unittest.TestCase):
         return td, cleanup
 
     def _create_group_id(self) -> str:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -36,8 +36,8 @@ class TestAutomationRulesConstraints(unittest.TestCase):
         return gid
 
     def test_group_state_rejects_non_one_time_schedule(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _, cleanup = self._with_home()
         try:
@@ -75,14 +75,14 @@ class TestAutomationRulesConstraints(unittest.TestCase):
 
     def test_group_state_active_treats_running_string_false_as_not_running(self) -> None:
         from pathlib import Path
-        from cccc.daemon.automation import AutomationManager
-        from cccc.kernel.group import Group
+        from no1.daemon.automation import AutomationManager
+        from no1.kernel.group import Group
 
         manager = AutomationManager()
         group = Group(group_id="g_test", path=Path("."), doc={})
         loaded = Group(group_id="g_test", path=Path("."), doc={"running": "false"})
 
-        with patch("cccc.daemon.automation.load_group", return_value=loaded), patch.object(
+        with patch("no1.daemon.automation.load_group", return_value=loaded), patch.object(
             manager, "_daemon_automation_call", return_value=(True, "")
         ) as mock_call:
             ok, err = manager._execute_group_state_action(group, target_state="active")
@@ -94,10 +94,10 @@ class TestAutomationRulesConstraints(unittest.TestCase):
         self.assertEqual(mock_call.call_args_list[1].kwargs.get("op"), "group_set_state")
 
     def test_at_rule_retime_clears_completion_state(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
-        from cccc.util.fs import read_json, atomic_write_json
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
+        from no1.util.fs import read_json, atomic_write_json
 
         _, cleanup = self._with_home()
         try:
@@ -184,10 +184,10 @@ class TestAutomationRulesConstraints(unittest.TestCase):
             cleanup()
 
     def test_one_time_rule_auto_disables_after_successful_delivery(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.daemon.automation import AutomationManager
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.daemon.automation import AutomationManager
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -247,8 +247,8 @@ class TestAutomationRulesConstraints(unittest.TestCase):
             assert group is not None
 
             manager = AutomationManager()
-            with patch("cccc.daemon.automation.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                "cccc.daemon.automation._queue_notify_to_pty", return_value=None
+            with patch("no1.daemon.automation.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                "no1.daemon.automation._queue_notify_to_pty", return_value=None
             ):
                 manager._check_rules(group, datetime.now(timezone.utc))
 

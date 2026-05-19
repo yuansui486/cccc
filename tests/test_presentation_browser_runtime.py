@@ -81,8 +81,8 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
     def test_runtime_attach_streams_frames_and_relays_commands(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.group import presentation_browser_runtime as runtime
-            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
+            from no1.daemon.group import presentation_browser_runtime as runtime
+            from no1.daemon.browser import projected_browser_runtime as browser_runtime
 
             fake_runtime = _FakeRuntime()
             with patch.object(browser_runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
@@ -141,7 +141,7 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
                 self.assertTrue(fake_runtime.closed)
         finally:
             try:
-                from cccc.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
+                from no1.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
 
                 close_all_browser_surface_sessions()
             except Exception:
@@ -151,8 +151,8 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
     def test_socket_disconnect_keeps_session_alive_for_reconnect(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.group import presentation_browser_runtime as runtime
-            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
+            from no1.daemon.group import presentation_browser_runtime as runtime
+            from no1.daemon.browser import projected_browser_runtime as browser_runtime
 
             fake_runtime = _FakeRuntime()
             with patch.object(browser_runtime, "launch_projected_browser_runtime", return_value=fake_runtime):
@@ -194,7 +194,7 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
                 runtime.close_browser_surface_session(group_id="g_demo", slot_id="slot-1")
         finally:
             try:
-                from cccc.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
+                from no1.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
 
                 close_all_browser_surface_sessions()
             except Exception:
@@ -204,8 +204,8 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
     def test_controller_input_does_not_wait_for_command_ack(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.group import presentation_browser_runtime as runtime
-            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
+            from no1.daemon.group import presentation_browser_runtime as runtime
+            from no1.daemon.browser import projected_browser_runtime as browser_runtime
 
             fake_runtime = _FakeRuntime()
             with (
@@ -241,7 +241,7 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
                 runtime.close_browser_surface_session(group_id="g_demo", slot_id="slot-1")
         finally:
             try:
-                from cccc.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
+                from no1.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
 
                 close_all_browser_surface_sessions()
             except Exception:
@@ -251,8 +251,8 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
     def test_runtime_sessions_are_slot_scoped(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.group import presentation_browser_runtime as runtime
-            from cccc.daemon.browser import projected_browser_runtime as browser_runtime
+            from no1.daemon.group import presentation_browser_runtime as runtime
+            from no1.daemon.browser import projected_browser_runtime as browser_runtime
 
             first_runtime = _FakeRuntime()
             second_runtime = _FakeRuntime()
@@ -286,7 +286,7 @@ class TestPresentationBrowserRuntime(unittest.TestCase):
                 self.assertTrue(bool(slot_two_after.get("active")))
         finally:
             try:
-                from cccc.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
+                from no1.daemon.group.presentation_browser_runtime import close_all_browser_surface_sessions
 
                 close_all_browser_surface_sessions()
             except Exception:

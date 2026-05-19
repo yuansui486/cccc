@@ -87,7 +87,7 @@
       "escalatedWaitingUser": "{{taskId}} は複数サイクルにわたり waiting_user のままです。ユーザー依存を今すぐ収束してください{{suffix}}"
     },
     "draft": {
-      "prefix": "cccc_task を使ってこのタスクを {{operation}}{{refs}} してください。{{reason}}",
+      "prefix": "onecolleague_task を使ってこのタスクを {{operation}}{{refs}} してください。{{reason}}",
       "moveActive": "{{actorId}} はすでにこのタスクをマウントしています。状態を active に同期してください。",
       "syncWaitingUser": "{{actorId}} の現在のフォーカスは {{focus}} です。waiting_on=user を追加し、ユーザー依存を記録してください。",
       "syncWaitingUserClose": "{{actorId}} の現在のフォーカスは {{focus}} です。waiting_on=user を明示的に収束し、次の owner を確定してください。",

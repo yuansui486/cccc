@@ -4,7 +4,7 @@ import unittest
 
 class TestCliEnvBoolParsing(unittest.TestCase):
     def test_env_flag_parses_falsey_strings(self) -> None:
-        from cccc.cli import _env_flag
+        from no1.cli import _env_flag
 
         old = os.environ.get("CCCC_WEB_RELOAD")
         try:

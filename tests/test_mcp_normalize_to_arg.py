@@ -2,7 +2,7 @@
 
 import unittest
 
-from cccc.ports.mcp.server import _normalize_to_arg
+from no1.ports.mcp.server import _normalize_to_arg
 
 
 class NormalizeToArgTest(unittest.TestCase):

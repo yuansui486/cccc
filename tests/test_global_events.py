@@ -7,7 +7,7 @@ from pathlib import Path
 
 class TestGlobalEvents(unittest.TestCase):
     def test_publish_event_appends_jsonl(self) -> None:
-        from cccc.kernel.events import publish_event
+        from no1.kernel.events import publish_event
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -15,7 +15,7 @@ class TestGlobalEvents(unittest.TestCase):
                 os.environ["CCCC_HOME"] = td
                 publish_event("group.created", {"group_id": "g_test", "title": "demo"})
 
-                p = Path(td) / "daemon" / "ccccd.events.jsonl"
+                p = Path(td) / "daemon" / "onecolleagued.events.jsonl"
                 self.assertTrue(p.exists())
                 lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
                 self.assertGreaterEqual(len(lines), 1)

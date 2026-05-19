@@ -23,8 +23,8 @@ class TestGroupSpaceProjection(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -64,7 +64,7 @@ class TestGroupSpaceProjection(unittest.TestCase):
             )
             self.assertTrue(bind_resp.ok, getattr(bind_resp, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(gid)
             self.assertIsNotNone(group)
@@ -116,7 +116,7 @@ class TestGroupSpaceProjection(unittest.TestCase):
             )
             self.assertTrue(sync_resp.ok, getattr(sync_resp, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(gid)
             self.assertIsNotNone(group)
@@ -169,10 +169,10 @@ class TestGroupSpaceProjection(unittest.TestCase):
             )
             self.assertTrue(sync_resp.ok, getattr(sync_resp, "error", None))
 
-            from cccc.daemon.space.group_space_runtime import process_due_space_jobs
-            from cccc.kernel.group import load_group
+            from no1.daemon.space.group_space_runtime import process_due_space_jobs
+            from no1.kernel.group import load_group
 
-            with patch("cccc.daemon.space.group_space_runtime.provider_ingest", return_value={"ok": True}):
+            with patch("no1.daemon.space.group_space_runtime.provider_ingest", return_value={"ok": True}):
                 tick = process_due_space_jobs(limit=20)
             self.assertGreaterEqual(int(tick.get("processed") or 0), 1)
 
@@ -194,8 +194,8 @@ class TestGroupSpaceProjection(unittest.TestCase):
         project_ctx = tempfile.TemporaryDirectory()
         project_dir = Path(project_ctx.__enter__()).resolve()
         try:
-            from cccc.daemon.space.group_space_paths import resolve_space_root, space_state_path
-            from cccc.kernel.group import load_group
+            from no1.daemon.space.group_space_paths import resolve_space_root, space_state_path
+            from no1.kernel.group import load_group
 
             gid = self._create_group("space-projection-unbind-sync")
             attach_resp, _ = self._call(
@@ -275,7 +275,7 @@ class TestGroupSpaceProjection(unittest.TestCase):
         project_ctx = tempfile.TemporaryDirectory()
         project_dir = Path(project_ctx.__enter__()).resolve()
         try:
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             gid = self._create_group("space-projection-unbind-queue")
             attach_resp, _ = self._call(

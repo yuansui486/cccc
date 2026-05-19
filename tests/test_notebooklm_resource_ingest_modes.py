@@ -4,8 +4,8 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from cccc.providers.notebooklm.adapter import _ingest_async
-from cccc.providers.notebooklm.errors import NotebookLMProviderError
+from no1.providers.notebooklm.adapter import _ingest_async
+from no1.providers.notebooklm.errors import NotebookLMProviderError
 
 
 class _FakeSource:
@@ -72,7 +72,7 @@ class TestNotebookLMResourceIngestModes(unittest.TestCase):
             _ = auth_payload, timeout_seconds
             return _FakeClient(fake_sources)
 
-        with patch("cccc.providers.notebooklm.adapter._build_client", side_effect=_fake_build_client):
+        with patch("no1.providers.notebooklm.adapter._build_client", side_effect=_fake_build_client):
             out = asyncio.run(
                 _ingest_async(
                     notebook_id="nb_test_1",
@@ -140,7 +140,7 @@ class TestNotebookLMResourceIngestModes(unittest.TestCase):
             _ = auth_payload, timeout_seconds
             return _FakeClient(_FakeSources())
 
-        with patch("cccc.providers.notebooklm.adapter._build_client", side_effect=_fake_build_client):
+        with patch("no1.providers.notebooklm.adapter._build_client", side_effect=_fake_build_client):
             with self.assertRaises(NotebookLMProviderError) as ctx:
                 asyncio.run(
                     _ingest_async(

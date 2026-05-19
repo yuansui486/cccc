@@ -16,8 +16,8 @@ class _Conn:
 
 class TestExecutionQueues(unittest.TestCase):
     def test_request_execution_queue_processes_request_and_closes_connection(self) -> None:
-        from cccc.contracts.v1 import DaemonResponse
-        from cccc.daemon.ops.execution_queues import DaemonRequestExecutionQueue
+        from no1.contracts.v1 import DaemonResponse
+        from no1.daemon.ops.execution_queues import DaemonRequestExecutionQueue
 
         stop_event = threading.Event()
         handled: list[dict] = []
@@ -48,7 +48,7 @@ class TestExecutionQueues(unittest.TestCase):
         self.assertEqual(exits, [])
 
     def test_group_space_sync_run_queue_dedupes_and_upgrades_force(self) -> None:
-        from cccc.daemon.ops.execution_queues import GroupSpaceSyncRunQueue
+        from no1.daemon.ops.execution_queues import GroupSpaceSyncRunQueue
 
         queue = GroupSpaceSyncRunQueue()
         first = queue.submit(group_id="g1", provider="notebooklm", force=False, by="user")
@@ -70,7 +70,7 @@ class TestExecutionQueues(unittest.TestCase):
         self.assertEqual(ran, [("g1", True, "peer1")])
 
     def test_group_space_sync_run_queue_keeps_followup_when_already_running(self) -> None:
-        from cccc.daemon.ops.execution_queues import GroupSpaceSyncRunQueue
+        from no1.daemon.ops.execution_queues import GroupSpaceSyncRunQueue
 
         queue = GroupSpaceSyncRunQueue()
         first = queue.submit(group_id="g1", provider="notebooklm", force=False, by="user")
@@ -96,7 +96,7 @@ class TestExecutionQueues(unittest.TestCase):
         self.assertEqual(second_runs, [("g1", True, "peer1")])
 
     def test_group_space_sync_run_queue_upgrades_followup_force_while_running(self) -> None:
-        from cccc.daemon.ops.execution_queues import GroupSpaceSyncRunQueue
+        from no1.daemon.ops.execution_queues import GroupSpaceSyncRunQueue
 
         queue = GroupSpaceSyncRunQueue()
         queue.submit(group_id="g1", provider="notebooklm", force=False, by="user")

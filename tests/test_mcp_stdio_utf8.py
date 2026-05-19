@@ -27,7 +27,7 @@ class _FakeBinaryStdout:
 
 class TestMcpStdioUtf8(unittest.TestCase):
     def test_read_message_uses_binary_utf8_stdin(self) -> None:
-        from cccc.ports.mcp import main as mcp_main
+        from no1.ports.mcp import main as mcp_main
 
         stdin = _FakeBinaryStdin(b'{"jsonrpc":"2.0","id":1,"method":"ping","params":{"text":"\xe5\xbc\x80"}}\n')
         with patch.object(mcp_main.sys, "stdin", stdin):
@@ -39,7 +39,7 @@ class TestMcpStdioUtf8(unittest.TestCase):
         self.assertEqual(str(params.get("text") or ""), "开")
 
     def test_write_message_uses_binary_utf8_stdout(self) -> None:
-        from cccc.ports.mcp import main as mcp_main
+        from no1.ports.mcp import main as mcp_main
 
         stdout = _FakeBinaryStdout()
         with patch.object(mcp_main.sys, "stdout", stdout):
@@ -51,7 +51,7 @@ class TestMcpStdioUtf8(unittest.TestCase):
         self.assertEqual(str(result.get("text") or ""), "开始")
 
     def test_text_stream_fallback_still_works_without_binary_buffer(self) -> None:
-        from cccc.ports.mcp import main as mcp_main
+        from no1.ports.mcp import main as mcp_main
 
         stdin = io.StringIO('{"jsonrpc":"2.0","id":2,"method":"ping"}\n')
         stdout = io.StringIO()

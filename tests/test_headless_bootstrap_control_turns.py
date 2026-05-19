@@ -32,7 +32,7 @@ def _thread_with_order(order: list[str], label: str) -> Mock:
 
 class TestHeadlessBootstrapControlTurns(unittest.TestCase):
     def test_claude_start_queues_bootstrap_before_turn_thread(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
 
         proc = _FakeProc()
         order: list[str] = []
@@ -44,10 +44,10 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
         ]
 
         with (
-            patch("cccc.daemon.claude_app_sessions.subprocess.Popen", return_value=proc) as popen,
-            patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True) as ensure_mcp,
-            patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=threads),
-            patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
+            patch("no1.daemon.claude_app_sessions.subprocess.Popen", return_value=proc) as popen,
+            patch("no1.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True) as ensure_mcp,
+            patch("no1.daemon.claude_app_sessions.threading.Thread", side_effect=threads),
+            patch("no1.daemon.claude_app_sessions.time.sleep", return_value=None),
             patch.object(session, "_persist_state"),
             patch.object(session, "_queue_bootstrap_control_turn", side_effect=lambda: order.append("bootstrap") or True),
         ):
@@ -61,7 +61,7 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
         self.assertEqual(popen_env.get("CCCC_ACTOR_ID"), "peer1")
 
     def test_codex_start_queues_bootstrap_before_turn_thread(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         proc = _FakeProc()
         order: list[str] = []
@@ -73,9 +73,9 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
         ]
 
         with (
-            patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=proc) as popen,
-            patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True) as ensure_mcp,
-            patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=threads),
+            patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=proc) as popen,
+            patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True) as ensure_mcp,
+            patch("no1.daemon.codex_app_sessions.threading.Thread", side_effect=threads),
             patch.object(session, "_persist_state"),
             patch.object(session, "_emit"),
             patch.object(
@@ -96,7 +96,7 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
         self.assertEqual(popen_env.get("CCCC_ACTOR_ID"), "peer1")
 
     def test_codex_start_passes_explicit_model_to_thread_start(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         proc = _FakeProc()
         session = CodexAppSession(group_id="g_test", actor_id="peer1", cwd=Path("."), env={}, model="gpt-5.3-codex-spark")
@@ -107,9 +107,9 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
         ]
 
         with (
-            patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=proc),
-            patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
-            patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=threads),
+            patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=proc),
+            patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
+            patch("no1.daemon.codex_app_sessions.threading.Thread", side_effect=threads),
             patch.object(session, "_persist_state"),
             patch.object(session, "_emit"),
             patch.object(

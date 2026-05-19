@@ -5,9 +5,9 @@ import unittest
 
 class TestRegistryDocNormalization(unittest.TestCase):
     def test_load_registry_normalizes_non_dict_root(self) -> None:
-        from cccc.kernel.registry import load_registry
-        from cccc.paths import ensure_home
-        from cccc.util.fs import atomic_write_json
+        from no1.kernel.registry import load_registry
+        from no1.paths import ensure_home
+        from no1.util.fs import atomic_write_json
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -27,9 +27,9 @@ class TestRegistryDocNormalization(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_load_registry_normalizes_bad_groups_defaults(self) -> None:
-        from cccc.kernel.registry import load_registry, set_default_group_for_scope
-        from cccc.paths import ensure_home
-        from cccc.util.fs import atomic_write_json, read_json
+        from no1.kernel.registry import load_registry, set_default_group_for_scope
+        from no1.paths import ensure_home
+        from no1.util.fs import atomic_write_json, read_json
 
         old_home = os.environ.get("CCCC_HOME")
         try:

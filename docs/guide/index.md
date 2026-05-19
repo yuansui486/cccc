@@ -2,7 +2,7 @@
 
 Use this section based on your role and goal.
 
-## If You Are New to CCCC
+## If You Are New to OneColleague
 
 - [Getting Started](/guide/getting-started/) for a 10-minute first setup
 - [Web UI Quick Start](/guide/getting-started/web) if you prefer visual control
@@ -14,7 +14,7 @@ Use this section based on your role and goal.
 - [Workflows](/guide/workflows) for common execution patterns
 - [Best Practices](/guide/best-practices) for stable collaboration behavior
 
-## If You Operate CCCC in Daily Work
+## If You Operate OneColleague in Daily Work
 
 - [Operations Runbook](/guide/operations) for triage, recovery, and upgrade flow
 - [Web UI Guide](/guide/web-ui) for control-plane behavior

@@ -35,8 +35,8 @@ class TestCliWebBindingResolution(unittest.TestCase):
         return cleanup
 
     def test_resolve_web_server_binding_uses_settings_before_env(self) -> None:
-        from cccc.cli.common import _resolve_web_server_binding
-        from cccc.kernel.settings import update_remote_access_settings
+        from no1.cli.common import _resolve_web_server_binding
+        from no1.kernel.settings import update_remote_access_settings
 
         _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
@@ -50,7 +50,7 @@ class TestCliWebBindingResolution(unittest.TestCase):
             cleanup()
 
     def test_resolve_web_server_binding_falls_back_to_env(self) -> None:
-        from cccc.cli.common import _resolve_web_server_binding
+        from no1.cli.common import _resolve_web_server_binding
 
         _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
@@ -63,7 +63,7 @@ class TestCliWebBindingResolution(unittest.TestCase):
             cleanup()
 
     def test_resolve_web_server_binding_uses_defaults_without_settings_or_env(self) -> None:
-        from cccc.cli.common import _resolve_web_server_binding
+        from no1.cli.common import _resolve_web_server_binding
 
         _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", None)
@@ -79,8 +79,8 @@ class TestCliWebBindingResolution(unittest.TestCase):
     def test_update_settings_does_not_shadow_env_port(self) -> None:
         """Regression: toggling 'enabled' must not persist default web_port=8848,
         which would shadow CCCC_WEB_PORT env fallback."""
-        from cccc.cli.common import _resolve_web_server_binding
-        from cccc.kernel.settings import update_remote_access_settings
+        from no1.cli.common import _resolve_web_server_binding
+        from no1.kernel.settings import update_remote_access_settings
 
         _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", None)

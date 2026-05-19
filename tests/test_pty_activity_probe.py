@@ -1,4 +1,4 @@
-from cccc.daemon.pty_activity_probe import read_pty_activity_signal
+from no1.daemon.pty_activity_probe import read_pty_activity_signal
 
 
 def test_read_pty_activity_signal_uses_override_without_tail() -> None:

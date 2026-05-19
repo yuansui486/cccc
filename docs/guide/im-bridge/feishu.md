@@ -1,6 +1,6 @@
 # Feishu (Lark) Setup
 
-Connect your CCCC working group to Feishu for enterprise collaboration in China.
+Connect your OneColleague working group to Feishu for enterprise collaboration in China.
 
 ## Overview
 
@@ -13,14 +13,14 @@ Feishu (飞书, also known as Lark internationally) is ideal for:
 ## Prerequisites
 
 - Feishu enterprise account with admin access
-- CCCC installed and running
+- OneColleague installed and running
 
 ## Step 1: Create an App
 
 1. Go to [Feishu Open Platform](https://open.feishu.cn/app)
 2. Click **Create Custom App**
 3. Fill in the app information:
-   - App Name (e.g., "CCCC Bot")
+   - App Name (e.g., "OneColleague Bot")
    - App Description
    - App Icon
 4. Click **Create**
@@ -70,7 +70,7 @@ Copyable scope configuration:
 | `contact:user.employee_id:readonly`, `corehr:file:download`, `event:ip_list` | Supporting identity, file, and platform event access |
 :::
 
-## Step 3: Configure CCCC
+## Step 3: Configure OneColleague
 
 1. In your app dashboard, go to **Credentials & Basic Info**
 2. Copy **App ID** and **App Secret**
@@ -81,7 +81,7 @@ Keep your App Secret confidential. Never commit it to version control.
 
 ### Option A: Via Web UI
 
-1. Open the CCCC Web UI at `http://127.0.0.1:8848/`
+1. Open the OneColleague Web UI at `http://127.0.0.1:8848/`
 2. Go to **Settings** (gear icon in header)
 3. Navigate to the **IM Bridge** tab
 4. Select **Feishu/Lark** as the platform
@@ -90,7 +90,7 @@ Keep your App Secret confidential. Never commit it to version control.
    - **App Secret**: Your Feishu App Secret
 6. Click **Save Config**
 
-![CCCC IM Bridge Configuration](/images/cccc-im-bridge-feishu.png)
+![OneColleague IM Bridge Configuration](/images/onecolleague-im-bridge-feishu.png)
 
 ### Option B: Via CLI
 
@@ -101,10 +101,10 @@ export FEISHU_APP_ID="cli_your_app_id"
 export FEISHU_APP_SECRET="your_app_secret"
 ```
 
-Then configure CCCC:
+Then configure OneColleague:
 
 ```bash
-cccc im set feishu \
+onecolleague im set feishu \
   --app-key-env FEISHU_APP_ID \
   --app-secret-env FEISHU_APP_SECRET
 ```
@@ -127,19 +127,19 @@ Click the **Save Config** button in the IM Bridge settings. The bridge will star
 ### Via CLI
 
 ```bash
-cccc im start
+onecolleague im start
 ```
 
 Verify it's running:
 
 ```bash
-cccc im status
+onecolleague im status
 ```
 
 ## Step 5: Enable Persistent Connection (Recommended)
 
 ::: warning Prerequisite
-The CCCC IM Bridge must be running before you can configure event subscriptions. Enable persistent connection so CCCC can receive events via a long connection (no public callback URL required for this mode).
+The OneColleague IM Bridge must be running before you can configure event subscriptions. Enable persistent connection so OneColleague can receive events via a long connection (no public callback URL required for this mode).
 :::
 
 1. Go back to [Feishu Open Platform](https://open.feishu.cn/app)
@@ -169,7 +169,7 @@ You must enable the Bot capability so users can find and chat with your bot afte
 :::
 
 1. In the sidebar, go to **Features** → **Bot**
-2. In **Bot Setting**, fill in the **Get started** field with a greeting message (e.g., "cccc im")
+2. In **Bot Setting**, fill in the **Get started** field with a greeting message (e.g., "onecolleague im")
 3. Click **Save**
 
 ![Feishu Bot Setting](/images/feishu-bot-setting.png)
@@ -237,13 +237,13 @@ Use `/verbose` to toggle whether you see agent-to-agent messages.
 
 ### File Sharing
 
-Attach files to your message. Feishu files are downloaded and stored in CCCC's blob storage, then forwarded to agents.
+Attach files to your message. Feishu files are downloaded and stored in OneColleague's blob storage, then forwarded to agents.
 
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `/subscribe` | Start receiving messages from CCCC |
+| `/subscribe` | Start receiving messages from OneColleague |
 | `/unsubscribe` | Stop receiving messages |
 | `/send <message>` | Send to foreman (default) |
 | `/send @<actor> <message>` | Send to a specific agent |
@@ -274,25 +274,25 @@ Attach files to your message. Feishu files are downloaded and stored in CCCC's b
 1. Check Event Subscriptions are configured
 2. Verify the app is installed in the chat
 3. Ensure the app version is published
-4. Make sure CCCC IM Bridge is running
+4. Make sure OneColleague IM Bridge is running
 
 ### Token expired
 
-CCCC auto-refreshes tokens, but if issues persist:
+OneColleague auto-refreshes tokens, but if issues persist:
 
 ```bash
-cccc im stop
-cccc im start
+onecolleague im stop
+onecolleague im start
 ```
 
 ## Advanced Configuration
 
-CCCC currently supports:
+OneColleague currently supports:
 
 - Outbound messages via REST APIs
 - Inbound messages via persistent connection (Python `lark-oapi`)
 
-Webhook callbacks (developer server URL), message cards, and encryption settings are not configured through CCCC at the moment.
+Webhook callbacks (developer server URL), message cards, and encryption settings are not configured through OneColleague at the moment.
 
 ## Security Notes
 

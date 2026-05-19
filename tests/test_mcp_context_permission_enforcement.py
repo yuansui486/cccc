@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cccc.ports.mcp.common import MCPError
+from no1.ports.mcp.common import MCPError
 
 
 class TestMcpContextPermissionEnforcement(unittest.TestCase):
@@ -25,15 +25,15 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     @staticmethod
     def _fake_call_daemon(req, timeout_s=None):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _ = timeout_s
         resp, _meta = handle_request(DaemonRequest.model_validate(req))
@@ -50,8 +50,8 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
         }
 
     def test_peer_cannot_update_coordination_brief_via_mcp(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         _, cleanup = self._with_home()
         try:
@@ -91,7 +91,7 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
             ):
                 with self.assertRaises(MCPError) as err:
                     mcp_server.handle_tool_call(
-                        "cccc_coordination",
+                        "onecolleague_coordination",
                         {"action": "update_brief", "objective": "hijacked"},
                     )
                 self.assertEqual(err.exception.code, "context_sync_error")
@@ -105,10 +105,10 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
             cleanup()
 
     def test_role_notes_read_is_self_only_for_peers_and_full_for_foreman(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.kernel.group import load_group
-        from cccc.kernel.prompt_files import HELP_FILENAME, write_group_prompt_file
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.kernel.group import load_group
+        from no1.kernel.prompt_files import HELP_FILENAME, write_group_prompt_file
 
         _, cleanup = self._with_home()
         try:
@@ -148,18 +148,18 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 clear=False,
             ):
                 own = mcp_server.handle_tool_call(
-                    "cccc_role_notes",
+                    "onecolleague_role_notes",
                     {"action": "get", "target_actor_id": "peer-impl"},
                 )
                 self.assertEqual(str(own.get("content") or ""), "self notes")
                 with self.assertRaises(MCPError) as other_err:
                     mcp_server.handle_tool_call(
-                        "cccc_role_notes",
+                        "onecolleague_role_notes",
                         {"action": "get", "target_actor_id": "peer-2"},
                     )
                 self.assertEqual(other_err.exception.code, "permission_denied")
                 with self.assertRaises(MCPError) as list_err:
-                    mcp_server.handle_tool_call("cccc_role_notes", {"action": "get"})
+                    mcp_server.handle_tool_call("onecolleague_role_notes", {"action": "get"})
                 self.assertEqual(list_err.exception.code, "permission_denied")
 
             with patch.object(mcp_common, "call_daemon", side_effect=self._fake_call_daemon), patch.dict(
@@ -167,7 +167,7 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "foreman-impl"},
                 clear=False,
             ):
-                all_notes = mcp_server.handle_tool_call("cccc_role_notes", {"action": "get"})
+                all_notes = mcp_server.handle_tool_call("onecolleague_role_notes", {"action": "get"})
                 role_notes = all_notes.get("role_notes") if isinstance(all_notes.get("role_notes"), list) else []
                 self.assertEqual(
                     sorted((str(item.get("actor_id") or ""), str(item.get("content") or "")) for item in role_notes if isinstance(item, dict)),
@@ -181,10 +181,10 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
             cleanup()
 
     def test_foreman_role_notes_set_updates_help_actor_block_without_touching_persona_notes(self) -> None:
-        from cccc.kernel.group import load_group
-        from cccc.kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.kernel.group import load_group
+        from no1.kernel.prompt_files import HELP_FILENAME, read_group_prompt_file
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         _, cleanup = self._with_home()
         try:
@@ -231,7 +231,7 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 clear=False,
             ):
                 updated = mcp_server.handle_tool_call(
-                    "cccc_role_notes",
+                    "onecolleague_role_notes",
                     {
                         "action": "set",
                         "target_actor_id": "peer-impl",
@@ -255,10 +255,10 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "peer-impl"},
                 clear=False,
             ), patch(
-                "cccc.ports.mcp.server._append_runtime_help_addenda",
+                "no1.ports.mcp.server._append_runtime_help_addenda",
                 side_effect=lambda markdown, group_id, actor_id: markdown,
             ):
-                help_resp = mcp_server.handle_tool_call("cccc_help", {})
+                help_resp = mcp_server.handle_tool_call("onecolleague_help", {})
                 markdown = str(help_resp.get("markdown") or "")
                 self.assertIn("## Notes for you", markdown)
                 self.assertIn("Stay skeptical.\nUse receipts.", markdown)
@@ -283,8 +283,8 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
             cleanup()
 
     def test_peer_cannot_set_role_notes_via_mcp(self) -> None:
-        from cccc.ports.mcp import common as mcp_common
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
 
         _, cleanup = self._with_home()
         try:
@@ -313,7 +313,7 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
             ):
                 with self.assertRaises(MCPError) as err:
                     mcp_server.handle_tool_call(
-                        "cccc_role_notes",
+                        "onecolleague_role_notes",
                         {"action": "set", "target_actor_id": "peer-impl", "content": "I should not self-author this"},
                     )
                 self.assertEqual(err.exception.code, "permission_denied")

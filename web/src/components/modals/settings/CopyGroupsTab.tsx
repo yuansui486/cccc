@@ -82,7 +82,7 @@ export function CopyGroupsTab({ isDark, groupId, groupTitle }: CopyGroupsTabProp
         setErr(resp.error?.message || t("copyGroups.failedToExport"));
         return;
       }
-      downloadBlobFile(resp.result.filename || `cccc-group--${groupTitle || groupId}.zip`, resp.result.blob);
+      downloadBlobFile(resp.result.filename || `onecolleague-group--${groupTitle || groupId}.zip`, resp.result.blob);
       setInfo(t("copyGroups.downloaded"));
       window.setTimeout(() => setInfo(""), 1400);
     } catch {

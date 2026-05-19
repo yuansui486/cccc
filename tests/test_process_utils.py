@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 class TestProcessUtils(unittest.TestCase):
     def test_best_effort_signal_pid_targets_process_group_id(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "posix"), patch.object(
             process_utils.os,
@@ -26,7 +26,7 @@ class TestProcessUtils(unittest.TestCase):
         killpg_mock.assert_called_once_with(4321, signal.SIGTERM)
 
     def test_best_effort_signal_pid_falls_back_to_kill(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "posix"), patch.object(
             process_utils.os,
@@ -40,7 +40,7 @@ class TestProcessUtils(unittest.TestCase):
         kill_mock.assert_called_once_with(1234, signal.SIGTERM)
 
     def test_resolve_subprocess_executable_uses_windows_cmd_shim(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "nt"), patch.object(process_utils.shutil, "which", return_value=r"C:\Tools\codex.cmd"):
             resolved = process_utils.resolve_subprocess_executable("codex")
@@ -48,34 +48,34 @@ class TestProcessUtils(unittest.TestCase):
         self.assertEqual(resolved, r"C:\Tools\codex.cmd")
 
     def test_resolve_subprocess_argv_only_rewrites_executable_token(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils, "resolve_subprocess_executable", return_value=r"C:\Tools\codex.cmd") as mock_resolve:
-            argv = process_utils.resolve_subprocess_argv(["codex", "mcp", "add", "cccc"])
+            argv = process_utils.resolve_subprocess_argv(["codex", "mcp", "add", "onecolleague"])
 
-        self.assertEqual(argv, [r"C:\Tools\codex.cmd", "mcp", "add", "cccc"])
+        self.assertEqual(argv, [r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague"])
         mock_resolve.assert_called_once_with("codex")
 
     def test_resolve_background_python_argv_prefers_pythonw_on_windows(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "nt"), patch.object(
             process_utils,
             "resolve_subprocess_argv",
-            return_value=[r"D:\dev\cccc\.venv\Scripts\python.exe", "-m", "cccc.daemon_main", "run"],
+            return_value=[r"D:\dev\onecolleague\.venv\Scripts\python.exe", "-m", "no1.daemon_main", "run"],
         ), patch.object(
             process_utils,
             "_windows_pythonw_executable",
-            return_value=r"D:\dev\cccc\.venv\Scripts\pythonw.exe",
+            return_value=r"D:\dev\onecolleague\.venv\Scripts\pythonw.exe",
         ):
-            argv = process_utils.resolve_background_python_argv([r"D:\dev\cccc\.venv\Scripts\python.exe", "-m", "cccc.daemon_main", "run"])
+            argv = process_utils.resolve_background_python_argv([r"D:\dev\onecolleague\.venv\Scripts\python.exe", "-m", "no1.daemon_main", "run"])
 
-        self.assertEqual(argv, [r"D:\dev\cccc\.venv\Scripts\pythonw.exe", "-m", "cccc.daemon_main", "run"])
+        self.assertEqual(argv, [r"D:\dev\onecolleague\.venv\Scripts\pythonw.exe", "-m", "no1.daemon_main", "run"])
 
     def test_resolve_background_python_argv_preserves_posix_venv_symlink_path(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
-        argv = ["/home/dodd/dev/cccc/.venv/bin/python", "-m", "cccc.daemon_main", "run"]
+        argv = ["/home/dodd/dev/onecolleague/.venv/bin/python", "-m", "no1.daemon_main", "run"]
         with patch.object(process_utils.os, "name", "posix"), patch.object(
             process_utils,
             "resolve_subprocess_argv",
@@ -86,7 +86,7 @@ class TestProcessUtils(unittest.TestCase):
         self.assertEqual(resolved, argv)
 
     def test_supervised_process_popen_kwargs_windows_uses_detached_group(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "nt"), patch.object(
             process_utils.subprocess,
@@ -104,7 +104,7 @@ class TestProcessUtils(unittest.TestCase):
         self.assertEqual(kwargs, {"creationflags": 0x208})
 
     def test_pid_is_alive_windows_prefers_native_process_query(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "nt"), patch.object(
             process_utils,
@@ -121,7 +121,7 @@ class TestProcessUtils(unittest.TestCase):
         mock_windows_alive.assert_called_once_with(4321)
 
     def test_pid_is_alive_posix_rejects_zombie_process(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "posix"), patch.object(
             process_utils.os,
@@ -149,7 +149,7 @@ class TestProcessUtils(unittest.TestCase):
         )
 
     def test_terminate_pid_windows_include_group_uses_taskkill_tree(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "nt"), patch.object(
             process_utils,
@@ -173,7 +173,7 @@ class TestProcessUtils(unittest.TestCase):
         )
 
     def test_terminate_pid_windows_force_falls_back_to_native_terminate(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with patch.object(process_utils.os, "name", "nt"), patch.object(
             process_utils,
@@ -195,7 +195,7 @@ class TestProcessUtils(unittest.TestCase):
         mock_force_terminate.assert_called_once_with(4321)
 
     def test_resolve_subprocess_executable_searches_common_windows_user_bin_dirs(self) -> None:
-        from cccc.util import process as process_utils
+        from no1.util import process as process_utils
 
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

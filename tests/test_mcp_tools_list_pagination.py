@@ -6,15 +6,15 @@ from unittest.mock import patch
 
 class TestMcpToolsListPagination(unittest.TestCase):
     def test_tools_list_supports_limit_and_cursor(self) -> None:
-        from cccc.ports.mcp.main import handle_request
+        from no1.ports.mcp.main import handle_request
 
         fake_tools = [
-            {"name": "cccc_a", "description": "a", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-            {"name": "cccc_b", "description": "b", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-            {"name": "cccc_c", "description": "c", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+            {"name": "onecolleague_a", "description": "a", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+            {"name": "onecolleague_b", "description": "b", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+            {"name": "onecolleague_c", "description": "c", "inputSchema": {"type": "object", "properties": {}, "required": []}},
         ]
 
-        with patch("cccc.ports.mcp.main.list_tools_for_caller", return_value=fake_tools):
+        with patch("no1.ports.mcp.main.list_tools_for_caller", return_value=fake_tools):
             r1 = handle_request(
                 {
                     "jsonrpc": "2.0",

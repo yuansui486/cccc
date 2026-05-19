@@ -24,13 +24,13 @@ class TestWebPresentationApi(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -52,7 +52,7 @@ class TestWebPresentationApi(unittest.TestCase):
             )
             self.assertTrue(publish.ok, getattr(publish, "error", None))
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=AssertionError("presentation_get should not call daemon")):
+            with patch("no1.ports.web.app.call_daemon", side_effect=AssertionError("presentation_get should not call daemon")):
                 with self._client() as client:
                     resp = client.get(f"/api/v1/groups/{group_id}/presentation")
 
@@ -221,7 +221,7 @@ class TestWebPresentationApi(unittest.TestCase):
                     payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                 return payload
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     resp = client.post(
                         f"/api/v1/groups/{group_id}/presentation/publish",
@@ -253,7 +253,7 @@ class TestWebPresentationApi(unittest.TestCase):
                     payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                 return payload
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     resp = client.post(
                         f"/api/v1/groups/{group_id}/presentation/publish_upload",
@@ -295,7 +295,7 @@ class TestWebPresentationApi(unittest.TestCase):
                         payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                     return payload
 
-                with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+                with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                     with self._client() as client:
                         listing = client.get(f"/api/v1/groups/{group_id}/presentation/workspace/list")
                         publish = client.post(
@@ -347,7 +347,7 @@ class TestWebPresentationApi(unittest.TestCase):
                     payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                 return payload
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     resp = client.post(
                         f"/api/v1/groups/{group_id}/presentation/clear",

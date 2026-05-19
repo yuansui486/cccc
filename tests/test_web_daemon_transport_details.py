@@ -25,7 +25,7 @@ class TestWebDaemonTransportDetails(unittest.TestCase):
     def test_ping_503_preserves_daemon_transport_details(self) -> None:
         cleanup = self._with_home()
         try:
-            from cccc.ports.web.app import create_app
+            from no1.ports.web.app import create_app
 
             fake_resp = {
                 "ok": False,
@@ -40,7 +40,7 @@ class TestWebDaemonTransportDetails(unittest.TestCase):
                     },
                 },
             }
-            with patch("cccc.ports.web.app.call_daemon", return_value=fake_resp):
+            with patch("no1.ports.web.app.call_daemon", return_value=fake_resp):
                 with TestClient(create_app()) as client:
                     resp = client.get("/api/v1/ping")
 
@@ -48,7 +48,7 @@ class TestWebDaemonTransportDetails(unittest.TestCase):
             payload = resp.json()
             self.assertFalse(bool(payload.get("ok")))
             self.assertEqual(payload["error"]["code"], "daemon_unavailable")
-            self.assertEqual(payload["error"]["message"], "ccccd unavailable")
+            self.assertEqual(payload["error"]["message"], "onecolleagued unavailable")
             self.assertEqual(payload["error"]["details"]["phase"], "read")
             self.assertEqual(payload["error"]["details"]["reason"], "timeout")
             self.assertEqual(payload["error"]["details"]["transport"], "unix")

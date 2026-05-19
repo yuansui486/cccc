@@ -23,13 +23,13 @@ class TestWebPetContextRoute(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="pet-context-local", topic="local").group_id
@@ -49,10 +49,10 @@ class TestWebPetContextRoute(unittest.TestCase):
             }
 
             with patch(
-                "cccc.ports.web.routes.groups._get_summary_context_fast",
+                "no1.ports.web.routes.groups._get_summary_context_fast",
                 return_value=local_summary,
             ) as summary_fast, patch(
-                "cccc.ports.web.routes.groups.load_pet_signals",
+                "no1.ports.web.routes.groups.load_pet_signals",
                 return_value={
                     "signals": [],
                     "reply_pressure": {},
@@ -61,7 +61,7 @@ class TestWebPetContextRoute(unittest.TestCase):
                     "proposal_ready": {},
                 },
             ) as load_signals, patch(
-                "cccc.ports.web.app.call_daemon",
+                "no1.ports.web.app.call_daemon",
                 side_effect=AssertionError("pet-context should not call daemon"),
             ):
                 with self._client() as client:
@@ -95,13 +95,13 @@ class TestWebPetContextRoute(unittest.TestCase):
             }
 
             with patch(
-                "cccc.ports.web.routes.groups._rebuild_summary_snapshot",
+                "no1.ports.web.routes.groups._rebuild_summary_snapshot",
                 return_value=True,
             ) as rebuild, patch(
-                "cccc.ports.web.routes.groups.ContextStorage.load_summary_snapshot",
+                "no1.ports.web.routes.groups.ContextStorage.load_summary_snapshot",
                 return_value={"result": fresh_summary},
             ) as load_summary, patch(
-                "cccc.ports.web.routes.groups.load_pet_signals",
+                "no1.ports.web.routes.groups.load_pet_signals",
                 return_value={
                     "signals": [],
                     "reply_pressure": {},

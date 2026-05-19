@@ -25,7 +25,7 @@ class TestWecomAuthFrames(unittest.TestCase):
     """WeCom AI Bot auth now uses bot_id + secret over WebSocket."""
 
     def _make_adapter(self, **kw):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(
             bot_id=kw.get("bot_id", "corp123"),
             secret=kw.get("secret", "sec456"),
@@ -44,7 +44,7 @@ class TestWecomDedup(unittest.TestCase):
     """Step 9: _should_enqueue_message deduplication tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(bot_id="corp", secret="sec")
 
     def test_first_message_passes(self):
@@ -75,7 +75,7 @@ class TestWecomEnqueueMessage(unittest.TestCase):
     """Step 9: _enqueue_message normalization tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(bot_id="corp", secret="sec")
 
     def test_text_message_normalized(self):
@@ -410,7 +410,7 @@ class TestWecomConnect(unittest.TestCase):
     """Step 8: connect() early failure detection tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(bot_id="corp", secret="sec")
 
     def test_connect_disables_proxies_before_start(self):
@@ -448,7 +448,7 @@ class TestWecomConnect(unittest.TestCase):
 
 class TestWecomWebSocketReconnect(unittest.TestCase):
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(bot_id="corp", secret="sec")
 
     def test_subsequent_websocket_failure_does_not_become_first_connect_fatal(self):
@@ -513,9 +513,9 @@ class TestWecomWebSocketReconnect(unittest.TestCase):
                     adapter._ws_running = False
 
         with patch.dict(sys.modules, {"websocket": fake_websocket_module}):
-            with patch("cccc.ports.im.adapters.wecom.threading.Thread", ImmediateThread):
-                with patch("cccc.ports.im.adapters.wecom.random.uniform", return_value=0.0):
-                    with patch("cccc.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
+            with patch("no1.ports.im.adapters.wecom.threading.Thread", ImmediateThread):
+                with patch("no1.ports.im.adapters.wecom.random.uniform", return_value=0.0):
+                    with patch("no1.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
                         adapter._start_ws_listener()
 
         self.assertTrue(adapter._ws_started.is_set())
@@ -523,7 +523,7 @@ class TestWecomWebSocketReconnect(unittest.TestCase):
         self.assertGreaterEqual(attempts["count"], 2)
 
     def test_missing_heartbeat_ack_triggers_reconnect_backoff(self):
-        from cccc.ports.im.adapters.wecom import WS_HEARTBEAT_INTERVAL
+        from no1.ports.im.adapters.wecom import WS_HEARTBEAT_INTERVAL
 
         adapter = self._make_adapter()
         sends: list[str] = []
@@ -584,9 +584,9 @@ class TestWecomWebSocketReconnect(unittest.TestCase):
                 adapter._ws_running = False
 
         with patch.dict(sys.modules, {"websocket": fake_websocket_module}):
-            with patch("cccc.ports.im.adapters.wecom.threading.Thread", FakeThread):
-                with patch("cccc.ports.im.adapters.wecom.random.uniform", return_value=0.0):
-                    with patch("cccc.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
+            with patch("no1.ports.im.adapters.wecom.threading.Thread", FakeThread):
+                with patch("no1.ports.im.adapters.wecom.random.uniform", return_value=0.0):
+                    with patch("no1.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
                         adapter._start_ws_listener()
 
         self.assertTrue(adapter._ws_started.is_set())
@@ -600,7 +600,7 @@ class TestWecomRespondHandles(unittest.TestCase):
     """Step 10-11: callback req_id capture and cache behavior."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(bot_id="corp", secret="sec")
 
     def test_enqueue_captures_reply_req_id(self):
@@ -646,7 +646,7 @@ class TestWecomRespondHandles(unittest.TestCase):
         self.assertEqual(adapter._get_reply_req_id("conv_1"), "req_old")
 
     def test_reply_ref_cache_prunes_oldest_entries(self):
-        from cccc.ports.im.adapters.wecom import REPLY_REF_MAX_ENTRIES
+        from no1.ports.im.adapters.wecom import REPLY_REF_MAX_ENTRIES
 
         adapter = self._make_adapter()
         for idx in range(REPLY_REF_MAX_ENTRIES + 8):
@@ -686,7 +686,7 @@ class TestWecomRespondHandles(unittest.TestCase):
 
 class TestWecomRateLimiter(unittest.TestCase):
     def test_wait_and_acquire_sleeps_for_same_chat_burst(self):
-        from cccc.ports.im.adapters.wecom import RateLimiter
+        from no1.ports.im.adapters.wecom import RateLimiter
 
         limiter = RateLimiter(max_per_second=2.0)
         fake_clock = {"now": 100.0}
@@ -699,8 +699,8 @@ class TestWecomRateLimiter(unittest.TestCase):
             sleep_calls.append(seconds)
             fake_clock["now"] += seconds
 
-        with patch("cccc.ports.im.adapters.wecom.time.time", side_effect=fake_time):
-            with patch("cccc.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
+        with patch("no1.ports.im.adapters.wecom.time.time", side_effect=fake_time):
+            with patch("no1.ports.im.adapters.wecom.time.sleep", side_effect=fake_sleep):
                 limiter.wait_and_acquire("chat-1")
                 limiter.wait_and_acquire("chat-1")
 
@@ -712,7 +712,7 @@ class TestWecomSendMessage(unittest.TestCase):
     """Step 10: send_message tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         adapter = WecomAdapter(bot_id="corp", secret="sec")
         adapter._connected = True
         return adapter
@@ -815,7 +815,7 @@ class _FakeHttpResponse:
 
 class TestWecomAttachments(unittest.TestCase):
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         adapter = WecomAdapter(bot_id="corp", secret="sec")
         adapter._connected = True
         return adapter
@@ -831,7 +831,7 @@ class TestWecomAttachments(unittest.TestCase):
             self.assertEqual(timeout, 60)
             return _FakeHttpResponse(b"image-bytes")
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             raw = adapter.download_attachment({"media_id": "media_abc"})
 
         self.assertEqual(raw, b"image-bytes")
@@ -844,7 +844,7 @@ class TestWecomAttachments(unittest.TestCase):
             self.assertEqual(timeout, 60)
             return _FakeHttpResponse(b"encrypted-bytes")
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             with patch.object(adapter, "_decrypt_media_bytes", return_value=b"plain-bytes") as mock_decrypt:
                 raw = adapter.download_attachment({
                     "download_url": "https://example.test/media.enc",
@@ -864,7 +864,7 @@ class TestWecomAttachments(unittest.TestCase):
             self.assertEqual(timeout, 60)
             return _FakeHttpResponse(encrypted)
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             with patch.object(subprocess, "run", side_effect=AssertionError("external openssl should not be used")):
                 raw = adapter.download_attachment({
                     "download_url": "https://example.test/media.enc",
@@ -881,7 +881,7 @@ class TestWecomAttachments(unittest.TestCase):
             self.assertEqual(timeout, 60)
             return _FakeHttpResponse(b"raw-bytes")
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             with patch.object(adapter, "_decrypt_media_bytes") as mock_decrypt:
                 raw = adapter.download_attachment({
                     "download_url": "https://example.test/media.bin",
@@ -892,7 +892,7 @@ class TestWecomAttachments(unittest.TestCase):
 
     def test_decrypt_media_bytes_uses_python_crypto_without_openssl(self):
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cccc.ports.im.adapters.wecom import WECOM_MEDIA_BLOCK_SIZE
+        from no1.ports.im.adapters.wecom import WECOM_MEDIA_BLOCK_SIZE
 
         adapter = self._make_adapter()
         key = b"0123456789abcdef0123456789abcdef"
@@ -925,7 +925,7 @@ class TestWecomAttachments(unittest.TestCase):
                 {"Content-Disposition": 'attachment; filename="tsvpn.ini"'},
             )
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             raw = adapter.download_attachment(attachment)
 
         self.assertEqual(raw, b"raw-bytes")
@@ -946,7 +946,7 @@ class TestWecomAttachments(unittest.TestCase):
                 {"Content-Disposition": "attachment; filename*=UTF-8''tsvpn.ini"},
             )
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             raw = adapter.download_attachment(attachment)
 
         self.assertEqual(raw, b"raw-bytes")
@@ -967,7 +967,7 @@ class TestWecomAttachments(unittest.TestCase):
                 {"Content-Disposition": 'attachment; filename="tsvpn.ini"'},
             )
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             raw = adapter.download_attachment(attachment)
 
         self.assertEqual(raw, b"raw-bytes")
@@ -990,7 +990,7 @@ class TestWecomAttachments(unittest.TestCase):
                 {"Content-Disposition": 'attachment; filename="tsvpn.ini"'},
             )
 
-        with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen", side_effect=fake_urlopen):
             with patch.object(adapter, "_decrypt_media_bytes", return_value=b"plain-bytes"):
                 with patch.object(adapter, "_log", side_effect=logs.append):
                     raw = adapter.download_attachment(attachment)
@@ -1028,7 +1028,7 @@ class TestWecomAttachments(unittest.TestCase):
             image_path = Path(td) / "photo.png"
             image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
 
-            with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen") as mock_urlopen:
+            with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen") as mock_urlopen:
                 with patch.object(adapter, "_ws_send_and_wait_ack", side_effect=fake_ws_send_and_wait_ack):
                     with patch.object(adapter, "send_message", return_value=True) as mock_caption:
                         ok = adapter.send_file(
@@ -1080,7 +1080,7 @@ class TestWecomAttachments(unittest.TestCase):
             file_path = Path(td) / "report.pdf"
             file_path.write_bytes(b"%PDF-1.4")
 
-            with patch("cccc.ports.im.adapters.wecom.urllib.request.urlopen") as mock_urlopen:
+            with patch("no1.ports.im.adapters.wecom.urllib.request.urlopen") as mock_urlopen:
                 with patch.object(adapter, "_ws_send_and_wait_ack", side_effect=fake_ws_send_and_wait_ack) as mock_ws:
                     with patch.object(adapter, "send_message", return_value=True) as mock_caption:
                         ok = adapter.send_file(
@@ -1162,7 +1162,7 @@ class TestWecomStreaming(unittest.TestCase):
     """Step 11: Streaming reply tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         adapter = WecomAdapter(bot_id="corp", secret="sec")
         adapter._connected = True
         return adapter
@@ -1288,7 +1288,7 @@ class _AckingWebSocket:
 
 class TestWecomReplyAck(unittest.TestCase):
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         adapter = WecomAdapter(bot_id="corp", secret="sec")
         adapter._connected = True
         return adapter
@@ -1329,7 +1329,7 @@ class TestWecomDisconnect(unittest.TestCase):
     """Step 13: Enhanced disconnect tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         adapter = WecomAdapter(bot_id="corp", secret="sec")
         adapter._connected = True
         return adapter
@@ -1353,7 +1353,7 @@ class TestWecomGetChatTitle(unittest.TestCase):
     """Step 13: get_chat_title tests."""
 
     def _make_adapter(self):
-        from cccc.ports.im.adapters.wecom import WecomAdapter
+        from no1.ports.im.adapters.wecom import WecomAdapter
         return WecomAdapter(bot_id="corp", secret="sec")
 
     def test_returns_chat_id(self):

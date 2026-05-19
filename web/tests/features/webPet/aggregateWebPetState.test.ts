@@ -9,7 +9,7 @@ function makeInput(overrides: Partial<AggregateInput> = {}): AggregateInput {
     groupContext: null,
     events: [],
     sseStatus: "connected",
-    teamName: "cccc",
+    teamName: "onecolleague",
     groupId: "g_test",
     ...overrides,
   };

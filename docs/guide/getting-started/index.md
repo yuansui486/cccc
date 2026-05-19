@@ -1,10 +1,10 @@
 # Getting Started
 
-Get CCCC running in 10 minutes.
+Get OneColleague running in 10 minutes.
 
 ## Choose Your Approach
 
-CCCC offers two ways to get started:
+OneColleague offers two ways to get started:
 
 <div class="vp-card-container">
 
@@ -53,17 +53,17 @@ Both approaches require:
 
 ### Upgrading from older versions
 
-If you have an older version of cccc-pair installed (e.g., 0.3.x), you must uninstall it first:
+If you have an older version of no1 installed (e.g., 0.3.x), you must uninstall it first:
 
 ```bash
 # For pipx users
-pipx uninstall cccc-pair
+pipx uninstall no1
 
 # For pip users
-pip uninstall cccc-pair
+pip uninstall no1
 
 # Remove any leftover binaries if needed
-rm -f ~/.local/bin/cccc ~/.local/bin/ccccd
+rm -f ~/.local/bin/onecolleague ~/.local/bin/onecolleagued
 ```
 
 ::: warning Version 0.4.x Breaking Changes
@@ -73,7 +73,7 @@ Version 0.4.x has a completely different command structure from 0.3.x. The old `
 ### From PyPI
 
 ```bash
-pip install -U cccc-pair
+pip install -U no1
 ```
 
 ### From TestPyPI (for explicit RC testing)
@@ -82,21 +82,21 @@ pip install -U cccc-pair
 pip install -U --pre \
   --index-url https://test.pypi.org/simple \
   --extra-index-url https://pypi.org/simple \
-  cccc-pair
+  no1
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/ChesterRa/cccc
-cd cccc
+git clone https://github.com/ChesterRa/onecolleague
+cd onecolleague
 pip install -e .
 ```
 
 ## Verify Installation
 
 ```bash
-cccc doctor
+onecolleague doctor
 ```
 
 This checks Python version, available runtimes, and system configuration.
@@ -105,8 +105,8 @@ This checks Python version, available runtimes, and system configuration.
 
 - [Web UI Quick Start](./web) - Get started with the visual interface
 - [CLI Quick Start](./cli) - Get started with the command line
-- [Docker Deployment](./docker) - Deploy CCCC in a Docker container
-- [SDK Overview](/sdk/) - Integrate CCCC into external apps/services
+- [Docker Deployment](./docker) - Deploy OneColleague in a Docker container
+- [SDK Overview](/sdk/) - Integrate OneColleague into external apps/services
 - [Use Cases](/guide/use-cases) - Learn high-ROI real-world patterns
-- [Operations Runbook](/guide/operations) - Run CCCC with operator-grade reliability
-- [Positioning](/reference/positioning) - Decide where CCCC should sit in your stack
+- [Operations Runbook](/guide/operations) - Run OneColleague with operator-grade reliability
+- [Positioning](/reference/positioning) - Decide where OneColleague should sit in your stack

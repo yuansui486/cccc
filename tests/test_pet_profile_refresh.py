@@ -21,12 +21,12 @@ class _FakeGroup:
 
 class TestPetProfileRefresh(unittest.TestCase):
     def tearDown(self) -> None:
-        from cccc.daemon.pet import assistive_jobs
+        from no1.daemon.pet import assistive_jobs
 
         assistive_jobs.cancel_job("g-demo", assistive_jobs.JOB_KIND_PET_PROFILE_REFRESH)
 
     def test_record_user_chat_message_skips_paste_noise(self) -> None:
-        from cccc.daemon.pet import profile_refresh
+        from no1.daemon.pet import profile_refresh
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -55,7 +55,7 @@ class TestPetProfileRefresh(unittest.TestCase):
         self.assertEqual(state.get("samples"), [])
 
     def test_bootstrap_threshold_dispatches_profile_refresh(self) -> None:
-        from cccc.daemon.pet import profile_refresh
+        from no1.daemon.pet import profile_refresh
 
         emitted = []
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,7 +113,7 @@ class TestPetProfileRefresh(unittest.TestCase):
         )
 
     def test_refresh_requires_twenty_new_eligible_messages_after_apply(self) -> None:
-        from cccc.daemon.pet import profile_refresh
+        from no1.daemon.pet import profile_refresh
 
         emitted = []
         with tempfile.TemporaryDirectory() as tmp:
@@ -182,7 +182,7 @@ class TestPetProfileRefresh(unittest.TestCase):
         )
 
     def test_mark_applied_advances_refresh_watermark(self) -> None:
-        from cccc.daemon.pet import profile_refresh
+        from no1.daemon.pet import profile_refresh
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

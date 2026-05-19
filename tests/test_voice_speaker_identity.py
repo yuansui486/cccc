@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from cccc.daemon.assistants.voice_speaker_identity import (
+from no1.daemon.assistants.voice_speaker_identity import (
     remap_speaker_embeddings,
     run_final_diarization_file,
     run_provisional_diarization_window,
@@ -221,7 +221,7 @@ class VoiceSpeakerIdentityTests(unittest.TestCase):
     def test_run_final_diarization_file_applies_identity_stabilization(self) -> None:
         async def _run() -> dict:
             with patch(
-                "cccc.daemon.assistants.voice_speaker_identity.run_sherpa_diarization_file",
+                "no1.daemon.assistants.voice_speaker_identity.run_sherpa_diarization_file",
                 new=AsyncMock(return_value={
                     "segments": [
                         {"speaker_label": "Speaker 1", "speaker_index": 0, "start_ms": 0, "end_ms": 3000},
@@ -256,7 +256,7 @@ class VoiceSpeakerIdentityTests(unittest.TestCase):
     def test_run_provisional_diarization_window_offsets_and_merges_global_segments(self) -> None:
         async def _run() -> dict:
             with patch(
-                "cccc.daemon.assistants.voice_speaker_identity.run_sherpa_diarization",
+                "no1.daemon.assistants.voice_speaker_identity.run_sherpa_diarization",
                 new=AsyncMock(return_value={
                     "segments": [
                         {"speaker_label": "Speaker 1", "speaker_index": 0, "start_ms": 0, "end_ms": 3000},
@@ -300,7 +300,7 @@ class VoiceSpeakerIdentityTests(unittest.TestCase):
     def test_run_provisional_diarization_window_keeps_trimmed_boundary_history(self) -> None:
         async def _run() -> dict:
             with patch(
-                "cccc.daemon.assistants.voice_speaker_identity.run_sherpa_diarization",
+                "no1.daemon.assistants.voice_speaker_identity.run_sherpa_diarization",
                 new=AsyncMock(return_value={
                     "segments": [
                         {"speaker_label": "Speaker 1", "speaker_index": 0, "start_ms": 0, "end_ms": 1000},

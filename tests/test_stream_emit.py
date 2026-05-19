@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from cccc.contracts.v1 import ChatStreamData
+from no1.contracts.v1 import ChatStreamData
 
 
 class TestStreamEmit(unittest.TestCase):
@@ -25,9 +25,9 @@ class TestStreamEmit(unittest.TestCase):
         return td, cleanup
 
     def test_stream_start_generates_stream_id(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_stream_emit
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.chat_ops import handle_stream_emit
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
@@ -53,9 +53,9 @@ class TestStreamEmit(unittest.TestCase):
             cleanup()
 
     def test_stream_update_requires_stream_id(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_stream_emit
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.chat_ops import handle_stream_emit
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
@@ -73,9 +73,9 @@ class TestStreamEmit(unittest.TestCase):
             cleanup()
 
     def test_stream_update_and_end(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_stream_emit
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.chat_ops import handle_stream_emit
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
@@ -120,9 +120,9 @@ class TestStreamEmit(unittest.TestCase):
             cleanup()
 
     def test_stream_invalid_op(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_stream_emit
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.chat_ops import handle_stream_emit
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:
@@ -139,10 +139,10 @@ class TestStreamEmit(unittest.TestCase):
             cleanup()
 
     def test_stream_events_written_to_ledger(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_stream_emit
-        from cccc.kernel.group import create_group
-        from cccc.kernel.inbox import iter_events
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.chat_ops import handle_stream_emit
+        from no1.kernel.group import create_group
+        from no1.kernel.inbox import iter_events
+        from no1.kernel.registry import load_registry
 
         _, cleanup = self._with_home()
         try:

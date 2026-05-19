@@ -23,8 +23,8 @@ class TestWebRemoteAccessApply(unittest.TestCase):
         return td, cleanup
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
@@ -46,9 +46,9 @@ class TestWebRemoteAccessApply(unittest.TestCase):
         return cleanup
 
     def test_remote_access_apply_accepts_supervised_restart(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.settings import update_remote_access_settings
-        from cccc.ports.web.app import create_app
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.settings import update_remote_access_settings
+        from no1.ports.web.app import create_app
         _, cleanup = self._with_home()
         cleanup_supervised = self._with_env("CCCC_WEB_SUPERVISED", "1")
         cleanup_host = self._with_env("CCCC_WEB_EFFECTIVE_HOST", "127.0.0.1")
@@ -58,7 +58,7 @@ class TestWebRemoteAccessApply(unittest.TestCase):
             created = create_access_token("admin-user", is_admin=True)
             token = str(created.get("token") or "")
             update_remote_access_settings({"provider": "manual", "enabled": True, "web_host": "0.0.0.0", "web_port": 9001})
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 app = create_app()
                 called: list[str] = []
                 with TestClient(app) as client:
@@ -80,9 +80,9 @@ class TestWebRemoteAccessApply(unittest.TestCase):
             cleanup()
 
     def test_remote_access_apply_rejects_unsupervised_runtime(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.settings import update_remote_access_settings
-        from cccc.ports.web.app import create_app
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.settings import update_remote_access_settings
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         cleanup_supervised = self._with_env("CCCC_WEB_SUPERVISED", None)
@@ -93,7 +93,7 @@ class TestWebRemoteAccessApply(unittest.TestCase):
             created = create_access_token("admin-user", is_admin=True)
             token = str(created.get("token") or "")
             update_remote_access_settings({"provider": "manual", "enabled": True, "web_host": "0.0.0.0", "web_port": 9001})
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 with TestClient(create_app()) as client:
                     resp = client.post("/api/v1/remote_access/apply?by=user", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 409)

@@ -87,7 +87,7 @@
       "escalatedWaitingUser": "{{taskId}} has looked like waiting_user for multiple cycles; close the user dependency now{{suffix}}"
     },
     "draft": {
-      "prefix": "Use cccc_task to {{operation}} this task{{refs}}.{{reason}}",
+      "prefix": "Use onecolleague_task to {{operation}} this task{{refs}}.{{reason}}",
       "moveActive": "{{actorId}} already mounted this task; sync its status to active.",
       "syncWaitingUser": "{{actorId}} is currently focused on {{focus}}; add waiting_on=user and record the user dependency.",
       "syncWaitingUserClose": "{{actorId}} is currently focused on {{focus}}; close waiting_on=user explicitly and assign the next owner.",

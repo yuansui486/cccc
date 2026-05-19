@@ -27,12 +27,12 @@ class _UrlopenResponse:
 
 class TestWebRuntimeControl(unittest.TestCase):
     def test_wait_for_web_ready_retries_after_oserror(self) -> None:
-        from cccc.ports.web.runtime_control import wait_for_web_ready
+        from no1.ports.web.runtime_control import wait_for_web_ready
 
         with patch(
-            "cccc.ports.web.runtime_control.urllib.request.urlopen",
+            "no1.ports.web.runtime_control.urllib.request.urlopen",
             side_effect=[ConnectionResetError("not ready"), _UrlopenResponse(200)],
-        ) as mock_urlopen, patch("cccc.ports.web.runtime_control.time.sleep") as mock_sleep:
+        ) as mock_urlopen, patch("no1.ports.web.runtime_control.time.sleep") as mock_sleep:
             ready = wait_for_web_ready(host="127.0.0.1", port=8848, timeout_s=0.2)
 
         self.assertTrue(ready)
@@ -40,13 +40,13 @@ class TestWebRuntimeControl(unittest.TestCase):
         mock_sleep.assert_called_once_with(0.1)
 
     def test_wait_for_web_ready_retries_after_http_protocol_error(self) -> None:
-        from cccc.ports.web.runtime_control import wait_for_web_ready
+        from no1.ports.web.runtime_control import wait_for_web_ready
         import http.client
 
         with patch(
-            "cccc.ports.web.runtime_control.urllib.request.urlopen",
+            "no1.ports.web.runtime_control.urllib.request.urlopen",
             side_effect=[http.client.RemoteDisconnected("not ready"), _UrlopenResponse(200)],
-        ) as mock_urlopen, patch("cccc.ports.web.runtime_control.time.sleep") as mock_sleep:
+        ) as mock_urlopen, patch("no1.ports.web.runtime_control.time.sleep") as mock_sleep:
             ready = wait_for_web_ready(host="127.0.0.1", port=8848, timeout_s=0.2)
 
         self.assertTrue(ready)
@@ -54,28 +54,28 @@ class TestWebRuntimeControl(unittest.TestCase):
         mock_sleep.assert_called_once_with(0.1)
 
     def test_wait_for_child_exit_interruptibly_returns_exit_code(self) -> None:
-        from cccc.ports.web.runtime_control import wait_for_child_exit_interruptibly
+        from no1.ports.web.runtime_control import wait_for_child_exit_interruptibly
 
         proc = _PollingProc([None, None, 75])
-        with patch("cccc.ports.web.runtime_control.time.sleep") as mock_sleep:
+        with patch("no1.ports.web.runtime_control.time.sleep") as mock_sleep:
             ret = wait_for_child_exit_interruptibly(proc, poll_interval_s=0.01)
 
         self.assertEqual(ret, 75)
         self.assertEqual(mock_sleep.call_count, 2)
 
     def test_wait_for_child_exit_interruptibly_propagates_keyboard_interrupt(self) -> None:
-        from cccc.ports.web.runtime_control import wait_for_child_exit_interruptibly
+        from no1.ports.web.runtime_control import wait_for_child_exit_interruptibly
 
         proc = _PollingProc([None])
         with patch(
-            "cccc.ports.web.runtime_control.time.sleep",
+            "no1.ports.web.runtime_control.time.sleep",
             side_effect=KeyboardInterrupt(),
         ):
             with self.assertRaises(KeyboardInterrupt):
                 wait_for_child_exit_interruptibly(proc, poll_interval_s=0.01)
 
     def test_run_supervised_web_stops_child_on_keyboard_interrupt(self) -> None:
-        from cccc.ports.web import main as web_main
+        from no1.ports.web import main as web_main
 
         td_ctx = tempfile.TemporaryDirectory()
         home = Path(td_ctx.__enter__())
@@ -104,7 +104,7 @@ class TestWebRuntimeControl(unittest.TestCase):
             td_ctx.__exit__(None, None, None)
 
     def test_spawn_web_child_windows_uses_supervised_process_kwargs_and_log_file(self) -> None:
-        from cccc.ports.web import runtime_control
+        from no1.ports.web import runtime_control
 
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
@@ -112,7 +112,7 @@ class TestWebRuntimeControl(unittest.TestCase):
             with patch.object(runtime_control.os, "name", "nt"), patch.object(
                 runtime_control,
                 "resolve_background_python_argv",
-                return_value=[r"D:\dev\cccc\.venv\Scripts\pythonw.exe", "-m", "cccc.ports.web.main", "--serve-child"],
+                return_value=[r"D:\dev\cccc\.venv\Scripts\pythonw.exe", "-m", "no1.ports.web.main", "--serve-child"],
             ) as mock_argv, patch.object(
                 runtime_control,
                 "supervised_process_popen_kwargs",
@@ -120,7 +120,7 @@ class TestWebRuntimeControl(unittest.TestCase):
             ), patch.object(
                 runtime_control,
                 "web_runtime_log_path",
-                return_value=home / "daemon" / "cccc-web.log",
+                return_value=home / "daemon" / "onecolleague-web.log",
             ), patch.object(runtime_control.subprocess, "Popen", return_value=fake_proc) as mock_popen:
                 proc = runtime_control.spawn_web_child(
                     home=home,
@@ -138,12 +138,12 @@ class TestWebRuntimeControl(unittest.TestCase):
             self.assertEqual(kwargs.get("creationflags"), 0x208)
             self.assertEqual(kwargs.get("stdin"), runtime_control.subprocess.DEVNULL)
             self.assertEqual(kwargs.get("cwd"), str(home))
-            self.assertTrue(str(getattr(kwargs.get("stdout"), "name", "")).endswith("cccc-web.log"))
+            self.assertTrue(str(getattr(kwargs.get("stdout"), "name", "")).endswith("onecolleague-web.log"))
             self.assertIs(kwargs.get("stdout"), kwargs.get("stderr"))
 
     def test_start_supervised_web_child_cleans_up_on_keyboard_interrupt(self) -> None:
-        from cccc.ports.web import runtime_control
-        from cccc.ports.web import bind_preflight
+        from no1.ports.web import runtime_control
+        from no1.ports.web import bind_preflight
 
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
@@ -172,8 +172,8 @@ class TestWebRuntimeControl(unittest.TestCase):
             mock_clear.assert_called_once_with(home=home, pid=4321)
 
     def test_start_supervised_web_child_uses_default_ready_timeout(self) -> None:
-        from cccc.ports.web import runtime_control
-        from cccc.ports.web import bind_preflight
+        from no1.ports.web import runtime_control
+        from no1.ports.web import bind_preflight
 
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
@@ -198,8 +198,8 @@ class TestWebRuntimeControl(unittest.TestCase):
         self.assertEqual(wait_ready.call_args.kwargs.get("timeout_s"), 10.0)
 
     def test_start_supervised_web_child_allows_ready_timeout_env_override(self) -> None:
-        from cccc.ports.web import runtime_control
-        from cccc.ports.web import bind_preflight
+        from no1.ports.web import runtime_control
+        from no1.ports.web import bind_preflight
 
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
@@ -227,14 +227,14 @@ class TestWebRuntimeControl(unittest.TestCase):
         self.assertEqual(wait_ready.call_args.kwargs.get("timeout_s"), 15.0)
 
     def test_web_runtime_pid_candidates_prefers_launcher_pid(self) -> None:
-        from cccc.ports.web import runtime_control
+        from no1.ports.web import runtime_control
 
         candidates = runtime_control.web_runtime_pid_candidates({"pid": 4321, "launcher_pid": 9876})
 
         self.assertEqual(candidates, [9876, 4321])
 
     def test_clear_web_runtime_state_accepts_launcher_pid(self) -> None:
-        from cccc.ports.web import runtime_control
+        from no1.ports.web import runtime_control
 
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)

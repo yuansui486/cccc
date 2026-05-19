@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 class TestQueryProjections(unittest.TestCase):
     def test_groups_projection_refreshes_after_group_state_change(self) -> None:
-        from cccc.daemon.ops.registry_ops import handle_groups
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.ops.registry_ops import handle_groups
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -43,9 +43,9 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_groups_projection_avoids_reloading_yaml_on_cache_hit(self) -> None:
-        from cccc.daemon.ops.registry_ops import handle_groups
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.ops.registry_ops import handle_groups
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -57,7 +57,7 @@ class TestQueryProjections(unittest.TestCase):
                 first = handle_groups({})
                 self.assertTrue(first.ok)
 
-                with patch("cccc.kernel.query_projections.load_group", side_effect=AssertionError("cache miss")):
+                with patch("no1.kernel.query_projections.load_group", side_effect=AssertionError("cache miss")):
                     second = handle_groups({})
                 self.assertTrue(second.ok)
         finally:
@@ -67,9 +67,9 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_groups_projection_marks_codex_group_running(self) -> None:
-        from cccc.daemon.ops.registry_ops import handle_groups
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.ops.registry_ops import handle_groups
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -78,7 +78,7 @@ class TestQueryProjections(unittest.TestCase):
                 reg = load_registry()
                 gid = create_group(reg, title="codex-proj", topic="").group_id
 
-                with patch("cccc.daemon.ops.registry_ops.codex_app_supervisor.group_running", return_value=True):
+                with patch("no1.daemon.ops.registry_ops.codex_app_supervisor.group_running", return_value=True):
                     resp = handle_groups({})
 
                 self.assertTrue(resp.ok)
@@ -92,11 +92,11 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_groups_projection_marks_web_model_marker_running(self) -> None:
-        from cccc.daemon.ops.registry_ops import handle_groups
-        from cccc.daemon.runner_state_ops import write_headless_state
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.ops.registry_ops import handle_groups
+        from no1.daemon.runner_state_ops import write_headless_state
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -120,10 +120,10 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_projection_refreshes_after_actor_update(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.actors.actor_ops import handle_actor_list
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -158,10 +158,10 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_projection_avoids_rebuilding_on_cache_hit(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.actors.actor_ops import handle_actor_list
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -177,7 +177,7 @@ class TestQueryProjections(unittest.TestCase):
                 first = handle_actor_list({"group_id": gid, "include_unread": False}, effective_runner_kind=lambda _: "pty")
                 self.assertTrue(first.ok)
 
-                with patch("cccc.kernel.query_projections.list_actors", side_effect=AssertionError("cache miss")):
+                with patch("no1.kernel.query_projections.list_actors", side_effect=AssertionError("cache miss")):
                     second = handle_actor_list({"group_id": gid, "include_unread": False}, effective_runner_kind=lambda _: "pty")
                 self.assertTrue(second.ok)
         finally:
@@ -187,10 +187,10 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_list_include_internal_opt_in_exposes_pet_actor_only_when_requested(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.actors.actor_ops import handle_actor_list
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -228,11 +228,11 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_projection_marks_running_pty_without_prompt_as_waiting(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.context import ContextStorage
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.actors.actor_ops import handle_actor_list
+        from no1.kernel.actors import add_actor
+        from no1.kernel.context import ContextStorage
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -248,8 +248,8 @@ class TestQueryProjections(unittest.TestCase):
                 storage = ContextStorage(group)  # type: ignore[arg-type]
                 storage.update_agent_state("peer1", "Implement auth", active_task_id="T100")
 
-                with patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                    "cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.idle_seconds",
+                with patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                    "no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.idle_seconds",
                     return_value=12.0,
                 ):
                     resp = handle_actor_list({"group_id": gid, "include_unread": False}, effective_runner_kind=lambda _: "pty")
@@ -267,10 +267,10 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_projection_marks_recent_running_pty_without_prompt_as_working(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.actors.actor_ops import handle_actor_list
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -284,9 +284,9 @@ class TestQueryProjections(unittest.TestCase):
                 group.save()  # type: ignore[union-attr]
 
                 with (
-                    patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.actor_running", return_value=True),
-                    patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.idle_seconds", return_value=1.2),
-                    patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.tail_output", return_value=b"still running"),
+                    patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.actor_running", return_value=True),
+                    patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.idle_seconds", return_value=1.2),
+                    patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.tail_output", return_value=b"still running"),
                 ):
                     resp = handle_actor_list({"group_id": gid, "include_unread": False}, effective_runner_kind=lambda _: "pty")
 
@@ -302,10 +302,10 @@ class TestQueryProjections(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_actor_projection_does_not_mark_fresh_running_pty_without_output_as_working(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.actors.actor_ops import handle_actor_list
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -319,9 +319,9 @@ class TestQueryProjections(unittest.TestCase):
                 group.save()  # type: ignore[union-attr]
 
                 with (
-                    patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.actor_running", return_value=True),
-                    patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.idle_seconds", return_value=0.4),
-                    patch("cccc.daemon.actors.actor_ops.pty_runner.SUPERVISOR.tail_output", return_value=b""),
+                    patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.actor_running", return_value=True),
+                    patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.idle_seconds", return_value=0.4),
+                    patch("no1.daemon.actors.actor_ops.pty_runner.SUPERVISOR.tail_output", return_value=b""),
                 ):
                     resp = handle_actor_list({"group_id": gid, "include_unread": False}, effective_runner_kind=lambda _: "pty")
 

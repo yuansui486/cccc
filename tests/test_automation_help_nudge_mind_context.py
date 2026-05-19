@@ -14,9 +14,9 @@ def _iso(dt: datetime) -> str:
 
 class TestAutomationHelpNudgeMindContext(unittest.TestCase):
     def _setup_group(self, *, runner: str = "pty"):
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title="help-nudge")
@@ -44,7 +44,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
         persona_notes: str,
         updated_at: str,
     ) -> None:
-        from cccc.kernel.context import AgentState, AgentStateHot, AgentStateWarm, AgentsData, ContextStorage
+        from no1.kernel.context import AgentState, AgentStateHot, AgentStateWarm, AgentsData, ContextStorage
 
         storage = ContextStorage(group)
         storage.save_agents(
@@ -100,7 +100,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
         return json.loads(lines[-1])
 
     def _append_message(self, group, *, to: list[str], text: str = "ping") -> None:
-        from cccc.kernel.ledger import append_event
+        from no1.kernel.ledger import append_event
 
         append_event(
             group.ledger_path,
@@ -112,7 +112,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
         )
 
     def test_help_nudge_prefers_execution_refresh_when_execution_state_missing(self) -> None:
-        from cccc.daemon.automation import AutomationManager, _cfg
+        from no1.daemon.automation import AutomationManager, _cfg
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -134,10 +134,10 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
 
                 manager = AutomationManager()
                 cfg = _cfg(group)
-                with patch("cccc.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                    "cccc.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
+                with patch("no1.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                    "no1.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
                     return_value="sess1",
-                ), patch("cccc.daemon.automation.engine._queue_notify_to_pty", return_value=None):
+                ), patch("no1.daemon.automation.engine._queue_notify_to_pty", return_value=None):
                     manager._check_help_nudge(group, cfg, now)
 
                 ev = self._latest_notify(group)
@@ -151,7 +151,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_help_nudge_switches_to_mind_context_when_execution_is_ready(self) -> None:
-        from cccc.daemon.automation import AutomationManager, _cfg
+        from no1.daemon.automation import AutomationManager, _cfg
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -173,10 +173,10 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
 
                 manager = AutomationManager()
                 cfg = _cfg(group)
-                with patch("cccc.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                    "cccc.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
+                with patch("no1.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                    "no1.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
                     return_value="sess1",
-                ), patch("cccc.daemon.automation.engine._queue_notify_to_pty", return_value=None):
+                ), patch("no1.daemon.automation.engine._queue_notify_to_pty", return_value=None):
                     manager._check_help_nudge(group, cfg, now)
 
                 ev = self._latest_notify(group)
@@ -190,7 +190,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_help_nudge_stays_silent_when_execution_and_mind_context_are_ready(self) -> None:
-        from cccc.daemon.automation import AutomationManager, _cfg
+        from no1.daemon.automation import AutomationManager, _cfg
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -213,10 +213,10 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
 
                 manager = AutomationManager()
                 cfg = _cfg(group)
-                with patch("cccc.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                    "cccc.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
+                with patch("no1.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                    "no1.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
                     return_value="sess1",
-                ), patch("cccc.daemon.automation.engine._queue_notify_to_pty", return_value=None):
+                ), patch("no1.daemon.automation.engine._queue_notify_to_pty", return_value=None):
                     manager._check_help_nudge(group, cfg, now)
 
                 after = group.ledger_path.read_text(encoding="utf-8")
@@ -228,7 +228,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_help_nudge_injects_headless_codex_control_turn(self) -> None:
-        from cccc.daemon.automation import AutomationManager, _cfg
+        from no1.daemon.automation import AutomationManager, _cfg
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -251,14 +251,14 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
                 manager = AutomationManager()
                 cfg = _cfg(group)
                 with (
-                    patch("cccc.daemon.automation.engine.headless_runner.SUPERVISOR.actor_running", return_value=True),
+                    patch("no1.daemon.automation.engine.headless_runner.SUPERVISOR.actor_running", return_value=True),
                     patch(
-                        "cccc.daemon.automation.engine.headless_runner.SUPERVISOR.get_state",
+                        "no1.daemon.automation.engine.headless_runner.SUPERVISOR.get_state",
                         return_value=SimpleNamespace(started_at="sess1"),
                     ),
-                    patch("cccc.daemon.codex_app_sessions.SUPERVISOR.actor_running", return_value=True),
+                    patch("no1.daemon.codex_app_sessions.SUPERVISOR.actor_running", return_value=True),
                     patch(
-                        "cccc.daemon.codex_app_sessions.SUPERVISOR.submit_control_message",
+                        "no1.daemon.codex_app_sessions.SUPERVISOR.submit_control_message",
                         return_value=True,
                     ) as submit_control_message,
                 ):
@@ -280,7 +280,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_help_nudge_counts_new_messages_without_holding_lock_for_ledger_read(self) -> None:
-        from cccc.daemon.automation import AutomationManager, _cfg
+        from no1.daemon.automation import AutomationManager, _cfg
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -307,10 +307,10 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
 
                 manager = AutomationManager()
                 cfg = _cfg(group)
-                with patch("cccc.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                    "cccc.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
+                with patch("no1.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                    "no1.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
                     return_value="sess1",
-                ), patch("cccc.daemon.automation.engine._queue_notify_to_pty", return_value=None):
+                ), patch("no1.daemon.automation.engine._queue_notify_to_pty", return_value=None):
                     manager._check_help_nudge(group, cfg, now)
 
                 state = self._load_automation_state(group)
@@ -324,7 +324,7 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_help_nudge_does_not_advance_cursor_on_partial_ledger_line(self) -> None:
-        from cccc.daemon.automation import AutomationManager, _cfg
+        from no1.daemon.automation import AutomationManager, _cfg
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -362,10 +362,10 @@ class TestAutomationHelpNudgeMindContext(unittest.TestCase):
 
                 manager = AutomationManager()
                 cfg = _cfg(group)
-                with patch("cccc.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
-                    "cccc.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
+                with patch("no1.daemon.automation.engine.pty_runner.SUPERVISOR.actor_running", return_value=True), patch(
+                    "no1.daemon.automation.engine.pty_runner.SUPERVISOR.session_key",
                     return_value="sess1",
-                ), patch("cccc.daemon.automation.engine._queue_notify_to_pty", return_value=None):
+                ), patch("no1.daemon.automation.engine._queue_notify_to_pty", return_value=None):
                     manager._check_help_nudge(group, cfg, now)
 
                 state = self._load_automation_state(group)

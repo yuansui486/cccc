@@ -1,6 +1,6 @@
 # Best Practices
 
-Tips for getting the most out of CCCC.
+Tips for getting the most out of OneColleague.
 
 ## Setting Up for Success
 
@@ -26,7 +26,7 @@ Brief overview of the codebase structure.
 What we're working on right now.
 ```
 
-Agents read this via `cccc_project_info` to understand context.
+Agents read this via `onecolleague_project_info` to understand context.
 
 ### Customize the Help Playbook
 
@@ -34,10 +34,10 @@ The help playbook is the collaboration contract that agents follow. You can cust
 
 #### File Priority
 
-CCCC loads help content with the following priority:
+OneColleague loads help content with the following priority:
 
-1. **Group override (CCCC_HOME)**: `CCCC_HOME/groups/<group_id>/prompts/CCCC_HELP.md` (highest priority)
-2. **Built-in default**: `cccc.resources/cccc-help.md` (fallback)
+1. **Group override (CCCC_HOME)**: `CCCC_HOME/groups/<group_id>/prompts/ONECOLLEAGUE_HELP.md` (highest priority)
+2. **Built-in default**: `no1.resources/onecolleague-help.md` (fallback)
 
 To customize, edit the group prompt override (recommended: Web UI → Settings → Guidance).
 
@@ -81,14 +81,14 @@ In the Web structured Help editor, these untagged sections are surfaced as `Comm
 
 Agents access help content through MCP tools:
 
-1. **`cccc_bootstrap`** - Returns the lean recovery packet (`session`, `recovery`, `inbox_preview`, `memory_recall_gate`, `next_calls`)
-2. **`cccc_help`** - Returns help content on demand
+1. **`onecolleague_bootstrap`** - Returns the lean recovery packet (`session`, `recovery`, `inbox_preview`, `memory_recall_gate`, `next_calls`)
+2. **`onecolleague_help`** - Returns help content on demand
 
 The on-demand help payload is returned as:
 ```json
 {
   "markdown": "<filtered content based on role/actor>",
-  "source": "CCCC_HOME/.../prompts/CCCC_HELP.md or cccc.resources/cccc-help.md"
+  "source": "CCCC_HOME/.../prompts/ONECOLLEAGUE_HELP.md or no1.resources/onecolleague-help.md"
 }
 ```
 
@@ -117,11 +117,11 @@ Use recommended flags for autonomous operation:
 
 ```bash
 # Claude Code
-cccc actor add impl --runtime claude
+onecolleague actor add impl --runtime claude
 # Uses: claude --dangerously-skip-permissions
 
 # Codex
-cccc actor add review --runtime codex
+onecolleague actor add review --runtime codex
 # Uses: codex --dangerously-bypass-approvals-and-sandbox --search
 ```
 
@@ -212,14 +212,14 @@ Periodically check:
 ### Agent Not Responding
 
 1. Check the terminal tab for errors
-2. Verify MCP setup: `cccc setup --runtime <name>`
+2. Verify MCP setup: `onecolleague setup --runtime <name>`
 3. Try restarting: click Restart in Web UI
-4. Check daemon health + recent events: `cccc daemon status` and `cccc tail -n 100`
+4. Check daemon health + recent events: `onecolleague daemon status` and `onecolleague tail -n 100`
 
 ### Messages Not Delivered
 
 1. Ensure agent is started (green indicator)
-2. Check inbox: `cccc inbox --actor-id <id>`
+2. Check inbox: `onecolleague inbox --actor-id <id>`
 3. Verify the `to` field is correct
 
 ### Context Getting Stale

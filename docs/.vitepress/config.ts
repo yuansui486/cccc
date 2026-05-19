@@ -1,11 +1,11 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'CCCC',
+  title: 'OneColleague',
   description: 'Multi-Agent Collaboration Kernel',
 
   // GitHub Pages base path
-  base: '/cccc/',
+  base: '/onecolleague/',
 
   // Keep local-only planning/archive notes out of the published docs build.
   srcExclude: [
@@ -24,7 +24,7 @@ export default defineConfig({
   ],
 
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/cccc/logo.svg' }]
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/onecolleague/logo.svg' }]
   ],
 
   themeConfig: {
@@ -127,12 +127,12 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/ChesterRa/cccc' }
+      { icon: 'github', link: 'https://github.com/ChesterRa/onecolleague' }
     ],
 
     footer: {
       message: 'Released under the Apache-2.0 License.',
-      copyright: 'Copyright 2024-present CCCC Contributors'
+      copyright: 'Copyright 2024-present OneColleague Contributors'
     },
 
     search: {

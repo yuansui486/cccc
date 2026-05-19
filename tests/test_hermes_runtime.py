@@ -56,16 +56,16 @@ class TestHermesRuntime(unittest.TestCase):
         )
 
     def test_status_defaults_to_user_hermes_home(self) -> None:
-        from cccc.kernel.hermes_runtime import hermes_runtime_status
+        from no1.kernel.hermes_runtime import hermes_runtime_status
 
         cccc_home, cleanup = self._with_home()
         user_home = cccc_home / "user"
         try:
-            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
                 return_value="/usr/bin/hermes",
             ), patch(
-                "cccc.kernel.hermes_runtime._hermes_version",
+                "no1.kernel.hermes_runtime._hermes_version",
                 return_value="Hermes Agent v0.14.0",
             ):
                 status = hermes_runtime_status(home=cccc_home)
@@ -81,16 +81,16 @@ class TestHermesRuntime(unittest.TestCase):
             cleanup()
 
     def test_status_respects_explicit_hermes_home_env(self) -> None:
-        from cccc.kernel.hermes_runtime import hermes_runtime_status
+        from no1.kernel.hermes_runtime import hermes_runtime_status
 
         cccc_home, cleanup = self._with_home()
         explicit_home = cccc_home / "explicit-hermes"
-        command = ["/abs/cccc", "mcp"]
+        command = ["/abs/onecolleague", "mcp"]
         try:
             os.environ["HERMES_HOME"] = str(explicit_home)
             self._write_ready_config(explicit_home / "config.yaml", command)
-            with patch("cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command", return_value=command), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+            with patch("no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command", return_value=command), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
                 return_value="/usr/bin/hermes",
             ):
                 status = hermes_runtime_status(home=cccc_home, include_version=False)
@@ -103,19 +103,19 @@ class TestHermesRuntime(unittest.TestCase):
             cleanup()
 
     def test_status_requires_mcp_placeholders_not_static_actor_ids(self) -> None:
-        from cccc.kernel.hermes_runtime import hermes_runtime_status
+        from no1.kernel.hermes_runtime import hermes_runtime_status
 
         cccc_home, cleanup = self._with_home()
         user_home = cccc_home / "user"
-        command = ["/abs/cccc", "mcp"]
+        command = ["/abs/onecolleague", "mcp"]
         config_path = user_home / ".hermes" / "config.yaml"
         try:
             self._write_ready_config(config_path, command)
-            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
-                "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
                 return_value=command,
             ), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
                 return_value="/usr/bin/hermes",
             ):
                 ready = hermes_runtime_status(home=cccc_home, include_version=False)
@@ -124,11 +124,11 @@ class TestHermesRuntime(unittest.TestCase):
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
             doc["mcp_servers"]["onecolleague"]["env"]["CCCC_ACTOR_ID"] = "peer1"
             config_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
-            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
-                "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
                 return_value=command,
             ), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
                 return_value="/usr/bin/hermes",
             ):
                 stale = hermes_runtime_status(home=cccc_home, include_version=False)
@@ -138,11 +138,11 @@ class TestHermesRuntime(unittest.TestCase):
             cleanup()
 
     def test_prepare_uses_default_profile_mcp_add_with_confirmation(self) -> None:
-        from cccc.kernel import hermes_runtime
+        from no1.kernel import hermes_runtime
 
         cccc_home, cleanup = self._with_home()
         user_home = cccc_home / "user"
-        command = ["/abs/cccc", "mcp"]
+        command = ["/abs/onecolleague", "mcp"]
         config_path = user_home / ".hermes" / "config.yaml"
         calls: list[tuple[list[str], str | None, str]] = []
 
@@ -155,11 +155,11 @@ class TestHermesRuntime(unittest.TestCase):
             return Mock(returncode=0, stdout="", stderr="")
 
         try:
-            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
                 return_value="/usr/bin/hermes",
             ), patch(
-                "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
                 return_value=command,
             ), patch.object(hermes_runtime, "_run_hermes_cli", side_effect=fake_run):
                 result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
@@ -173,7 +173,7 @@ class TestHermesRuntime(unittest.TestCase):
                     "add",
                     "onecolleague",
                     "--command",
-                    "/abs/cccc",
+                    "/abs/onecolleague",
                     "--args",
                     "mcp",
                     "--env",
@@ -191,18 +191,18 @@ class TestHermesRuntime(unittest.TestCase):
             cleanup()
 
     def test_prepare_skips_mcp_add_when_config_ready(self) -> None:
-        from cccc.kernel import hermes_runtime
+        from no1.kernel import hermes_runtime
 
         cccc_home, cleanup = self._with_home()
         user_home = cccc_home / "user"
-        command = ["/abs/cccc", "mcp"]
+        command = ["/abs/onecolleague", "mcp"]
         try:
             self._write_ready_config(user_home / ".hermes" / "config.yaml", command)
-            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
+            with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
+                "no1.kernel.hermes_runtime.find_subprocess_executable",
                 return_value="/usr/bin/hermes",
             ), patch(
-                "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
+                "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
                 return_value=command,
             ), patch.object(hermes_runtime, "_run_hermes_cli") as mock_run:
                 result = hermes_runtime.prepare_hermes_runtime(home=cccc_home, auto_enable_tools=True)
@@ -212,31 +212,8 @@ class TestHermesRuntime(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_status_accepts_legacy_hermes_mcp_server_name(self) -> None:
-        from cccc.kernel.hermes_runtime import hermes_runtime_status
-
-        cccc_home, cleanup = self._with_home()
-        user_home = cccc_home / "user"
-        command = ["/abs/cccc", "mcp"]
-        try:
-            self._write_ready_config_for_server(user_home / ".hermes" / "config.yaml", command, server_name="cccc")
-            with patch("cccc.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
-                "cccc.kernel.hermes_runtime.get_cccc_mcp_stdio_command",
-                return_value=command,
-            ), patch(
-                "cccc.kernel.hermes_runtime.find_subprocess_executable",
-                return_value="/usr/bin/hermes",
-            ):
-                status = hermes_runtime_status(home=cccc_home, include_version=False)
-
-            self.assertEqual(status["mcp"]["status"], "ready")
-            self.assertEqual(status["mcp"]["server_name"], "cccc")
-            self.assertTrue(status["mcp"]["legacy_server_name"])
-        finally:
-            cleanup()
-
     def test_placeholder_normalization_preserves_unrelated_comments(self) -> None:
-        from cccc.kernel.hermes_runtime import _normalize_mcp_config_placeholders
+        from no1.kernel.hermes_runtime import _normalize_mcp_config_placeholders
 
         cccc_home, cleanup = self._with_home()
         try:
@@ -248,7 +225,7 @@ class TestHermesRuntime(unittest.TestCase):
                     "model: ''\n"
                     "mcp_servers:\n"
                     "  onecolleague:\n"
-                    "    command: /abs/cccc\n"
+                    "    command: /abs/onecolleague\n"
                     "    args:\n"
                     "    - mcp\n"
                     "    env:\n"

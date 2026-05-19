@@ -24,21 +24,21 @@ class TestWebActorAvatarApi(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
     def _create_group(self) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         return create_group(reg, title="actor-avatar", topic="").group_id
@@ -61,15 +61,15 @@ class TestWebActorAvatarApi(unittest.TestCase):
         self.assertTrue(bool(created.get("ok")), created)
 
     def test_upload_and_clear_actor_avatar(self) -> None:
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
 
         home, cleanup = self._with_home()
         try:
             group_id = self._create_group()
             self._add_actor(group_id)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
                 upload_resp = client.post(
                     f"/api/v1/groups/{group_id}/actors/peer-1/avatar",
@@ -124,15 +124,15 @@ class TestWebActorAvatarApi(unittest.TestCase):
             cleanup()
 
     def test_delete_actor_cleans_avatar_asset(self) -> None:
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
 
         home, cleanup = self._with_home()
         try:
             group_id = self._create_group()
             self._add_actor(group_id)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._client()
                 upload_resp = client.post(
                     f"/api/v1/groups/{group_id}/actors/peer-1/avatar",

@@ -5,30 +5,30 @@ from unittest.mock import patch
 
 class TestMcpBootstrapInboxPreview(unittest.TestCase):
     def test_bootstrap_inbox_preview_is_trimmed_and_shape_stable(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_core, cccc_group_actor
-        from cccc.ports.mcp.handlers import context as cccc_context
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_core, onecolleague_group_actor
+        from no1.ports.mcp.handlers import context as onecolleague_context
 
         long_text = "x" * 400
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "peer1"}, clear=False), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "group_info",
             return_value={"group": {"group_id": "g_test", "title": "temp_task", "active_scope_key": "s1", "scopes": []}},
         ), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "actor_list",
             return_value={"actors": [{"id": "peer1", "role": "peer", "runner": "pty"}]},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "project_info",
             return_value={"found": False, "path": None},
         ), patch.object(
-            cccc_context,
+            onecolleague_context,
             "context_get",
             return_value={"coordination": {"brief": {}, "tasks": [], "recent_decisions": [], "recent_handoffs": []}, "agent_states": []},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "inbox_list",
             return_value={
                 "messages": [
@@ -38,7 +38,7 @@ class TestMcpBootstrapInboxPreview(unittest.TestCase):
                 ]
             },
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "_call_daemon_or_raise",
             return_value={"hits": []},
         ):
@@ -62,28 +62,28 @@ class TestMcpBootstrapInboxPreview(unittest.TestCase):
         self.assertEqual(preview["messages"][1]["text_preview"], "Need review")
 
     def test_bootstrap_inbox_preview_exposes_notify_kind_for_interrupt_notifies(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_core, cccc_group_actor
-        from cccc.ports.mcp.handlers import context as cccc_context
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_core, onecolleague_group_actor
+        from no1.ports.mcp.handlers import context as onecolleague_context
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "peer1"}, clear=False), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "group_info",
             return_value={"group": {"group_id": "g_test", "title": "temp_task", "active_scope_key": "s1", "scopes": []}},
         ), patch.object(
-            cccc_group_actor,
+            onecolleague_group_actor,
             "actor_list",
             return_value={"actors": [{"id": "peer1", "role": "peer", "runner": "pty"}]},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "project_info",
             return_value={"found": False, "path": None},
         ), patch.object(
-            cccc_context,
+            onecolleague_context,
             "context_get",
             return_value={"coordination": {"brief": {}, "tasks": [], "recent_decisions": [], "recent_handoffs": []}, "agent_states": []},
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "inbox_list",
             return_value={
                 "messages": [
@@ -97,7 +97,7 @@ class TestMcpBootstrapInboxPreview(unittest.TestCase):
                 ]
             },
         ), patch.object(
-            cccc_core,
+            onecolleague_core,
             "_call_daemon_or_raise",
             return_value={"hits": []},
         ):

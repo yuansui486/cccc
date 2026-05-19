@@ -24,9 +24,9 @@ class _FakeGroup:
 
 class TestPetSignals(unittest.TestCase):
     def test_reply_pressure_and_rhythm_signals(self) -> None:
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.pet_signals import load_pet_signals
-        from cccc.util.time import utc_now_iso
+        from no1.kernel.ledger import append_event
+        from no1.kernel.pet_signals import load_pet_signals
+        from no1.util.time import utc_now_iso
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -157,8 +157,8 @@ class TestPetSignals(unittest.TestCase):
         self.assertIn("user", str(signals["proposal_ready"]["summary"]).lower())
 
     def test_lightweight_signals_skip_obligation_and_context_sync_scans(self) -> None:
-        from cccc.kernel.ledger import append_event
-        from cccc.kernel.pet_signals import load_pet_signals
+        from no1.kernel.ledger import append_event
+        from no1.kernel.pet_signals import load_pet_signals
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -189,7 +189,7 @@ class TestPetSignals(unittest.TestCase):
             )
 
             with patch(
-                "cccc.kernel.pet_signals.get_obligation_status_batch",
+                "no1.kernel.pet_signals.get_obligation_status_batch",
                 side_effect=AssertionError("lightweight pet signals should not compute full obligations"),
             ):
                 signals = load_pet_signals(

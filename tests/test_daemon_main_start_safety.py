@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 class TestDaemonMainStartSafety(unittest.TestCase):
     def test_start_refuses_duplicate_when_pid_alive_but_ipc_down(self) -> None:
-        from cccc.daemon.server import DaemonPaths
-        from cccc import daemon_main
+        from no1.daemon.server import DaemonPaths
+        from no1 import daemon_main
 
         with tempfile.TemporaryDirectory() as td:
             paths = DaemonPaths(home=Path(td))
@@ -30,8 +30,8 @@ class TestDaemonMainStartSafety(unittest.TestCase):
             self.assertIn("refusing to spawn duplicate daemon", out.getvalue())
 
     def test_start_cleans_stale_pid_and_spawns(self) -> None:
-        from cccc.daemon.server import DaemonPaths
-        from cccc import daemon_main
+        from no1.daemon.server import DaemonPaths
+        from no1 import daemon_main
 
         with tempfile.TemporaryDirectory() as td:
             paths = DaemonPaths(home=Path(td))

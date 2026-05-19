@@ -22,18 +22,18 @@ class TestObservabilityLogging(unittest.TestCase):
         return Path(td), cleanup
 
     def test_apply_logger_levels_resets_removed_overrides(self) -> None:
-        from cccc.util.obslog import apply_logger_levels
+        from no1.util.obslog import apply_logger_levels
 
-        target = logging.getLogger("cccc.test.override")
+        target = logging.getLogger("no1.test.override")
         original = target.level
-        parent = logging.getLogger("cccc.test")
+        parent = logging.getLogger("no1.test")
         parent_original = parent.level
         try:
-            apply_logger_levels({"cccc.test": "DEBUG", "cccc.test.override": "INFO"})
+            apply_logger_levels({"no1.test": "DEBUG", "no1.test.override": "INFO"})
             self.assertEqual(parent.level, logging.DEBUG)
             self.assertEqual(target.level, logging.INFO)
 
-            apply_logger_levels({"cccc.test": "WARNING"})
+            apply_logger_levels({"no1.test": "WARNING"})
             self.assertEqual(parent.level, logging.WARNING)
             self.assertEqual(target.level, logging.NOTSET)
         finally:
@@ -42,16 +42,16 @@ class TestObservabilityLogging(unittest.TestCase):
             apply_logger_levels({})
 
     def test_daemon_apply_observability_uses_targeted_debug(self) -> None:
-        from cccc.daemon.server import _apply_observability_settings
+        from no1.daemon.server import _apply_observability_settings
 
         home, cleanup = self._with_home()
         root = logging.getLogger()
-        cccc_logger = logging.getLogger("cccc")
-        delivery_logger = logging.getLogger("cccc.delivery")
+        onecolleague_logger = logging.getLogger("onecolleague")
+        delivery_logger = logging.getLogger("no1.delivery")
         asyncio_logger = logging.getLogger("asyncio")
         original_levels = {
             "root": root.level,
-            "cccc": cccc_logger.level,
+            "onecolleague": onecolleague_logger.level,
             "delivery": delivery_logger.level,
             "asyncio": asyncio_logger.level,
         }
@@ -61,17 +61,17 @@ class TestObservabilityLogging(unittest.TestCase):
                 {
                     "developer_mode": True,
                     "log_level": "INFO",
-                    "logger_levels": {"cccc.daemon.group_space_ops": "DEBUG"},
+                    "logger_levels": {"no1.daemon.group_space_ops": "DEBUG"},
                 },
             )
             self.assertEqual(root.level, logging.INFO)
-            self.assertEqual(cccc_logger.level, logging.DEBUG)
+            self.assertEqual(onecolleague_logger.level, logging.DEBUG)
             self.assertEqual(delivery_logger.level, logging.INFO)
             self.assertEqual(asyncio_logger.level, logging.INFO)
-            self.assertEqual(logging.getLogger("cccc.daemon.group_space_ops").level, logging.DEBUG)
+            self.assertEqual(logging.getLogger("no1.daemon.group_space_ops").level, logging.DEBUG)
         finally:
             root.setLevel(original_levels["root"])
-            cccc_logger.setLevel(original_levels["cccc"])
+            onecolleague_logger.setLevel(original_levels["onecolleague"])
             delivery_logger.setLevel(original_levels["delivery"])
             asyncio_logger.setLevel(original_levels["asyncio"])
             cleanup()

@@ -5,7 +5,7 @@ import unittest
 
 class TestRuntimePoolDefaultsImmutable(unittest.TestCase):
     def test_get_runtime_pool_returns_copy_of_defaults(self) -> None:
-        from cccc.kernel.settings import get_runtime_pool
+        from no1.kernel.settings import get_runtime_pool
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -28,7 +28,7 @@ class TestRuntimePoolDefaultsImmutable(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_runtime_pool_from_dict_tolerates_dirty_fields(self) -> None:
-        from cccc.kernel.settings import RuntimePoolEntry
+        from no1.kernel.settings import RuntimePoolEntry
 
         entry = RuntimePoolEntry.from_dict(
             {

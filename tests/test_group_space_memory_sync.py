@@ -40,8 +40,8 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -53,8 +53,8 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
         return gid
 
     def _append_daily_entry(self, group_id: str, *, date: str, summary: str, entry_id: str) -> None:
-        from cccc.kernel.memory_reme.writer import append_daily_entry, build_memory_entry
-        from cccc.kernel.memory_reme.layout import resolve_memory_layout
+        from no1.kernel.memory_reme.writer import append_daily_entry, build_memory_entry
+        from no1.kernel.memory_reme.layout import resolve_memory_layout
 
         layout = resolve_memory_layout(group_id, date=date, ensure_files=True)
         entry = build_memory_entry(
@@ -69,8 +69,8 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
         self.assertEqual(str(out.get("status") or ""), "written")
 
     def test_memory_lane_sync_executes_daily_job_and_records_manifest(self) -> None:
-        from cccc.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
-        from cccc.daemon.space.group_space_runtime import process_due_space_jobs
+        from no1.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
+        from no1.daemon.space.group_space_runtime import process_due_space_jobs
 
         _, cleanup = self._with_home(stub=True)
         try:
@@ -127,8 +127,8 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
             cleanup()
 
     def test_memory_lane_split_upload_when_daily_file_exceeds_word_budget(self) -> None:
-        from cccc.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
-        from cccc.daemon.space.group_space_runtime import process_due_space_jobs
+        from no1.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
+        from no1.daemon.space.group_space_runtime import process_due_space_jobs
 
         _, cleanup = self._with_home(stub=True, max_words="80")
         try:
@@ -184,8 +184,8 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
             cleanup()
 
     def test_memory_lane_skips_empty_daily_file_and_reports_coverage(self) -> None:
-        from cccc.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
-        from cccc.kernel.memory_reme.layout import resolve_memory_layout
+        from no1.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
+        from no1.kernel.memory_reme.layout import resolve_memory_layout
 
         _, cleanup = self._with_home(stub=True)
         try:
@@ -234,8 +234,8 @@ class TestGroupSpaceMemorySync(unittest.TestCase):
             cleanup()
 
     def test_memory_lane_skips_today_file(self) -> None:
-        from cccc.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
-        from cccc.util.time import utc_now_iso
+        from no1.daemon.space.group_space_memory_sync import read_memory_notebooklm_sync_state
+        from no1.util.time import utc_now_iso
 
         _, cleanup = self._with_home(stub=True)
         try:

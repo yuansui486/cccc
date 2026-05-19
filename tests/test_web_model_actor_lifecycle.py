@@ -22,8 +22,8 @@ class TestWebModelActorLifecycle(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -36,7 +36,7 @@ class TestWebModelActorLifecycle(unittest.TestCase):
         return group_id
 
     def test_web_model_actor_add_start_stop_uses_marker_not_local_process(self) -> None:
-        from cccc.daemon.runner_state_ops import headless_state_running
+        from no1.daemon.runner_state_ops import headless_state_running
 
         home, cleanup = self._with_home()
         try:
@@ -160,8 +160,8 @@ class TestWebModelActorLifecycle(unittest.TestCase):
     def test_chatgpt_web_model_singleton_ignores_internal_actor_runtime_residue(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import INTERNAL_KIND_VOICE_SECRETARY
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import INTERNAL_KIND_VOICE_SECRETARY
+            from no1.kernel.group import load_group
 
             root = Path(home) / "repo"
             root.mkdir(parents=True, exist_ok=True)
@@ -200,8 +200,8 @@ class TestWebModelActorLifecycle(unittest.TestCase):
     def test_internal_actor_cannot_use_chatgpt_web_model_runtime_or_profile(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.actors import INTERNAL_KIND_VOICE_SECRETARY, add_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import INTERNAL_KIND_VOICE_SECRETARY, add_actor
+            from no1.kernel.group import load_group
 
             root = Path(home) / "repo"
             root.mkdir(parents=True, exist_ok=True)
@@ -261,8 +261,8 @@ class TestWebModelActorLifecycle(unittest.TestCase):
     def test_voice_secretary_seed_does_not_inherit_web_model_runtime(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.voice_secretary_actor import build_voice_secretary_actor_seed
+            from no1.kernel.group import load_group
+            from no1.kernel.voice_secretary_actor import build_voice_secretary_actor_seed
 
             root = Path(home) / "repo"
             root.mkdir(parents=True, exist_ok=True)
@@ -290,8 +290,8 @@ class TestWebModelActorLifecycle(unittest.TestCase):
     def test_pet_seed_does_not_inherit_web_model_runtime(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.kernel.group import load_group
-            from cccc.kernel.pet_actor import build_pet_actor_seed
+            from no1.kernel.group import load_group
+            from no1.kernel.pet_actor import build_pet_actor_seed
 
             root = Path(home) / "repo"
             root.mkdir(parents=True, exist_ok=True)
@@ -370,7 +370,7 @@ class TestWebModelActorLifecycle(unittest.TestCase):
             cleanup()
 
     def test_group_start_for_web_model_does_not_spawn_headless_supervisor(self) -> None:
-        from cccc.daemon.runner_state_ops import headless_state_running
+        from no1.daemon.runner_state_ops import headless_state_running
 
         home, cleanup = self._with_home()
         try:
@@ -393,10 +393,10 @@ class TestWebModelActorLifecycle(unittest.TestCase):
             self.assertTrue(stop.ok, getattr(stop, "error", None))
 
             with patch(
-                "cccc.daemon.group.group_lifecycle_ops.headless_runner.SUPERVISOR.start_actor",
+                "no1.daemon.group.group_lifecycle_ops.headless_runner.SUPERVISOR.start_actor",
                 side_effect=AssertionError("web_model must not spawn generic headless supervisor"),
             ), patch(
-                "cccc.daemon.group.group_lifecycle_ops.pty_runner.SUPERVISOR.start_actor",
+                "no1.daemon.group.group_lifecycle_ops.pty_runner.SUPERVISOR.start_actor",
                 side_effect=AssertionError("web_model must not spawn PTY supervisor"),
             ):
                 started, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
@@ -408,8 +408,8 @@ class TestWebModelActorLifecycle(unittest.TestCase):
             cleanup()
 
     def test_runner_group_running_includes_web_model_marker(self) -> None:
-        from cccc.daemon.actors.runner_ops import is_group_running
-        from cccc.daemon.runner_state_ops import write_headless_state
+        from no1.daemon.actors.runner_ops import is_group_running
+        from no1.daemon.runner_state_ops import write_headless_state
 
         home, cleanup = self._with_home()
         try:

@@ -24,13 +24,13 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -42,7 +42,7 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "")
 
             with patch(
-                "cccc.daemon.group.presentation_browser_ops.open_browser_surface_session",
+                "no1.daemon.group.presentation_browser_ops.open_browser_surface_session",
                 return_value={
                     "active": True,
                     "state": "ready",
@@ -68,7 +68,7 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
                         payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                     return payload
 
-                with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+                with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                     with self._client() as client:
                         resp = client.post(
                             f"/api/v1/groups/{group_id}/presentation/browser_surface/session",
@@ -99,7 +99,7 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
                     payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                 return payload
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 with self._client() as client:
                     resp = client.get(f"/api/v1/groups/{group_id}/presentation/browser_surface/session?slot=slot-1")
 
@@ -118,7 +118,7 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "")
 
             with patch(
-                "cccc.daemon.group.presentation_browser_ops.close_browser_surface_session",
+                "no1.daemon.group.presentation_browser_ops.close_browser_surface_session",
                 return_value={
                     "closed": True,
                     "browser_surface": {
@@ -147,7 +147,7 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
                         payload["error"] = resp.error.model_dump(mode="json", exclude_none=True)
                     return payload
 
-                with patch("cccc.ports.web.app.call_daemon", side_effect=fake_call_daemon):
+                with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                     with self._client() as client:
                         resp = client.post(
                             f"/api/v1/groups/{group_id}/presentation/browser_surface/session/close",
@@ -164,7 +164,7 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
     def test_browser_surface_websocket_uses_large_stream_limit(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.ports.web.routes import groups as groups_routes
+            from no1.ports.web.routes import groups as groups_routes
 
             create, _ = self._call("group_create", {"title": "browser-ws-limit", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -177,14 +177,14 @@ class TestWebPresentationBrowserApi(unittest.TestCase):
                 captured["limit"] = limit
                 raise RuntimeError("simulated connect failure")
 
-            with patch("cccc.ports.web.routes.groups.get_daemon_endpoint", return_value={"transport": "tcp", "host": "127.0.0.1", "port": 9001}), patch(
-                "cccc.ports.web.routes.groups.check_group",
+            with patch("no1.ports.web.routes.groups.get_daemon_endpoint", return_value={"transport": "tcp", "host": "127.0.0.1", "port": 9001}), patch(
+                "no1.ports.web.routes.groups.check_group",
                 return_value=None,
             ), patch(
-                "cccc.ports.web.routes.groups.load_group",
+                "no1.ports.web.routes.groups.load_group",
                 return_value=SimpleNamespace(group_id=group_id),
             ), patch(
-                "cccc.ports.web.routes.groups.asyncio.open_connection",
+                "no1.ports.web.routes.groups.asyncio.open_connection",
                 side_effect=fake_open_connection,
             ):
                 with self._client() as client:

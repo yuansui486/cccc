@@ -22,9 +22,9 @@ class TestIdleStandupSuppression(unittest.TestCase):
             os.environ["CCCC_HOME"] = self._old_home
 
     def _create_group_with_actor_and_rules(self, rules_payload):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -91,7 +91,7 @@ class TestIdleStandupSuppression(unittest.TestCase):
 
     def test_standup_suppressed_when_idle(self) -> None:
         """Standup rule must NOT reach delivery when group is idle."""
-        from cccc.daemon.automation.engine import AutomationManager
+        from no1.daemon.automation.engine import AutomationManager
 
         group = self._create_group_with_actor_and_rules(self._standup_rules_payload())
         mgr = AutomationManager()
@@ -102,10 +102,10 @@ class TestIdleStandupSuppression(unittest.TestCase):
         later = now + timedelta(seconds=5)
 
         with (
-            patch("cccc.daemon.automation.engine.append_event") as mock_append,
-            patch("cccc.daemon.automation.engine.pty_runner") as mock_pty,
-            patch("cccc.daemon.automation.engine.headless_runner"),
-            patch("cccc.daemon.automation.engine._queue_notify_to_pty"),
+            patch("no1.daemon.automation.engine.append_event") as mock_append,
+            patch("no1.daemon.automation.engine.pty_runner") as mock_pty,
+            patch("no1.daemon.automation.engine.headless_runner"),
+            patch("no1.daemon.automation.engine._queue_notify_to_pty"),
         ):
             mock_pty.SUPERVISOR.actor_running.return_value = True
             mgr._check_rules(group, later, group_state="idle")
@@ -114,7 +114,7 @@ class TestIdleStandupSuppression(unittest.TestCase):
 
     def test_standup_fires_when_active(self) -> None:
         """Standup rule should reach delivery when group is active."""
-        from cccc.daemon.automation.engine import AutomationManager
+        from no1.daemon.automation.engine import AutomationManager
 
         group = self._create_group_with_actor_and_rules(self._standup_rules_payload())
         mgr = AutomationManager()
@@ -125,10 +125,10 @@ class TestIdleStandupSuppression(unittest.TestCase):
         later = now + timedelta(seconds=5)
 
         with (
-            patch("cccc.daemon.automation.engine.append_event", return_value={"id": "ev1"}) as mock_append,
-            patch("cccc.daemon.automation.engine.pty_runner") as mock_pty,
-            patch("cccc.daemon.automation.engine.headless_runner"),
-            patch("cccc.daemon.automation.engine._queue_notify_to_pty"),
+            patch("no1.daemon.automation.engine.append_event", return_value={"id": "ev1"}) as mock_append,
+            patch("no1.daemon.automation.engine.pty_runner") as mock_pty,
+            patch("no1.daemon.automation.engine.headless_runner"),
+            patch("no1.daemon.automation.engine._queue_notify_to_pty"),
         ):
             mock_pty.SUPERVISOR.actor_running.return_value = True
             mgr._check_rules(group, later, group_state="active")
@@ -137,7 +137,7 @@ class TestIdleStandupSuppression(unittest.TestCase):
 
     def test_custom_rule_not_suppressed_when_idle(self) -> None:
         """Non-standup rules should still fire when idle."""
-        from cccc.daemon.automation.engine import AutomationManager
+        from no1.daemon.automation.engine import AutomationManager
 
         group = self._create_group_with_actor_and_rules(
             {
@@ -169,10 +169,10 @@ class TestIdleStandupSuppression(unittest.TestCase):
         later = now + timedelta(seconds=5)
 
         with (
-            patch("cccc.daemon.automation.engine.append_event", return_value={"id": "ev1"}) as mock_append,
-            patch("cccc.daemon.automation.engine.pty_runner") as mock_pty,
-            patch("cccc.daemon.automation.engine.headless_runner"),
-            patch("cccc.daemon.automation.engine._queue_notify_to_pty"),
+            patch("no1.daemon.automation.engine.append_event", return_value={"id": "ev1"}) as mock_append,
+            patch("no1.daemon.automation.engine.pty_runner") as mock_pty,
+            patch("no1.daemon.automation.engine.headless_runner"),
+            patch("no1.daemon.automation.engine._queue_notify_to_pty"),
         ):
             mock_pty.SUPERVISOR.actor_running.return_value = True
             mgr._check_rules(group, later, group_state="idle")
@@ -181,7 +181,7 @@ class TestIdleStandupSuppression(unittest.TestCase):
 
     def test_idle_suppressed_rule_ids_contains_standup(self) -> None:
         """Verify the suppression set includes 'standup'."""
-        from cccc.daemon.automation.engine import AutomationManager
+        from no1.daemon.automation.engine import AutomationManager
 
         self.assertIn("standup", AutomationManager._IDLE_SUPPRESSED_RULE_IDS)
 

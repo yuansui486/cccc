@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 class TestGroupSpaceContract(unittest.TestCase):
     def test_provider_state_defaults(self) -> None:
-        from cccc.contracts.v1.group_space import SpaceProviderState
+        from no1.contracts.v1.group_space import SpaceProviderState
 
         doc = SpaceProviderState()
         self.assertEqual(doc.provider, "notebooklm")
@@ -15,7 +15,7 @@ class TestGroupSpaceContract(unittest.TestCase):
         self.assertEqual(doc.mode, "disabled")
 
     def test_space_job_defaults(self) -> None:
-        from cccc.contracts.v1.group_space import SpaceJob
+        from no1.contracts.v1.group_space import SpaceJob
 
         job = SpaceJob(job_id="spj_1", group_id="g_1")
         self.assertEqual(job.kind, "context_sync")
@@ -24,13 +24,13 @@ class TestGroupSpaceContract(unittest.TestCase):
         self.assertEqual(job.result, {})
 
     def test_space_job_state_validation(self) -> None:
-        from cccc.contracts.v1.group_space import SpaceJob
+        from no1.contracts.v1.group_space import SpaceJob
 
         with self.assertRaises(ValidationError):
             SpaceJob(job_id="spj_1", group_id="g_1", state="unknown")
 
     def test_provider_credential_state_defaults(self) -> None:
-        from cccc.contracts.v1.group_space import SpaceProviderCredentialState
+        from no1.contracts.v1.group_space import SpaceProviderCredentialState
 
         doc = SpaceProviderCredentialState()
         self.assertEqual(doc.provider, "notebooklm")

@@ -15,10 +15,10 @@ class TestActorLifecycleOps(unittest.TestCase):
 
         def cleanup() -> None:
             try:
-                from cccc.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
-                from cccc.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
-                from cccc.runners import headless as headless_runner
-                from cccc.runners import pty as pty_runner
+                from no1.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from no1.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from no1.runners import headless as headless_runner
+                from no1.runners import pty as pty_runner
 
                 codex_app_supervisor.stop_all()
                 claude_app_supervisor.stop_all()
@@ -35,13 +35,13 @@ class TestActorLifecycleOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def _global_event_kinds(self, home_path: str) -> list[str]:
-        path = Path(home_path) / "daemon" / "ccccd.events.jsonl"
+        path = Path(home_path) / "daemon" / "onecolleagued.events.jsonl"
         if not path.exists():
             return []
         kinds: list[str] = []
@@ -154,8 +154,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             assert isinstance(actor_after_stop, dict)
             self.assertTrue(bool(actor_after_stop.get("enabled", False)))
 
-            from cccc.kernel.actors import find_actor
-            from cccc.kernel.group import load_group
+            from no1.kernel.actors import find_actor
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -216,7 +216,7 @@ class TestActorLifecycleOps(unittest.TestCase):
             attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
-            with patch("cccc.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
+            with patch("no1.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
                 add, _ = self._call(
                     "actor_add",
                     {
@@ -236,8 +236,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(update.ok, getattr(update, "error", None))
 
-            with patch("cccc.daemon.actors.actor_lifecycle_ops.codex_app_supervisor.stop_actor") as stop_codex, patch(
-                "cccc.daemon.actors.actor_lifecycle_ops.claude_app_supervisor.start_actor"
+            with patch("no1.daemon.actors.actor_lifecycle_ops.codex_app_supervisor.stop_actor") as stop_codex, patch(
+                "no1.daemon.actors.actor_lifecycle_ops.claude_app_supervisor.start_actor"
             ):
                 restart, _ = self._call("actor_restart", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
 
@@ -270,8 +270,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            from cccc.kernel.group import load_group
-            from cccc.kernel.context import ContextStorage
+            from no1.kernel.group import load_group
+            from no1.kernel.context import ContextStorage
             group = load_group(group_id)
             self.assertIsNotNone(group)
             storage = ContextStorage(group)  # type: ignore[arg-type]
@@ -316,8 +316,8 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            from cccc.kernel.group import load_group
-            from cccc.kernel.context import ContextStorage
+            from no1.kernel.group import load_group
+            from no1.kernel.context import ContextStorage
             group = load_group(group_id)
             self.assertIsNotNone(group)
             storage = ContextStorage(group)  # type: ignore[arg-type]
@@ -362,7 +362,7 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            from cccc.daemon.runtime_session_ops import read_runtime_session, record_pty_runtime_session
+            from no1.daemon.runtime_session_ops import read_runtime_session, record_pty_runtime_session
 
             record_pty_runtime_session(
                 group_id=group_id,
@@ -373,7 +373,7 @@ class TestActorLifecycleOps(unittest.TestCase):
                 provider_session_id="019dbe1d-cd97-7d31-9ba6-212d3e57b15c",
                 captured_from="test",
             )
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
             group = load_group(group_id)
             self.assertIsNotNone(group)
             assert group is not None
@@ -438,7 +438,7 @@ class TestActorLifecycleOps(unittest.TestCase):
             attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
-            with patch("cccc.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
+            with patch("no1.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
                 add, _ = self._call(
                     "actor_add",
                     {
@@ -452,7 +452,7 @@ class TestActorLifecycleOps(unittest.TestCase):
                 )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            with patch("cccc.daemon.actors.actor_membership_ops.codex_app_supervisor.stop_actor") as stop_actor:
+            with patch("no1.daemon.actors.actor_membership_ops.codex_app_supervisor.stop_actor") as stop_actor:
                 remove, _ = self._call("actor_remove", {"group_id": group_id, "actor_id": "peer1", "by": "user"})
             self.assertTrue(remove.ok, getattr(remove, "error", None))
             stop_actor.assert_called_once_with(group_id=group_id, actor_id="peer1")
@@ -461,7 +461,7 @@ class TestActorLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_web_model_actor_recreate_resets_browser_binding_state(self) -> None:
-        from cccc.ports.web_model_browser_sidecar import (
+        from no1.ports.web_model_browser_sidecar import (
             chatgpt_browser_profile_dir,
             read_chatgpt_browser_state,
             record_chatgpt_browser_state,
@@ -549,7 +549,7 @@ class TestActorLifecycleOps(unittest.TestCase):
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
             with patch(
-                "cccc.daemon.actors.actor_add_ops._schedule_summary_snapshot_rebuild",
+                "no1.daemon.actors.actor_add_ops._schedule_summary_snapshot_rebuild",
                 return_value=True,
             ) as add_schedule:
                 add, _ = self._call(
@@ -567,7 +567,7 @@ class TestActorLifecycleOps(unittest.TestCase):
             add_schedule.assert_called_once_with(group_id)
 
             with patch(
-                "cccc.daemon.actors.actor_membership_ops._schedule_summary_snapshot_rebuild",
+                "no1.daemon.actors.actor_membership_ops._schedule_summary_snapshot_rebuild",
                 return_value=True,
             ) as remove_schedule:
                 remove, _ = self._call("actor_remove", {"group_id": group_id, "actor_id": "peer1", "by": "user"})

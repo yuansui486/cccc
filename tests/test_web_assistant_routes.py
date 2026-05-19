@@ -27,8 +27,8 @@ class TestWebAssistantRoutes(unittest.TestCase):
         return td, cleanup
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
@@ -99,7 +99,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
         return manifest_path
 
     def test_web_voice_secretary_transcription_route_uses_service_asr(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         old_mock = os.environ.get("CCCC_VOICE_SECRETARY_ASR_MOCK_TEXT")
@@ -108,13 +108,13 @@ class TestWebAssistantRoutes(unittest.TestCase):
         os.environ.pop("CCCC_VOICE_SECRETARY_ASR_COMMAND", None)
         group = None
         try:
-            from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.voice_service_runtime import stop_voice_service
+            from no1.kernel.group import load_group
 
             group_id = self._create_group()
             self._add_foreman(group_id)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 with TestClient(create_app()) as client:
                     settings_resp = client.put(
                         f"/api/v1/groups/{group_id}/assistants/voice_secretary/settings",
@@ -151,7 +151,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
                 stop_voice_service(group)
         finally:
             if group is not None:
-                from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
+                from no1.daemon.assistants.voice_service_runtime import stop_voice_service
 
                 stop_voice_service(group)
             if old_mock is not None:
@@ -165,21 +165,21 @@ class TestWebAssistantRoutes(unittest.TestCase):
             cleanup()
 
     def test_web_voice_secretary_model_install_route_downloads_and_enables_managed_model(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         home, cleanup = self._with_home()
         old_mock = os.environ.pop("CCCC_VOICE_SECRETARY_ASR_MOCK_TEXT", None)
         old_command = os.environ.pop("CCCC_VOICE_SECRETARY_ASR_COMMAND", None)
         group = None
         try:
-            from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
-            from cccc.kernel.group import load_group
+            from no1.daemon.assistants.voice_service_runtime import stop_voice_service
+            from no1.kernel.group import load_group
 
             self._write_voice_model_manifest(home)
             group_id = self._create_group()
             self._add_foreman(group_id)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 with TestClient(create_app()) as client:
                     settings_resp = client.put(
                         f"/api/v1/groups/{group_id}/assistants/voice_secretary/settings",
@@ -243,7 +243,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
                 stop_voice_service(group)
         finally:
             if group is not None:
-                from cccc.daemon.assistants.voice_service_runtime import stop_voice_service
+                from no1.daemon.assistants.voice_service_runtime import stop_voice_service
 
                 stop_voice_service(group)
             if old_mock is not None:
@@ -257,14 +257,14 @@ class TestWebAssistantRoutes(unittest.TestCase):
             cleanup()
 
     def test_web_voice_secretary_transcript_segment_route_stores_sidecar_without_legacy_proposal(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
             self._add_foreman(group_id)
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 with TestClient(create_app()) as client:
                     settings_resp = client.put(
                         f"/api/v1/groups/{group_id}/assistants/voice_secretary/settings",
@@ -347,7 +347,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
             cleanup()
 
     def test_web_voice_secretary_transcript_segment_route_updates_working_document(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         home, cleanup = self._with_home()
         try:
@@ -357,7 +357,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
             repo.mkdir()
             self._attach_scope(group_id, str(repo))
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 with TestClient(create_app()) as client:
                     settings_resp = client.put(
                         f"/api/v1/groups/{group_id}/assistants/voice_secretary/settings",
@@ -464,7 +464,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
             cleanup()
 
     def test_web_voice_secretary_transcript_segment_route_acks_live_segments_without_daemon(self) -> None:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         home, cleanup = self._with_home()
         try:
@@ -474,7 +474,7 @@ class TestWebAssistantRoutes(unittest.TestCase):
             repo.mkdir()
             self._attach_scope(group_id, str(repo))
 
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon) as daemon_mock:
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon) as daemon_mock:
                 with TestClient(create_app()) as client:
                     settings_resp = client.put(
                         f"/api/v1/groups/{group_id}/assistants/voice_secretary/settings",

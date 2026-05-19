@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 class TestCliSpaceCommands(unittest.TestCase):
     def test_parser_accepts_space_commands(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         parser = cli.build_parser()
 
@@ -46,7 +46,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(args.action, "sync")
 
     def test_space_bind_routes_to_group_space_bind(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -70,7 +70,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("remote_space_id"), "nb_123")
 
     def test_space_ingest_invalid_payload_rejected_before_daemon_call(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         args = Namespace(
             group="g_test",
@@ -91,7 +91,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(str((printed.get("error") or {}).get("code") or ""), "invalid_payload")
 
     def test_space_jobs_cancel_routes_to_group_space_jobs(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -115,7 +115,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("job_id"), "spj_1")
 
     def test_space_sync_routes_to_group_space_sync(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -139,7 +139,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("force"), True)
 
     def test_space_credential_set_routes_to_provider_credential_update(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -166,7 +166,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("clear"), False)
 
     def test_space_health_routes_to_provider_health_check(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -187,7 +187,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("provider"), "notebooklm")
 
     def test_space_auth_start_routes_to_provider_auth(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -211,7 +211,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("force_reauth"), False)
 
     def test_space_auth_start_force_reauth_routes_to_provider_auth(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -233,7 +233,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("force_reauth"), True)
 
     def test_space_auth_status_routes_to_provider_auth(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 
@@ -255,7 +255,7 @@ class TestCliSpaceCommands(unittest.TestCase):
         self.assertEqual(req.get("args", {}).get("provider"), "notebooklm")
 
     def test_space_auth_disconnect_routes_to_provider_auth(self) -> None:
-        from cccc import cli
+        from no1 import cli
 
         calls = []
 

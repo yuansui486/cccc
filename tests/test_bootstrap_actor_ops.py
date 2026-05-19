@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cccc.daemon.group.bootstrap_actor_ops import autostart_running_groups
+from no1.daemon.group.bootstrap_actor_ops import autostart_running_groups
 
 
 class TestBootstrapActorOps(unittest.TestCase):
@@ -24,8 +24,8 @@ class TestBootstrapActorOps(unittest.TestCase):
         return Path(td), cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -66,7 +66,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             group_id = str((create.result or {}).get("group_id") or "").strip()
             self.assertTrue(group_id)
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -109,11 +109,11 @@ class TestBootstrapActorOps(unittest.TestCase):
     def test_autostart_restores_explicit_user_scope_profile_secrets(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
-            from cccc.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
-            from cccc.daemon.actors.private_env_ops import merge_actor_env_with_private, update_actor_private_env
-            from cccc.kernel.actors import find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
+            from no1.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
+            from no1.daemon.actors.private_env_ops import merge_actor_env_with_private, update_actor_private_env
+            from no1.kernel.actors import find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "autostart-profile", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -197,7 +197,7 @@ class TestBootstrapActorOps(unittest.TestCase):
 
                 return _Session()
 
-            with patch("cccc.daemon.group.bootstrap_actor_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
+            with patch("no1.daemon.group.bootstrap_actor_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
                 autostart_running_groups(
                     home,
                     effective_runner_kind=lambda runner: runner,
@@ -260,16 +260,16 @@ class TestBootstrapActorOps(unittest.TestCase):
     def test_autostart_pet_inherits_foreman_profile_private_env(self) -> None:
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
-            from cccc.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
-            from cccc.daemon.actors.private_env_ops import (
+            from no1.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
+            from no1.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
+            from no1.daemon.actors.private_env_ops import (
                 delete_actor_private_env,
                 load_actor_private_env,
                 merge_actor_env_with_private,
                 update_actor_private_env,
             )
-            from cccc.kernel.group import load_group
-            from cccc.kernel.pet_actor import PET_ACTOR_ID
+            from no1.kernel.group import load_group
+            from no1.kernel.pet_actor import PET_ACTOR_ID
 
             create, _ = self._call("group_create", {"title": "autostart-pet-profile", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -359,7 +359,7 @@ class TestBootstrapActorOps(unittest.TestCase):
 
                 return _Session()
 
-            with patch("cccc.daemon.group.bootstrap_actor_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
+            with patch("no1.daemon.group.bootstrap_actor_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
                 autostart_running_groups(
                     home,
                     effective_runner_kind=lambda runner: runner,
@@ -433,7 +433,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -466,8 +466,8 @@ class TestBootstrapActorOps(unittest.TestCase):
                 return _Session()
 
             with (
-                patch("cccc.daemon.group.bootstrap_actor_ops.codex_app_supervisor.start_actor", side_effect=_fake_codex_start_actor),
-                patch("cccc.daemon.group.bootstrap_actor_ops.codex_app_supervisor.group_running", return_value=True),
+                patch("no1.daemon.group.bootstrap_actor_ops.codex_app_supervisor.start_actor", side_effect=_fake_codex_start_actor),
+                patch("no1.daemon.group.bootstrap_actor_ops.codex_app_supervisor.group_running", return_value=True),
             ):
                 autostart_running_groups(
                     home,
@@ -528,7 +528,7 @@ class TestBootstrapActorOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
-            from cccc.kernel.group import load_group
+            from no1.kernel.group import load_group
 
             group = load_group(group_id)
             self.assertIsNotNone(group)
@@ -569,11 +569,11 @@ class TestBootstrapActorOps(unittest.TestCase):
 
                 return _Session()
 
-            with patch("cccc.daemon.group.bootstrap_actor_ops.pty_runner.SUPERVISOR.start_actor", side_effect=_fake_pty_start_actor), patch(
-                "cccc.daemon.group.bootstrap_actor_ops.codex_app_supervisor.start_actor",
+            with patch("no1.daemon.group.bootstrap_actor_ops.pty_runner.SUPERVISOR.start_actor", side_effect=_fake_pty_start_actor), patch(
+                "no1.daemon.group.bootstrap_actor_ops.codex_app_supervisor.start_actor",
                 side_effect=AssertionError("codex supervisor should not start for PTY runner"),
             ), patch(
-                "cccc.daemon.group.bootstrap_actor_ops.runtime_start_preflight_error",
+                "no1.daemon.group.bootstrap_actor_ops.runtime_start_preflight_error",
                 return_value="",
             ):
                 autostart_running_groups(
@@ -612,11 +612,11 @@ class TestBootstrapActorOps(unittest.TestCase):
         """Global profile attach persists profile_scope='global' and start resolves via explicit ref."""
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
-            from cccc.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
-            from cccc.daemon.actors.private_env_ops import update_actor_private_env
-            from cccc.kernel.actors import find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
+            from no1.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
+            from no1.daemon.actors.private_env_ops import update_actor_private_env
+            from no1.kernel.actors import find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "global-start", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -700,11 +700,11 @@ class TestBootstrapActorOps(unittest.TestCase):
         """User-scope profile start resolves via explicit ref persisted at attach time."""
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
-            from cccc.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
-            from cccc.daemon.actors.private_env_ops import update_actor_private_env
-            from cccc.kernel.actors import find_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.actors.actor_profile_runtime import resolve_linked_actor_before_start
+            from no1.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
+            from no1.daemon.actors.private_env_ops import update_actor_private_env
+            from no1.kernel.actors import find_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "user-start", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))
@@ -799,14 +799,14 @@ class TestBootstrapActorOps(unittest.TestCase):
         return None so the implicit-global semantic does not leak to other helpers."""
         home, cleanup = self._with_home()
         try:
-            from cccc.daemon.actors.actor_profile_runtime import (
+            from no1.daemon.actors.actor_profile_runtime import (
                 actor_profile_ref,
                 resolve_linked_actor_before_start,
             )
-            from cccc.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
-            from cccc.daemon.actors.private_env_ops import update_actor_private_env
-            from cccc.kernel.actors import find_actor, update_actor
-            from cccc.kernel.group import load_group
+            from no1.daemon.actors.actor_profile_store import get_actor_profile, load_actor_profile_secrets
+            from no1.daemon.actors.private_env_ops import update_actor_private_env
+            from no1.kernel.actors import find_actor, update_actor
+            from no1.kernel.group import load_group
 
             create, _ = self._call("group_create", {"title": "legacy-test", "topic": "", "by": "user"})
             self.assertTrue(create.ok, getattr(create, "error", None))

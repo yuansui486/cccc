@@ -23,8 +23,8 @@ class TestPresentationOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -97,7 +97,7 @@ class TestPresentationOps(unittest.TestCase):
             self.assertTrue((Path(home) / "groups" / group_id / blob_rel_path).exists())
 
             with patch(
-                "cccc.daemon.group.presentation_ops.close_browser_surface_session",
+                "no1.daemon.group.presentation_ops.close_browser_surface_session",
                 return_value={"closed": True, "browser_surface": {"active": False, "state": "idle"}},
             ) as close_mock:
                 cleared, _ = self._call(
@@ -172,7 +172,7 @@ class TestPresentationOps(unittest.TestCase):
             self.assertTrue(initial.ok, getattr(initial, "error", None))
 
             with patch(
-                "cccc.daemon.group.presentation_ops.close_browser_surface_session",
+                "no1.daemon.group.presentation_ops.close_browser_surface_session",
                 return_value={"closed": True, "browser_surface": {"active": False, "state": "idle"}},
             ) as close_mock:
                 updated, _ = self._call(

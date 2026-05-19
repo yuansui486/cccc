@@ -23,23 +23,23 @@ class TestWebPrincipalGuards(unittest.TestCase):
         return td, cleanup
 
     def _local_call_daemon(self, req: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         request = DaemonRequest.model_validate(req)
         resp, _ = handle_request(request)
         return resp.model_dump(exclude_none=True)
 
     def _create_group(self, title: str) -> str:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         reg = load_registry()
         group = create_group(reg, title=title, topic="")
         return group.group_id
 
     def _create_client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
@@ -55,7 +55,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_anonymous_forbidden_when_access_tokens_exist(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -69,14 +69,14 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_groups_list_filters_by_allowed_groups(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             gid1 = self._create_group("g1")
             self._create_group("g2")
             token = str(create_access_token("user-a", allowed_groups=[gid1], is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
                 resp = client.get("/api/v1/groups", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 200)
@@ -87,12 +87,12 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_non_admin_observability_and_fs_recent_are_denied(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
                 headers = {"Authorization": f"Bearer {token}"}
 
@@ -107,12 +107,12 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_admin_can_access_fs_recent(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             token = str(create_access_token("admin-a", allowed_groups=[], is_admin=True).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
                 resp = client.get("/api/v1/fs/recent", headers={"Authorization": f"Bearer {token}"})
                 self.assertEqual(resp.status_code, 200)
@@ -124,7 +124,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
     def test_ping_omits_home_by_default_and_includes_it_on_demand(self) -> None:
         _, cleanup = self._with_home()
         try:
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
 
                 default_resp = client.get("/api/v1/ping")
@@ -140,8 +140,8 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_runtimes_response_is_trimmed_to_ui_fields(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.runtime import RuntimeInfo
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.runtime import RuntimeInfo
 
         _, cleanup = self._with_home()
         try:
@@ -155,12 +155,12 @@ class TestWebPrincipalGuards(unittest.TestCase):
                 capabilities="MCP; MCP setup: auto",
                 mcp_add_command=["codex", "mcp", "add"],
             )
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
-                "cccc.kernel.runtime.detect_all_runtimes",
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon), patch(
+                "no1.kernel.runtime.detect_all_runtimes",
                 return_value=[runtime],
             ), patch(
-                "cccc.kernel.runtime.get_runtime_command_with_flags",
-                return_value=["codex", "--mcp-config", "cccc"],
+                "no1.kernel.runtime.get_runtime_command_with_flags",
+                return_value=["codex", "--mcp-config", "onecolleague"],
             ):
                 client = self._create_client()
                 resp = client.get("/api/v1/runtimes", headers={"Authorization": f"Bearer {token}"})
@@ -170,7 +170,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
                 row = runtimes[0]
                 self.assertEqual(row.get("name"), "codex")
                 self.assertEqual(row.get("display_name"), "Codex CLI")
-                self.assertEqual(row.get("recommended_command"), "codex --mcp-config cccc")
+                self.assertEqual(row.get("recommended_command"), "codex --mcp-config onecolleague")
                 self.assertEqual(row.get("available"), True)
                 self.assertNotIn("command", row)
                 self.assertNotIn("path", row)
@@ -179,14 +179,14 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_empty_scoped_token_sees_no_groups(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             self._create_group("g1")
             self._create_group("g2")
             token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
                 resp = client.get("/api/v1/groups", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 200)
@@ -196,7 +196,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_empty_scoped_token_cannot_access_group_route(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -210,13 +210,13 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_group_delete_requires_admin_even_with_group_scope(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             gid = self._create_group("g1")
             token = str(create_access_token("user-a", allowed_groups=[gid], is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
                 resp = client.delete(f"/api/v1/groups/{gid}?confirm={gid}", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 403)
@@ -225,13 +225,13 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_admin_can_delete_group(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             gid = self._create_group("g1")
             token = str(create_access_token("admin-user", is_admin=True).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
                 client = self._create_client()
                 resp = client.delete(f"/api/v1/groups/{gid}?confirm={gid}", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 200)
@@ -240,7 +240,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_websocket_terminal_checks_group_access(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -256,7 +256,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_websocket_auth_accepts_valid_access_token(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -276,7 +276,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
     def test_health_anonymous_returns_200_without_extended_fields(self) -> None:
         _, cleanup = self._with_home()
         try:
-            with patch("cccc.ports.web.app.call_daemon", return_value={"ok": True}):
+            with patch("no1.ports.web.app.call_daemon", return_value={"ok": True}):
                 client = self._create_client()
                 resp = client.get("/api/v1/health")
             self.assertEqual(resp.status_code, 200)
@@ -287,12 +287,12 @@ class TestWebPrincipalGuards(unittest.TestCase):
             cleanup()
 
     def test_health_valid_token_returns_200_with_extended_fields(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
             token = str(create_access_token("user-a", allowed_groups=[], is_admin=False).get("token") or "")
-            with patch("cccc.ports.web.app.call_daemon", return_value={"ok": True}):
+            with patch("no1.ports.web.app.call_daemon", return_value={"ok": True}):
                 client = self._create_client()
                 resp = client.get("/api/v1/health", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 200)
@@ -305,7 +305,7 @@ class TestWebPrincipalGuards(unittest.TestCase):
     def test_health_invalid_token_still_returns_200(self) -> None:
         _, cleanup = self._with_home()
         try:
-            with patch("cccc.ports.web.app.call_daemon", return_value={"ok": True}):
+            with patch("no1.ports.web.app.call_daemon", return_value={"ok": True}):
                 client = self._create_client()
                 resp = client.get("/api/v1/health", headers={"Authorization": "Bearer bad-token"})
             self.assertEqual(resp.status_code, 200)

@@ -22,8 +22,8 @@ class TestSystemPromptGroupSpace(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -46,9 +46,9 @@ class TestSystemPromptGroupSpace(unittest.TestCase):
         return gid, "agent1"
 
     def test_prompt_excludes_group_space_block_when_unbound(self) -> None:
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
-        from cccc.kernel.system_prompt import render_system_prompt
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
+        from no1.kernel.system_prompt import render_system_prompt
 
         _, cleanup = self._with_home()
         try:
@@ -60,15 +60,15 @@ class TestSystemPromptGroupSpace(unittest.TestCase):
             self.assertIsNotNone(actor)
             prompt = render_system_prompt(group=group, actor=actor or {})
             self.assertNotIn("Group Space:", prompt)
-            self.assertNotIn("cccc_space(action=query)", prompt)
+            self.assertNotIn("onecolleague_space(action=query)", prompt)
         finally:
             cleanup()
 
     def test_prompt_excludes_group_space_block_even_when_work_lane_bound(self) -> None:
-        from cccc.daemon.space.group_space_store import set_space_provider_state, upsert_space_binding
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
-        from cccc.kernel.system_prompt import render_system_prompt
+        from no1.daemon.space.group_space_store import set_space_provider_state, upsert_space_binding
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
+        from no1.kernel.system_prompt import render_system_prompt
 
         _, cleanup = self._with_home()
         try:
@@ -95,16 +95,16 @@ class TestSystemPromptGroupSpace(unittest.TestCase):
             prompt = render_system_prompt(group=group, actor=actor or {})
             self.assertNotIn("Group Space:", prompt)
             self.assertNotIn("work_bound=true memory_bound=false", prompt)
-            self.assertNotIn('`cccc_space(action="query", lane="work")`', prompt)
+            self.assertNotIn('`onecolleague_space(action="query", lane="work")`', prompt)
             self.assertNotIn("system.notify; do not poll", prompt)
         finally:
             cleanup()
 
     def test_prompt_excludes_group_space_block_even_when_memory_lane_bound(self) -> None:
-        from cccc.daemon.space.group_space_store import set_space_provider_state, upsert_space_binding
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
-        from cccc.kernel.system_prompt import render_system_prompt
+        from no1.daemon.space.group_space_store import set_space_provider_state, upsert_space_binding
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
+        from no1.kernel.system_prompt import render_system_prompt
 
         _, cleanup = self._with_home()
         try:
@@ -140,7 +140,7 @@ class TestSystemPromptGroupSpace(unittest.TestCase):
             prompt = render_system_prompt(group=group, actor=actor or {})
             self.assertNotIn("Group Space:", prompt)
             self.assertNotIn("work_bound=true memory_bound=true", prompt)
-            self.assertNotIn('`cccc_space(action="query", lane="memory")`', prompt)
+            self.assertNotIn('`onecolleague_space(action="query", lane="memory")`', prompt)
         finally:
             cleanup()
 

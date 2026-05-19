@@ -1,6 +1,6 @@
 # Telegram Setup
 
-Connect your CCCC working group to Telegram for mobile access.
+Connect your OneColleague working group to Telegram for mobile access.
 
 ## Overview
 
@@ -13,15 +13,15 @@ Telegram is the easiest platform to set up. It's ideal for:
 ## Prerequisites
 
 - A Telegram account
-- CCCC installed and running
+- OneColleague installed and running
 
 ## Step 1: Create a Bot
 
 1. Open Telegram and search for `@BotFather`
 2. Start a chat and send `/newbot`
 3. Follow the prompts:
-   - Choose a display name (e.g., "My CCCC Bot")
-   - Choose a username (must end in `bot`, e.g., `my_cccc_bot`)
+   - Choose a display name (e.g., "My OneColleague Bot")
+   - Choose a username (must end in `bot`, e.g., `my_onecolleague_bot`)
 4. BotFather will give you a token like:
    ```
    123456789:ABCdefGHIjklMNOpqrsTUVwxyz
@@ -36,11 +36,11 @@ If you plan to use the bot in group chats, disable group privacy so the bot can 
 3. Set to **Disabled**
 :::
 
-## Step 2: Configure CCCC
+## Step 2: Configure OneColleague
 
 ### Option A: Via Web UI (Recommended)
 
-1. Open the CCCC Web UI at `http://127.0.0.1:8848/`
+1. Open the OneColleague Web UI at `http://127.0.0.1:8848/`
 2. Go to **Settings** (gear icon in header)
 3. Navigate to the **IM Bridge** tab
 4. Select **Telegram** as the platform
@@ -49,7 +49,7 @@ If you plan to use the bot in group chats, disable group privacy so the bot can 
    - Or enter an environment variable name (e.g., `TELEGRAM_BOT_TOKEN`)
 6. Click **Save Config**
 
-![CCCC IM Bridge Configuration](/images/cccc-im-bridge-telegram.png)
+![OneColleague IM Bridge Configuration](/images/onecolleague-im-bridge-telegram.png)
 
 ::: tip Security Best Practice
 For production use, store the token in an environment variable instead of pasting it directly:
@@ -66,10 +66,10 @@ Then enter `TELEGRAM_BOT_TOKEN` in the Web UI. Never commit tokens to git.
 
 ```bash
 # Using environment variable name
-cccc im set telegram --token-env TELEGRAM_BOT_TOKEN
+onecolleague im set telegram --token-env TELEGRAM_BOT_TOKEN
 
 # Verify configuration
-cccc im config
+onecolleague im config
 ```
 
 Both methods save the configuration to your group's `group.yaml`:
@@ -89,13 +89,13 @@ im:
 **Via CLI**:
 
 ```bash
-cccc im start
+onecolleague im start
 ```
 
 Verify it's running:
 
 ```bash
-cccc im status
+onecolleague im status
 ```
 
 ### Authorize in Telegram
@@ -109,15 +109,15 @@ New chats must be authorized before they can use the bot:
    abc123xyz
    ```
 4. **Authorize the chat** (choose one):
-   - **Web (recommended):** Open **CCCC Web → Settings → IM Bridge**, find it in **Pending Requests**, and click **Approve** (or paste the key in **Bind**)
+   - **Web (recommended):** Open **OneColleague Web → Settings → IM Bridge**, find it in **Pending Requests**, and click **Approve** (or paste the key in **Bind**)
    - **Foreman-assisted:** If foreman is online, send the key to foreman and ask foreman to bind it
-   - **CLI:** Run `cccc im bind --key <key>` on the server
+   - **CLI:** Run `onecolleague im bind --key <key>` on the server
 5. Once authorized, the chat can immediately send and receive messages — no further commands needed
 
 For group chats:
 1. Add the bot to your group
 2. Follow the same authorization flow above
-3. All authorized chats receive messages from CCCC
+3. All authorized chats receive messages from OneColleague
 
 ## Usage
 
@@ -168,7 +168,7 @@ Use `/verbose` to toggle whether you see agent-to-agent messages.
 
 ### File Attachments
 
-Attach files to your message. They're downloaded and stored in CCCC's blob storage, then forwarded to agents.
+Attach files to your message. They're downloaded and stored in OneColleague's blob storage, then forwarded to agents.
 
 ## Commands Reference
 
@@ -192,12 +192,12 @@ Attach files to your message. They're downloaded and stored in CCCC's blob stora
 
 1. Check if the bridge is running:
    ```bash
-   cccc im status
+   onecolleague im status
    ```
 
 2. Check logs for errors:
    ```bash
-   cccc im logs -f
+   onecolleague im logs -f
    ```
 
 3. Verify token is correct — re-check with BotFather (`/mybots` → select bot → **API Token**)
@@ -209,13 +209,13 @@ Your token is invalid. Get a new one from BotFather:
 1. Send `/mybots` to BotFather
 2. Select your bot
 3. Click **API Token** → **Revoke current token**
-4. Update your token in CCCC Settings (Web UI) or environment variable
+4. Update your token in OneColleague Settings (Web UI) or environment variable
 
 ### Messages not delivered
 
 1. Ensure the chat is authorized (run `/subscribe` → bind the key via Web, foreman-assisted bind, or CLI)
-2. Check that the CCCC daemon is running
-3. Verify the bridge status in Web UI or via `cccc im status`
+2. Check that the OneColleague daemon is running
+3. Verify the bridge status in Web UI or via `onecolleague im status`
 
 ### Rate limiting
 
@@ -231,4 +231,4 @@ Telegram has rate limits. If you're sending many messages:
 - The bot can see all messages in groups where it's added
 - **New chats require key-based authorization** before they can interact with the bot — send `/subscribe` to generate a one-time key, then confirm it from the server side (Web Settings > IM Bridge, foreman-assisted bind, or CLI); once bound, the chat is fully authorized
 - Binding keys expire after **10 minutes**; generate a new one with `/subscribe` if it lapses
-- The bind operation must be performed via CCCC Web Settings (IM Bridge), foreman-assisted bind, or `cccc im bind --key` on the server — Telegram users cannot self-authorize
+- The bind operation must be performed via OneColleague Web Settings (IM Bridge), foreman-assisted bind, or `onecolleague im bind --key` on the server — Telegram users cannot self-authorize

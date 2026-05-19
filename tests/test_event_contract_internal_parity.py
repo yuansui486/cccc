@@ -5,7 +5,7 @@ from typing import get_args
 
 class TestEventContractInternalParity(unittest.TestCase):
     def test_event_kind_literal_and_model_map_stay_in_sync(self) -> None:
-        from cccc.contracts.v1.event import EventKind, _KIND_TO_MODEL
+        from no1.contracts.v1.event import EventKind, _KIND_TO_MODEL
 
         kinds = set(get_args(EventKind))
         mapped = set(_KIND_TO_MODEL.keys())
@@ -22,7 +22,7 @@ class TestEventContractInternalParity(unittest.TestCase):
         )
 
     def test_reference_architecture_names_all_event_kinds(self) -> None:
-        from cccc.contracts.v1.event import EventKind
+        from no1.contracts.v1.event import EventKind
 
         repo_root = Path(__file__).resolve().parents[1]
         text = (repo_root / "docs/reference/architecture.md").read_text(encoding="utf-8")

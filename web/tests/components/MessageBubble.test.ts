@@ -11,7 +11,7 @@ describe("getMessageBubbleMotionClass", () => {
       isStreaming: true,
       isOptimistic: false,
       streamPhase: "commentary",
-    })).toBe("cccc-transient-bubble cccc-transient-bubble-commentary");
+    })).toBe("onecolleague-transient-bubble onecolleague-transient-bubble-commentary");
   });
 
   it("animates optimistic bubbles with the base transient class", () => {
@@ -19,7 +19,7 @@ describe("getMessageBubbleMotionClass", () => {
       isStreaming: false,
       isOptimistic: true,
       streamPhase: "",
-    })).toBe("cccc-transient-bubble");
+    })).toBe("onecolleague-transient-bubble");
   });
 
   it("keeps stable final bubbles animation-free", () => {
@@ -44,7 +44,7 @@ describe("mayContainMarkdown", () => {
   });
 
   it("keeps internal attachment manifests as plain text", () => {
-    expect(mayRenderMarkdown("[cccc] Attachments:\n- file.txt")).toBe(false);
+    expect(mayRenderMarkdown("[onecolleague] Attachments:\n- file.txt")).toBe(false);
   });
 });
 

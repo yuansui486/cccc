@@ -22,13 +22,13 @@ class TestWebLedgerTailApi(unittest.TestCase):
         return td, cleanup
 
     def _client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -236,8 +236,8 @@ class TestWebLedgerTailApi(unittest.TestCase):
             event_id = str(sent_event.get("id") or "").strip()
             self.assertTrue(event_id)
 
-            from cccc.kernel.group import load_group
-            from cccc.kernel.ledger import append_event
+            from no1.kernel.group import load_group
+            from no1.kernel.ledger import append_event
 
             group = load_group(group_id)
             self.assertIsNotNone(group)

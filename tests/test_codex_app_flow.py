@@ -28,8 +28,8 @@ class TestCodexAppFlow(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -46,7 +46,7 @@ class TestCodexAppFlow(unittest.TestCase):
         return events
 
     def test_claude_app_session_persists_start_state_outside_lock(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
 
         _, cleanup = self._with_home()
         try:
@@ -83,10 +83,10 @@ class TestCodexAppFlow(unittest.TestCase):
                     session._lock.release()
 
             with (
-                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", return_value=FakeProc()),
-                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
-                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch("no1.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.claude_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("no1.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.claude_app_sessions.time.sleep", return_value=None),
                 patch.object(session, "_persist_state", side_effect=fake_persist_state),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
             ):
@@ -97,8 +97,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_headless_start_uses_persistent_print_session(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
-        from cccc.daemon.runtime_session_ops import read_runtime_session
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.runtime_session_ops import read_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -133,11 +133,11 @@ class TestCodexAppFlow(unittest.TestCase):
                 return FakeProc()
 
             with (
-                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
-                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
-                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
-                patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"),
+                patch("no1.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
+                patch("no1.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="42e9ef0c-3b75-43a0-9056-eef13dd1061d"),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
             ):
@@ -155,8 +155,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_headless_start_resumes_existing_session_id(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
-        from cccc.daemon.runtime_session_ops import record_headless_runtime_session
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.runtime_session_ops import record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -213,10 +213,10 @@ class TestCodexAppFlow(unittest.TestCase):
                 return FakeProc()
 
             with (
-                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
-                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
-                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch("no1.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
+                patch("no1.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.claude_app_sessions.time.sleep", return_value=None),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
             ):
@@ -229,7 +229,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_headless_shutdown_stdout_close_does_not_persist_actor_stop(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, ClaudeAppSessionManager
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, ClaudeAppSessionManager
 
         home, cleanup = self._with_home()
         try:
@@ -260,7 +260,7 @@ class TestCodexAppFlow(unittest.TestCase):
             session._running = True
             manager._sessions[("g_claude_shutdown", "peer1")] = session
 
-            with patch("cccc.daemon.claude_app_sessions.persist_actor_process_exit_stopped") as persist_stopped:
+            with patch("no1.daemon.claude_app_sessions.persist_actor_process_exit_stopped") as persist_stopped:
                 manager.begin_shutdown()
                 session._stdout_loop()
 
@@ -270,7 +270,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_headless_print_mode_stdout_close_does_not_persist_actor_stop(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -299,7 +299,7 @@ class TestCodexAppFlow(unittest.TestCase):
             session._proc = FakeProc()
             session._running = True
 
-            with patch("cccc.daemon.claude_app_sessions.persist_actor_process_exit_stopped") as persist_stopped:
+            with patch("no1.daemon.claude_app_sessions.persist_actor_process_exit_stopped") as persist_stopped:
                 session._stdout_loop()
 
             persist_stopped.assert_not_called()
@@ -308,8 +308,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_headless_resume_exit_falls_back_without_poisoning_turn_queue(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
-        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -381,11 +381,11 @@ class TestCodexAppFlow(unittest.TestCase):
                 return ExitedProc() if len(launch_commands) == 1 else RunningProc()
 
             with (
-                patch("cccc.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
-                patch("cccc.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
-                patch("cccc.daemon.claude_app_sessions.time.sleep", return_value=None),
-                patch("cccc.daemon.runtime_session_ops.uuid.uuid4", return_value="fresh-session"),
+                patch("no1.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.claude_app_sessions.subprocess.Popen", side_effect=fake_popen),
+                patch("no1.daemon.claude_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.claude_app_sessions.time.sleep", return_value=None),
+                patch("no1.daemon.runtime_session_ops.uuid.uuid4", return_value="fresh-session"),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
             ):
@@ -401,8 +401,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_headless_resume_rejected_on_first_turn_marks_metadata_failed(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
-        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -464,7 +464,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_actor_list_uses_codex_supervisor_state_for_headless_working(self) -> None:
-        from cccc.daemon.actors.actor_ops import handle_actor_list
+        from no1.daemon.actors.actor_ops import handle_actor_list
 
         _, cleanup = self._with_home()
         try:
@@ -487,9 +487,9 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
 
             with (
-                patch("cccc.daemon.actors.actor_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.actors.actor_ops.codex_app_supervisor.actor_running", return_value=True),
                 patch(
-                    "cccc.daemon.actors.actor_ops.codex_app_supervisor.get_state",
+                    "no1.daemon.actors.actor_ops.codex_app_supervisor.get_state",
                     return_value={
                         "group_id": group_id,
                         "actor_id": "peer1",
@@ -517,8 +517,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_send_routes_running_headless_codex_actor_to_app_supervisor(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_send
-        from cccc.kernel.group import load_group
+        from no1.daemon.messaging.chat_ops import handle_send
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -541,11 +541,11 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
             ):
                 resp = handle_send(
                     {
@@ -567,7 +567,7 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             submit_user_message.assert_called_once()
             submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
-            self.assertIn("[cccc] user → peer1:", submitted_text)
+            self.assertIn("[onecolleague] user → peer1:", submitted_text)
             self.assertIn("hello codex", submitted_text)
             queue_chat_message.assert_not_called()
             request_flush_pending_messages.assert_not_called()
@@ -579,8 +579,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_install_slash_command_delivers_general_install_task_to_agent(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_send
-        from cccc.kernel.group import load_group
+        from no1.daemon.messaging.chat_ops import handle_send
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -603,11 +603,11 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
             ):
                 resp = handle_send(
                     {
@@ -629,8 +629,8 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             submit_user_message.assert_called_once()
             submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
-            self.assertIn("[cccc] Slash command: /install", submitted_text)
-            self.assertIn("[cccc] Capability: skill:cccc:install", submitted_text)
+            self.assertIn("[onecolleague] Slash command: /install", submitted_text)
+            self.assertIn("[onecolleague] Capability: skill:cccc:install", submitted_text)
             self.assertIn("scope=group", submitted_text)
             self.assertIn("Route this request through skill:cccc:install", submitted_text)
             self.assertIn("The skill definition is the source of truth", submitted_text)
@@ -657,11 +657,11 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_send_headless_codex_auto_mark_waits_for_runtime_acceptance(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_send
-        from cccc.daemon.messaging.delivery import MCP_REMINDER_LINE
-        from cccc.daemon.messaging.delivery import auto_mark_headless_delivery_started
-        from cccc.kernel.group import load_group
-        from cccc.kernel.inbox import get_cursor, unread_count
+        from no1.daemon.messaging.chat_ops import handle_send
+        from no1.daemon.messaging.delivery import MCP_REMINDER_LINE
+        from no1.daemon.messaging.delivery import auto_mark_headless_delivery_started
+        from no1.kernel.group import load_group
+        from no1.kernel.inbox import get_cursor, unread_count
 
         _, cleanup = self._with_home()
         try:
@@ -691,11 +691,11 @@ class TestCodexAppFlow(unittest.TestCase):
             before_cursor_event_id, before_cursor_ts = get_cursor(group, "peer1")
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
             ):
                 resp = handle_send(
                     {
@@ -717,7 +717,7 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             submit_user_message.assert_called_once()
             submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
-            self.assertIn("[cccc] user → peer1", submitted_text)
+            self.assertIn("[onecolleague] user → peer1", submitted_text)
             self.assertIn("hello codex", submitted_text)
             self.assertIn(MCP_REMINDER_LINE, submitted_text)
             queue_chat_message.assert_not_called()
@@ -761,10 +761,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_reply_headless_codex_does_not_leak_original_external_source_into_sender_header(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_reply
-        from cccc.kernel.group import load_group
-        from cccc.kernel.ledger import append_event
-        from cccc.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.chat_ops import handle_reply
+        from no1.kernel.group import load_group
+        from no1.kernel.ledger import append_event
+        from no1.contracts.v1 import ChatMessageData
 
         _, cleanup = self._with_home()
         try:
@@ -807,11 +807,11 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(reply_to)
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
             ):
                 resp = handle_reply(
                     {
@@ -833,7 +833,7 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             submit_user_message.assert_called_once()
             submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
-            self.assertIn("[cccc] peer2 → peer1", submitted_text)
+            self.assertIn("[onecolleague] peer2 → peer1", submitted_text)
             self.assertIn('> "外部用户原话"', submitted_text)
             self.assertIn("收到，我来处理。", submitted_text)
             self.assertNotIn("Alice", submitted_text)
@@ -845,7 +845,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_send_routes_headless_codex_image_attachments_to_app_supervisor(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_send
+        from no1.daemon.messaging.chat_ops import handle_send
 
         _, cleanup = self._with_home()
         try:
@@ -870,12 +870,12 @@ class TestCodexAppFlow(unittest.TestCase):
             attachments = [{"kind": "image", "path": "state/blobs/test.png", "title": "test.png", "mime_type": "image/png"}]
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
-                patch("cccc.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=[]),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=[]),
             ):
                 resp = handle_send(
                     {
@@ -903,7 +903,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_send_routes_running_pty_codex_actor_to_pty_delivery(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_send
+        from no1.daemon.messaging.chat_ops import handle_send
 
         _, cleanup = self._with_home()
         try:
@@ -926,12 +926,12 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
-                patch("cccc.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=[]),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=[]),
             ):
                 resp = handle_send(
                     {
@@ -958,7 +958,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_reply_routes_running_pty_codex_actor_to_pty_delivery(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_reply
+        from no1.daemon.messaging.chat_ops import handle_reply
 
         _, cleanup = self._with_home()
         try:
@@ -996,12 +996,12 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(reply_to)
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
-                patch("cccc.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=[]),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message") as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=[]),
             ):
                 resp = handle_reply(
                     {
@@ -1028,11 +1028,11 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_reply_headless_codex_auto_mark_waits_for_runtime_acceptance(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_reply
-        from cccc.daemon.messaging.delivery import MCP_REMINDER_LINE
-        from cccc.daemon.messaging.delivery import auto_mark_headless_delivery_started
-        from cccc.kernel.group import load_group
-        from cccc.kernel.inbox import get_cursor, latest_unread_event, set_cursor, unread_count
+        from no1.daemon.messaging.chat_ops import handle_reply
+        from no1.daemon.messaging.delivery import MCP_REMINDER_LINE
+        from no1.daemon.messaging.delivery import auto_mark_headless_delivery_started
+        from no1.kernel.group import load_group
+        from no1.kernel.inbox import get_cursor, latest_unread_event, set_cursor, unread_count
 
         _, cleanup = self._with_home()
         try:
@@ -1088,11 +1088,11 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
             ):
                 resp = handle_reply(
                     {
@@ -1155,9 +1155,9 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_reply_routes_running_headless_codex_actor_without_extra_info_notify(self) -> None:
-        from cccc.daemon.messaging.chat_ops import handle_reply
-        from cccc.daemon.messaging.delivery import MCP_REMINDER_LINE
-        from cccc.kernel.group import load_group
+        from no1.daemon.messaging.chat_ops import handle_reply
+        from no1.daemon.messaging.delivery import MCP_REMINDER_LINE
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -1201,11 +1201,11 @@ class TestCodexAppFlow(unittest.TestCase):
             stale_notify_count = sum(1 for item in self._ledger_events(group) if str(item.get("kind") or "") == "system.notify")
 
             with (
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
-                patch("cccc.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
-                patch("cccc.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
-                patch("cccc.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
-                patch("cccc.daemon.messaging.chat_ops.flush_pending_messages"),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True),
+                patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True) as submit_user_message,
+                patch("no1.daemon.messaging.chat_ops.queue_chat_message") as queue_chat_message,
+                patch("no1.daemon.messaging.chat_ops.request_flush_pending_messages") as request_flush_pending_messages,
+                patch("no1.daemon.messaging.chat_ops.flush_pending_messages"),
             ):
                 resp = handle_reply(
                     {
@@ -1239,7 +1239,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_turn_loop_auto_marks_only_after_runtime_accepts_turn(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1259,7 +1259,7 @@ class TestCodexAppFlow(unittest.TestCase):
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit"),
                 patch.object(session._turn_done, "wait", return_value=True),
-                patch("cccc.daemon.codex_app_sessions.auto_mark_headless_delivery_started", return_value=True) as auto_mark,
+                patch("no1.daemon.codex_app_sessions.auto_mark_headless_delivery_started", return_value=True) as auto_mark,
             ):
                 session._turn_loop()
 
@@ -1273,7 +1273,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_turn_start_timeout_stops_session_without_idle_overwrite(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1322,7 +1322,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_turn_loop_auto_marks_only_after_runtime_accepts_turn(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1341,7 +1341,7 @@ class TestCodexAppFlow(unittest.TestCase):
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit"),
                 patch.object(session._turn_done, "wait", return_value=True),
-                patch("cccc.daemon.claude_app_sessions.auto_mark_headless_delivery_started", return_value=True) as auto_mark,
+                patch("no1.daemon.claude_app_sessions.auto_mark_headless_delivery_started", return_value=True) as auto_mark,
             ):
                 session._turn_loop()
 
@@ -1355,7 +1355,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_voice_secretary_control_turn_requeues_when_input_not_consumed(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1376,20 +1376,20 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch(
-                    "cccc.daemon.claude_app_sessions._voice_secretary_control_consumption_diagnostics",
+                    "no1.daemon.claude_app_sessions._voice_secretary_control_consumption_diagnostics",
                     return_value={"missing": ["secretary_report:req-1"]},
                 ),
                 patch(
-                    "cccc.daemon.claude_app_sessions._voice_secretary_prepare_repair_retry",
+                    "no1.daemon.claude_app_sessions._voice_secretary_prepare_repair_retry",
                     return_value=(
                         "\n".join(
                             [
                                 "read secretary input",
                                 "",
-                                "[CCCC] SYSTEM REPAIR: read_new_input already ran before this retry.",
-                                "[CCCC] FETCHED INPUT:",
+                                "[OneColleague] SYSTEM REPAIR: read_new_input already ran before this retry.",
+                                "[OneColleague] FETCHED INPUT:",
                                 "Target: secretary",
                             ]
                         ),
@@ -1421,7 +1421,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_voice_secretary_control_turn_fails_after_retry_when_input_not_consumed(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1443,7 +1443,7 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit") as emit,
                 patch.object(session._turn_done, "set") as done_set,
@@ -1462,7 +1462,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_control_turn_uses_control_events_and_skips_auto_mark(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1482,7 +1482,7 @@ class TestCodexAppFlow(unittest.TestCase):
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit") as emit,
                 patch.object(session._turn_done, "wait", return_value=True),
-                patch("cccc.daemon.codex_app_sessions.auto_mark_headless_delivery_started") as auto_mark,
+                patch("no1.daemon.codex_app_sessions.auto_mark_headless_delivery_started") as auto_mark,
             ):
                 session._turn_loop()
 
@@ -1494,10 +1494,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_bootstrap_control_text_passes_explicit_actor_id(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -1518,7 +1518,7 @@ class TestCodexAppFlow(unittest.TestCase):
 
             text = session._build_bootstrap_control_text()
 
-            self.assertIn("cccc_bootstrap", text)
+            self.assertIn("onecolleague_bootstrap", text)
             self.assertIn('actor_id="Development"', text)
             self.assertIn(f'group_id="{created.group_id}"', text)
             self.assertIn("Pass actor_id explicitly", text)
@@ -1526,7 +1526,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_bootstrap_control_failed_tool_call_finishes_turn(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1554,8 +1554,8 @@ class TestCodexAppFlow(unittest.TestCase):
                         "item": {
                             "type": "mcpToolCall",
                             "id": "call-bootstrap",
-                            "server": "cccc",
-                            "tool": "cccc_bootstrap",
+                            "server": "onecolleague",
+                            "tool": "onecolleague_bootstrap",
                             "status": "failed",
                             "result": {
                                 "content": [
@@ -1582,7 +1582,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_control_turn_emits_stalled_when_runtime_goes_quiet(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1609,9 +1609,9 @@ class TestCodexAppFlow(unittest.TestCase):
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit") as emit,
                 patch.object(session._turn_done, "wait", side_effect=[False, True]),
-                patch("cccc.daemon.codex_app_sessions._TURN_STALL_SECONDS", 0.0),
-                patch("cccc.daemon.codex_app_sessions._TURN_WAIT_POLL_SECONDS", 0.0),
-                patch("cccc.daemon.codex_app_sessions.auto_mark_headless_delivery_started") as auto_mark,
+                patch("no1.daemon.codex_app_sessions._TURN_STALL_SECONDS", 0.0),
+                patch("no1.daemon.codex_app_sessions._TURN_WAIT_POLL_SECONDS", 0.0),
+                patch("no1.daemon.codex_app_sessions.auto_mark_headless_delivery_started") as auto_mark,
             ):
                 session._turn_loop()
 
@@ -1626,7 +1626,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_control_turn_completion_emits_headless_preview_output(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -1671,7 +1671,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_control_turn_completion_failure_emits_failed_error(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -1713,7 +1713,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_turn_completion_failure_emits_turn_failed_error(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -1752,7 +1752,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_control_turn_requeues_when_input_not_consumed(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1773,15 +1773,15 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch(
-                    "cccc.daemon.codex_app_sessions._voice_secretary_control_consumption_diagnostics",
+                    "no1.daemon.codex_app_sessions._voice_secretary_control_consumption_diagnostics",
                     return_value={"missing": ["secretary_report:req-1"]},
                 ),
                 patch(
-                    "cccc.daemon.codex_app_sessions._voice_secretary_prepare_repair_retry",
+                    "no1.daemon.codex_app_sessions._voice_secretary_prepare_repair_retry",
                     return_value=(
-                        "\n".join(["read secretary input", "", "[CCCC] REPAIR HINT:", "- secretary_report:req-1"]),
+                        "\n".join(["read secretary input", "", "[OneColleague] REPAIR HINT:", "- secretary_report:req-1"]),
                         {"missing": ["secretary_report:req-1"]},
                     ),
                 ) as prepare_retry,
@@ -1813,7 +1813,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_prepare_repair_retry_only_restates_missing_outputs(self) -> None:
-        from cccc.daemon.codex_app_sessions import (
+        from no1.daemon.codex_app_sessions import (
             _voice_secretary_control_failure_reason,
             _voice_secretary_prepare_repair_retry,
         )
@@ -1834,7 +1834,7 @@ class TestCodexAppFlow(unittest.TestCase):
         )
 
     def test_voice_secretary_control_completion_keeps_unknown_composer_draft_incomplete(self) -> None:
-        from cccc.daemon.codex_app_sessions import _voice_secretary_control_completion_state
+        from no1.daemon.codex_app_sessions import _voice_secretary_control_completion_state
 
         home, cleanup = self._with_home()
         try:
@@ -1862,7 +1862,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_voice_secretary_prepare_repair_retry_only_restates_missing_outputs(self) -> None:
-        from cccc.daemon.claude_app_sessions import (
+        from no1.daemon.claude_app_sessions import (
             _voice_secretary_control_failure_reason,
             _voice_secretary_prepare_repair_retry,
         )
@@ -1883,7 +1883,7 @@ class TestCodexAppFlow(unittest.TestCase):
         )
 
     def test_voice_secretary_control_turn_does_not_retry_missing_read_new_input(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1904,12 +1904,12 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch(
-                    "cccc.daemon.codex_app_sessions._voice_secretary_control_consumption_diagnostics",
+                    "no1.daemon.codex_app_sessions._voice_secretary_control_consumption_diagnostics",
                     return_value={"missing": ["read_new_input"]},
                 ),
-                patch("cccc.daemon.codex_app_sessions._voice_secretary_prepare_repair_retry") as prepare_retry,
+                patch("no1.daemon.codex_app_sessions._voice_secretary_prepare_repair_retry") as prepare_retry,
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit") as emit,
                 patch.object(session._turn_done, "set") as done_set,
@@ -1929,7 +1929,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_voice_secretary_control_turn_does_not_retry_missing_read_new_input(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1950,12 +1950,12 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch(
-                    "cccc.daemon.claude_app_sessions._voice_secretary_control_consumption_diagnostics",
+                    "no1.daemon.claude_app_sessions._voice_secretary_control_consumption_diagnostics",
                     return_value={"missing": ["read_new_input"]},
                 ),
-                patch("cccc.daemon.claude_app_sessions._voice_secretary_prepare_repair_retry") as prepare_retry,
+                patch("no1.daemon.claude_app_sessions._voice_secretary_prepare_repair_retry") as prepare_retry,
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit") as emit,
                 patch.object(session._turn_done, "set") as done_set,
@@ -1972,7 +1972,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_control_turn_fails_after_retry_when_input_not_consumed(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -1994,7 +1994,7 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.codex_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_emit") as emit,
                 patch.object(session._turn_done, "set") as done_set,
@@ -2016,7 +2016,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_voice_secretary_control_turn_requires_read_new_input_for_prompt_draft(self) -> None:
-        from cccc.daemon.codex_app_sessions import (
+        from no1.daemon.codex_app_sessions import (
             _voice_secretary_control_consumed_input,
             _voice_secretary_control_consumption_diagnostics,
         )
@@ -2349,12 +2349,12 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_voice_secretary_prepare_control_turn_prefetches_input(self) -> None:
-        from cccc.contracts.v1 import DaemonResponse
-        from cccc.daemon.codex_app_sessions import _voice_secretary_prepare_control_turn
+        from no1.contracts.v1 import DaemonResponse
+        from no1.daemon.codex_app_sessions import _voice_secretary_prepare_control_turn
 
         with (
             patch(
-                "cccc.daemon.codex_app_sessions._voice_secretary_control_snapshot",
+                "no1.daemon.codex_app_sessions._voice_secretary_control_snapshot",
                 return_value={
                     "kind": "voice_secretary_input",
                     "before_latest_seq": 8,
@@ -2362,7 +2362,7 @@ class TestCodexAppFlow(unittest.TestCase):
                 },
             ),
             patch(
-                "cccc.daemon.assistants.assistant_ops.handle_assistant_voice_document_input_read",
+                "no1.daemon.assistants.assistant_ops.handle_assistant_voice_document_input_read",
                 return_value=DaemonResponse(
                     ok=True,
                     result={
@@ -2388,11 +2388,11 @@ class TestCodexAppFlow(unittest.TestCase):
         self.assertTrue(snapshot.get("prefetched_read_new_input"))
 
     def test_codex_voice_secretary_prepare_control_turn_uses_inline_envelope_without_prefetch(self) -> None:
-        from cccc.daemon.codex_app_sessions import _voice_secretary_prepare_control_turn
+        from no1.daemon.codex_app_sessions import _voice_secretary_prepare_control_turn
 
         with (
             patch(
-                "cccc.daemon.codex_app_sessions._voice_secretary_control_snapshot",
+                "no1.daemon.codex_app_sessions._voice_secretary_control_snapshot",
                 return_value={
                     "kind": "voice_secretary_input",
                     "before_latest_seq": 8,
@@ -2404,7 +2404,7 @@ class TestCodexAppFlow(unittest.TestCase):
                     "before_prompt_drafts": {},
                 },
             ),
-            patch("cccc.daemon.assistants.assistant_ops.handle_assistant_voice_document_input_read") as read_input,
+            patch("no1.daemon.assistants.assistant_ops.handle_assistant_voice_document_input_read") as read_input,
         ):
             payload_text, snapshot = _voice_secretary_prepare_control_turn(
                 group_id="g_test",
@@ -2421,12 +2421,12 @@ class TestCodexAppFlow(unittest.TestCase):
         self.assertTrue(snapshot.get("input_envelope_delivered"))
 
     def test_claude_voice_secretary_prepare_control_turn_prefetches_input(self) -> None:
-        from cccc.contracts.v1 import DaemonResponse
-        from cccc.daemon.claude_app_sessions import _voice_secretary_prepare_control_turn
+        from no1.contracts.v1 import DaemonResponse
+        from no1.daemon.claude_app_sessions import _voice_secretary_prepare_control_turn
 
         with (
             patch(
-                "cccc.daemon.claude_app_sessions._voice_secretary_control_snapshot",
+                "no1.daemon.claude_app_sessions._voice_secretary_control_snapshot",
                 return_value={
                     "kind": "voice_secretary_input",
                     "before_latest_seq": 8,
@@ -2434,7 +2434,7 @@ class TestCodexAppFlow(unittest.TestCase):
                 },
             ),
             patch(
-                "cccc.daemon.assistants.assistant_ops.handle_assistant_voice_document_input_read",
+                "no1.daemon.assistants.assistant_ops.handle_assistant_voice_document_input_read",
                 return_value=DaemonResponse(
                     ok=True,
                     result={
@@ -2460,9 +2460,9 @@ class TestCodexAppFlow(unittest.TestCase):
         self.assertTrue(snapshot.get("prefetched_read_new_input"))
 
     def test_emit_system_notify_routes_running_headless_codex_actor_to_control_turn(self) -> None:
-        from cccc.contracts.v1 import SystemNotifyData
-        from cccc.daemon.messaging.delivery import emit_system_notify
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import SystemNotifyData
+        from no1.daemon.messaging.delivery import emit_system_notify
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -2487,8 +2487,8 @@ class TestCodexAppFlow(unittest.TestCase):
             assert group is not None
 
             with (
-                patch("cccc.daemon.codex_app_sessions.SUPERVISOR.actor_running", return_value=True),
-                patch("cccc.daemon.codex_app_sessions.SUPERVISOR.submit_control_message", return_value=True) as submit_control_message,
+                patch("no1.daemon.codex_app_sessions.SUPERVISOR.actor_running", return_value=True),
+                patch("no1.daemon.codex_app_sessions.SUPERVISOR.submit_control_message", return_value=True) as submit_control_message,
             ):
                 event = emit_system_notify(
                     group,
@@ -2514,9 +2514,9 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_emit_system_notify_routes_running_headless_claude_actor_to_control_turn(self) -> None:
-        from cccc.contracts.v1 import SystemNotifyData
-        from cccc.daemon.messaging.delivery import emit_system_notify
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import SystemNotifyData
+        from no1.daemon.messaging.delivery import emit_system_notify
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -2541,8 +2541,8 @@ class TestCodexAppFlow(unittest.TestCase):
             assert group is not None
 
             with (
-                patch("cccc.daemon.claude_app_sessions.SUPERVISOR.actor_running", return_value=True),
-                patch("cccc.daemon.claude_app_sessions.SUPERVISOR.submit_control_message", return_value=True) as submit_control_message,
+                patch("no1.daemon.claude_app_sessions.SUPERVISOR.actor_running", return_value=True),
+                patch("no1.daemon.claude_app_sessions.SUPERVISOR.submit_control_message", return_value=True) as submit_control_message,
             ):
                 event = emit_system_notify(
                     group,
@@ -2568,10 +2568,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_notifications_write_stream_events_without_auto_materializing_chat_message(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.kernel.headless_events import headless_events_path
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.kernel.headless_events import headless_events_path
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -2712,10 +2712,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_session_build_turn_input_items_includes_local_image_blob(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
-        from cccc.kernel.blobs import store_blob_bytes
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn
+        from no1.kernel.blobs import store_blob_bytes
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -2749,10 +2749,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_session_compose_user_content_includes_local_image_blob_path(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
-        from cccc.kernel.blobs import store_blob_bytes
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.kernel.blobs import store_blob_bytes
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -2786,7 +2786,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_resume_rejected_restart_preserves_non_bootstrap_queued_turns(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -2818,10 +2818,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_notifications_keep_streaming_when_agent_message_phase_missing(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.kernel.headless_events import headless_events_path
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.kernel.headless_events import headless_events_path
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -2905,10 +2905,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_stream_completion_emits_headless_events_without_auto_chat_message(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
-        from cccc.kernel.headless_events import headless_events_path
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.kernel.headless_events import headless_events_path
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -2958,7 +2958,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_stream_control_turn_requeues_when_input_not_consumed(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
+        from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn
 
         home, cleanup = self._with_home()
         try:
@@ -2979,20 +2979,20 @@ class TestCodexAppFlow(unittest.TestCase):
             )
 
             with (
-                patch("cccc.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
+                patch("no1.daemon.claude_app_sessions._voice_secretary_control_consumed_input", return_value=False),
                 patch(
-                    "cccc.daemon.claude_app_sessions._voice_secretary_control_consumption_diagnostics",
+                    "no1.daemon.claude_app_sessions._voice_secretary_control_consumption_diagnostics",
                     return_value={"missing": ["secretary_report:req-1"]},
                 ),
                 patch(
-                    "cccc.daemon.claude_app_sessions._voice_secretary_prepare_repair_retry",
+                    "no1.daemon.claude_app_sessions._voice_secretary_prepare_repair_retry",
                     return_value=(
                         "\n".join(
                             [
                                 "read secretary input",
                                 "",
-                                "[CCCC] SYSTEM REPAIR: read_new_input already ran before this retry.",
-                                "[CCCC] FETCHED INPUT:",
+                                "[OneColleague] SYSTEM REPAIR: read_new_input already ran before this retry.",
+                                "[OneColleague] FETCHED INPUT:",
                                 "Target: secretary",
                             ]
                         ),
@@ -3026,7 +3026,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_stream_control_turn_emits_headless_preview_output(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -3062,10 +3062,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_claude_session_emits_rich_tool_hook_task_and_summary_activity(self) -> None:
-        from cccc.daemon.claude_app_sessions import ClaudeAppSession
-        from cccc.kernel.headless_events import headless_events_path
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.claude_app_sessions import ClaudeAppSession
+        from no1.kernel.headless_events import headless_events_path
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -3288,10 +3288,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_actor_activity_thread_emits_running_headless_codex_actor(self) -> None:
-        from cccc.daemon.serve_ops import start_actor_activity_thread
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.serve_ops import start_actor_activity_thread
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -3348,10 +3348,10 @@ class TestCodexAppFlow(unittest.TestCase):
 
     def test_actor_activity_thread_writes_ledger_on_state_change(self) -> None:
         """actor.activity should be written to ledger on working-state transitions."""
-        from cccc.daemon.serve_ops import start_actor_activity_thread
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.serve_ops import start_actor_activity_thread
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -3443,10 +3443,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_actor_activity_thread_preserves_runner_on_stopped_entry(self) -> None:
-        from cccc.daemon.serve_ops import start_actor_activity_thread
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.serve_ops import start_actor_activity_thread
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -3516,10 +3516,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_actor_activity_thread_uses_codex_app_server_state_for_pty_app_server_actor(self) -> None:
-        from cccc.daemon.serve_ops import start_actor_activity_thread
-        from cccc.kernel.actors import add_actor, update_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.serve_ops import start_actor_activity_thread
+        from no1.kernel.actors import add_actor, update_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -3599,10 +3599,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_actor_activity_thread_does_not_infer_working_from_tail_for_idle_pty_app_server_actor(self) -> None:
-        from cccc.daemon.serve_ops import start_actor_activity_thread
-        from cccc.kernel.actors import add_actor, update_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.serve_ops import start_actor_activity_thread
+        from no1.kernel.actors import add_actor, update_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -3686,8 +3686,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_session_persists_headless_state_file(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.daemon.runner_state_ops import headless_state_path
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.runner_state_ops import headless_state_path
 
         home, cleanup = self._with_home()
         try:
@@ -3722,7 +3722,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_thread_status_notification_does_not_mark_active_as_working(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -3750,7 +3750,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_thread_status_notification_marks_remote_tui_waiting(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -3773,7 +3773,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_thread_status_notification_ignores_other_threads(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -3793,8 +3793,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_headless_start_resumes_recorded_app_server_thread(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -3845,9 +3845,9 @@ class TestCodexAppFlow(unittest.TestCase):
                 raise AssertionError(f"unexpected request: {method}")
 
             with (
-                patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
-                patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("no1.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
                 patch.object(session, "_request", side_effect=fake_request),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
@@ -3866,8 +3866,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_headless_start_resumes_when_listen_url_changes(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -3919,9 +3919,9 @@ class TestCodexAppFlow(unittest.TestCase):
                 raise AssertionError(f"unexpected request: {method}")
 
             with (
-                patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
-                patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("no1.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
                 patch.object(session, "_request", side_effect=fake_request),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
@@ -3940,8 +3940,8 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_headless_resume_failure_falls_back_to_fresh_thread(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
-        from cccc.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+        from no1.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
 
         home, cleanup = self._with_home()
         try:
@@ -3994,9 +3994,9 @@ class TestCodexAppFlow(unittest.TestCase):
                 raise AssertionError(f"unexpected request: {method}")
 
             with (
-                patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
-                patch("cccc.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
+                patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
+                patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("no1.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
                 patch.object(session, "_request", side_effect=fake_request),
                 patch.object(session, "_persist_state"),
                 patch.object(session, "_queue_bootstrap_control_turn", return_value=None),
@@ -4012,15 +4012,15 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_session_manager_falls_back_when_cli_is_missing(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSessionManager
-        from cccc.daemon.runner_state_ops import headless_state_path
+        from no1.daemon.codex_app_sessions import CodexAppSessionManager
+        from no1.daemon.runner_state_ops import headless_state_path
 
         home, cleanup = self._with_home()
         try:
             manager = CodexAppSessionManager()
 
             with patch(
-                "cccc.daemon.codex_app_sessions.CodexAppSession.start",
+                "no1.daemon.codex_app_sessions.CodexAppSession.start",
                 side_effect=FileNotFoundError(2, "No such file or directory", "codex"),
             ):
                 session = manager.start_actor(
@@ -4051,15 +4051,15 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_session_manager_falls_back_before_mcp_install_when_cli_is_absent(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSessionManager
-        from cccc.daemon.runner_state_ops import headless_state_path
+        from no1.daemon.codex_app_sessions import CodexAppSessionManager
+        from no1.daemon.runner_state_ops import headless_state_path
 
         home, cleanup = self._with_home()
         try:
             manager = CodexAppSessionManager()
 
-            with patch("cccc.daemon.codex_app_sessions.shutil.which", return_value=None), patch(
-                "cccc.daemon.codex_app_sessions.ensure_mcp_installed",
+            with patch("no1.daemon.codex_app_sessions.shutil.which", return_value=None), patch(
+                "no1.daemon.codex_app_sessions.ensure_mcp_installed",
                 side_effect=AssertionError("MCP install should not run without codex CLI"),
             ):
                 session = manager.start_actor(
@@ -4080,7 +4080,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_pty_app_session_starts_ws_server_and_remote_tui(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSessionManager
+        from no1.daemon.codex_app_sessions import CodexAppSessionManager
 
         home, cleanup = self._with_home()
         try:
@@ -4141,18 +4141,18 @@ class TestCodexAppFlow(unittest.TestCase):
 
                 return _PtySession()
 
-            with patch("cccc.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()) as popen, patch(
-                "cccc.daemon.codex_app_sessions.threading.Thread", FakeThread
-            ), patch("cccc.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True), patch(
-                "cccc.daemon.codex_app_sessions._connect_websocket", return_value=FakeWs()
+            with patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()) as popen, patch(
+                "no1.daemon.codex_app_sessions.threading.Thread", FakeThread
+            ), patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True), patch(
+                "no1.daemon.codex_app_sessions._connect_websocket", return_value=FakeWs()
             ) as connect_ws, patch(
-                "cccc.daemon.codex_app_sessions._codex_cli_available", return_value=True
+                "no1.daemon.codex_app_sessions._codex_cli_available", return_value=True
             ), patch(
-                "cccc.daemon.codex_app_sessions.CodexAppSession._request", fake_request
+                "no1.daemon.codex_app_sessions.CodexAppSession._request", fake_request
             ), patch(
-                "cccc.daemon.codex_app_sessions.CodexAppSession._build_bootstrap_control_text", return_value="bootstrap"
+                "no1.daemon.codex_app_sessions.CodexAppSession._build_bootstrap_control_text", return_value="bootstrap"
             ), patch(
-                "cccc.daemon.codex_app_sessions.pty_runner.SUPERVISOR.start_actor", side_effect=fake_start_actor
+                "no1.daemon.codex_app_sessions.pty_runner.SUPERVISOR.start_actor", side_effect=fake_start_actor
             ):
                 session = manager.start_pty_app_actor(
                     group_id="g_test",
@@ -4199,7 +4199,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_pty_app_session_adopts_thread_from_status_notification(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -4219,10 +4219,10 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_pty_app_remote_tui_exit_stops_app_server_session(self) -> None:
-        from cccc.daemon.server import _handle_pty_session_exit
-        from cccc.kernel.actors import add_actor, update_actor
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.server import _handle_pty_session_exit
+        from no1.kernel.actors import add_actor, update_actor
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
 
         home, cleanup = self._with_home()
         try:
@@ -4239,8 +4239,8 @@ class TestCodexAppFlow(unittest.TestCase):
                 actor_id = "peer1"
                 pid = 12345
 
-            with patch("cccc.daemon.server._remove_pty_state_if_pid", return_value=True), patch(
-                "cccc.daemon.server.codex_app_supervisor.stop_actor"
+            with patch("no1.daemon.server._remove_pty_state_if_pid", return_value=True), patch(
+                "no1.daemon.server.codex_app_supervisor.stop_actor"
             ) as stop_actor:
                 _handle_pty_session_exit(_Session())  # type: ignore[arg-type]
 
@@ -4249,7 +4249,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_pty_app_observer_websocket_close_keeps_remote_tui_session(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -4285,7 +4285,7 @@ class TestCodexAppFlow(unittest.TestCase):
             session._running = True
 
             with patch(
-                "cccc.daemon.codex_app_sessions.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.codex_app_sessions.pty_runner.SUPERVISOR.actor_running",
                 return_value=True,
             ), patch.object(
                 session,
@@ -4299,7 +4299,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_pty_app_observer_websocket_close_does_not_persist_actor_stop(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:
@@ -4335,7 +4335,7 @@ class TestCodexAppFlow(unittest.TestCase):
             session._running = True
 
             with patch(
-                "cccc.daemon.codex_app_sessions.pty_runner.SUPERVISOR.actor_running",
+                "no1.daemon.codex_app_sessions.pty_runner.SUPERVISOR.actor_running",
                 return_value=False,
             ), patch.object(
                 session,
@@ -4348,7 +4348,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_app_shutdown_stdout_close_does_not_persist_actor_stop(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession, CodexAppSessionManager
+        from no1.daemon.codex_app_sessions import CodexAppSession, CodexAppSessionManager
 
         home, cleanup = self._with_home()
         try:
@@ -4379,7 +4379,7 @@ class TestCodexAppFlow(unittest.TestCase):
             session._running = True
             manager._sessions[("g_codex_shutdown", "peer1")] = session
 
-            with patch("cccc.daemon.codex_app_sessions.persist_actor_process_exit_stopped") as persist_stopped:
+            with patch("no1.daemon.codex_app_sessions.persist_actor_process_exit_stopped") as persist_stopped:
                 manager.begin_shutdown()
                 session._stdout_loop()
 
@@ -4389,7 +4389,7 @@ class TestCodexAppFlow(unittest.TestCase):
             cleanup()
 
     def test_codex_remote_tui_command_filters_prompt_and_keeps_approval_flags(self) -> None:
-        from cccc.daemon.codex_app_sessions import _codex_remote_tui_command
+        from no1.daemon.codex_app_sessions import _codex_remote_tui_command
 
         command = _codex_remote_tui_command(
             [
@@ -4419,7 +4419,7 @@ class TestCodexAppFlow(unittest.TestCase):
         )
 
     def test_codex_websocket_idle_timeout_does_not_stop_session(self) -> None:
-        from cccc.daemon.codex_app_sessions import CodexAppSession
+        from no1.daemon.codex_app_sessions import CodexAppSession
 
         home, cleanup = self._with_home()
         try:

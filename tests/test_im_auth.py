@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from cccc.ports.im.auth import KEY_TTL_SECONDS, KeyManager
+from no1.ports.im.auth import KEY_TTL_SECONDS, KeyManager
 
 
 class TestKeyManagerBasic(unittest.TestCase):
@@ -197,7 +197,7 @@ class TestKeyManagerAtomicWrite(unittest.TestCase):
 
 
 class TestMCPImBind(unittest.TestCase):
-    """MCP cccc_im_bind tool integration (unit-level, no daemon)."""
+    """MCP onecolleague_im_bind tool integration (unit-level, no daemon)."""
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
@@ -207,10 +207,10 @@ class TestMCPImBind(unittest.TestCase):
     def tearDown(self) -> None:
         self._td.cleanup()
 
-    def test_toolspecs_contains_cccc_im_bind(self) -> None:
-        from cccc.ports.mcp.toolspecs import MCP_TOOLS
+    def test_toolspecs_contains_onecolleague_im_bind(self) -> None:
+        from no1.ports.mcp.toolspecs import MCP_TOOLS
         names = [t["name"] for t in MCP_TOOLS]
-        self.assertIn("cccc_im_bind", names)
+        self.assertIn("onecolleague_im_bind", names)
 
     def test_bind_valid_key(self) -> None:
         """Normal bind flow: generate key → bind → authorized."""
@@ -245,8 +245,8 @@ class TestImRevokeSemantics(unittest.TestCase):
         self._td.cleanup()
 
     def test_revoke_also_unsubscribes_chat(self) -> None:
-        from cccc.daemon.im import im_ops
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.daemon.im import im_ops
+        from no1.ports.im.subscribers import SubscriberManager
 
         km = KeyManager(self.state_dir)
         sm = SubscriberManager(self.state_dir)
@@ -259,7 +259,7 @@ class TestImRevokeSemantics(unittest.TestCase):
         self.assertTrue(sm.is_subscribed("chat1", 0))
 
         fake_group = SimpleNamespace(path=self.group_path)
-        with patch("cccc.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
+        with patch("no1.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
             resp = im_ops.handle_im_revoke_chat({"group_id": "g_demo", "chat_id": "chat1", "thread_id": 0})
 
         self.assertTrue(resp.ok, getattr(resp, "error", None))
@@ -274,12 +274,12 @@ class TestImRevokeSemantics(unittest.TestCase):
         self.assertFalse(sm2.is_subscribed("chat1", 0))
 
     def test_list_pending_returns_generated_key(self) -> None:
-        from cccc.daemon.im import im_ops
+        from no1.daemon.im import im_ops
 
         km = KeyManager(self.state_dir)
         key = km.generate_key("chat2", 0, "telegram")
         fake_group = SimpleNamespace(path=self.group_path)
-        with patch("cccc.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
+        with patch("no1.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
             resp = im_ops.handle_im_list_pending({"group_id": "g_demo"})
 
         self.assertTrue(resp.ok, getattr(resp, "error", None))
@@ -290,12 +290,12 @@ class TestImRevokeSemantics(unittest.TestCase):
         self.assertEqual(pending[0].get("key"), key)
 
     def test_reject_pending_is_idempotent(self) -> None:
-        from cccc.daemon.im import im_ops
+        from no1.daemon.im import im_ops
 
         km = KeyManager(self.state_dir)
         key = km.generate_key("chat3", 0, "telegram")
         fake_group = SimpleNamespace(path=self.group_path)
-        with patch("cccc.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
+        with patch("no1.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
             first = im_ops.handle_im_reject_pending({"group_id": "g_demo", "key": key})
             second = im_ops.handle_im_reject_pending({"group_id": "g_demo", "key": key})
 
@@ -307,11 +307,11 @@ class TestImRevokeSemantics(unittest.TestCase):
         self.assertFalse(bool(second_result.get("rejected")))
 
     def test_reject_pending_requires_key(self) -> None:
-        from cccc.daemon.im import im_ops
+        from no1.daemon.im import im_ops
 
         km = KeyManager(self.state_dir)
         fake_group = SimpleNamespace(path=self.group_path)
-        with patch("cccc.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
+        with patch("no1.daemon.im.im_ops._load_km", return_value=(None, km, fake_group)):
             resp = im_ops.handle_im_reject_pending({"group_id": "g_demo", "key": ""})
 
         self.assertFalse(resp.ok)
@@ -363,8 +363,8 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
         self._td.cleanup()
 
     def test_process_outbound_reloads_auth_and_blocks_revoked_chat(self) -> None:
-        from cccc.ports.im.bridge import IMBridge
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.ports.im.bridge import IMBridge
+        from no1.ports.im.subscribers import SubscriberManager
 
         km = KeyManager(self.state_dir)
         sm = SubscriberManager(self.state_dir)
@@ -397,8 +397,8 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
         self.assertEqual(adapter.sent_messages, [])
 
     def test_outbound_header_uses_actor_title_first(self) -> None:
-        from cccc.ports.im.bridge import IMBridge
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.ports.im.bridge import IMBridge
+        from no1.ports.im.subscribers import SubscriberManager
 
         km = KeyManager(self.state_dir)
         sm = SubscriberManager(self.state_dir)
@@ -438,8 +438,8 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
         self.assertEqual(to, ["@all", "Reviewer"])
 
     def test_typing_indicator_removed_once_after_multi_file_delivery(self) -> None:
-        from cccc.ports.im.bridge import IMBridge
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.ports.im.bridge import IMBridge
+        from no1.ports.im.subscribers import SubscriberManager
 
         class _FileOkAdapter(self._FakeAdapter):
             def __init__(self) -> None:
@@ -505,15 +505,15 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
 
         sample_file = self.state_dir / "sample.txt"
         sample_file.write_text("ok", encoding="utf-8")
-        with patch("cccc.ports.im.bridge.resolve_blob_attachment_path", return_value=sample_file):
+        with patch("no1.ports.im.bridge.resolve_blob_attachment_path", return_value=sample_file):
             bridge._process_outbound()
 
         self.assertEqual(len(adapter.file_calls), 2)
         self.assertEqual(removed, ["chat_auth"])
 
     def test_typing_indicator_kept_when_send_message_fails(self) -> None:
-        from cccc.ports.im.bridge import IMBridge
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.ports.im.bridge import IMBridge
+        from no1.ports.im.subscribers import SubscriberManager
 
         class _MessageFailAdapter(self._FakeAdapter):
             def send_message(self, chat_id: str, text: str, thread_id: int = 0) -> bool:
@@ -552,7 +552,7 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
         self.assertEqual(removed, [])
 
     def test_subscribe_reloads_auth_state_and_avoids_stale_authorized_decision(self) -> None:
-        from cccc.ports.im.bridge import IMBridge
+        from no1.ports.im.bridge import IMBridge
 
         km = KeyManager(self.state_dir)
         key = km.generate_key("chat_auth", 0, "telegram")
@@ -579,12 +579,12 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
         self.assertIn("打开一号同事", text)
         self.assertIn("如果一号同事在线", text)
         self.assertNotIn("负责人在线", text)
-        self.assertNotIn("cccc im bind", text)
+        self.assertNotIn("onecolleague im bind", text)
 
 
     def test_unsubscribe_reloads_auth_state_and_revokes_daemon_authorized_chat(self) -> None:
         """Unsubscribe must reload auth from disk so it can revoke chats authorized by daemon."""
-        from cccc.ports.im.bridge import IMBridge
+        from no1.ports.im.bridge import IMBridge
 
         fake_group = SimpleNamespace(
             group_id="g_demo",
@@ -613,7 +613,7 @@ class TestImBridgeOutboundAuthGuard(unittest.TestCase):
 
 
 try:
-    from cccc.daemon.im.im_ops import _load_km
+    from no1.daemon.im.im_ops import _load_km
     _HAS_DAEMON_DEPS = True
 except ImportError:
     _HAS_DAEMON_DEPS = False

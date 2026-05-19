@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 
-from cccc.util.fs import read_json
+from no1.util.fs import read_json
 
 
 class TestMemoryRemeAutoTrigger(unittest.TestCase):
@@ -25,17 +25,17 @@ class TestMemoryRemeAutoTrigger(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_on_new_message_triggers_auto_cycle(self) -> None:
         _, cleanup = self._with_home()
         try:
-            from cccc.daemon.automation.engine import AutomationManager
-            from cccc.kernel.group import load_group
-            from cccc.kernel.ledger import append_event
+            from no1.daemon.automation.engine import AutomationManager
+            from no1.kernel.group import load_group
+            from no1.kernel.ledger import append_event
 
             create_resp, _ = self._call("group_create", {"title": "auto-trigger", "topic": "", "by": "user"})
             self.assertTrue(create_resp.ok, getattr(create_resp, "error", None))

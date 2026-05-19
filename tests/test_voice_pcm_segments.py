@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cccc.daemon.assistants.voice_pcm_segments import build_pcm16_segments_from_ranges, split_pcm16_voice_segments
+from no1.daemon.assistants.voice_pcm_segments import build_pcm16_segments_from_ranges, split_pcm16_voice_segments
 
 
 def _pcm(samples: list[int]) -> bytes:

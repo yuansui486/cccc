@@ -7,15 +7,15 @@ from unittest.mock import patch
 
 class TestMcpToolBoolCoercion(unittest.TestCase):
     def test_headless_codex_message_send_is_allowed(self) -> None:
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
-        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = cccc_messaging.message_send(
+        with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
+        ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = onecolleague_messaging.message_send(
                 group_id="g_test",
                 actor_id="peer1",
                 text="hello",
@@ -25,15 +25,15 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(call_daemon.call_args.args[0]["op"], "send")
 
     def test_headless_codex_message_reply_is_allowed(self) -> None:
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
-        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = cccc_messaging.message_reply(
+        with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
+        ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = onecolleague_messaging.message_reply(
                 group_id="g_test",
                 actor_id="peer1",
                 reply_to="ev_1",
@@ -44,15 +44,15 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(call_daemon.call_args.args[0]["op"], "reply")
 
     def test_headless_claude_message_send_is_allowed(self) -> None:
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
-        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = cccc_messaging.message_send(
+        with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
+        ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = onecolleague_messaging.message_send(
                 group_id="g_test",
                 actor_id="peer1",
                 text="hello",
@@ -62,15 +62,15 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(call_daemon.call_args.args[0]["op"], "send")
 
     def test_headless_claude_message_reply_is_allowed(self) -> None:
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup()), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
-        ), patch.object(cccc_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = cccc_messaging.message_reply(
+        with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
+        ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
+            result = onecolleague_messaging.message_reply(
                 group_id="g_test",
                 actor_id="peer1",
                 reply_to="ev_1",
@@ -81,8 +81,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(call_daemon.call_args.args[0]["op"], "reply")
 
     def test_file_send_blocks_path_outside_scope_root(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             def __init__(self, root: str) -> None:
@@ -101,7 +101,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             with open(outside_file, "w", encoding="utf-8") as f:
                 f.write("x")
 
-            with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup(scope_root)):
+            with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup(scope_root)):
                 with self.assertRaises(mcp_server.MCPError) as cm:
                     mcp_server.file_send(
                         group_id="g_test",
@@ -112,8 +112,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(cm.exception.code, "invalid_path")
 
     def test_file_send_stores_scope_file_as_chat_attachment(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             def __init__(self, root: str, group_path: str) -> None:
@@ -137,8 +137,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
                 captured.update(payload)
                 return {"ok": True}
 
-            with patch.object(cccc_messaging, "load_group", return_value=_FakeGroup(str(scope_root), str(group_path))), patch.object(
-                cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call
+            with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup(str(scope_root), str(group_path))), patch.object(
+                onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call
             ):
                 out = mcp_server.file_send(
                     group_id="g_test",
@@ -165,8 +165,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertTrue(str(att.get("path") or "").startswith("state/blobs/"))
 
     def test_blob_read_reads_blob_attachment_with_limit(self) -> None:
-        from cccc.kernel.blobs import store_blob_bytes
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.kernel.blobs import store_blob_bytes
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         class _FakeGroup:
             def __init__(self, root: str) -> None:
@@ -178,8 +178,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             group = _FakeGroup(td)
             att = store_blob_bytes(group, data="hello world".encode("utf-8"), filename="note.txt", mime_type="text/plain")
 
-            with patch.object(cccc_messaging, "load_group", return_value=group):
-                out = cccc_messaging.blob_read(group_id="g_test", rel_path=str(att.get("path")), max_bytes=5)
+            with patch.object(onecolleague_messaging, "load_group", return_value=group):
+                out = onecolleague_messaging.blob_read(group_id="g_test", rel_path=str(att.get("path")), max_bytes=5)
 
             self.assertEqual(out.get("text"), "hello")
             self.assertTrue(out.get("truncated"))
@@ -187,7 +187,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertTrue(str(out.get("path") or "").endswith("note.txt"))
 
     def test_repo_edit_requires_web_model_actor_even_when_called_directly(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         class _FakeGroup:
             pass
@@ -201,7 +201,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         ) as mock_repo_tool:
             with self.assertRaises(mcp_server.MCPError) as cm:
                 mcp_server.handle_tool_call(
-                    "cccc_repo_edit",
+                    "onecolleague_repo_edit",
                     {"action": "write", "path": "notes.txt", "content": "blocked"},
                 )
 
@@ -209,7 +209,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         mock_repo_tool.assert_not_called()
 
     def test_repo_edit_allows_web_model_actor(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         class _FakeGroup:
             pass
@@ -222,7 +222,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             mcp_server, "repo_tool", return_value={"ok": True}
         ) as mock_repo_tool:
             result = mcp_server.handle_tool_call(
-                "cccc_repo_edit",
+                "onecolleague_repo_edit",
                 {"action": "write", "path": "notes.txt", "content": "ok"},
             )
 
@@ -230,8 +230,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         mock_repo_tool.assert_called_once()
 
     def test_message_send_normalizes_double_escaped_newlines(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         captured = {}
 
@@ -242,10 +242,10 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
-            cccc_messaging, "load_group", return_value=_FakeGroup()
+        with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            onecolleague_messaging, "load_group", return_value=_FakeGroup()
         ), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
         ):
             mcp_server.message_send(
                 group_id="g_test",
@@ -259,8 +259,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(args.get("text"), "line1\nline2\tindent")
 
     def test_message_reply_keeps_normal_newlines_idempotent(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         captured = {}
 
@@ -271,10 +271,10 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
-            cccc_messaging, "load_group", return_value=_FakeGroup()
+        with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            onecolleague_messaging, "load_group", return_value=_FakeGroup()
         ), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
         ):
             mcp_server.message_reply(
                 group_id="g_test",
@@ -289,8 +289,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(args.get("text"), "line1\nline2")
 
     def test_message_send_keeps_windows_path_for_non_codex_runtime(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         captured = {}
 
@@ -301,10 +301,10 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
-            cccc_messaging, "load_group", return_value=_FakeGroup()
+        with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            onecolleague_messaging, "load_group", return_value=_FakeGroup()
         ), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
         ):
             mcp_server.message_send(
                 group_id="g_test",
@@ -318,8 +318,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(args.get("text"), r"C:\\temp\\new")
 
     def test_message_send_keeps_literal_backslash_n_for_codex_runtime(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         captured = {}
 
@@ -330,10 +330,10 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
-            cccc_messaging, "load_group", return_value=_FakeGroup()
+        with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            onecolleague_messaging, "load_group", return_value=_FakeGroup()
         ), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
         ):
             mcp_server.message_send(
                 group_id="g_test",
@@ -347,8 +347,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(args.get("text"), r"literal \\n path C:\\temp\\new")
 
     def test_message_reply_keeps_literal_backslash_t_for_codex_runtime(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_messaging
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_messaging
 
         captured = {}
 
@@ -359,10 +359,10 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         class _FakeGroup:
             pass
 
-        with patch.object(cccc_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
-            cccc_messaging, "load_group", return_value=_FakeGroup()
+        with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call), patch.object(
+            onecolleague_messaging, "load_group", return_value=_FakeGroup()
         ), patch.object(
-            cccc_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
+            onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
         ):
             mcp_server.message_reply(
                 group_id="g_test",
@@ -378,13 +378,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
 
 
     def test_notify_send_requires_ack_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_self_actor_id", return_value="peer1"
         ), patch.object(mcp_server, "notify_send", return_value={"ok": True}) as mock_notify_send:
             mcp_server.handle_tool_call(
-                "cccc_notify",
+                "onecolleague_notify",
                 {
                     "action": "send",
                     "kind": "info",
@@ -400,13 +400,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertFalse(bool(kwargs.get("requires_ack")))
 
     def test_terminal_tail_strip_ansi_string_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_self_actor_id", return_value="peer1"
         ), patch.object(mcp_server, "terminal_tail", return_value={"ok": True}) as mock_terminal_tail:
             mcp_server.handle_tool_call(
-                "cccc_terminal",
+                "onecolleague_terminal",
                 {
                     "action": "tail",
                     "target_actor_id": "peer2",
@@ -421,13 +421,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertFalse(bool(kwargs.get("strip_ansi")))
 
     def test_space_artifact_defaults_to_async_wait_false(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
             mcp_server.handle_tool_call(
-                "cccc_space",
+                "onecolleague_space",
                 {
                     "action": "artifact",
                     "sub_action": "generate",
@@ -441,13 +441,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertFalse(bool(kwargs.get("wait")))
 
     def test_space_artifact_infers_generate_when_action_missing(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
             mcp_server.handle_tool_call(
-                "cccc_space",
+                "onecolleague_space",
                 {
                     "action": "artifact",
                     "lane": "work",
@@ -462,13 +462,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(str(options.get("source") or ""), "/tmp/notes.md")
 
     def test_space_artifact_top_level_language_is_mapped_into_options(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
             mcp_server.handle_tool_call(
-                "cccc_space",
+                "onecolleague_space",
                 {
                     "action": "artifact",
                     "lane": "work",
@@ -482,7 +482,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(str(options.get("language") or ""), "zh-CN")
 
     def test_space_artifact_language_infers_from_cjk_source_file(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with tempfile.TemporaryDirectory() as td:
             src = os.path.join(td, "zh_notes.md")
@@ -492,7 +492,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
                 mcp_server, "_resolve_caller_from_by", return_value="peer1"
             ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
                 mcp_server.handle_tool_call(
-                    "cccc_space",
+                    "onecolleague_space",
                     {
                         "action": "artifact",
                         "lane": "work",
@@ -505,13 +505,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
                 self.assertEqual(str(options.get("language") or ""), "zh-CN")
 
     def test_space_ingest_top_level_fields_auto_pack_payload(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_ingest", return_value={"ok": True}) as mock_space_ingest:
             mcp_server.handle_tool_call(
-                "cccc_space",
+                "onecolleague_space",
                 {
                     "action": "ingest",
                     "lane": "work",
@@ -528,13 +528,13 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(str(payload.get("title") or ""), "Spec")
 
     def test_space_query_source_ids_option_is_normalized(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "space_query", return_value={"ok": True}
         ) as mock_space_query:
             mcp_server.handle_tool_call(
-                "cccc_space",
+                "onecolleague_space",
                 {
                     "action": "query",
                     "lane": "work",
@@ -547,12 +547,12 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(options.get("source_ids"), ["src_1", "src_2"])
 
     def test_space_query_rejects_top_level_language(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"):
             with self.assertRaises(mcp_server.MCPError) as cm:
                 mcp_server.handle_tool_call(
-                    "cccc_space",
+                    "onecolleague_space",
                     {
                         "action": "query",
                         "lane": "work",
@@ -564,12 +564,12 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertIn("language/lang", str(cm.exception.message))
 
     def test_space_query_rejects_unsupported_options(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"):
             with self.assertRaises(mcp_server.MCPError) as cm:
                 mcp_server.handle_tool_call(
-                    "cccc_space",
+                    "onecolleague_space",
                     {
                         "action": "query",
                         "lane": "work",
@@ -581,8 +581,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertIn("unsupported options", str(cm.exception.message))
 
     def test_space_artifact_wait_true_uses_extended_daemon_timeout(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_space
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_space
 
         captured = {}
 
@@ -591,7 +591,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             captured["timeout_s"] = float(timeout_s)
             return {"ok": True, "status": "completed"}
 
-        with patch.object(cccc_space, "_call_daemon_or_raise", side_effect=_fake_daemon):
+        with patch.object(onecolleague_space, "_call_daemon_or_raise", side_effect=_fake_daemon):
             mcp_server.space_artifact(
                 group_id="g_test",
                 by="peer1",
@@ -603,8 +603,8 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertGreaterEqual(float(captured.get("timeout_s") or 0.0), 150.0)
 
     def test_space_artifact_audio_forces_async_even_if_wait_true(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp.handlers import cccc_space
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.handlers import onecolleague_space
 
         captured = {}
 
@@ -613,7 +613,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             captured["timeout_s"] = float(timeout_s)
             return {"ok": True, "status": "accepted"}
 
-        with patch.object(cccc_space, "_call_daemon_or_raise", side_effect=_fake_daemon):
+        with patch.object(onecolleague_space, "_call_daemon_or_raise", side_effect=_fake_daemon):
             mcp_server.space_artifact(
                 group_id="g_test",
                 by="peer1",
@@ -628,7 +628,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertGreaterEqual(float(captured.get("timeout_s") or 0.0), 120.0)
 
     def test_memory_write_routes_to_daemon(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -640,7 +640,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
             mcp_server.handle_tool_call(
-                "cccc_memory",
+                "onecolleague_memory",
                 {"action": "write", "target": "daily", "date": "2026-03-03", "content": "x"},
             )
 
@@ -652,15 +652,15 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(args.get("date"), "2026-03-03")
 
     def test_memory_get_missing_path_raises_validation_error(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"):
             with self.assertRaises(mcp_server.MCPError) as cm:
-                mcp_server.handle_tool_call("cccc_memory", {"action": "get"})
+                mcp_server.handle_tool_call("onecolleague_memory", {"action": "get"})
         self.assertEqual(cm.exception.code, "validation_error")
 
     def test_memory_index_sync_routes_to_daemon(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -671,7 +671,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
-            mcp_server.handle_tool_call("cccc_memory_admin", {"action": "index_sync", "mode": "rebuild"})
+            mcp_server.handle_tool_call("onecolleague_memory_admin", {"action": "index_sync", "mode": "rebuild"})
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
         self.assertEqual(req.get("op"), "memory_reme_index_sync")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
@@ -679,7 +679,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(args.get("mode"), "rebuild")
 
     def test_memory_context_check_routes_to_daemon(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -691,7 +691,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
             mcp_server.handle_tool_call(
-                "cccc_memory_admin",
+                "onecolleague_memory_admin",
                 {
                     "action": "context_check",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -706,7 +706,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         self.assertEqual(len(messages), 1)
 
     def test_memory_daily_flush_coerces_return_prompt_bool(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
+        from no1.ports.mcp import server as mcp_server
 
         captured = {}
 
@@ -718,7 +718,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
             mcp_server.handle_tool_call(
-                "cccc_memory_admin",
+                "onecolleague_memory_admin",
                 {"action": "daily_flush", "messages": [{"role": "user", "content": "h"}], "return_prompt": "false"},
             )
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}

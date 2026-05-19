@@ -20,8 +20,8 @@ class TestAutomationManageLegacyShape(unittest.TestCase):
         return td, cleanup
 
     def _create_group_id(self) -> str:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -34,8 +34,8 @@ class TestAutomationManageLegacyShape(unittest.TestCase):
         return group_id
 
     def test_manage_rejects_simple_mode_and_legacy_rule_shape(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _, cleanup = self._with_home()
         try:
@@ -69,8 +69,8 @@ class TestAutomationManageLegacyShape(unittest.TestCase):
             cleanup()
 
     def test_manage_rejects_legacy_rule_fields_in_actions(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _, cleanup = self._with_home()
         try:
@@ -111,8 +111,8 @@ class TestAutomationManageLegacyShape(unittest.TestCase):
             cleanup()
 
     def test_update_rejects_legacy_rule_fields_in_ruleset(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _, cleanup = self._with_home()
         try:
@@ -152,8 +152,8 @@ class TestAutomationManageLegacyShape(unittest.TestCase):
             cleanup()
 
     def test_replace_all_rejects_legacy_rule_fields_in_ruleset(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _, cleanup = self._with_home()
         try:

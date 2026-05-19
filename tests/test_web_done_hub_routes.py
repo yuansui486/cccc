@@ -54,7 +54,7 @@ class _FakeAsyncClient:
 
 class TestWebDoneHubRoutes(unittest.TestCase):
     def _create_client(self) -> TestClient:
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         return TestClient(create_app())
 
@@ -96,8 +96,8 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             return _FakeAsyncClient(responses, calls)
 
         with (
-            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-            patch("cccc.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value=None)),
+            patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+            patch("no1.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value=None)),
         ):
             client = self._create_client()
             resp = client.post(
@@ -132,7 +132,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 [],
             )
 
-        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
             client = self._create_client()
             resp = client.post(
                 "/api/v1/done_hub/login",
@@ -173,8 +173,8 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             return _FakeAsyncClient(responses, calls)
 
         with (
-            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-            patch("cccc.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value={"codex_api_key": "sk-codex-token"})),
+            patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+            patch("no1.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value={"codex_api_key": "sk-codex-token"})),
         ):
             client = self._create_client()
             resp = client.post(
@@ -214,7 +214,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 calls,
             )
 
-        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
             client = self._create_client()
             resp = client.post(
                 "/api/v1/done_hub/team_presets/list",
@@ -244,7 +244,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 calls,
             )
 
-        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
             client = self._create_client()
             resp = client.post(
                 "/api/v1/done_hub/team_presets/list",
@@ -261,7 +261,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         base = "https://peer.shierkeji.com"
         preset_base = "https://dongdongkc.shierkeji.com:5205/onecolleague_agent"
         calls: list[tuple[str, str, dict]] = []
-        template = "kind: cccc.group_template\nv: 1\ntitle: 自由剪辑skill\nactors: []\n"
+        template = "kind: no1.group_template\nv: 1\ntitle: 自由剪辑skill\nactors: []\n"
 
         def _factory(*args, **kwargs):
             return _FakeAsyncClient(
@@ -280,7 +280,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 calls,
             )
 
-        with patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
             client = self._create_client()
             resp = client.post(
                 "/api/v1/done_hub/team_presets/download",
@@ -313,7 +313,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"ONECOLLEAGUE_TEAM_PRESET_BASE_URL": preset_base}, clear=False),
-            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+            patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
         ):
             client = self._create_client()
             resp = client.post(
@@ -438,8 +438,8 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 return _FakeAsyncClient(responses, calls)
 
             with (
-                patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-                patch("cccc.ports.web.routes.done_hub.Path.home", return_value=home_path),
+                patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+                patch("no1.ports.web.routes.done_hub.Path.home", return_value=home_path),
             ):
                 client = self._create_client()
                 resp = client.post(
@@ -531,8 +531,8 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 return _FakeAsyncClient(responses, calls)
 
             with (
-                patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-                patch("cccc.ports.web.routes.done_hub.Path.home", return_value=home_path),
+                patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+                patch("no1.ports.web.routes.done_hub.Path.home", return_value=home_path),
             ):
                 client = self._create_client()
                 resp = client.post(
@@ -626,9 +626,9 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 return _FakeAsyncClient(responses, calls)
 
             with (
-                patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-                patch("cccc.ports.web.routes.done_hub.Path.home", return_value=home_path),
-                patch("cccc.ports.web.routes.done_hub._TOKEN_PAGE_SIZE", 2),
+                patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+                patch("no1.ports.web.routes.done_hub.Path.home", return_value=home_path),
+                patch("no1.ports.web.routes.done_hub._TOKEN_PAGE_SIZE", 2),
             ):
                 client = self._create_client()
                 resp = client.post(
@@ -729,8 +729,8 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             return _FakeAsyncClient(responses, calls)
 
         with (
-            patch("cccc.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-            patch("cccc.ports.web.routes.done_hub._sync_local_client_files", side_effect=OSError("failed to write /tmp/.codex/config.toml")),
+            patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+            patch("no1.ports.web.routes.done_hub._sync_local_client_files", side_effect=OSError("failed to write /tmp/.codex/config.toml")),
         ):
             client = self._create_client()
             resp = client.post(

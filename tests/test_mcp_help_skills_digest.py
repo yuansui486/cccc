@@ -25,14 +25,14 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
 
         return td, cleanup
 
-    def test_cccc_help_appends_runtime_skill_digest(self) -> None:
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_appends_runtime_skill_digest(self) -> None:
+        from no1.ports.mcp.server import handle_tool_call
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
-            "cccc.ports.mcp.handlers.cccc_core.load_group",
+            "no1.ports.mcp.handlers.onecolleague_core.load_group",
             return_value=None,
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
             return_value={
                 "active_capsule_skills": [
                     {
@@ -52,7 +52,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                 ],
             },
         ):
-            out = handle_tool_call("cccc_help", {})
+            out = handle_tool_call("onecolleague_help", {})
 
         markdown = str(out.get("markdown") or "")
         self.assertIn("## Working Stance", markdown)
@@ -64,7 +64,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertIn("## Role Notes", markdown)
         self.assertIn("## Active Skills (Runtime)", markdown)
         self.assertIn("Capsule skill is runtime capsule activation", markdown)
-        self.assertIn("cccc_capability_install", markdown)
+        self.assertIn("onecolleague_capability_install", markdown)
         self.assertIn("CCCC capability records", markdown)
         self.assertNotIn("Codex's skills directory", markdown)
         self.assertNotIn("CODEX_HOME", markdown)
@@ -81,17 +81,17 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertIn("Gather evidence before changing anything.", markdown)
         self.assertNotIn("### NotebookLM Artifact Runs", markdown)
 
-    def test_cccc_help_appends_group_space_runtime_only_when_bound(self) -> None:
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_appends_group_space_runtime_only_when_bound(self) -> None:
+        from no1.ports.mcp.server import handle_tool_call
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
-            "cccc.ports.mcp.handlers.cccc_core.load_group",
+            "no1.ports.mcp.handlers.onecolleague_core.load_group",
             return_value=None,
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
             return_value={"enabled_capabilities": []},
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core.get_group_space_prompt_state",
+            "no1.ports.mcp.handlers.onecolleague_core.get_group_space_prompt_state",
             return_value={
                 "provider": "notebooklm",
                 "mode": "active",
@@ -99,28 +99,28 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                 "memory_bound": True,
             },
         ):
-            out = handle_tool_call("cccc_help", {})
+            out = handle_tool_call("onecolleague_help", {})
 
         markdown = str(out.get("markdown") or "")
         self.assertIn("## Group Space (Runtime)", markdown)
-        self.assertIn("If `cccc_space` is hidden in this session", markdown)
-        self.assertIn('Use `cccc_space(action="query", lane="work")` for shared/project knowledge lookup.', markdown)
+        self.assertIn("If `onecolleague_space` is hidden in this session", markdown)
+        self.assertIn('Use `onecolleague_space(action="query", lane="work")` for shared/project knowledge lookup.', markdown)
         self.assertIn("do not poll. Wait for the later `system.notify`", markdown)
         self.assertIn("continue other work or standby", markdown)
         self.assertIn("one-shot reminder", markdown)
-        self.assertIn('use `cccc_space(action="query", lane="memory")` only as a deeper recall fallback.', markdown)
+        self.assertIn('use `onecolleague_space(action="query", lane="memory")` only as a deeper recall fallback.', markdown)
 
-    def test_cccc_help_group_space_runtime_tracks_bind_unbind_rebind(self) -> None:
-        from cccc.daemon.space.group_space_store import set_space_binding_unbound, set_space_provider_state, upsert_space_binding
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_group_space_runtime_tracks_bind_unbind_rebind(self) -> None:
+        from no1.daemon.space.group_space_store import set_space_binding_unbound, set_space_provider_state, upsert_space_binding
+        from no1.ports.mcp.server import handle_tool_call
 
         _, cleanup = self._with_home()
         try:
             with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
-                "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+                "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
                 return_value={"enabled_capabilities": []},
             ):
-                initial = handle_tool_call("cccc_help", {})
+                initial = handle_tool_call("onecolleague_help", {})
                 initial_markdown = str(initial.get("markdown") or "")
                 self.assertNotIn("## Group Space (Runtime)", initial_markdown)
 
@@ -139,14 +139,14 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                     last_error="",
                     touch_health=True,
                 )
-                bound = handle_tool_call("cccc_help", {})
+                bound = handle_tool_call("onecolleague_help", {})
                 bound_markdown = str(bound.get("markdown") or "")
                 self.assertIn("## Group Space (Runtime)", bound_markdown)
                 self.assertIn("work_bound=true memory_bound=false", bound_markdown)
 
                 # Even if provider state remains active, removing the bound lane must remove the runtime addendum.
                 set_space_binding_unbound("g1", provider="notebooklm", lane="work", by="user")
-                unbound = handle_tool_call("cccc_help", {})
+                unbound = handle_tool_call("onecolleague_help", {})
                 unbound_markdown = str(unbound.get("markdown") or "")
                 self.assertNotIn("## Group Space (Runtime)", unbound_markdown)
                 self.assertNotIn("work_bound=true", unbound_markdown)
@@ -159,16 +159,16 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                     by="user",
                     status="bound",
                 )
-                rebound = handle_tool_call("cccc_help", {})
+                rebound = handle_tool_call("onecolleague_help", {})
                 rebound_markdown = str(rebound.get("markdown") or "")
                 self.assertIn("## Group Space (Runtime)", rebound_markdown)
                 self.assertIn("work_bound=true memory_bound=false", rebound_markdown)
         finally:
             cleanup()
 
-    def test_cccc_help_group_space_runtime_tracks_partial_lane_unbind(self) -> None:
-        from cccc.daemon.space.group_space_store import set_space_binding_unbound, set_space_provider_state, upsert_space_binding
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_group_space_runtime_tracks_partial_lane_unbind(self) -> None:
+        from no1.daemon.space.group_space_store import set_space_binding_unbound, set_space_provider_state, upsert_space_binding
+        from no1.ports.mcp.server import handle_tool_call
 
         _, cleanup = self._with_home()
         try:
@@ -197,27 +197,27 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
             )
 
             with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
-                "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+                "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
                 return_value={"enabled_capabilities": []},
             ):
-                both = handle_tool_call("cccc_help", {})
+                both = handle_tool_call("onecolleague_help", {})
                 both_markdown = str(both.get("markdown") or "")
                 self.assertIn("work_bound=true memory_bound=true", both_markdown)
-                self.assertIn('`cccc_space(action="query", lane="work")`', both_markdown)
-                self.assertIn('`cccc_space(action="query", lane="memory")`', both_markdown)
+                self.assertIn('`onecolleague_space(action="query", lane="work")`', both_markdown)
+                self.assertIn('`onecolleague_space(action="query", lane="memory")`', both_markdown)
 
                 set_space_binding_unbound("g1", provider="notebooklm", lane="work", by="user")
-                memory_only = handle_tool_call("cccc_help", {})
+                memory_only = handle_tool_call("onecolleague_help", {})
                 memory_only_markdown = str(memory_only.get("markdown") or "")
                 self.assertIn("## Group Space (Runtime)", memory_only_markdown)
                 self.assertIn("work_bound=false memory_bound=true", memory_only_markdown)
-                self.assertNotIn('Use `cccc_space(action="query", lane="work")` for shared/project knowledge lookup.', memory_only_markdown)
-                self.assertIn('use `cccc_space(action="query", lane="memory")` only as a deeper recall fallback.', memory_only_markdown)
+                self.assertNotIn('Use `onecolleague_space(action="query", lane="work")` for shared/project knowledge lookup.', memory_only_markdown)
+                self.assertIn('use `onecolleague_space(action="query", lane="memory")` only as a deeper recall fallback.', memory_only_markdown)
         finally:
             cleanup()
 
     def test_runtime_help_addenda_replace_stale_reserved_sections(self) -> None:
-        from cccc.ports.mcp.handlers.cccc_core import _append_runtime_help_addenda
+        from no1.ports.mcp.handlers.onecolleague_core import _append_runtime_help_addenda
 
         base = (
             "## Core Routes\n"
@@ -231,7 +231,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
             return_value={
                 "enabled_capabilities": [],
                 "active_capsule_skills": [
@@ -245,7 +245,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                 "autoload_skills": [],
             },
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core.get_group_space_prompt_state",
+            "no1.ports.mcp.handlers.onecolleague_core.get_group_space_prompt_state",
             return_value={
                 "provider": "notebooklm",
                 "mode": "active",
@@ -265,8 +265,8 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertIn("## Role Notes", markdown)
         self.assertIn("- keep this", markdown)
 
-    def test_cccc_help_appends_web_model_transport_runtime_note(self) -> None:
-        from cccc.ports.mcp.handlers.cccc_core import _append_runtime_help_addenda
+    def test_onecolleague_help_appends_web_model_transport_runtime_note(self) -> None:
+        from no1.ports.mcp.handlers.onecolleague_core import _append_runtime_help_addenda
 
         group = SimpleNamespace(doc={"actors": [{"id": "web-1", "runtime": "web_model"}]})
         base = (
@@ -277,48 +277,48 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         )
 
         with patch(
-            "cccc.ports.mcp.handlers.cccc_core.load_group",
+            "no1.ports.mcp.handlers.onecolleague_core.load_group",
             return_value=group,
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
             return_value={"enabled_capabilities": []},
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core.get_group_space_prompt_state",
+            "no1.ports.mcp.handlers.onecolleague_core.get_group_space_prompt_state",
             return_value={},
         ):
             markdown = _append_runtime_help_addenda(base, group_id="g1", actor_id="web-1")
 
         self.assertEqual(markdown.count("## Web Model Transport (Runtime)"), 1)
-        self.assertIn("normal CCCC agent", markdown)
+        self.assertIn("normal OneColleague agent", markdown)
         self.assertIn("same bootstrap/help/message/coordination/capability rules", markdown)
-        self.assertIn("do not call `cccc_runtime_wait_next_turn` first", markdown)
+        self.assertIn("do not call `onecolleague_runtime_wait_next_turn` first", markdown)
         self.assertIn("remote MCP pull", markdown)
-        self.assertIn("Web chat text alone is not a visible CCCC reply", markdown)
-        self.assertIn("you do not have CCCC local access", markdown)
-        self.assertIn("`cccc_shell`", markdown)
-        self.assertIn("`cccc_git`", markdown)
-        self.assertIn("Delivered CCCC attachments are blob references", markdown)
-        self.assertIn("`cccc_file(action=\"read\", rel_path=...)`", markdown)
-        self.assertIn("`cccc_file(action=\"send\", path=..., text=...)`", markdown)
+        self.assertIn("Web chat text alone is not a visible OneColleague reply", markdown)
+        self.assertIn("you do not have OneColleague local access", markdown)
+        self.assertIn("`onecolleague_shell`", markdown)
+        self.assertIn("`onecolleague_git`", markdown)
+        self.assertIn("Delivered OneColleague attachments are blob references", markdown)
+        self.assertIn("`onecolleague_file(action=\"read\", rel_path=...)`", markdown)
+        self.assertIn("`onecolleague_file(action=\"send\", path=..., text=...)`", markdown)
         self.assertIn("`COMMON_WORK_LOOPS`", markdown)
         self.assertIn("`tool_names(\"repo\")`", markdown)
         self.assertIn("`list_tools(\"repo\")`", markdown)
         self.assertIn("`tool_help(\"repo\")`", markdown)
         self.assertIn("`tool_help(\"repo\", {detail:\"schema\"})`", markdown)
-        self.assertIn("`cccc_runtime_complete_turn`", markdown)
+        self.assertIn("`onecolleague_runtime_complete_turn`", markdown)
         self.assertNotIn("stale standalone web-model instructions", markdown)
 
-    def test_cccc_help_includes_context_hygiene(self) -> None:
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_includes_context_hygiene(self) -> None:
+        from no1.ports.mcp.server import handle_tool_call
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
-            "cccc.ports.mcp.handlers.cccc_core.load_group",
+            "no1.ports.mcp.handlers.onecolleague_core.load_group",
             return_value=None,
         ), patch(
-            "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+            "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
             return_value={},
         ), patch(
-            "cccc.ports.mcp.server._call_daemon_or_raise",
+            "no1.ports.mcp.server._call_daemon_or_raise",
             return_value={
                 "agent_states": [
                     {
@@ -333,7 +333,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                 ]
             },
         ):
-            out = handle_tool_call("cccc_help", {})
+            out = handle_tool_call("onecolleague_help", {})
 
         hygiene = out.get("context_hygiene") if isinstance(out, dict) else None
         self.assertIsInstance(hygiene, dict)
@@ -344,10 +344,10 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertEqual(str((hygiene.get("execution_health") or {}).get("status") or ""), "stale")
         self.assertEqual(str((hygiene.get("mind_context_health") or {}).get("status") or ""), "missing")
 
-    def test_cccc_help_marks_mind_context_stale_from_runtime_churn(self) -> None:
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
-        from cccc.ports.mcp.server import handle_tool_call
+    def test_onecolleague_help_marks_mind_context_stale_from_runtime_churn(self) -> None:
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+        from no1.ports.mcp.server import handle_tool_call
 
         _, cleanup = self._with_home()
         try:
@@ -377,10 +377,10 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                 {"CCCC_GROUP_ID": group.group_id, "CCCC_ACTOR_ID": "peer-1"},
                 clear=False,
             ), patch(
-                "cccc.ports.mcp.handlers.cccc_core._call_daemon_or_raise",
+                "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
                 return_value={},
             ), patch(
-                "cccc.ports.mcp.server._call_daemon_or_raise",
+                "no1.ports.mcp.server._call_daemon_or_raise",
                 return_value={
                     "agent_states": [
                         {
@@ -401,7 +401,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
                     ]
                 },
             ):
-                out = handle_tool_call("cccc_help", {})
+                out = handle_tool_call("onecolleague_help", {})
 
             hygiene = out.get("context_hygiene") if isinstance(out, dict) else None
             self.assertIsInstance(hygiene, dict)

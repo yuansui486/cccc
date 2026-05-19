@@ -15,10 +15,10 @@ class TestGroupLifecycleOps(unittest.TestCase):
 
         def cleanup() -> None:
             try:
-                from cccc.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
-                from cccc.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
-                from cccc.runners import headless as headless_runner
-                from cccc.runners import pty as pty_runner
+                from no1.daemon.claude_app_sessions import SUPERVISOR as claude_app_supervisor
+                from no1.daemon.codex_app_sessions import SUPERVISOR as codex_app_supervisor
+                from no1.runners import headless as headless_runner
+                from no1.runners import pty as pty_runner
 
                 codex_app_supervisor.stop_all()
                 claude_app_supervisor.stop_all()
@@ -35,8 +35,8 @@ class TestGroupLifecycleOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -54,7 +54,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
             return _Session()
 
         with patch(
-            "cccc.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor",
+            "no1.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor",
             side_effect=_fake_start_actor,
         ):
             yield
@@ -74,7 +74,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
         self.assertTrue(add.ok, getattr(add, "error", None))
         if enabled is None:
             return
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         group = load_group(group_id)
         assert group is not None
@@ -129,7 +129,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_after_stop_clears_stale_paused_state(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -172,7 +172,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_uses_disabled_foreman_as_pet_config_source(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -221,7 +221,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_removes_stale_pet_actor_when_no_foreman_exists(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -267,10 +267,10 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_pet_uses_foreman_profile_private_env(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
-        from cccc.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
+        from no1.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 
         _, cleanup = self._with_home()
         try:
@@ -369,7 +369,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
 
                 return _Session()
 
-            with patch("cccc.daemon.group.group_lifecycle_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
+            with patch("no1.daemon.group.group_lifecycle_ops.headless_runner.SUPERVISOR.start_actor", side_effect=_fake_headless_start_actor):
                 start, _ = self._call(
                     "group_start",
                     {"group_id": group_id, "by": "user", "caller_id": "user-a", "is_admin": False},
@@ -401,10 +401,10 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_preserves_existing_pet_runtime_config(self) -> None:
-        from cccc.daemon.actors.private_env_ops import load_actor_private_env, update_actor_private_env
-        from cccc.kernel.actors import update_actor
-        from cccc.kernel.group import load_group
-        from cccc.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
+        from no1.daemon.actors.private_env_ops import load_actor_private_env, update_actor_private_env
+        from no1.kernel.actors import update_actor
+        from no1.kernel.group import load_group
+        from no1.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 
         _, cleanup = self._with_home()
         try:
@@ -450,7 +450,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
 
                 return _Session()
 
-            with patch("cccc.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor", side_effect=_fake_codex_start_actor):
+            with patch("no1.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor", side_effect=_fake_codex_start_actor):
                 start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
 
             self.assertTrue(start.ok, getattr(start, "error", None))
@@ -475,8 +475,8 @@ class TestGroupLifecycleOps(unittest.TestCase):
             cleanup()
 
     def test_group_start_pet_falls_back_when_foreman_is_web_model(self) -> None:
-        from cccc.kernel.group import load_group
-        from cccc.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
+        from no1.kernel.group import load_group
+        from no1.kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 
         _, cleanup = self._with_home()
         try:
@@ -525,7 +525,7 @@ class TestGroupLifecycleOps(unittest.TestCase):
 
                 return _Session()
 
-            with patch("cccc.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor", side_effect=_fake_codex_start_actor):
+            with patch("no1.daemon.group.group_lifecycle_ops.codex_app_supervisor.start_actor", side_effect=_fake_codex_start_actor):
                 start, _ = self._call("group_start", {"group_id": group_id, "by": "user"})
 
             self.assertTrue(start.ok, getattr(start, "error", None))

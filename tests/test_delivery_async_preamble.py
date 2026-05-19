@@ -10,7 +10,7 @@ class TestAsyncFirstDelivery(unittest.TestCase):
         return SimpleNamespace(group_id="g-test", doc={})
 
     def test_first_flush_returns_without_waiting_for_preamble_submit(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         preamble_state = {"sent": False}
@@ -28,19 +28,19 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             return True
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
-        ), patch("cccc.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
-            "cccc.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
+            "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
+        ), patch("no1.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
+            "no1.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
         ), patch(
-            "cccc.daemon.messaging.delivery.is_preamble_sent", side_effect=lambda _group, _aid: bool(preamble_state["sent"])
+            "no1.daemon.messaging.delivery.is_preamble_sent", side_effect=lambda _group, _aid: bool(preamble_state["sent"])
         ), patch(
-            "cccc.daemon.messaging.delivery.mark_preamble_sent", side_effect=lambda _group, _aid: preamble_state.__setitem__("sent", True)
+            "no1.daemon.messaging.delivery.mark_preamble_sent", side_effect=lambda _group, _aid: preamble_state.__setitem__("sent", True)
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
+            "no1.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
         ), patch.object(
             delivery, "PREAMBLE_TO_MESSAGE_DELAY_SECONDS", 0.0
         ):
@@ -64,7 +64,7 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             self.assertTrue(message_sent.wait(1.0))
 
     def test_async_first_delivery_serializes_followup_flushes(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         preamble_state = {"sent": False}
@@ -85,19 +85,19 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             return True
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
-        ), patch("cccc.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
-            "cccc.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
+            "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
+        ), patch("no1.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
+            "no1.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
         ), patch(
-            "cccc.daemon.messaging.delivery.is_preamble_sent", side_effect=lambda _group, _aid: bool(preamble_state["sent"])
+            "no1.daemon.messaging.delivery.is_preamble_sent", side_effect=lambda _group, _aid: bool(preamble_state["sent"])
         ), patch(
-            "cccc.daemon.messaging.delivery.mark_preamble_sent", side_effect=lambda _group, _aid: preamble_state.__setitem__("sent", True)
+            "no1.daemon.messaging.delivery.mark_preamble_sent", side_effect=lambda _group, _aid: preamble_state.__setitem__("sent", True)
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
+            "no1.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
         ), patch.object(
             delivery, "PREAMBLE_TO_MESSAGE_DELAY_SECONDS", 0.0
         ):
@@ -132,7 +132,7 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             self.assertIn("hello second", sent_messages[1])
 
     def test_async_first_delivery_requeues_messages_when_worker_raises(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         preamble_state = {"sent": False}
@@ -145,19 +145,19 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             return True
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
-        ), patch("cccc.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
-            "cccc.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
+            "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
+        ), patch("no1.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
+            "no1.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
         ), patch(
-            "cccc.daemon.messaging.delivery.is_preamble_sent", side_effect=lambda _group, _aid: bool(preamble_state["sent"])
+            "no1.daemon.messaging.delivery.is_preamble_sent", side_effect=lambda _group, _aid: bool(preamble_state["sent"])
         ), patch(
-            "cccc.daemon.messaging.delivery.mark_preamble_sent", side_effect=RuntimeError("boom during mark_preamble_sent")
+            "no1.daemon.messaging.delivery.mark_preamble_sent", side_effect=RuntimeError("boom during mark_preamble_sent")
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times", return_value=(None, None)
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
+            "no1.daemon.messaging.delivery.pty_submit_text", side_effect=fake_submit
         ), patch.object(
             delivery, "PREAMBLE_TO_MESSAGE_DELAY_SECONDS", 0.0
         ):
@@ -192,26 +192,26 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             delivery.THROTTLE.end_delivery("g-test", "peer1")
 
     def test_first_flush_waits_for_bracketed_paste_before_preamble(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         submit_mock = unittest.mock.Mock(return_value=True)
         now = time.monotonic()
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
-        ), patch("cccc.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
-            "cccc.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
+            "no1.daemon.messaging.delivery.find_actor", return_value={"id": "peer1", "runner": "pty"}
+        ), patch("no1.daemon.messaging.delivery.should_deliver_message", return_value=True), patch(
+            "no1.daemon.messaging.delivery.render_system_prompt", return_value="SYSTEM PROMPT"
         ), patch(
-            "cccc.daemon.messaging.delivery.is_preamble_sent", return_value=False
+            "no1.daemon.messaging.delivery.is_preamble_sent", return_value=False
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times",
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.startup_times",
             return_value=(now - 1.0, now - 2.0),
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.bracketed_paste_status",
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.bracketed_paste_status",
             return_value=(False, None),
         ), patch(
-            "cccc.daemon.messaging.delivery.pty_submit_text", submit_mock
+            "no1.daemon.messaging.delivery.pty_submit_text", submit_mock
         ):
             delivery.queue_chat_message(
                 group,
@@ -228,16 +228,16 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             submit_mock.assert_not_called()
 
     def test_request_flush_retries_until_delivery_window_opens(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         delivered = threading.Event()
         flush_calls = {"count": 0}
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
-            "cccc.daemon.messaging.delivery.get_group_state", return_value="active"
+            "no1.daemon.messaging.delivery.get_group_state", return_value="active"
         ), patch.object(
             delivery, "ASYNC_FLUSH_POLL_SECONDS", 0.01
         ), patch.object(
@@ -269,7 +269,7 @@ class TestAsyncFirstDelivery(unittest.TestCase):
                 return True
 
             with patch(
-                "cccc.daemon.messaging.delivery.flush_pending_messages", side_effect=fake_flush
+                "no1.daemon.messaging.delivery.flush_pending_messages", side_effect=fake_flush
             ), patch.object(
                 delivery.THROTTLE, "next_retry_delay", side_effect=lambda gid, aid, interval: (
                     0.0 if flush_calls["count"] == 0 else original_next_retry_delay(gid, aid, interval)
@@ -281,15 +281,15 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             self.assertGreaterEqual(flush_calls["count"], 2)
 
     def test_request_flush_stops_when_actor_is_not_running(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         flush_called = threading.Event()
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=False
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=False
         ), patch(
-            "cccc.daemon.messaging.delivery.get_group_state", return_value="active"
+            "no1.daemon.messaging.delivery.get_group_state", return_value="active"
         ), patch.object(
             delivery, "ASYNC_FLUSH_POLL_SECONDS", 0.01
         ), patch.object(
@@ -310,7 +310,7 @@ class TestAsyncFirstDelivery(unittest.TestCase):
                 flush_called.set()
                 return False
 
-            with patch("cccc.daemon.messaging.delivery.flush_pending_messages", side_effect=fake_flush):
+            with patch("no1.daemon.messaging.delivery.flush_pending_messages", side_effect=fake_flush):
                 self.assertTrue(delivery.request_flush_pending_messages(group, actor_id="peer1"))
                 self.assertTrue(flush_called.wait(1.0))
                 deadline = time.monotonic() + 1.0
@@ -325,15 +325,15 @@ class TestAsyncFirstDelivery(unittest.TestCase):
             self.assertTrue(delivery.THROTTLE.has_pending("g-test", "peer1"))
 
     def test_request_flush_stops_when_group_is_paused(self) -> None:
-        from cccc.daemon.messaging import delivery
+        from no1.daemon.messaging import delivery
 
         group = self._group()
         flush_called = threading.Event()
 
         with patch.object(delivery, "THROTTLE", delivery.DeliveryThrottle()), patch(
-            "cccc.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
+            "no1.daemon.messaging.delivery.pty_runner.SUPERVISOR.actor_running", return_value=True
         ), patch(
-            "cccc.daemon.messaging.delivery.get_group_state", return_value="paused"
+            "no1.daemon.messaging.delivery.get_group_state", return_value="paused"
         ), patch.object(
             delivery, "ASYNC_FLUSH_POLL_SECONDS", 0.01
         ), patch.object(
@@ -354,7 +354,7 @@ class TestAsyncFirstDelivery(unittest.TestCase):
                 flush_called.set()
                 return False
 
-            with patch("cccc.daemon.messaging.delivery.flush_pending_messages", side_effect=fake_flush):
+            with patch("no1.daemon.messaging.delivery.flush_pending_messages", side_effect=fake_flush):
                 self.assertTrue(delivery.request_flush_pending_messages(group, actor_id="peer1"))
                 self.assertTrue(flush_called.wait(1.0))
                 deadline = time.monotonic() + 1.0

@@ -6,7 +6,7 @@ from pathlib import Path
 class TestDaemonIpcDocsParity(unittest.TestCase):
     def test_all_daemon_ops_are_documented(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        daemon_dir = repo_root / "src" / "cccc" / "daemon"
+        daemon_dir = repo_root / "src" / "no1" / "daemon"
         server_path = daemon_dir / "server.py"
         ops_dir = daemon_dir / "ops"
         spec_path = repo_root / "docs" / "standards" / "CCCC_DAEMON_IPC_V1.md"

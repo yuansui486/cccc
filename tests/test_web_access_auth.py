@@ -24,7 +24,7 @@ class TestWebAccessAuth(unittest.TestCase):
 
     def _create_probe_client(self) -> TestClient:
         from fastapi import Request
-        from cccc.ports.web.app import create_app
+        from no1.ports.web.app import create_app
 
         app = create_app()
 
@@ -59,7 +59,7 @@ class TestWebAccessAuth(unittest.TestCase):
             cleanup()
 
     def test_web_access_session_reports_signed_in_browser(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -81,8 +81,8 @@ class TestWebAccessAuth(unittest.TestCase):
             cleanup()
 
     def test_web_access_session_reports_locked_management_for_non_admin_browser_when_tokens_exist(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
-        from cccc.kernel.settings import update_observability_settings
+        from no1.kernel.access_tokens import create_access_token
+        from no1.kernel.settings import update_observability_settings
 
         _, cleanup = self._with_home()
         try:
@@ -126,7 +126,7 @@ class TestWebAccessAuth(unittest.TestCase):
             cleanup()
 
     def test_web_access_logout_with_cookie_only_clears_session(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -145,7 +145,7 @@ class TestWebAccessAuth(unittest.TestCase):
             cleanup()
 
     def test_web_access_logout_clears_cookie_without_rebinding_token(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:
@@ -164,7 +164,7 @@ class TestWebAccessAuth(unittest.TestCase):
             cleanup()
 
     def test_valid_access_token_resolves_principal_and_sets_cookie(self) -> None:
-        from cccc.kernel.access_tokens import create_access_token
+        from no1.kernel.access_tokens import create_access_token
 
         _, cleanup = self._with_home()
         try:

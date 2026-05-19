@@ -1,6 +1,6 @@
 # Notebook Binding + NotebookLM (Web)
 
-This guide covers the user-facing Web flow for connecting NotebookLM and choosing which notebooks CCCC should use.
+This guide covers the user-facing Web flow for connecting NotebookLM and choosing which notebooks OneColleague should use.
 
 The Web UI is intentionally minimal:
 
@@ -12,11 +12,11 @@ Actual NotebookLM operations such as query, ingest, source management, artifacts
 
 ## 1. Enable Real Provider Path
 
-Start CCCC with the real NotebookLM adapter enabled:
+Start OneColleague with the real NotebookLM adapter enabled:
 
 ```bash
 export CCCC_NOTEBOOKLM_REAL=1
-cccc
+onecolleague
 ```
 
 If you expose Web outside localhost, first create an **Admin Access Token** in **Settings > Web Access** and keep the service behind a network boundary until that token exists.
@@ -32,7 +32,7 @@ If you expose Web outside localhost, first create an **Admin Access Token** in *
 In **Google Account**:
 
 1. Click **Connect Google**.
-2. Complete sign-in in the interactive browser view shown inside CCCC Web.
+2. Complete sign-in in the interactive browser view shown inside OneColleague Web.
 3. Wait until the account status becomes connected.
 
 Notes:
@@ -40,7 +40,7 @@ Notes:
 - If a valid credential is already stored, reconnect may complete without a full browser login.
 - The default Web page does not expose manual credential editing anymore.
 - The Web flow uses a projected sign-in browser so Docker / remote deployments do not need a local desktop browser on the daemon host.
-- The projected sign-in browser now runs in headed mode for better Google compatibility. In server/container environments without a native display, CCCC uses `Xvfb` automatically.
+- The projected sign-in browser now runs in headed mode for better Google compatibility. In server/container environments without a native display, OneColleague uses `Xvfb` automatically.
 - The Docker image includes the minimal Chromium shared libraries needed for the projected sign-in browser. Playwright / Chromium binaries themselves are still installed lazily on first use.
 
 ## 4. Bind the Work Notebook
@@ -112,12 +112,12 @@ If NotebookLM is unstable in your environment:
 
 ```bash
 unset CCCC_NOTEBOOKLM_REAL
-cccc daemon restart
+onecolleague daemon restart
 ```
 
 ## 10. Repo Space Sync Notes
 
-When a group has a local scope attached, CCCC still uses repo-local `space/` as the work-lane resource source of truth:
+When a group has a local scope attached, OneColleague still uses repo-local `space/` as the work-lane resource source of truth:
 
 `<scope_root>/space/`
 

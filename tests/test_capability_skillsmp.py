@@ -22,13 +22,13 @@ class TestCapabilitySkillsMP(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
     def test_parse_skillsmp_proxy_search_markdown_avoids_generic_skill_md_name(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         markdown = (
             '[finishing-branch.md 2.1k from "openakita/openakita-skills" '
@@ -41,7 +41,7 @@ class TestCapabilitySkillsMP(unittest.TestCase):
         self.assertEqual(str(first.get("name") or ""), "finishing-branch")
 
     def test_parse_skillsmp_proxy_search_markdown_dedupes_http_https_slug(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         markdown = (
             "[brainstorming.md](http://skillsmp.com/skills/openakita-openakita-skills-superpowers-brainstorming-skill-md)\n"
@@ -57,7 +57,7 @@ class TestCapabilitySkillsMP(unittest.TestCase):
         )
 
     def test_skillsmp_record_display_name_repairs_catalog_skill_md(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         name = ops._skillsmp_record_display_name(
             {
@@ -68,7 +68,7 @@ class TestCapabilitySkillsMP(unittest.TestCase):
         self.assertEqual(name, "collecting-open-source-intelligence")
 
     def test_capability_overview_repairs_persisted_skillsmp_skill_md_name(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:
@@ -105,7 +105,7 @@ class TestCapabilitySkillsMP(unittest.TestCase):
             cleanup()
 
     def test_capability_overview_dedupes_persisted_skillsmp_http_https_records(self) -> None:
-        from cccc.daemon.ops import capability_ops as ops
+        from no1.daemon.ops import capability_ops as ops
 
         _, cleanup = self._with_home()
         try:

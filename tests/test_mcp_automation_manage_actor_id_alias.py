@@ -9,8 +9,8 @@ _CLEAN_ENV = {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}
 
 class TestMcpAutomationManageActorIdAlias(unittest.TestCase):
     def test_automation_manage_accepts_actor_id_with_canonical_rule_shape(self) -> None:
-        from cccc.ports.mcp import server as mcp_server
-        from cccc.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp import common as mcp_common
 
         captured = {}
 
@@ -21,7 +21,7 @@ class TestMcpAutomationManageActorIdAlias(unittest.TestCase):
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
             out = mcp_server.handle_tool_call(
-                "cccc_automation",
+                "onecolleague_automation",
                 {
                     "action": "manage",
                     "group_id": "g_test",

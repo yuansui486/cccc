@@ -6,7 +6,7 @@ from pathlib import Path
 
 class TestIMSubscribersTolerance(unittest.TestCase):
     def test_load_tolerates_dirty_bool_and_int_values(self) -> None:
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.ports.im.subscribers import SubscriberManager
 
         with tempfile.TemporaryDirectory() as td:
             state_dir = Path(td)
@@ -26,7 +26,7 @@ class TestIMSubscribersTolerance(unittest.TestCase):
             self.assertEqual(manager.count(), 2)
 
     def test_missing_verbose_defaults_to_user_only_mode(self) -> None:
-        from cccc.ports.im.subscribers import SubscriberManager
+        from no1.ports.im.subscribers import SubscriberManager
 
         with tempfile.TemporaryDirectory() as td:
             state_dir = Path(td)

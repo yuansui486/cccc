@@ -1,4 +1,4 @@
-"""Tests for DaemonLifecycle in cccc/cli/daemon_lifecycle.py.
+"""Tests for DaemonLifecycle in no1/cli/daemon_lifecycle.py.
 
 Imports the REAL DaemonLifecycle class and drives it with injectable
 fake dependencies — no reimplemented mirror logic.
@@ -17,7 +17,7 @@ import threading
 import time
 import unittest
 
-from cccc.cli.daemon_lifecycle import DaemonLifecycle
+from no1.cli.daemon_lifecycle import DaemonLifecycle
 
 
 class _FakeProcess:
@@ -84,7 +84,7 @@ class TestStopDaemonGuard(unittest.TestCase):
 
     def test_owned_daemon_prefers_tree_termination_for_pid_process(self) -> None:
         """Owned daemon stop should use shared tree termination when a PID is available."""
-        from cccc.cli import daemon_lifecycle as lifecycle_mod
+        from no1.cli import daemon_lifecycle as lifecycle_mod
 
         call_log: list[dict] = []
         lc = DaemonLifecycle(

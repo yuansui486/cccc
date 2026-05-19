@@ -19,8 +19,8 @@ class _FakeGroup:
 
 class TestPetOutcomes(unittest.TestCase):
     def test_append_pet_decision_outcome_records_event(self) -> None:
-        from cccc.kernel.inbox import iter_events
-        from cccc.kernel.pet_outcomes import append_pet_decision_outcome
+        from no1.kernel.inbox import iter_events
+        from no1.kernel.pet_outcomes import append_pet_decision_outcome
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -39,8 +39,8 @@ class TestPetOutcomes(unittest.TestCase):
         self.assertEqual(str(events[-1].get("data", {}).get("outcome") or ""), "dismissed")
 
     def test_append_expired_pet_decision_outcomes_marks_removed_fingerprints(self) -> None:
-        from cccc.kernel.inbox import iter_events
-        from cccc.kernel.pet_outcomes import append_expired_pet_decision_outcomes
+        from no1.kernel.inbox import iter_events
+        from no1.kernel.pet_outcomes import append_expired_pet_decision_outcomes
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -59,7 +59,7 @@ class TestPetOutcomes(unittest.TestCase):
         self.assertEqual(str(events[-1].get("data", {}).get("outcome") or ""), "expired")
 
     def test_load_suppressed_pet_fingerprints_uses_recent_executed_and_dismissed(self) -> None:
-        from cccc.kernel.pet_outcomes import append_pet_decision_outcome, load_suppressed_pet_fingerprints
+        from no1.kernel.pet_outcomes import append_pet_decision_outcome, load_suppressed_pet_fingerprints
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -82,7 +82,7 @@ class TestPetOutcomes(unittest.TestCase):
         self.assertEqual(str((suppressed.get("fp-dismissed") or {}).get("outcome") or ""), "dismissed")
 
     def test_append_pet_decision_outcome_rejects_removed_snoozed_outcome(self) -> None:
-        from cccc.kernel.pet_outcomes import append_pet_decision_outcome
+        from no1.kernel.pet_outcomes import append_pet_decision_outcome
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -95,7 +95,7 @@ class TestPetOutcomes(unittest.TestCase):
                 )
 
     def test_web_pet_outcome_request_rejects_internal_or_removed_outcomes(self) -> None:
-        from cccc.ports.web.schemas import PetDecisionOutcomeRequest
+        from no1.ports.web.schemas import PetDecisionOutcomeRequest
 
         with self.assertRaises(ValidationError):
             PetDecisionOutcomeRequest(fingerprint="fp-1", outcome="snoozed")

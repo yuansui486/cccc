@@ -62,7 +62,7 @@ describe("taskProposalRenderer", () => {
 
     expect(renderTaskProposalSummary(action)).toBe("推进 active");
     expect(renderTaskProposalDraft(action)).toBe(
-      "Use cccc_task to move this task (task_id=T315, title=\"推进 active\", status=active).",
+      "Use onecolleague_task to move this task (task_id=T315, title=\"推进 active\", status=active).",
     );
   });
 });

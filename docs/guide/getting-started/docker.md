@@ -1,6 +1,6 @@
 # Docker Deployment
 
-Run CCCC in a Docker container — ideal for servers, teams, and reproducible environments.
+Run OneColleague in a Docker container — ideal for servers, teams, and reproducible environments.
 
 ## AI-Assisted Deployment
 
@@ -9,20 +9,20 @@ Copy the prompt below and paste it to any AI assistant — it will guide you thr
 ::: details Click to copy AI deployment prompt
 
 ```text
-You are a deployment assistant for CCCC (Multi-Agent Collaboration Kernel).
+You are a deployment assistant for OneColleague (Multi-Agent Collaboration Kernel).
 Guide the user step-by-step through Docker deployment. Ask questions interactively, don't dump all steps at once.
 
 ## What you're deploying
-CCCC is a multi-agent collaboration hub. The Docker image includes Python 3.11, Node.js 20,
+OneColleague is a multi-agent collaboration hub. The Docker image includes Python 3.11, Node.js 20,
 and pre-installed AI agent CLIs (Claude Code, Gemini CLI, Codex CLI, Factory CLI).
 
 ## Step 1: Get the source code
-Ask: "Do you already have the CCCC repo cloned? If yes, what's the path?"
+Ask: "Do you already have the OneColleague repo cloned? If yes, what's the path?"
 If no:
-  git clone https://github.com/ChesterRa/cccc && cd cccc
+  git clone https://github.com/ChesterRa/onecolleague && cd onecolleague
 
 ## Step 2: Build the image
-  docker build -f docker/Dockerfile -t cccc .
+  docker build -f docker/Dockerfile -t onecolleague .
 Note: multi-stage build — first compiles Web UI (Node.js), then packages Python daemon.
 If build fails, check: Docker version >= 20.10, sufficient disk space, network access to npm/PyPI.
 
@@ -37,23 +37,23 @@ Ask each one individually:
 Build the docker run command from the user's answers:
   docker run -d \
     -p 127.0.0.1:{port}:8848 \
-    -v cccc-data:/data \
+    -v onecolleague-data:/data \
     -v {project_path}:/workspace \
     -e {API_KEY_ENV}={api_key} \
-    --name cccc \
-    cccc
+    --name onecolleague \
+    onecolleague
 
 ## Step 5: Verify
 Run these and report results:
-  docker logs cccc
-  docker exec cccc cccc doctor
+  docker logs onecolleague
+  docker exec onecolleague onecolleague doctor
 
 ## Troubleshooting knowledge (use when relevant, don't preemptively dump):
-- "cannot be used with root/sudo privileges": The Dockerfile uses a non-root `cccc` user. Ensure using the latest Dockerfile.
-- Volume permission errors after upgrading: `docker run --rm -v cccc-data:/data python:3.11-slim chown -R 1000:1000 /data`
-- Claude CLI onboarding already pre-configured via: `{"hasCompletedOnboarding":true}` in /home/cccc/.claude.json
-- Custom Claude CLI config: `docker exec cccc sh -c 'cat > /home/cccc/.claude.json << EOF\n{your json}\nEOF'`
-- Check runtime CLIs: `docker exec cccc claude --version` / `gemini --version` / `codex --version`
+- "cannot be used with root/sudo privileges": The Dockerfile uses a non-root `onecolleague` user. Ensure using the latest Dockerfile.
+- Volume permission errors after upgrading: `docker run --rm -v onecolleague-data:/data python:3.11-slim chown -R 1000:1000 /data`
+- Claude CLI onboarding already pre-configured via: `{"hasCompletedOnboarding":true}` in /home/onecolleague/.claude.json
+- Custom Claude CLI config: `docker exec onecolleague sh -c 'cat > /home/onecolleague/.claude.json << EOF\n{your json}\nEOF'`
+- Check runtime CLIs: `docker exec onecolleague claude --version` / `gemini --version` / `codex --version`
 
 ## Optional: Docker Compose
 If user prefers Compose, point them to the bundled docker/docker-compose.yml:
@@ -92,9 +92,9 @@ If user prefers Compose, point them to the bundled docker/docker-compose.yml:
 ### 1. Build the Image
 
 ```bash
-git clone https://github.com/ChesterRa/cccc
-cd cccc
-docker build -f docker/Dockerfile -t cccc .
+git clone https://github.com/ChesterRa/onecolleague
+cd onecolleague
+docker build -f docker/Dockerfile -t onecolleague .
 ```
 
 ::: tip Build Context
@@ -107,11 +107,11 @@ The build uses a multi-stage approach: first compiles the Web UI (Node.js), then
 docker run -d \
   --init \
   -p 127.0.0.1:8848:8848 \
-  -v cccc-data:/data \
+  -v onecolleague-data:/data \
   -v /path/to/your/projects:/workspace \
   -e ANTHROPIC_AUTH_TOKEN=sk-ant-xxx \
-  --name cccc \
-  cccc
+  --name onecolleague \
+  onecolleague
 ```
 
 Open `http://localhost:8848` in your browser. The sample command binds the host port to `127.0.0.1` on purpose, so you can safely create an **Admin Access Token** in **Settings > Web Access** before any broader exposure.
@@ -122,10 +122,10 @@ The image now includes the minimal shared libraries plus `Xvfb` needed for proje
 
 ```bash
 # Check container is running
-docker logs cccc
+docker logs onecolleague
 
 # Health check
-docker exec cccc cccc doctor
+docker exec onecolleague onecolleague doctor
 ```
 
 ## Configuration
@@ -150,7 +150,7 @@ docker exec cccc cccc doctor
 
 | Container Path | Purpose |
 |---------------|---------|
-| `/data` | Persistent CCCC state (groups, ledger, daemon config) |
+| `/data` | Persistent OneColleague state (groups, ledger, daemon config) |
 | `/workspace` | Project files for agents to work on |
 
 ::: warning Protect Your Data
@@ -168,15 +168,15 @@ docker run -d \
   --init \
   -p 127.0.0.1:8848:8848 \
   -p 127.0.0.1:9765:9765 \
-  -v cccc-data:/data \
+  -v onecolleague-data:/data \
   -v /path/to/projects:/workspace \
   -e CCCC_DAEMON_HOST=0.0.0.0 \
   -e CCCC_DAEMON_ALLOW_REMOTE=1 \
-  --name cccc \
-  cccc
+  --name onecolleague \
+  onecolleague
 ```
 
-Projected browser sessions now default to a headed browser for better site compatibility. In server/container environments without a native display, CCCC uses its own `Xvfb` display automatically. The image also includes `x11vnc` so embedded browser panels can use the VNC-backed viewer when the browser is running on that CCCC-owned display, while delivery and automation still use the daemon-owned CDP session. CCCC does not attach VNC to an inherited host desktop display; those sessions use the CDP screencast fallback instead. The VNC endpoint is localhost-only inside the container and is intended for trusted single-user deployments; browser access from CCCC Web is proxied through the authenticated WebSocket route. If you use projected browser features heavily and see Chromium renderer crashes inside the container, add `--ipc=host` to the `docker run` command. Playwright's Docker guidance recommends a larger shared-memory budget for Chromium workloads.
+Projected browser sessions now default to a headed browser for better site compatibility. In server/container environments without a native display, OneColleague uses its own `Xvfb` display automatically. The image also includes `x11vnc` so embedded browser panels can use the VNC-backed viewer when the browser is running on that OneColleague-owned display, while delivery and automation still use the daemon-owned CDP session. OneColleague does not attach VNC to an inherited host desktop display; those sessions use the CDP screencast fallback instead. The VNC endpoint is localhost-only inside the container and is intended for trusted single-user deployments; browser access from OneColleague Web is proxied through the authenticated WebSocket route. If you use projected browser features heavily and see Chromium renderer crashes inside the container, add `--ipc=host` to the `docker run` command. Playwright's Docker guidance recommends a larger shared-memory budget for Chromium workloads.
 
 ### Custom Claude CLI Configuration
 
@@ -184,7 +184,7 @@ The container comes with Claude CLI pre-configured (onboarding skipped). To cust
 
 ```bash
 # Write config from host
-docker exec cccc sh -c 'cat > /home/cccc/.claude.json << EOF
+docker exec onecolleague sh -c 'cat > /home/onecolleague/.claude.json << EOF
 {
   "hasCompletedOnboarding": true,
   "customApiKey": "your-key"
@@ -192,7 +192,7 @@ docker exec cccc sh -c 'cat > /home/cccc/.claude.json << EOF
 EOF'
 
 # Or copy a config file in
-docker cp ~/.claude.json cccc:/home/cccc/.claude.json
+docker cp ~/.claude.json onecolleague:/home/onecolleague/.claude.json
 ```
 
 ### Run with Docker Compose
@@ -207,7 +207,7 @@ cp docker/.env.example docker/.env
 Create the data volume (required on first run, as the compose file uses `external: true`):
 
 ```bash
-docker volume create cccc-data
+docker volume create onecolleague-data
 ```
 
 Then choose either way to start:
@@ -259,7 +259,7 @@ Security note: the Docker examples now bind host ports to `127.0.0.1` by default
 
 ### "cannot be used with root/sudo privileges"
 
-Claude CLI refuses to run with `--dangerously-skip-permissions` as root. The Dockerfile already creates a non-root `cccc` user to handle this. If you see this error, make sure you're using the latest Dockerfile.
+Claude CLI refuses to run with `--dangerously-skip-permissions` as root. The Dockerfile already creates a non-root `onecolleague` user to handle this. If you see this error, make sure you're using the latest Dockerfile.
 
 ### Volume Permission Issues
 
@@ -267,7 +267,7 @@ If you previously ran the container as root and then switched to the non-root us
 
 ```bash
 # Fix permissions on the data volume
-docker run --rm -v cccc-data:/data python:3.11-slim \
+docker run --rm -v onecolleague-data:/data python:3.11-slim \
   chown -R 1000:1000 /data
 ```
 
@@ -277,22 +277,22 @@ The image ships with Claude Code, Gemini CLI, and Codex CLI pre-installed. If a 
 
 ```bash
 # Check available runtimes
-docker exec cccc cccc doctor
+docker exec onecolleague onecolleague doctor
 
 # Verify CLI availability
-docker exec cccc claude --version
-docker exec cccc gemini --version
-docker exec cccc codex --version
+docker exec onecolleague claude --version
+docker exec onecolleague gemini --version
+docker exec onecolleague codex --version
 ```
 
 ### Container Logs
 
 ```bash
 # Real-time logs
-docker logs -f cccc
+docker logs -f onecolleague
 
 # Last 100 lines
-docker logs --tail 100 cccc
+docker logs --tail 100 onecolleague
 ```
 
 ## Pre-installed Tools
@@ -301,7 +301,7 @@ The Docker image includes:
 
 | Tool | Purpose |
 |------|---------|
-| Python 3.11 | CCCC daemon runtime |
+| Python 3.11 | OneColleague daemon runtime |
 | Node.js 20 | Agent CLI runtime (npm-based tools) |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's AI coding agent |
 | [Gemini CLI](https://github.com/google/gemini-cli) | Google's AI coding agent |
@@ -312,6 +312,6 @@ The Docker image includes:
 ## Next Steps
 
 - [Web UI Quick Start](./web) - Configure agents through the visual interface
-- [CLI Quick Start](./cli) - Manage CCCC from the command line
+- [CLI Quick Start](./cli) - Manage OneColleague from the command line
 - [Operations Runbook](/guide/operations) - Production operations guide
 - [Secure Remote Access](/guide/operations#_5-secure-remote-access) - Set up Cloudflare Access or Tailscale

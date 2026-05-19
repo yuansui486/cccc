@@ -5,9 +5,9 @@ import unittest
 
 class TestDeliveryStateBehavior(unittest.TestCase):
     def test_should_deliver_message_respects_idle_and_paused_semantics(self) -> None:
-        from cccc.daemon.messaging.delivery import should_deliver_message
-        from cccc.kernel.group import create_group, set_group_state
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.messaging.delivery import should_deliver_message
+        from no1.kernel.group import create_group, set_group_state
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         td_ctx = tempfile.TemporaryDirectory()

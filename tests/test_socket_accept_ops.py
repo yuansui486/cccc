@@ -1,8 +1,8 @@
 import logging
 import unittest
 
-from cccc.contracts.v1 import DaemonError, DaemonResponse
-from cccc.daemon.ops.socket_accept_ops import handle_incoming_connection
+from no1.contracts.v1 import DaemonError, DaemonResponse
+from no1.daemon.ops.socket_accept_ops import handle_incoming_connection
 
 
 class _FakeConn:

@@ -24,8 +24,8 @@ class TestGroupCoreOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -104,8 +104,8 @@ class TestGroupCoreOps(unittest.TestCase):
             cleanup()
 
     def test_group_delete_clears_active_and_removes_group(self) -> None:
-        from cccc.kernel.active import load_active, set_active_group_id
-        from cccc.kernel.group import load_group
+        from no1.kernel.active import load_active, set_active_group_id
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -131,7 +131,7 @@ class TestGroupCoreOps(unittest.TestCase):
             cleanup()
 
     def test_group_delete_tolerates_transient_directory_not_empty(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
@@ -150,7 +150,7 @@ class TestGroupCoreOps(unittest.TestCase):
                     raise OSError(errno.ENOTEMPTY, "Directory not empty")
                 return real_rmtree(path, *args, **kwargs)
 
-            with patch("cccc.kernel.group.shutil.rmtree", side_effect=_flaky_rmtree):
+            with patch("no1.kernel.group.shutil.rmtree", side_effect=_flaky_rmtree):
                 delete_resp, _ = self._call("group_delete", {"group_id": group_id, "by": "user"})
 
             self.assertTrue(injected["raised"])

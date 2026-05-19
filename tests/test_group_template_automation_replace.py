@@ -8,9 +8,9 @@ import yaml  # type: ignore
 
 class TestGroupTemplateAutomationReplace(unittest.TestCase):
     def test_import_replace_clears_automation_when_template_omits_automation_block(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -68,7 +68,7 @@ class TestGroupTemplateAutomationReplace(unittest.TestCase):
                 self.assertTrue(update_resp.ok, getattr(update_resp, "error", None))
 
                 template = """
-kind: cccc.group_template
+kind: no1.group_template
 v: 1
 actors: []
 prompts: {}
@@ -101,8 +101,8 @@ prompts: {}
                 os.environ["CCCC_HOME"] = old_home
 
     def test_export_always_includes_automation_block_when_empty(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -152,10 +152,10 @@ prompts: {}
                 os.environ["CCCC_HOME"] = old_home
 
     def test_import_replace_clears_execution_state_but_preserves_mind_context(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.context import ContextStorage
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.context import ContextStorage
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -224,8 +224,8 @@ prompts: {}
                 template_text = str((export_resp.result or {}).get("template") or "")
                 self.assertTrue(template_text)
 
-                with patch("cccc.daemon.ops.template_ops.pty_runner.SUPERVISOR.actor_running", return_value=False), patch(
-                    "cccc.daemon.ops.template_ops.headless_runner.SUPERVISOR.actor_running",
+                with patch("no1.daemon.ops.template_ops.pty_runner.SUPERVISOR.actor_running", return_value=False), patch(
+                    "no1.daemon.ops.template_ops.headless_runner.SUPERVISOR.actor_running",
                     return_value=True,
                 ):
                     import_resp, _ = handle_request(

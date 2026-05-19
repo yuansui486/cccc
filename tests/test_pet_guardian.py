@@ -40,7 +40,7 @@ class TestPetDecisionsOps(unittest.TestCase):
         }
 
     def test_replace_load_and_clear_pet_decisions(self) -> None:
-        from cccc.kernel.pet_decisions import (
+        from no1.kernel.pet_decisions import (
             clear_pet_decisions,
             load_pet_decisions,
             replace_pet_decisions,
@@ -61,7 +61,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(load_pet_decisions(group), [])
 
     def test_replace_filters_invalid_decisions(self) -> None:
-        from cccc.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
+        from no1.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -82,7 +82,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(load_pet_decisions(group), [valid])
 
     def test_replace_compacts_foreman_draft_message_to_next_step_message(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_decisions import replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -115,7 +115,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertNotIn("suggestion_preview", stored[0])
 
     def test_replace_keeps_non_foreman_draft_message_text(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_decisions import replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -140,7 +140,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(str(stored[0]["action"]["text"] or ""), "Please share reproduction steps and the error screenshot.")
 
     def test_replace_preserves_structured_foreman_control_message(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_decisions import replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -173,7 +173,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             )
 
     def test_replace_keeps_task_proposal_reply_pressure_text_from_pet(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_decisions import replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -207,8 +207,8 @@ class TestPetDecisionsOps(unittest.TestCase):
             )
 
     def test_replace_filters_recently_executed_fingerprint(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
-        from cccc.kernel.pet_outcomes import append_pet_decision_outcome
+        from no1.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_outcomes import append_pet_decision_outcome
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -242,7 +242,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(stored, [])
 
     def test_replace_resolves_fingerprint_collisions_by_suffixing_distinct_decisions(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_decisions import replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -263,7 +263,7 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertTrue(str(stored[1]["fingerprint"]).startswith(str(first["fingerprint"])))
 
     def test_replace_filters_removed_send_suggestion_alias(self) -> None:
-        from cccc.kernel.pet_decisions import replace_pet_decisions
+        from no1.kernel.pet_decisions import replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -280,8 +280,8 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(stored, [])
 
     def test_replace_rolls_back_when_ledger_append_fails(self) -> None:
-        from cccc.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
-        from cccc.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
+        from no1.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
+        from no1.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -291,11 +291,11 @@ class TestPetDecisionsOps(unittest.TestCase):
             updated = dict(previous)
             updated["summary"] = "Updated summary"
 
-            with patch("cccc.daemon.pet.pet_decision_ops.load_group", return_value=group), patch(
-                "cccc.daemon.pet.pet_decision_ops.get_pet_actor",
+            with patch("no1.daemon.pet.pet_decision_ops.load_group", return_value=group), patch(
+                "no1.daemon.pet.pet_decision_ops.get_pet_actor",
                 return_value={"id": "pet-peer", "internal_kind": "pet"},
             ), patch(
-                "cccc.daemon.pet.pet_decision_ops.append_event",
+                "no1.daemon.pet.pet_decision_ops.append_event",
                 side_effect=RuntimeError("ledger failed"),
             ):
                 resp = handle_pet_decisions_replace(
@@ -310,19 +310,19 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(load_pet_decisions(group), [previous])
 
     def test_clear_rolls_back_when_ledger_append_fails(self) -> None:
-        from cccc.daemon.pet.pet_decision_ops import handle_pet_decisions_clear
-        from cccc.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
+        from no1.daemon.pet.pet_decision_ops import handle_pet_decisions_clear
+        from no1.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
             previous = self._sample_decision(group.group_id)
             replace_pet_decisions(group, decisions=[previous], actor_id="pet-peer")
 
-            with patch("cccc.daemon.pet.pet_decision_ops.load_group", return_value=group), patch(
-                "cccc.daemon.pet.pet_decision_ops.get_pet_actor",
+            with patch("no1.daemon.pet.pet_decision_ops.load_group", return_value=group), patch(
+                "no1.daemon.pet.pet_decision_ops.get_pet_actor",
                 return_value={"id": "pet-peer", "internal_kind": "pet"},
             ), patch(
-                "cccc.daemon.pet.pet_decision_ops.append_event",
+                "no1.daemon.pet.pet_decision_ops.append_event",
                 side_effect=RuntimeError("ledger failed"),
             ):
                 resp = handle_pet_decisions_clear(
@@ -336,13 +336,13 @@ class TestPetDecisionsOps(unittest.TestCase):
             self.assertEqual(load_pet_decisions(group), [previous])
 
     def test_replace_keeps_empty_when_actor_returns_no_decisions(self) -> None:
-        from cccc.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
+        from no1.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
 
         with tempfile.TemporaryDirectory() as tmp, patch(
-            "cccc.daemon.pet.pet_decision_ops.load_group",
+            "no1.daemon.pet.pet_decision_ops.load_group",
             return_value=_FakeGroup("g-demo", Path(tmp)),
         ), patch(
-            "cccc.daemon.pet.pet_decision_ops.get_pet_actor",
+            "no1.daemon.pet.pet_decision_ops.get_pet_actor",
             return_value={"id": "pet-peer", "internal_kind": "pet"},
         ):
             resp = handle_pet_decisions_replace(
@@ -358,14 +358,14 @@ class TestPetDecisionsOps(unittest.TestCase):
         self.assertEqual(decisions, [])
 
     def test_clear_always_clears_even_if_no_new_decisions_are_generated(self) -> None:
-        from cccc.daemon.pet.pet_decision_ops import handle_pet_decisions_clear
-        from cccc.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
+        from no1.daemon.pet.pet_decision_ops import handle_pet_decisions_clear
+        from no1.kernel.pet_decisions import load_pet_decisions, replace_pet_decisions
 
         with tempfile.TemporaryDirectory() as tmp, patch(
-            "cccc.daemon.pet.pet_decision_ops.load_group",
+            "no1.daemon.pet.pet_decision_ops.load_group",
             return_value=_FakeGroup("g-demo", Path(tmp)),
         ), patch(
-            "cccc.daemon.pet.pet_decision_ops.get_pet_actor",
+            "no1.daemon.pet.pet_decision_ops.get_pet_actor",
             return_value={"id": "pet-peer", "internal_kind": "pet"},
         ):
             group = _FakeGroup("g-demo", Path(tmp))
@@ -383,15 +383,15 @@ class TestPetDecisionsOps(unittest.TestCase):
 
 
     def test_replace_marks_pet_review_job_completed(self) -> None:
-        from cccc.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
+        from no1.daemon.pet.pet_decision_ops import handle_pet_decisions_replace
 
         with tempfile.TemporaryDirectory() as tmp, patch(
-            "cccc.daemon.pet.pet_decision_ops.load_group",
+            "no1.daemon.pet.pet_decision_ops.load_group",
             return_value=_FakeGroup("g-demo", Path(tmp)),
         ), patch(
-            "cccc.daemon.pet.pet_decision_ops.get_pet_actor",
+            "no1.daemon.pet.pet_decision_ops.get_pet_actor",
             return_value={"id": "pet-peer", "internal_kind": "pet"},
-        ), patch("cccc.daemon.pet.pet_decision_ops.mark_job_completed") as mark_completed:
+        ), patch("no1.daemon.pet.pet_decision_ops.mark_job_completed") as mark_completed:
             resp = handle_pet_decisions_replace(
                 {
                     "group_id": "g-demo",
@@ -406,7 +406,7 @@ class TestPetDecisionsOps(unittest.TestCase):
 
 class TestPetActorSeed(unittest.TestCase):
     def test_pet_actor_seed_uses_foreman_settings(self) -> None:
-        from cccc.kernel.pet_actor import _pet_actor_seed
+        from no1.kernel.pet_actor import _pet_actor_seed
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -429,7 +429,7 @@ class TestPetActorSeed(unittest.TestCase):
             self.assertEqual(seed["env"], {"FOO": "bar"})
 
     def test_pet_actor_seed_requires_foreman(self) -> None:
-        from cccc.kernel.pet_actor import _pet_actor_seed
+        from no1.kernel.pet_actor import _pet_actor_seed
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -437,16 +437,16 @@ class TestPetActorSeed(unittest.TestCase):
                 _pet_actor_seed(group)
 
     def test_pet_actor_seed_uses_available_runtime_when_foreman_runtime_missing(self) -> None:
-        from cccc.kernel.pet_actor import _pet_actor_seed
+        from no1.kernel.pet_actor import _pet_actor_seed
 
         with tempfile.TemporaryDirectory() as tmp, patch(
-            "cccc.kernel.internal_assistant_runtime.runtime_start_preflight_error",
+            "no1.kernel.internal_assistant_runtime.runtime_start_preflight_error",
             side_effect=lambda runtime, command, runner="pty": "missing" if runtime == "codex" else "",
         ), patch(
-            "cccc.kernel.internal_assistant_runtime.detect_runtime",
+            "no1.kernel.internal_assistant_runtime.detect_runtime",
             side_effect=lambda name: type("RuntimeInfo", (), {"available": name == "claude"})(),
         ), patch(
-            "cccc.kernel.internal_assistant_runtime.get_runtime_command_with_flags",
+            "no1.kernel.internal_assistant_runtime.get_runtime_command_with_flags",
             side_effect=lambda name: [name, "--dangerously-skip-permissions"],
         ):
             group = _FakeGroup("g-demo", Path(tmp))
@@ -466,7 +466,7 @@ class TestPetActorSeed(unittest.TestCase):
 
 class TestPetVisibleChatBoundary(unittest.TestCase):
     def test_pet_cannot_send_visible_chat_directly(self) -> None:
-        from cccc.daemon.messaging import chat_ops
+        from no1.daemon.messaging import chat_ops
 
         with tempfile.TemporaryDirectory() as tmp:
             fake_group = _FakeGroup("g-demo", Path(tmp))
@@ -490,7 +490,7 @@ class TestPetVisibleChatBoundary(unittest.TestCase):
         self.assertEqual(getattr(resp.error, "code", ""), "pet_visible_chat_forbidden")
 
     def test_pet_cannot_reply_visible_chat_directly(self) -> None:
-        from cccc.daemon.messaging import chat_ops
+        from no1.daemon.messaging import chat_ops
 
         with tempfile.TemporaryDirectory() as tmp:
             fake_group = _FakeGroup("g-demo", Path(tmp))
@@ -516,7 +516,7 @@ class TestPetVisibleChatBoundary(unittest.TestCase):
 
 class TestPetPromptContract(unittest.TestCase):
     def test_render_pet_system_prompt_declares_outbound_message_boundary(self) -> None:
-        from cccc.kernel.pet_prompt import render_pet_system_prompt
+        from no1.kernel.pet_prompt import render_pet_system_prompt
 
         with tempfile.TemporaryDirectory() as tmp:
             group = _FakeGroup("g-demo", Path(tmp))
@@ -526,14 +526,14 @@ class TestPetPromptContract(unittest.TestCase):
         self.assertIn("user-side draft-first attention assistant", prompt)
         self.assertIn("surface exactly one current highest-value recommendation", prompt)
         self.assertIn("use its review_packet as your initial focus", prompt)
-        self.assertIn("Finish every pet_review with exactly one cccc_pet_decisions call", prompt)
+        self.assertIn("Finish every pet_review with exactly one onecolleague_pet_decisions call", prompt)
         self.assertIn("action.text must already be the exact message the user would likely want to send next", prompt)
         self.assertIn("A draft_message may be multi-sentence or a short bullet list", prompt)
-        self.assertIn("Do not call cccc_message_send, cccc_message_reply", prompt)
+        self.assertIn("Do not call onecolleague_message_send, onecolleague_message_reply", prompt)
         self.assertIn("pet_profile_refresh", prompt)
         self.assertIn("data.context.kind=pet_profile_refresh", prompt)
-        self.assertIn("do not touch cccc_pet_decisions", prompt)
-        self.assertIn('cccc_agent_state(action=update, actor_id=pet-peer, user_model=...)', prompt)
+        self.assertIn("do not touch onecolleague_pet_decisions", prompt)
+        self.assertIn('onecolleague_agent_state(action=update, actor_id=pet-peer, user_model=...)', prompt)
         self.assertNotIn("Working Style:", prompt)
         self.assertNotIn("Pet-Specific Help:", prompt)
         self.assertNotIn("Runtime Snapshot:", prompt)

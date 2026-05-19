@@ -8,11 +8,11 @@ from unittest.mock import patch
 
 class TestRegistryReconcileAndAutoWake(unittest.TestCase):
     def test_auto_wake_failure_keeps_actor_disabled(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon import server as daemon_server
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.actors import find_actor
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon import server as daemon_server
+        from no1.daemon.server import handle_request
+        from no1.kernel.actors import find_actor
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -112,10 +112,10 @@ class TestRegistryReconcileAndAutoWake(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_registry_cleanup_is_explicit_not_implicit(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.registry import load_registry
-        from cccc.paths import ensure_home
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.registry import load_registry
+        from no1.paths import ensure_home
 
         old_home = os.environ.get("CCCC_HOME")
         try:

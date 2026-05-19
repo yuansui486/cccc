@@ -20,10 +20,10 @@ class TestMessageObligation(unittest.TestCase):
         return td, cleanup
 
     def _create_group_with_peer(self):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.actors import add_actor
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import load_group
 
         resp, _ = handle_request(
             DaemonRequest.model_validate(
@@ -41,8 +41,8 @@ class TestMessageObligation(unittest.TestCase):
         return group, group_id
 
     def test_send_persists_reply_required(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         _, cleanup = self._with_home()
         try:
@@ -72,9 +72,9 @@ class TestMessageObligation(unittest.TestCase):
             cleanup()
 
     def test_obligation_status_lifecycle(self) -> None:
-        from cccc.contracts.v1 import ChatMessageData
-        from cccc.kernel.inbox import get_obligation_status_batch, set_cursor
-        from cccc.kernel.ledger import append_event
+        from no1.contracts.v1 import ChatMessageData
+        from no1.kernel.inbox import get_obligation_status_batch, set_cursor
+        from no1.kernel.ledger import append_event
 
         group, _group_id = (None, "")
         _, cleanup = self._with_home()
@@ -133,10 +133,10 @@ class TestMessageObligation(unittest.TestCase):
             cleanup()
 
     def test_reply_auto_creates_ack_for_attention_message(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.inbox import has_chat_ack
-        from cccc.kernel.ledger import append_event
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.inbox import has_chat_ack
+        from no1.kernel.ledger import append_event
 
         _, cleanup = self._with_home()
         try:

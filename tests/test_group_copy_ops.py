@@ -27,8 +27,8 @@ class TestGroupCopyOps(unittest.TestCase):
         return td, cleanup
 
     def _call(self, op: str, args: dict):
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
 
         return handle_request(DaemonRequest.model_validate({"op": op, "args": args}))
 
@@ -44,7 +44,7 @@ class TestGroupCopyOps(unittest.TestCase):
         return group_id, scope_key
 
     def _mark_actor_with_secret_and_missing_profile(self, group_id: str, actor_id: str) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         group = load_group(group_id)
         self.assertIsNotNone(group)
@@ -69,7 +69,7 @@ class TestGroupCopyOps(unittest.TestCase):
         return base64.b64decode(raw)
 
     def test_export_excludes_runtime_state_and_secrets(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _home, cleanup = self._with_home()
         try:
@@ -149,7 +149,7 @@ class TestGroupCopyOps(unittest.TestCase):
                     self.assertNotIn("group/state/browser/session.json", names)
                     self.assertNotIn("group/state/tokens/provider.json", names)
                     manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
-                    self.assertEqual(manifest.get("kind"), "cccc.group_copy")
+                    self.assertEqual(manifest.get("kind"), "no1.group_copy")
                     self.assertFalse(bool(manifest.get("workspace_included")))
                     self.assertFalse(bool(manifest.get("contains_secrets")))
                     packaged_doc = yaml.safe_load(zf.read("group/group.yaml").decode("utf-8")) or {}
@@ -159,8 +159,8 @@ class TestGroupCopyOps(unittest.TestCase):
             cleanup()
 
     def test_conflict_import_creates_inert_copy_without_stealing_workspace_default(self) -> None:
-        from cccc.kernel.group import load_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import load_group
+        from no1.kernel.registry import load_registry
 
         _home, cleanup = self._with_home()
         try:
@@ -272,8 +272,8 @@ class TestGroupCopyOps(unittest.TestCase):
             cleanup()
 
     def test_import_without_conflict_preserves_group_id_in_new_home(self) -> None:
-        from cccc.kernel.group import load_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -308,8 +308,8 @@ class TestGroupCopyOps(unittest.TestCase):
     def test_import_publish_event_failure_does_not_rollback_group_or_registry(self) -> None:
         from unittest.mock import patch
 
-        from cccc.kernel.group import load_group
-        from cccc.kernel.registry import load_registry
+        from no1.kernel.group import load_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -320,7 +320,7 @@ class TestGroupCopyOps(unittest.TestCase):
                 package_b64 = base64.b64encode(package).decode("ascii")
 
                 os.environ["CCCC_HOME"] = target_home
-                with patch("cccc.kernel.events.publish_event", side_effect=RuntimeError("event bus unavailable")):
+                with patch("no1.kernel.events.publish_event", side_effect=RuntimeError("event bus unavailable")):
                     import_resp, _ = self._call(
                         "group_copy_import",
                         {"package_b64": package_b64, "workspace_root": workspace_raw, "by": "user"},
@@ -338,7 +338,7 @@ class TestGroupCopyOps(unittest.TestCase):
                 os.environ["CCCC_HOME"] = old_home
 
     def test_preview_actor_count_excludes_internal_assistants(self) -> None:
-        from cccc.kernel.group import load_group
+        from no1.kernel.group import load_group
 
         _home, cleanup = self._with_home()
         try:
@@ -396,7 +396,7 @@ class TestGroupCopyOps(unittest.TestCase):
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w") as zf:
                 zf.writestr("manifest.json", json.dumps({
-                    "kind": "cccc.group_copy",
+                    "kind": "no1.group_copy",
                     "version": 1,
                     "export_mode": "group_state_only",
                     "workspace_included": False,
@@ -414,7 +414,7 @@ class TestGroupCopyOps(unittest.TestCase):
         _home, cleanup = self._with_home()
         try:
             manifest = {
-                "kind": "cccc.group_copy",
+                "kind": "no1.group_copy",
                 "version": 1,
                 "export_mode": "group_state_only",
                 "workspace_included": False,

@@ -1,16 +1,16 @@
-# CCCC Client SDK
+# OneColleague Client SDK
 
-The official SDK for integrating external apps/services with a running CCCC daemon.
+The official SDK for integrating external apps/services with a running OneColleague daemon.
 
 ## Repository and Packages
 
-- Repository: [ChesterRa/cccc-sdk](https://github.com/ChesterRa/cccc-sdk)
-- Python package: `cccc-sdk` (import as `cccc_sdk`)
-- TypeScript package: `cccc-sdk`
+- Repository: [ChesterRa/onecolleague-sdk](https://github.com/ChesterRa/onecolleague-sdk)
+- Python package: `onecolleague-sdk` (import as `onecolleague_sdk`)
+- TypeScript package: `onecolleague-sdk`
 
-## How It Fits with CCCC Core
+## How It Fits with OneColleague Core
 
-CCCC core (`cccc-pair`) is the runtime system:
+OneColleague core (`no1`) is the runtime system:
 
 - daemon
 - ledger/state
@@ -37,30 +37,30 @@ Use MCP when the caller is an in-session agent/tool runtime.
 
 ```bash
 # Python
-pip install -U cccc-sdk
+pip install -U onecolleague-sdk
 
 # TypeScript
-npm install cccc-sdk
+npm install onecolleague-sdk
 ```
 
 ## Runtime Requirement
 
-A CCCC daemon must already be running.
+A OneColleague daemon must already be running.
 
 ```bash
-cccc daemon status
+onecolleague daemon status
 ```
 
-The SDK client then connects to the daemon transport configured by your CCCC runtime (`CCCC_HOME`, daemon socket/TCP settings).
+The SDK client then connects to the daemon transport configured by your OneColleague runtime (`CCCC_HOME`, daemon socket/TCP settings).
 
 ## Integration Model
 
 Typical production setup:
 
-1. Run CCCC core (`cccc-pair`) as the local control plane.
+1. Run OneColleague core (`no1`) as the local control plane.
 2. Connect your app/service through the SDK.
 3. Use SDK calls for group/actor/messaging/context/automation operations.
-4. Keep operational truth in the CCCC ledger and group state.
+4. Keep operational truth in the OneColleague ledger and group state.
 
 ## Compatibility Notes
 
@@ -73,4 +73,4 @@ Typical production setup:
 
 For concrete API examples and language-specific usage, follow the SDK repo documentation:
 
-- [cccc-sdk README](https://github.com/ChesterRa/cccc-sdk)
+- [onecolleague-sdk README](https://github.com/ChesterRa/onecolleague-sdk)

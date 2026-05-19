@@ -22,9 +22,9 @@ class TestWebGroupSettingsDirtyTolerance(unittest.TestCase):
         return td, cleanup
 
     def test_group_settings_get_tolerates_dirty_numeric_values(self) -> None:
-        from cccc.kernel.group import create_group, load_group
-        from cccc.kernel.registry import load_registry
-        from cccc.ports.web.app import create_app
+        from no1.kernel.group import create_group, load_group
+        from no1.kernel.registry import load_registry
+        from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
         try:

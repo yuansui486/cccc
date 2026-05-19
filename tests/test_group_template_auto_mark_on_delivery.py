@@ -5,9 +5,9 @@ import unittest
 
 class TestGroupTemplateAutoMarkOnDelivery(unittest.TestCase):
     def test_template_import_replace_applies_auto_mark_on_delivery(self) -> None:
-        from cccc.contracts.v1 import DaemonRequest
-        from cccc.daemon.server import handle_request
-        from cccc.kernel.group import load_group
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.kernel.group import load_group
 
         old_home = os.environ.get("CCCC_HOME")
         try:
@@ -36,7 +36,7 @@ class TestGroupTemplateAutoMarkOnDelivery(unittest.TestCase):
 
                 # Apply template with auto_mark_on_delivery=true.
                 template = f"""
-kind: cccc.group_template
+kind: no1.group_template
 v: 1
 actors: []
 settings:
@@ -86,9 +86,9 @@ prompts: {{}}
                 os.environ["CCCC_HOME"] = old_home
 
     def test_apply_settings_replace_coerces_falsey_string_toggles(self) -> None:
-        from cccc.daemon.ops.template_ops import _apply_settings_replace
-        from cccc.kernel.group import create_group
-        from cccc.kernel.registry import load_registry
+        from no1.daemon.ops.template_ops import _apply_settings_replace
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
 
         old_home = os.environ.get("CCCC_HOME")
         try:

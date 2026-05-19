@@ -6,13 +6,13 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from cccc.contracts.v1 import DaemonRequest
-from cccc.daemon.messaging.delivery import PendingMessage, render_single_message
-from cccc.daemon.server import handle_request
-from cccc.kernel.actors import add_actor
-from cccc.kernel.group import Group, load_group
-from cccc.ports.im.adapters.base import IMAdapter
-from cccc.ports.im.bridge import IMBridge
+from no1.contracts.v1 import DaemonRequest
+from no1.daemon.messaging.delivery import PendingMessage, render_single_message
+from no1.daemon.server import handle_request
+from no1.kernel.actors import add_actor
+from no1.kernel.group import Group, load_group
+from no1.ports.im.adapters.base import IMAdapter
+from no1.ports.im.bridge import IMBridge
 
 
 class _FakeDingTalkAdapter(IMAdapter):
@@ -584,7 +584,7 @@ class TestImSenderIdentity(unittest.TestCase):
                 source_user_id="staff_001",
             )
         )
-        self.assertIn("[cccc] user[dingtalk / Alice / staff_001] → @foreman", rendered)
+        self.assertIn("[onecolleague] user[dingtalk / Alice / staff_001] → @foreman", rendered)
 
     def test_render_single_message_without_source_identity_keeps_legacy_header(self) -> None:
         rendered = render_single_message(
@@ -595,7 +595,7 @@ class TestImSenderIdentity(unittest.TestCase):
                 text="普通消息",
             )
         )
-        self.assertEqual(rendered, "[cccc] user → @foreman: 普通消息")
+        self.assertEqual(rendered, "[onecolleague] user → @foreman: 普通消息")
 
     def test_plain_send_without_im_source_keeps_legacy_event_shape(self) -> None:
         _, cleanup = self._with_home()
@@ -704,7 +704,7 @@ class TestImSenderIdentity(unittest.TestCase):
 
             from unittest.mock import patch
 
-            with patch("cccc.ports.im.bridge.resolve_blob_attachment_path", return_value=sample_file):
+            with patch("no1.ports.im.bridge.resolve_blob_attachment_path", return_value=sample_file):
                 bridge._forward_event(
                     {
                         "kind": "chat.message",

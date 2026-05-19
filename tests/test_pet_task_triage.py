@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from cccc.kernel.pet_task_triage import build_task_triage_payload, join_task_briefs
+from no1.kernel.pet_task_triage import build_task_triage_payload, join_task_briefs
 
 
 def _task(
