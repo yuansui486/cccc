@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ntpath
 import os
 import queue
 import shutil
@@ -79,10 +80,41 @@ def _is_websocket_idle_timeout(exc: BaseException) -> bool:
     return "timed out" in message and "websocket" in name
 
 
-def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str, thread_id: str = "") -> list[str]:
+def _env_path(env: Dict[str, str]) -> str:
+    return str((env or {}).get("PATH") or os.environ.get("PATH") or "")
+
+
+def _resolve_codex_cli(env: Dict[str, str]) -> str:
+    return str(shutil.which("codex", path=_env_path(env)) or "").strip()
+
+
+def _codex_command_stem(value: str) -> str:
+    try:
+        return os.path.splitext(ntpath.basename(str(value or "")))[0].lower()
+    except Exception:
+        return str(value or "").strip().lower()
+
+
+def _codex_remote_tui_command(
+    base_command: list[str] | None,
+    listen_url: str,
+    thread_id: str = "",
+    *,
+    env: Dict[str, str] | None = None,
+) -> list[str]:
     command = list(base_command or [])
-    if not command or Path(str(command[0] or "")).name != "codex":
-        command = ["codex"]
+    if not command or _codex_command_stem(str(command[0] or "")) != "codex":
+        if env is None:
+            command = ["codex"]
+        else:
+            executable = _resolve_codex_cli(dict(env or {}))
+            if not executable:
+                raise RuntimeError("codex CLI not found")
+            command = [executable]
+    elif env is not None and _codex_command_stem(str(command[0] or "")) == "codex":
+        executable = _resolve_codex_cli(dict(env or {}))
+        if executable:
+            command[0] = executable
     filtered: list[str] = [str(command[0])]
     takes_value = {
         "-a",
@@ -138,14 +170,14 @@ def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str, t
 def _is_missing_codex_cli_error(exc: BaseException) -> bool:
     if isinstance(exc, FileNotFoundError):
         filename = str(getattr(exc, "filename", "") or "").strip().lower()
-        if not filename or Path(filename).name == "codex":
+        if not filename or _codex_command_stem(filename) == "codex":
             return True
     message = str(exc or "").strip().lower()
     return "no such file or directory" in message and "codex" in message
 
 
 def _codex_cli_available(env: Dict[str, str]) -> bool:
-    return bool(shutil.which("codex", path=str((env or {}).get("PATH") or os.environ.get("PATH") or "")))
+    return bool(_resolve_codex_cli(env))
 
 
 def _is_closed_stream_logging_error(exc: BaseException) -> bool:
@@ -546,17 +578,26 @@ class CodexAppSession:
             env = with_node_deprecation_warnings_suppressed(env)
             if not ensure_mcp_installed("codex", self.cwd, auto_mcp_runtimes=("codex",), env=env):
                 raise RuntimeError("failed to install MCP for runtime: codex")
-            self._runtime_command = ["codex", "app-server", "--listen", self.listen_url]
-            self._proc = subprocess.Popen(
-                self._runtime_command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(self.cwd),
-                env=env,
-                text=True,
-                bufsize=1,
-            )
+            codex_executable = _resolve_codex_cli(env)
+            if not codex_executable:
+                raise RuntimeError("runtime unavailable: Codex CLI is not installed or not in PATH")
+            self._runtime_command = [codex_executable, "app-server", "--listen", self.listen_url]
+            logical_runtime_command = ["codex", "app-server", "--listen", self.listen_url]
+            try:
+                self._proc = subprocess.Popen(
+                    self._runtime_command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=str(self.cwd),
+                    env=env,
+                    text=True,
+                    bufsize=1,
+                )
+            except FileNotFoundError as exc:
+                if _is_missing_codex_cli_error(exc):
+                    raise RuntimeError("runtime unavailable: Codex CLI is not installed or not in PATH") from exc
+                raise
             self._running = True
 
         if self.transport == "websocket":
@@ -596,7 +637,7 @@ class CodexAppSession:
                 group_id=self.group_id,
                 actor_id=self.actor_id,
                 cwd=self.cwd,
-                command=self._runtime_command,
+                command=logical_runtime_command,
                 model=self.model,
             )
             with self._lock:
@@ -609,7 +650,7 @@ class CodexAppSession:
             if not self.start_remote_tui:
                 self._queue_bootstrap_control_turn()
             if self.start_remote_tui:
-                remote_command = _codex_remote_tui_command(self.remote_tui_base_command, self.listen_url, thread_id)
+                remote_command = _codex_remote_tui_command(self.remote_tui_base_command, self.listen_url, thread_id, env=env)
                 self._pty_session = pty_runner.SUPERVISOR.start_actor(
                     group_id=self.group_id,
                     actor_id=self.actor_id,

@@ -125,6 +125,7 @@ from ..schemas import (
     resolve_websocket_principal,
     websocket_tokens_active,
 )
+from ..middleware import get_access_token_cookie, has_access_token_cookie
 from .browser_surface_proxy import (
     open_daemon_stream,
     proxy_daemon_raw_stream_to_websocket,
@@ -1049,7 +1050,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         auth = str(request.headers.get("authorization") or "").strip()
         if auth.lower().startswith("bearer "):
             return str(auth[7:] or "").strip()
-        cookie_token = str(request.cookies.get("onecolleague_access_token") or "").strip()
+        cookie_token = get_access_token_cookie(request)
         if cookie_token:
             return cookie_token
         return str(request.query_params.get("token") or "").strip()
@@ -2383,7 +2384,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         has_cookie_token = False
         try:
             cookies = getattr(websocket, "cookies", None) or {}
-            has_cookie_token = bool(str(cookies.get("onecolleague_access_token") or "").strip())
+            has_cookie_token = has_access_token_cookie(cookies)
         except Exception:
             has_cookie_token = False
         has_query_token = bool(str(websocket.query_params.get("token") or "").strip())
@@ -3582,7 +3583,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         has_cookie_token = False
         try:
             cookies = getattr(websocket, "cookies", None) or {}
-            has_cookie_token = bool(str(cookies.get("onecolleague_access_token") or "").strip())
+            has_cookie_token = has_access_token_cookie(cookies)
         except Exception:
             has_cookie_token = False
         has_query_token = bool(str(websocket.query_params.get("token") or "").strip())

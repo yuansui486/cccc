@@ -57,6 +57,20 @@ class _FakeSelector:
         return None
 
 
+class TestProjectedBrowserRuntimeEnv(unittest.TestCase):
+    def test_onecolleague_projected_browser_vnc_alias_takes_precedence(self) -> None:
+        from no1.daemon.browser.projected_browser_runtime import _vnc_viewer_enabled
+
+        with patch.dict(
+            "os.environ",
+            {
+                "ONECOLLEAGUE_PROJECTED_BROWSER_VNC": "0",
+                "CCCC_PROJECTED_BROWSER_VNC": "1",
+            },
+        ):
+            self.assertFalse(_vnc_viewer_enabled())
+
+
 class _FakeCdpSession:
     def __init__(self) -> None:
         self.handlers = {}

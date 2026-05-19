@@ -1516,7 +1516,10 @@ def _health_next_action(recommended: str, label: str, reason: str) -> dict[str, 
 def _delivery_timeout_seconds(session: dict[str, Any]) -> float:
     raw = session.get("last_delivery_timeout_seconds")
     if raw in (None, ""):
-        raw = os.environ.get("CCCC_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS")
+        raw = (
+            os.environ.get("ONECOLLEAGUE_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS")
+            or os.environ.get("CCCC_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS")
+        )
     try:
         value = float(raw)
     except Exception:

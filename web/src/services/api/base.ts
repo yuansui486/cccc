@@ -41,7 +41,10 @@ type ApiErrorShape = {
 };
 
 let cachedToken: string | null = null;
-const FORCE_LOGIN_KEY = "cccc_force_token_login";
+const FORCE_LOGIN_KEY = "onecolleague_force_token_login";
+const LEGACY_FORCE_LOGIN_KEY = "cccc_force_token_login";
+const DEV_TOKEN_KEY = "onecolleague_dev_token";
+const LEGACY_DEV_TOKEN_KEY = "cccc_dev_token";
 
 let authRequiredHandler: (() => void) | null = null;
 
@@ -68,7 +71,7 @@ export function setAuthToken(token: string): void {
   clearAllReadRequestCaches();
   cachedToken = token;
   try {
-    sessionStorage.setItem("cccc_dev_token", token);
+    sessionStorage.setItem(DEV_TOKEN_KEY, token);
   } catch {
     void 0;
   }
@@ -78,7 +81,8 @@ export function clearAuthToken(): void {
   clearAllReadRequestCaches();
   cachedToken = "";
   try {
-    sessionStorage.removeItem("cccc_dev_token");
+    sessionStorage.removeItem(DEV_TOKEN_KEY);
+    sessionStorage.removeItem(LEGACY_DEV_TOKEN_KEY);
   } catch {
     void 0;
   }
@@ -95,6 +99,7 @@ export function setForceTokenLogin(): void {
 export function clearForceTokenLogin(): void {
   try {
     sessionStorage.removeItem(FORCE_LOGIN_KEY);
+    sessionStorage.removeItem(LEGACY_FORCE_LOGIN_KEY);
   } catch {
     void 0;
   }
@@ -102,7 +107,14 @@ export function clearForceTokenLogin(): void {
 
 export function shouldForceTokenLogin(): boolean {
   try {
-    return sessionStorage.getItem(FORCE_LOGIN_KEY) === "1";
+    const stored = sessionStorage.getItem(FORCE_LOGIN_KEY);
+    if (stored !== null) return stored === "1";
+    const legacyStored = sessionStorage.getItem(LEGACY_FORCE_LOGIN_KEY);
+    if (legacyStored !== null) {
+      sessionStorage.setItem(FORCE_LOGIN_KEY, legacyStored);
+      return legacyStored === "1";
+    }
+    return false;
   } catch {
     return false;
   }
@@ -116,7 +128,7 @@ function getAuthToken(): string | null {
   if (urlToken) {
     cachedToken = urlToken;
     try {
-      sessionStorage.setItem("cccc_dev_token", urlToken);
+      sessionStorage.setItem(DEV_TOKEN_KEY, urlToken);
     } catch {
       void 0;
     }
@@ -124,10 +136,16 @@ function getAuthToken(): string | null {
   }
 
   try {
-    const stored = sessionStorage.getItem("cccc_dev_token");
+    const stored = sessionStorage.getItem(DEV_TOKEN_KEY);
     if (stored) {
       cachedToken = stored;
       return stored;
+    }
+    const legacyStored = sessionStorage.getItem(LEGACY_DEV_TOKEN_KEY);
+    if (legacyStored) {
+      sessionStorage.setItem(DEV_TOKEN_KEY, legacyStored);
+      cachedToken = legacyStored;
+      return legacyStored;
     }
   } catch {
     void 0;

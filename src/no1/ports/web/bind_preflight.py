@@ -50,9 +50,9 @@ def _listener_detected(*, host: str, port: int) -> bool:
 def _switch_port_examples(port: int = 9000) -> str:
     cli_cmd = f"`onecolleague --port {int(port)}`"
     if sys.platform.startswith("win"):
-        env_cmd = f"`$env:CCCC_WEB_PORT={int(port)}; onecolleague`"
+        env_cmd = f"`$env:ONECOLLEAGUE_WEB_PORT={int(port)}; onecolleague`"
     else:
-        env_cmd = f"`CCCC_WEB_PORT={int(port)} onecolleague`"
+        env_cmd = f"`ONECOLLEAGUE_WEB_PORT={int(port)} onecolleague`"
     return f"Example: {cli_cmd} or {env_cmd}."
 
 

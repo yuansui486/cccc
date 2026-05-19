@@ -60,6 +60,21 @@ const resources = {
   },
 };
 
+const LANGUAGE_STORAGE_KEY = "onecolleague-language";
+const LEGACY_LANGUAGE_STORAGE_KEY = "cccc-language";
+
+if (typeof window !== "undefined") {
+  try {
+    const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    const legacyStored = window.localStorage.getItem(LEGACY_LANGUAGE_STORAGE_KEY);
+    if (!stored && legacyStored) {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, legacyStored);
+    }
+  } catch {
+    void 0;
+  }
+}
+
 void i18n
   .use(LanguageDetector)
   .use(initReactI18next)
@@ -74,7 +89,7 @@ void i18n
     },
     detection: {
       order: [],
-      lookupLocalStorage: "cccc-language",
+      lookupLocalStorage: LANGUAGE_STORAGE_KEY,
       caches: [],
     },
     supportedLngs: SUPPORTED_LANGUAGES,
@@ -86,6 +101,14 @@ i18n.on("languageChanged", (lng) => {
   const normalized = normalizeLanguageCode(lng);
   if (lng !== normalized) {
     void i18n.changeLanguage(normalized);
+    return;
+  }
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, normalized);
+    } catch {
+      void 0;
+    }
   }
 });
 

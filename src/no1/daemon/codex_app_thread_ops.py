@@ -43,6 +43,13 @@ def _thread_id_from_response(response: Dict[str, Any]) -> str:
     return str((thread or {}).get("id") or "").strip()
 
 
+def _mark_resume_failed(*, group_id: str, actor_id: str, error: str) -> None:
+    try:
+        mark_runtime_session_resume_failed(group_id=group_id, actor_id=actor_id, error=error)
+    except Exception:
+        pass
+
+
 def start_codex_app_thread(
     *,
     request: CodexThreadRequest,
@@ -55,23 +62,30 @@ def start_codex_app_thread(
     model = str(model or "").strip()
     command_list = [str(item) for item in list(command or []) if str(item).strip()]
     thread_params = _thread_start_params(cwd=cwd, model=model)
-    resume_doc = prepare_headless_runtime_resume(
-        group_id=group_id,
-        actor_id=actor_id,
-        runtime="codex",
-        cwd=cwd,
-        command=command_list,
-        model=model,
-    )
+    try:
+        resume_doc = prepare_headless_runtime_resume(
+            group_id=group_id,
+            actor_id=actor_id,
+            runtime="codex",
+            cwd=cwd,
+            command=command_list,
+            model=model,
+        )
+    except Exception as exc:
+        _mark_resume_failed(group_id=group_id, actor_id=actor_id, error=str(exc))
+        resume_doc = {}
 
     resumed = False
     if resume_doc:
         resume_params = _thread_resume_params(thread_id=str(resume_doc.get("provider_thread_id") or ""), model=model)
         try:
             thread_resp = request("thread/resume", resume_params, timeout=20.0)
+            resumed_thread_id = _thread_id_from_response(thread_resp)
+            if not resumed_thread_id:
+                raise RuntimeError("codex app-server resume returned empty thread id")
             resumed = True
         except Exception as exc:
-            mark_runtime_session_resume_failed(group_id=group_id, actor_id=actor_id, error=str(exc))
+            _mark_resume_failed(group_id=group_id, actor_id=actor_id, error=str(exc))
             thread_resp = request("thread/start", thread_params, timeout=20.0)
     else:
         thread_resp = request("thread/start", thread_params, timeout=20.0)

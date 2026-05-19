@@ -22,6 +22,7 @@ const GuidanceTab = lazy(() => import("./modals/settings/GuidanceTab").then((mod
 const BlueprintTab = lazy(() => import("./modals/settings/BlueprintTab").then((module) => ({ default: module.BlueprintTab })));
 const CapabilitiesTab = lazy(() => import("./modals/settings/CapabilitiesTab").then((module) => ({ default: module.CapabilitiesTab })));
 const ActorProfilesTab = lazy(() => import("./modals/settings/ActorProfilesTab").then((module) => ({ default: module.ActorProfilesTab })));
+const DeveloperTab = lazy(() => import("./modals/settings/DeveloperTab").then((module) => ({ default: module.DeveloperTab })));
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -360,6 +361,13 @@ export function SettingsModal({
   useEffect(() => {
     if (isOpen && canAccessGlobalSettings === true) loadObservability();
   }, [isOpen, canAccessGlobalSettings]);
+
+  useEffect(() => {
+    if (isOpen && canAccessGlobalSettings === true && scope === "global" && globalTab === "developer") {
+      void loadRuntimeInfo();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Runtime info only needs refresh when the Developer tab is opened.
+  }, [isOpen, canAccessGlobalSettings, scope, globalTab]);
 
   useEffect(() => {
     if (isOpen && groupId) loadDevActors();
@@ -900,6 +908,7 @@ export function SettingsModal({
       { id: "capabilities" as const, label: t("tabs.capabilities") },
       { id: "selfEvolvingSkills" as const, label: t("tabs.selfEvolvingSkills") },
       { id: "actorProfiles" as const, label: t("tabs.actorProfiles") },
+      { id: "developer" as const, label: t("tabs.developer") },
     ] : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
     ...(currentBrowserSignedIn && !globalSettingsEnabled ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }] : []),
@@ -1134,6 +1143,49 @@ export function SettingsModal({
                   isDark={isDark}
                   isActive={scope === "global" && activeTab === "myProfiles"}
                   scope="my"
+                />
+              )}
+
+              {activeTab === "developer" && (
+                <DeveloperTab
+                  isDark={isDark}
+                  groupId={groupId}
+                  runtimeVersion={runtimeVersion}
+                  daemonVersion={daemonVersion}
+                  runtimeInfoErr={runtimeInfoErr}
+                  developerMode={developerMode}
+                  setDeveloperMode={setDeveloperMode}
+                  logLevel={logLevel}
+                  setLogLevel={setLogLevel}
+                  terminalBacklogMiB={terminalBacklogMiB}
+                  setTerminalBacklogMiB={setTerminalBacklogMiB}
+                  terminalScrollbackLines={terminalScrollbackLines}
+                  setTerminalScrollbackLines={setTerminalScrollbackLines}
+                  peerRuntimeVisibility={peerRuntimeVisibility}
+                  setPeerRuntimeVisibility={setPeerRuntimeVisibility}
+                  petRuntimeVisibility={petRuntimeVisibility}
+                  setPetRuntimeVisibility={setPetRuntimeVisibility}
+                  obsBusy={obsBusy}
+                  onSaveObservability={() => void handleSaveObservability()}
+                  debugSnapshot={debugSnapshot}
+                  debugSnapshotErr={debugSnapshotErr}
+                  debugSnapshotBusy={debugSnapshotBusy}
+                  onLoadDebugSnapshot={() => void loadDebugSnapshot()}
+                  onClearDebugSnapshot={() => setDebugSnapshot("")}
+                  logComponent={logComponent}
+                  setLogComponent={setLogComponent}
+                  logLines={logLines}
+                  setLogLines={setLogLines}
+                  logText={logText}
+                  logErr={logErr}
+                  logBusy={logBusy}
+                  onLoadLogTail={() => void loadLogTail()}
+                  onClearLogs={() => void handleClearLogs()}
+                  registryBusy={registryBusy}
+                  registryErr={registryErr}
+                  registryResult={registryResult}
+                  onPreviewRegistry={() => void loadRegistryPreview()}
+                  onReconcileRegistry={() => void handleReconcileRegistry()}
                 />
               )}
 

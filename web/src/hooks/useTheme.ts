@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 
 import { Theme } from "../types";
 import { syncDocumentBrandingTheme } from "../utils/branding";
 
-const THEME_STORAGE_KEY = "cccc-theme";
+const THEME_STORAGE_KEY = "onecolleague-theme";
+const LEGACY_THEME_STORAGE_KEY = "cccc-theme";
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "dark";
@@ -11,8 +12,11 @@ function getSystemTheme(): "light" | "dark" {
 
 function getStoredTheme(): Theme {
   if (typeof window === "undefined") return "system";
-  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  const stored = localStorage.getItem(THEME_STORAGE_KEY) || localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
   if (stored === "light" || stored === "dark" || stored === "system") {
+    if (stored && localStorage.getItem(THEME_STORAGE_KEY) !== stored) {
+      localStorage.setItem(THEME_STORAGE_KEY, stored);
+    }
     return stored;
   }
   return "system";

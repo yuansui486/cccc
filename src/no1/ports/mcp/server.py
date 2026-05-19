@@ -285,7 +285,7 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
     if tool_name in CODE_MODE_TOOL_ALIAS_NAMES and not code_mode_enabled():
         raise MCPError(
             code="code_mode_disabled",
-            message=f"{tool_name} is disabled by CCCC_WEB_MODEL_CODE_MODE=0",
+            message=f"{tool_name} is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
         )
     if tool_name not in _BUILTIN_MCP_TOOL_NAMES:
         return

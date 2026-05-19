@@ -391,7 +391,7 @@ def _heartbeat(ctx: VoiceSecretaryServiceContext, stop_event: threading.Event) -
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the CCCC Voice Secretary local ASR service.")
+    parser = argparse.ArgumentParser(description="Run the OneColleague Voice Secretary local ASR service.")
     parser.add_argument("--group-id", required=True)
     parser.add_argument("--state-path", required=True)
     parser.add_argument("--host", default=DEFAULT_HOST)

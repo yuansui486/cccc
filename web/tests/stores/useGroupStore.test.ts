@@ -38,8 +38,8 @@ let useGroupStore: typeof import("../../src/stores/useGroupStore").useGroupStore
 let useComposerStore: typeof import("../../src/stores/useComposerStore").useComposerStore;
 let api: typeof import("../../src/services/api");
 let groupStoreCore: typeof import("../../src/stores/groupStoreCore");
-const SELECTED_GROUP_ID_KEY = "cccc-selected-group-id";
-const ARCHIVED_GROUP_IDS_KEY = "cccc-archived-group-ids";
+const SELECTED_GROUP_ID_KEY = "onecolleague-selected-group-id";
+const ARCHIVED_GROUP_IDS_KEY = "onecolleague-archived-group-ids";
 
 async function flushDeferredUnreadRefresh() {
   await Promise.resolve();

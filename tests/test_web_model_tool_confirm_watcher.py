@@ -51,6 +51,18 @@ class TestWebModelToolConfirmWatcher(unittest.TestCase):
             else:
                 os.environ["CCCC_WEB_MODEL_AUTO_CONFIRM_TOOLS"] = old
 
+    def test_onecolleague_auto_confirm_env_alias_takes_precedence(self) -> None:
+        from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
+
+        with patch.dict(
+            os.environ,
+            {
+                "ONECOLLEAGUE_WEB_MODEL_AUTO_CONFIRM_TOOLS": "0",
+                "CCCC_WEB_MODEL_AUTO_CONFIRM_TOOLS": "1",
+            },
+        ):
+            self.assertFalse(watcher.web_model_tool_auto_confirm_enabled())
+
     def test_ensure_watcher_starts_only_when_cdp_is_active(self) -> None:
         from no1.daemon.actors import web_model_tool_confirm_watcher as watcher
 

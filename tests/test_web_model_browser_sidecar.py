@@ -46,6 +46,38 @@ class TestWebModelBrowserSidecar(unittest.TestCase):
 
         self.assertFalse(web_model_browser_delivery_enabled("g-test", actor))
 
+    def test_onecolleague_web_model_env_alias_takes_precedence(self) -> None:
+        from no1.daemon.actors.web_model_browser_delivery import web_model_browser_delivery_enabled
+
+        actor = {
+            "id": "peer1",
+            "runtime": "web_model",
+            "runner": "headless",
+            "web_model_provider": "",
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "ONECOLLEAGUE_WEB_MODEL_DELIVERY_MODE": "browser",
+                "ONECOLLEAGUE_WEB_MODEL_PROVIDER": "chatgpt_web",
+                "CCCC_WEB_MODEL_DELIVERY_MODE": "remote_mcp",
+                "CCCC_WEB_MODEL_PROVIDER": "",
+            },
+        ):
+            self.assertTrue(web_model_browser_delivery_enabled("g-test", actor))
+
+    def test_onecolleague_browser_delivery_timeout_alias_takes_precedence(self) -> None:
+        from no1.ports.web_model_browser_sidecar import _delivery_timeout_seconds
+
+        with patch.dict(
+            os.environ,
+            {
+                "ONECOLLEAGUE_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS": "17",
+                "CCCC_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS": "99",
+            },
+        ):
+            self.assertEqual(_delivery_timeout_seconds({}), 17.0)
+
     def test_chatgpt_conversation_url_normalization_strips_query(self) -> None:
         from no1.ports.web_model_browser_sidecar import _conversation_url_from_tab
 

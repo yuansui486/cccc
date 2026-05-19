@@ -24,13 +24,23 @@ _DEFAULT_RELOAD_WINDOW_SECONDS = 30.0 * 60.0
 _DELIVERY_SUBMITTING_RELOAD_GRACE_SECONDS = 180.0
 
 
+def _env_value(name: str, default: str = "") -> str:
+    key = str(name or "").strip()
+    if key.startswith("CCCC_"):
+        alias = f"ONECOLLEAGUE_{key[len('CCCC_'):]}"
+        value = str(os.environ.get(alias) or "").strip()
+        if value:
+            return value
+    return str(os.environ.get(key, default) or "").strip()
+
+
 def web_model_tool_auto_confirm_enabled() -> bool:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_AUTO_CONFIRM_TOOLS") or "").strip().lower()
+    raw = _env_value("CCCC_WEB_MODEL_AUTO_CONFIRM_TOOLS").lower()
     return raw not in {"0", "false", "no", "off", "disabled"}
 
 
 def web_model_tool_auto_confirm_interval_seconds() -> float:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_AUTO_CONFIRM_INTERVAL_SECONDS") or "").strip()
+    raw = _env_value("CCCC_WEB_MODEL_AUTO_CONFIRM_INTERVAL_SECONDS")
     try:
         value = float(raw) if raw else _DEFAULT_INTERVAL_SECONDS
     except Exception:
@@ -39,12 +49,12 @@ def web_model_tool_auto_confirm_interval_seconds() -> float:
 
 
 def web_model_browser_auto_reload_enabled() -> bool:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD") or "").strip().lower()
+    raw = _env_value("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD").lower()
     return raw not in {"0", "false", "no", "off", "disabled"}
 
 
 def web_model_browser_auto_reload_inactivity_seconds() -> float:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD_INACTIVITY_SECONDS") or "").strip()
+    raw = _env_value("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD_INACTIVITY_SECONDS")
     try:
         value = float(raw) if raw else _DEFAULT_INACTIVITY_RELOAD_SECONDS
     except Exception:
@@ -53,7 +63,7 @@ def web_model_browser_auto_reload_inactivity_seconds() -> float:
 
 
 def web_model_browser_auto_reload_cooldown_seconds() -> float:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD_COOLDOWN_SECONDS") or "").strip()
+    raw = _env_value("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD_COOLDOWN_SECONDS")
     try:
         value = float(raw) if raw else _DEFAULT_RELOAD_COOLDOWN_SECONDS
     except Exception:
@@ -62,7 +72,7 @@ def web_model_browser_auto_reload_cooldown_seconds() -> float:
 
 
 def web_model_browser_auto_reload_window_seconds() -> float:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD_WINDOW_SECONDS") or "").strip()
+    raw = _env_value("CCCC_WEB_MODEL_BROWSER_AUTO_RELOAD_WINDOW_SECONDS")
     try:
         value = float(raw) if raw else _DEFAULT_RELOAD_WINDOW_SECONDS
     except Exception:

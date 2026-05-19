@@ -756,7 +756,7 @@ def _connect_worker(
                         f"Interactive sign-in ready ({str(browser_surface.get('strategy') or 'chromium')}). "
                         f"{'Restored previous session cookies. ' if restored_count > 0 else ''}"
                         f"{'Previous browser sign-in was cleared. ' if force_reauth else ''}"
-                        "Continue sign-in in CCCC Web."
+                        "Continue sign-in in OneColleague Web."
                     ),
                     error={},
                     delivery="projected_browser",

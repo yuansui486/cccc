@@ -1,6 +1,7 @@
 import type { TextScale } from "../types";
 
-export const TEXT_SCALE_STORAGE_KEY = "cccc-ui-text-scale";
+export const TEXT_SCALE_STORAGE_KEY = "onecolleague-ui-text-scale";
+const LEGACY_TEXT_SCALE_STORAGE_KEY = "cccc-ui-text-scale";
 export const TEXT_SCALE_OPTIONS: TextScale[] = [90, 100, 125];
 export const DEFAULT_TEXT_SCALE: TextScale = 100;
 
@@ -14,7 +15,12 @@ export function normalizeTextScale(value: unknown): TextScale {
 
 export function getStoredTextScale(): TextScale {
   if (typeof window === "undefined") return DEFAULT_TEXT_SCALE;
-  return normalizeTextScale(window.localStorage.getItem(TEXT_SCALE_STORAGE_KEY));
+  const stored = window.localStorage.getItem(TEXT_SCALE_STORAGE_KEY);
+  const legacyStored = window.localStorage.getItem(LEGACY_TEXT_SCALE_STORAGE_KEY);
+  if (!stored && legacyStored) {
+    window.localStorage.setItem(TEXT_SCALE_STORAGE_KEY, legacyStored);
+  }
+  return normalizeTextScale(stored || legacyStored);
 }
 
 export function getTextScaleLabel(scale: TextScale): string {

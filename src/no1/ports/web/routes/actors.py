@@ -54,6 +54,7 @@ from ..schemas import (
     resolve_websocket_principal,
     websocket_tokens_active,
 )
+from ..middleware import has_access_token_cookie
 
 _READONLY_ACTOR_CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
 _READONLY_ACTOR_INFLIGHT: Dict[str, Dict[str, Any]] = {}
@@ -1254,7 +1255,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         has_cookie_token = False
         try:
             cookies = getattr(websocket, "cookies", None) or {}
-            has_cookie_token = bool(str(cookies.get("cccc_access_token") or "").strip())
+            has_cookie_token = has_access_token_cookie(cookies)
         except Exception:
             has_cookie_token = False
         has_query_token = bool(str(websocket.query_params.get("token") or "").strip())

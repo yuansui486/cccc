@@ -270,7 +270,7 @@ await new Promise(() => {});
 
         home, _workspace, group, cleanup = self._with_home_and_group()
         try:
-            with patch.dict(os.environ, {"CCCC_WEB_MODEL_CODE_MODE": "0"}), runtime_context_override(
+            with patch.dict(os.environ, {"ONECOLLEAGUE_WEB_MODEL_CODE_MODE": "0"}), runtime_context_override(
                 home=str(home), group_id=group.group_id, actor_id="peer1"
             ):
                 names = {str(spec.get("name") or "") for spec in mcp_server.list_tools_for_caller()}

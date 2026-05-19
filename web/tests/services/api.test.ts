@@ -246,7 +246,7 @@ describe("api.fetchPresentation", () => {
   });
 
   it("builds token-aware asset urls for presentation slots", async () => {
-    sessionStorageMock.setItem("cccc_dev_token", "dev-token");
+    sessionStorageMock.setItem("onecolleague_dev_token", "dev-token");
     const api = await import("../../src/services/api");
     expect(api.getPresentationAssetUrl("g-demo", "slot-4")).toBe(
       "/api/v1/groups/g-demo/presentation/slots/slot-4/asset?token=dev-token"
@@ -257,7 +257,7 @@ describe("api.fetchPresentation", () => {
   });
 
   it("builds token-aware blob urls only for group-scoped blob paths", async () => {
-    sessionStorageMock.setItem("cccc_dev_token", "dev-token");
+    sessionStorageMock.setItem("onecolleague_dev_token", "dev-token");
     const api = await import("../../src/services/api");
     expect(api.getGroupBlobUrl("g-demo", "state/blobs/sha256_demo.jpg")).toBe(
       "/api/v1/groups/g-demo/blobs/sha256_demo.jpg?token=dev-token"
@@ -318,7 +318,7 @@ describe("api.fetchPresentation", () => {
   });
 
   it("builds a token-aware websocket url for browser-surface streaming", async () => {
-    sessionStorageMock.setItem("cccc_dev_token", "dev-token");
+    sessionStorageMock.setItem("onecolleague_dev_token", "dev-token");
     vi.stubGlobal("window", {
       location: { search: "", protocol: "https:", host: "onecolleague.test" },
     });

@@ -260,7 +260,11 @@ _STORED_VALUES: Dict[str, Dict[str, Any]] = {}
 
 
 def code_mode_enabled() -> bool:
-    raw = str(os.environ.get("CCCC_WEB_MODEL_CODE_MODE") or "1").strip().lower()
+    raw = str(
+        os.environ.get("ONECOLLEAGUE_WEB_MODEL_CODE_MODE")
+        or os.environ.get("CCCC_WEB_MODEL_CODE_MODE")
+        or "1"
+    ).strip().lower()
     return raw not in {"0", "false", "no", "off", "disabled"}
 
 
@@ -753,8 +757,8 @@ def code_exec_tool(
     if not code_mode_enabled():
         raise MCPError(
             code="code_mode_disabled",
-            message="onecolleague_code_exec is disabled by CCCC_WEB_MODEL_CODE_MODE=0",
-            details={"recommended_action": "Use direct onecolleague_repo/onecolleague_shell/onecolleague_git tools, or enable CCCC_WEB_MODEL_CODE_MODE on the OneColleague server."},
+            message="onecolleague_code_exec is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
+            details={"recommended_action": "Use direct onecolleague_repo/onecolleague_shell/onecolleague_git tools, or enable ONECOLLEAGUE_WEB_MODEL_CODE_MODE on the OneColleague server."},
         )
     if code_mode_nested_call_active():
         raise MCPError(
@@ -801,8 +805,8 @@ def code_wait_tool(
     if not code_mode_enabled():
         raise MCPError(
             code="code_mode_disabled",
-            message="onecolleague_code_wait is disabled by CCCC_WEB_MODEL_CODE_MODE=0",
-            details={"recommended_action": "Use direct tools or re-enable CCCC_WEB_MODEL_CODE_MODE before waiting on code cells."},
+            message="onecolleague_code_wait is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
+            details={"recommended_action": "Use direct tools or re-enable ONECOLLEAGUE_WEB_MODEL_CODE_MODE before waiting on code cells."},
         )
     if code_mode_nested_call_active():
         raise MCPError(

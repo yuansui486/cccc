@@ -9,8 +9,10 @@ import {
   sanitizeDoneHubErrorMessage,
 } from "../services/doneHub";
 
-const DONE_HUB_STORAGE_KEY = "cccc_done_hub_session";
-const DONE_HUB_LOGIN_KEY = "cccc_done_hub_login";
+const DONE_HUB_STORAGE_KEY = "onecolleague_done_hub_session";
+const DONE_HUB_LOGIN_KEY = "onecolleague_done_hub_login";
+const LEGACY_DONE_HUB_STORAGE_KEY = "cccc_done_hub_session";
+const LEGACY_DONE_HUB_LOGIN_KEY = "cccc_done_hub_login";
 
 const EMPTY_SAVED_LOGIN: DoneHubSavedLogin = {
   base_url: DONE_HUB_BASE_URL,
@@ -62,7 +64,10 @@ export function getCurrentDoneHubCodexApiKey(): string {
 function loadStoredSession(): DoneHubSession | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(DONE_HUB_STORAGE_KEY);
+    const raw = sessionStorage.getItem(DONE_HUB_STORAGE_KEY) || sessionStorage.getItem(LEGACY_DONE_HUB_STORAGE_KEY);
+    if (raw && !sessionStorage.getItem(DONE_HUB_STORAGE_KEY)) {
+      sessionStorage.setItem(DONE_HUB_STORAGE_KEY, raw);
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
@@ -91,7 +96,10 @@ function loadStoredSession(): DoneHubSession | null {
 function loadSavedLogin(): DoneHubSavedLogin {
   if (typeof window === "undefined") return EMPTY_SAVED_LOGIN;
   try {
-    const raw = localStorage.getItem(DONE_HUB_LOGIN_KEY);
+    const raw = localStorage.getItem(DONE_HUB_LOGIN_KEY) || localStorage.getItem(LEGACY_DONE_HUB_LOGIN_KEY);
+    if (raw && !localStorage.getItem(DONE_HUB_LOGIN_KEY)) {
+      localStorage.setItem(DONE_HUB_LOGIN_KEY, raw);
+    }
     if (!raw) return EMPTY_SAVED_LOGIN;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return EMPTY_SAVED_LOGIN;
@@ -116,6 +124,7 @@ function persistSession(session: DoneHubSession | null): void {
   try {
     if (!session) {
       sessionStorage.removeItem(DONE_HUB_STORAGE_KEY);
+      sessionStorage.removeItem(LEGACY_DONE_HUB_STORAGE_KEY);
       return;
     }
     sessionStorage.setItem(DONE_HUB_STORAGE_KEY, JSON.stringify(session));
@@ -139,6 +148,7 @@ function persistSavedLogin(savedLogin: DoneHubSavedLogin): void {
   try {
     if (!nextValue.username && !nextValue.password && !nextValue.remember_password) {
       localStorage.removeItem(DONE_HUB_LOGIN_KEY);
+      localStorage.removeItem(LEGACY_DONE_HUB_LOGIN_KEY);
       return;
     }
     localStorage.setItem(DONE_HUB_LOGIN_KEY, JSON.stringify(nextValue));

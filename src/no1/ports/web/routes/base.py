@@ -53,6 +53,7 @@ from ..schemas import (
     resolve_websocket_principal,
     websocket_tokens_active,
 )
+from ..middleware import delete_access_token_cookies, delete_signed_out_cookies, has_access_token_cookie
 from .browser_surface_proxy import (
     open_daemon_stream,
     proxy_daemon_raw_stream_to_websocket,
@@ -755,7 +756,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         has_cookie_token = False
         try:
             cookies = getattr(websocket, "cookies", None) or {}
-            has_cookie_token = bool(str(cookies.get("onecolleague_access_token") or "").strip())
+            has_cookie_token = has_access_token_cookie(cookies)
         except Exception:
             has_cookie_token = False
         has_query_token = bool(str(websocket.query_params.get("token") or "").strip())
@@ -1031,10 +1032,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def web_access_logout(request: Request) -> JSONResponse:
         request.state.skip_token_cookie_refresh = True
         resp = JSONResponse({"ok": True, "result": {"signed_out": True}})
-        resp.delete_cookie(key="onecolleague_access_token", path="/")
+        delete_access_token_cookies(resp, path="/")
+        delete_signed_out_cookies(resp, path="/")
         host = str(getattr(getattr(request, "url", None), "hostname", "") or "").strip().lower()
         if host:
-            resp.delete_cookie(key="onecolleague_access_token", path="/", domain=host)
+            delete_access_token_cookies(resp, path="/", domain=host)
+            delete_signed_out_cookies(resp, path="/", domain=host)
         resp.set_cookie(key="onecolleague_signed_out", value="1", httponly=True, samesite="lax", path="/", max_age=300)
         return resp
 

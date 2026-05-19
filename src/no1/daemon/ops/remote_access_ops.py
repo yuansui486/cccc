@@ -251,14 +251,14 @@ def _remote_next_steps(*, provider: str, status: str, diagnostics: Dict[str, Any
         if not bool(diagnostics.get("web_bind_reachable")):
             out.append("Use a non-loopback Web host (for example 0.0.0.0) or set a Public URL, then click Save.")
         if exposure_class == "private" and bool(diagnostics.get("running_in_wsl")):
-            out.append("If CCCC is running inside WSL2, 0.0.0.0 only exposes Web inside WSL by default. For LAN access, enable WSL mirrored networking or add a Windows portproxy/firewall rule.")
+            out.append("If OneColleague is running inside WSL2, 0.0.0.0 only exposes Web inside WSL by default. For LAN access, enable WSL mirrored networking or add a Windows portproxy/firewall rule.")
         if exposure_class in ("private", "public") and bool(diagnostics.get("effective_require_access_token")) and not bool(diagnostics.get("access_token_present")):
             out.append("If this is only a trusted LAN, you can also turn off the token requirement and save again.")
         if restart_required:
             if apply_supported:
                 out.append("Click Apply in Settings > Web Access to switch the running Web binding.")
             else:
-                out.append("Restart the running CCCC Web service to switch it to the saved Web binding.")
+                out.append("Restart the running OneColleague Web service to switch it to the saved Web binding.")
         elif live_runtime_present:
             out.append("The running Web binding already matches the saved configuration.")
         else:

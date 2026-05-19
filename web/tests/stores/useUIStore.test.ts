@@ -72,7 +72,7 @@ describe("useUIStore sidebar width", () => {
   });
 
   it("normalizes follow snapshots to an empty anchor on reload", async () => {
-    localStorageMock.setItem("cccc-chat-sessions", JSON.stringify({
+    localStorageMock.setItem("onecolleague-chat-sessions", JSON.stringify({
       "g-demo": {
         chatFilter: "all",
         scrollSnapshot: {
@@ -94,7 +94,7 @@ describe("useUIStore sidebar width", () => {
   });
 
   it("ignores obsolete runtime dock payloads on reload", async () => {
-    localStorageMock.setItem("cccc-chat-sessions", JSON.stringify({
+    localStorageMock.setItem("onecolleague-chat-sessions", JSON.stringify({
       "g-demo": {
         runtimeDockExpanded: 1,
         runtimeDockFocusedActorId: { actor: "coder" },

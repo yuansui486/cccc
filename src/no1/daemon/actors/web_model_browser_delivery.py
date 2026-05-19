@@ -38,10 +38,14 @@ _IN_FLIGHT_LOCK = threading.Lock()
 _IN_FLIGHT: set[tuple[str, str]] = set()
 
 _MODE_ENV_KEYS = (
+    "ONECOLLEAGUE_WEB_MODEL_DELIVERY_MODE",
+    "ONECOLLEAGUE_WEB_MODEL_DELIVERY",
     "CCCC_WEB_MODEL_DELIVERY_MODE",
     "CCCC_WEB_MODEL_DELIVERY",
 )
 _PROVIDER_ENV_KEYS = (
+    "ONECOLLEAGUE_WEB_MODEL_PROVIDER",
+    "ONECOLLEAGUE_WEB_MODEL_BROWSER_PROVIDER",
     "CCCC_WEB_MODEL_PROVIDER",
     "CCCC_WEB_MODEL_BROWSER_PROVIDER",
 )
@@ -80,8 +84,20 @@ def _setting(actor: Dict[str, Any], keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _onecolleague_env_keys(*legacy_keys: str) -> tuple[str, ...]:
+    keys: list[str] = []
+    for key in legacy_keys:
+        raw = str(key or "").strip()
+        if not raw:
+            continue
+        if raw.startswith("CCCC_"):
+            keys.append(f"ONECOLLEAGUE_{raw[len('CCCC_'):]}")
+        keys.append(raw)
+    return tuple(keys)
+
+
 def _timeout_seconds(actor: Dict[str, Any]) -> float:
-    raw = _setting(actor, ("CCCC_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS",))
+    raw = _setting(actor, _onecolleague_env_keys("CCCC_WEB_MODEL_BROWSER_DELIVERY_TIMEOUT_SECONDS"))
     if not raw:
         return _DEFAULT_TIMEOUT_SECONDS
     try:
@@ -343,7 +359,14 @@ def _has_unread_work(group: Any, actor_id: str) -> bool:
 
 
 def _target_chat_url(group_id: str, actor_id: str, actor: Dict[str, Any]) -> str:
-    explicit = _setting(actor, ("CCCC_WEB_MODEL_CHAT_URL", "CCCC_WEB_MODEL_CONVERSATION_URL", "CCCC_WEB_MODEL_TARGET_URL"))
+    explicit = _setting(
+        actor,
+        _onecolleague_env_keys(
+            "CCCC_WEB_MODEL_CHAT_URL",
+            "CCCC_WEB_MODEL_CONVERSATION_URL",
+            "CCCC_WEB_MODEL_TARGET_URL",
+        ),
+    )
     if explicit:
         return explicit
     try:
@@ -536,14 +559,14 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
             "timeout_seconds": delivery_timeout_seconds,
             "input_timeout_seconds": _float_setting(
                 actor,
-                ("CCCC_WEB_MODEL_BROWSER_INPUT_TIMEOUT_SECONDS",),
+                _onecolleague_env_keys("CCCC_WEB_MODEL_BROWSER_INPUT_TIMEOUT_SECONDS"),
                 default=30.0,
                 minimum=5.0,
                 maximum=300.0,
             ),
             "new_chat_bind_timeout_seconds": _float_setting(
                 actor,
-                ("CCCC_WEB_MODEL_NEW_CHAT_BIND_TIMEOUT_SECONDS",),
+                _onecolleague_env_keys("CCCC_WEB_MODEL_NEW_CHAT_BIND_TIMEOUT_SECONDS"),
                 default=20.0,
                 minimum=1.0,
                 maximum=120.0,
