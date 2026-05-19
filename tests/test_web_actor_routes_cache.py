@@ -14,6 +14,7 @@ class TestWebActorRoutesCache(unittest.TestCase):
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
         old_mode = os.environ.get("CCCC_WEB_MODE")
+        old_new_mode = os.environ.get("ONECOLLEAGUE_WEB_MODE")
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
         os.environ["CCCC_HOME"] = td
@@ -28,6 +29,10 @@ class TestWebActorRoutesCache(unittest.TestCase):
                 os.environ.pop("CCCC_WEB_MODE", None)
             else:
                 os.environ["CCCC_WEB_MODE"] = old_mode
+            if old_new_mode is None:
+                os.environ.pop("ONECOLLEAGUE_WEB_MODE", None)
+            else:
+                os.environ["ONECOLLEAGUE_WEB_MODE"] = old_new_mode
 
         return td, cleanup
 
@@ -35,6 +40,33 @@ class TestWebActorRoutesCache(unittest.TestCase):
         from no1.ports.web.app import create_app
 
         return TestClient(create_app())
+
+    def test_onecolleague_web_mode_enables_exhibit_cache(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            os.environ["ONECOLLEAGUE_WEB_MODE"] = "exhibit"
+            group_id = self._create_group()
+            actor_list_reads = 0
+
+            def fake_call_daemon(req: dict):
+                nonlocal actor_list_reads
+                self.assertEqual(str(req.get("op") or ""), "actor_list")
+                actor_list_reads += 1
+                return {"ok": True, "result": {"actors": [{"id": "peer-1", "title": "Peer 1"}]}}
+
+            with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon), patch(
+                "no1.ports.web.routes.actors._read_actor_list_local",
+                side_effect=AssertionError("actor list should use daemon before local fallback"),
+            ):
+                with self._client() as client:
+                    path = f"/api/v1/groups/{group_id}/actors"
+                    first = client.get(path)
+                    second = client.get(path)
+                    self.assertEqual(first.status_code, 200)
+                    self.assertEqual(second.status_code, 200)
+                    self.assertEqual(actor_list_reads, 1)
+        finally:
+            cleanup()
 
     def _local_call_daemon(self, req: dict):
         from no1.contracts.v1 import DaemonRequest

@@ -67,6 +67,7 @@ def _print_web_banner(host: str, port: int) -> None:
 
 
 def _run_web_child(*, host: str, port: int, mode: str, reload: bool, log_level: str) -> int:
+    os.environ["ONECOLLEAGUE_WEB_MODE"] = str(mode or "normal")
     os.environ["CCCC_WEB_MODE"] = str(mode or "normal")
     config = uvicorn.Config(
         "no1.ports.web.app:create_app",
@@ -147,7 +148,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--port", type=int, default=default_port, help=f"Bind port (default: {default_port})")
     parser.add_argument(
         "--mode",
-        default=str(os.environ.get("CCCC_WEB_MODE") or "normal"),
+        default=str(os.environ.get("ONECOLLEAGUE_WEB_MODE") or os.environ.get("CCCC_WEB_MODE") or "normal"),
         choices=["normal", "exhibit"],
         help="Web mode: normal (read/write) or exhibit (read-only) (default: normal)",
     )

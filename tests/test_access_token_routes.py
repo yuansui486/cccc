@@ -84,7 +84,8 @@ class TestAccessTokenRoutes(unittest.TestCase):
             token = str(created.get("token") or "")
             self.assertTrue(token.startswith("acc_"))
             set_cookie = str(resp.headers.get("set-cookie") or "")
-            self.assertIn("cccc_access_token=", set_cookie)
+            self.assertIn("onecolleague_access_token=", set_cookie)
+            self.assertIn("cccc_access_token=\"\"", set_cookie)
             self.assertIn(token, set_cookie)
 
             session = client.get("/api/v1/web_access/session")
@@ -107,7 +108,7 @@ class TestAccessTokenRoutes(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 200)
             set_cookie = str(resp.headers.get("set-cookie") or "").lower()
-            self.assertIn("cccc_access_token=", set_cookie)
+            self.assertIn("onecolleague_access_token=", set_cookie)
             self.assertIn("secure", set_cookie)
             self.assertIn("samesite=none", set_cookie)
         finally:

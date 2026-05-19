@@ -510,6 +510,26 @@ class TestRemoteAccessOps(unittest.TestCase):
 
     def test_remote_access_state_uses_env_binding_when_settings_absent(self) -> None:
         _, cleanup = self._with_home()
+        cleanup_host = self._with_env("ONECOLLEAGUE_WEB_HOST", "10.0.0.8")
+        cleanup_port = self._with_env("ONECOLLEAGUE_WEB_PORT", "8899")
+        try:
+            resp, should_stop = self._call("remote_access_state", {"by": "user"})
+            self.assertFalse(should_stop)
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            remote = (resp.result or {}).get("remote_access") if isinstance(resp.result, dict) else {}
+            cfg = remote.get("config") if isinstance(remote.get("config"), dict) else {}
+            diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(str(cfg.get("web_host") or ""), "10.0.0.8")
+            self.assertEqual(int(cfg.get("web_port") or 0), 8899)
+            self.assertEqual(str(diagnostics.get("web_host_source") or ""), "env")
+            self.assertEqual(str(diagnostics.get("web_port_source") or ""), "env")
+        finally:
+            cleanup_port()
+            cleanup_host()
+            cleanup()
+
+    def test_remote_access_state_falls_back_to_legacy_env_binding(self) -> None:
+        _, cleanup = self._with_home()
         cleanup_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
         cleanup_port = self._with_env("CCCC_WEB_PORT", "8899")
         try:
@@ -526,4 +546,28 @@ class TestRemoteAccessOps(unittest.TestCase):
         finally:
             cleanup_port()
             cleanup_host()
+            cleanup()
+
+    def test_remote_access_state_prefers_onecolleague_env_binding(self) -> None:
+        _, cleanup = self._with_home()
+        cleanup_old_host = self._with_env("CCCC_WEB_HOST", "10.0.0.8")
+        cleanup_old_port = self._with_env("CCCC_WEB_PORT", "8899")
+        cleanup_new_host = self._with_env("ONECOLLEAGUE_WEB_HOST", "0.0.0.0")
+        cleanup_new_port = self._with_env("ONECOLLEAGUE_WEB_PORT", "7777")
+        try:
+            resp, should_stop = self._call("remote_access_state", {"by": "user"})
+            self.assertFalse(should_stop)
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            remote = (resp.result or {}).get("remote_access") if isinstance(resp.result, dict) else {}
+            cfg = remote.get("config") if isinstance(remote.get("config"), dict) else {}
+            diagnostics = remote.get("diagnostics") if isinstance(remote.get("diagnostics"), dict) else {}
+            self.assertEqual(str(cfg.get("web_host") or ""), "0.0.0.0")
+            self.assertEqual(int(cfg.get("web_port") or 0), 7777)
+            self.assertEqual(str(diagnostics.get("web_host_source") or ""), "env")
+            self.assertEqual(str(diagnostics.get("web_port_source") or ""), "env")
+        finally:
+            cleanup_new_port()
+            cleanup_new_host()
+            cleanup_old_port()
+            cleanup_old_host()
             cleanup()

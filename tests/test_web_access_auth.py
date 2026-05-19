@@ -133,10 +133,11 @@ class TestWebAccessAuth(unittest.TestCase):
             created = create_access_token("member-user", is_admin=False)
             token = str(created.get("token") or "")
             client = self._create_probe_client()
-            client.cookies.set("cccc_access_token", token)
+            client.cookies.set("onecolleague_access_token", token)
             resp = client.post("/api/v1/web_access/logout")
             self.assertEqual(resp.status_code, 200)
             set_cookie = str(resp.headers.get("set-cookie") or "")
+            self.assertIn("onecolleague_access_token=""", set_cookie)
             self.assertIn("cccc_access_token=""", set_cookie)
             self.assertIn("Max-Age=0", set_cookie)
             follow = client.get("/api/v1/web_access/session")
@@ -157,6 +158,7 @@ class TestWebAccessAuth(unittest.TestCase):
             body = resp.json()
             self.assertTrue(bool((body.get("result") or {}).get("signed_out")))
             set_cookie = str(resp.headers.get("set-cookie") or "")
+            self.assertIn("onecolleague_access_token=""", set_cookie)
             self.assertIn("cccc_access_token=""", set_cookie)
             self.assertIn("Max-Age=0", set_cookie)
             self.assertNotIn(token, set_cookie)
@@ -178,7 +180,25 @@ class TestWebAccessAuth(unittest.TestCase):
             self.assertEqual(str(body.get("user_id") or ""), "user-a")
             self.assertEqual(body.get("allowed_groups"), ["g-1"])
             self.assertFalse(bool(body.get("is_admin")))
-            self.assertIn("cccc_access_token=", str(resp.headers.get("set-cookie") or ""))
+            self.assertIn("onecolleague_access_token=", str(resp.headers.get("set-cookie") or ""))
+            self.assertIn("cccc_access_token=\"\"", str(resp.headers.get("set-cookie") or ""))
+        finally:
+            cleanup()
+
+    def test_valid_legacy_cookie_resolves_principal(self) -> None:
+        from no1.kernel.access_tokens import create_access_token
+
+        _, cleanup = self._with_home()
+        try:
+            created = create_access_token("legacy-user", allowed_groups=["g-1"], is_admin=False)
+            token = str(created.get("token") or "")
+            client = self._create_probe_client()
+            client.cookies.set("cccc_access_token", token)
+            resp = client.get("/__test__/principal")
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertEqual(str(body.get("kind") or ""), "user")
+            self.assertEqual(str(body.get("user_id") or ""), "legacy-user")
         finally:
             cleanup()
 
@@ -186,11 +206,12 @@ class TestWebAccessAuth(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             client = self._create_probe_client()
-            client.cookies.set("cccc_access_token", "stale-cookie")
+            client.cookies.set("onecolleague_access_token", "stale-cookie")
             resp = client.get("/__test__/principal")
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertEqual(str(body.get("kind") or ""), "anonymous")
+            self.assertIn("onecolleague_access_token=\"\"", str(resp.headers.get("set-cookie") or ""))
             self.assertIn("cccc_access_token=\"\"", str(resp.headers.get("set-cookie") or ""))
         finally:
             cleanup()

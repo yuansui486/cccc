@@ -249,7 +249,7 @@ class TestWebGroupSpaceApi(unittest.TestCase):
         from no1.ports.web.app import create_app
 
         _, cleanup = self._with_home()
-        cleanup_mode = self._with_env("CCCC_WEB_MODE", "exhibit")
+        cleanup_mode = self._with_env("ONECOLLEAGUE_WEB_MODE", "exhibit")
         try:
             gid = self._create_group("web-space-exhibit")
             with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
