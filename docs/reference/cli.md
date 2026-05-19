@@ -294,4 +294,4 @@ onecolleague mcp                           # Start MCP server (stdio mode)
 | `CCCC_WEB_HOST` | `127.0.0.1` | Web UI bind address |
 | `CCCC_WEB_PORT` | `8848` | Web UI port |
 | `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Supervised Web child readiness timeout before OneColleague treats startup as failed |
-| `OneColleague_LOG_LEVEL` | `INFO` | Log level |
+| `CCCC_WEB_LOG_LEVEL` | `INFO` | Web log level |

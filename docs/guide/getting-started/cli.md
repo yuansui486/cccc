@@ -167,7 +167,7 @@ Access at http://127.0.0.1:8848/
 | `CCCC_HOME` | `~/.cccc` | Runtime directory |
 | `CCCC_WEB_PORT` | `8848` | Web UI port |
 | `CCCC_WEB_READY_TIMEOUT_SECONDS` | `10` | Web startup readiness timeout for slower machines |
-| `OneColleague_LOG_LEVEL` | `INFO` | Log verbosity |
+| `CCCC_WEB_LOG_LEVEL` | `INFO` | Web log verbosity |
 
 ## Example Workflow
 
