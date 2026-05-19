@@ -267,7 +267,7 @@ class TestGroupCopyOps(unittest.TestCase):
                 )
                 self.assertFalse(import_resp.ok)
                 self.assertEqual(getattr(import_resp.error, "code", ""), "group_copy_import_failed")
-                self.assertIn("not CCCC_HOME", getattr(import_resp.error, "message", ""))
+                self.assertIn("not ONECOLLEAGUE_HOME", getattr(import_resp.error, "message", ""))
         finally:
             cleanup()
 

@@ -529,7 +529,8 @@ class ClaudeAppSession:
             self._stop_requested = False
             env = os.environ.copy()
             env.update(self.env)
-            env.setdefault("CCCC_HOME", str(ensure_home()))
+            env.setdefault("ONECOLLEAGUE_HOME", str(ensure_home()))
+            env.setdefault("CCCC_HOME", env["ONECOLLEAGUE_HOME"])
             env["CCCC_GROUP_ID"] = self.group_id
             env["CCCC_ACTOR_ID"] = self.actor_id
             env = with_node_deprecation_warnings_suppressed(env)

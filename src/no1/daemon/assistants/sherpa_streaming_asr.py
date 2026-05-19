@@ -180,7 +180,8 @@ async def open_sherpa_streaming_session(selected_model_id: str = "") -> SherpaSt
     if config.get("joiner"):
         argv.extend(["--joiner", str(config["joiner"])])
     env = os.environ.copy()
-    env["CCCC_HOME"] = str(ensure_home())
+    env["ONECOLLEAGUE_HOME"] = str(ensure_home())
+    env["CCCC_HOME"] = env["ONECOLLEAGUE_HOME"]
     source_root = str(Path(__file__).resolve().parents[3])
     env["PYTHONPATH"] = source_root if not env.get("PYTHONPATH") else f"{source_root}{os.pathsep}{env['PYTHONPATH']}"
     env.pop("__PYVENV_LAUNCHER__", None)

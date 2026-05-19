@@ -136,7 +136,7 @@ class TestActorPrivateEnv(unittest.TestCase):
                 self.assertEqual(str(masked.get("ANTHROPIC_API_KEY") or ""), "******")
                 self.assertNotIn("supersecret", str(masked))
 
-                # File exists under CCCC_HOME/state/... and is user-only on POSIX.
+                # File exists under ONECOLLEAGUE_HOME/state/... and is user-only on POSIX.
                 secret_dir = Path(td) / "state" / "secrets" / "actors" / group_id
                 files = list(secret_dir.glob("*.json"))
                 self.assertEqual(len(files), 1)

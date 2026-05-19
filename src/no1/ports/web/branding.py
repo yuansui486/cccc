@@ -70,7 +70,7 @@ def resolve_branding_asset_path(rel_path: str) -> Path:
     try:
         target.relative_to(base)
     except ValueError as exc:
-        raise FileNotFoundError("branding asset path is outside CCCC_HOME") from exc
+        raise FileNotFoundError("branding asset path is outside ONECOLLEAGUE_HOME") from exc
     return target
 
 

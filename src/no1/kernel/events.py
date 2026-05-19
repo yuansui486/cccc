@@ -1,7 +1,7 @@
 """Global event log for system-wide events (cross-process safe).
 
 Design:
-- Daemon (and other local writers) append JSONL entries to a single file under CCCC_HOME.
+- Daemon (and other local writers) append JSONL entries to a single file under ONECOLLEAGUE_HOME.
 - The web port tails this file over SSE to invalidate cached UI state (e.g., group list).
 
 This avoids in-memory pub/sub, which cannot work across processes.
@@ -29,7 +29,7 @@ def global_events_lock_path(home: Optional[Path] = None) -> Path:
 
 
 def publish_event(kind: str, data: Dict[str, Any] | None = None) -> None:
-    """Append a global event to the CCCC_HOME event log (best-effort)."""
+    """Append a global event to the ONECOLLEAGUE_HOME event log (best-effort)."""
     try:
         ev = {
             "v": 1,

@@ -176,6 +176,7 @@ class TestMcpInstall(unittest.TestCase):
                                 "  Args: mcp\n"
                             ).encode(),
                         ),
+                        Mock(returncode=1, stdout="", stderr=""),
                         Mock(returncode=0, stdout="", stderr=""),
                         Mock(returncode=0, stdout="", stderr=""),
                         Mock(
@@ -198,6 +199,12 @@ class TestMcpInstall(unittest.TestCase):
                                 ["claude", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=False,
+                                timeout=10,
+                            ),
+                            call(
+                                ["claude", "mcp", "get", "cccc"],
+                                capture_output=True,
+                                text=True,
                                 timeout=10,
                             ),
                             call(
@@ -232,16 +239,31 @@ class TestMcpInstall(unittest.TestCase):
                 return_value=["/abs/onecolleague", "mcp"],
             ), patch("no1.daemon.mcp_install.resolve_subprocess_argv", side_effect=lambda argv: list(argv)):
                 with patch("no1.daemon.mcp_install.subprocess.run") as mock_run:
-                    mock_run.return_value.returncode = 0
+                    mock_run.side_effect = [
+                        Mock(returncode=1, stdout="", stderr=""),
+                        Mock(returncode=0, stdout="", stderr=""),
+                    ]
                     ok = ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",), env=env)
                     self.assertTrue(ok)
-                    mock_run.assert_called_once_with(
-                        ["codex", "mcp", "add", "onecolleague", "--", "/abs/onecolleague", "mcp"],
-                        capture_output=True,
-                        text=True,
-                        cwd=str(cwd),
-                        timeout=30,
-                        env={**os.environ, **env},
+                    self.assertEqual(
+                        mock_run.call_args_list,
+                        [
+                            call(
+                                ["codex", "mcp", "get", "cccc"],
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                                env={**os.environ, **env},
+                            ),
+                            call(
+                                ["codex", "mcp", "add", "onecolleague", "--", "/abs/onecolleague", "mcp"],
+                                capture_output=True,
+                                text=True,
+                                cwd=str(cwd),
+                                timeout=30,
+                                env={**os.environ, **env},
+                            ),
+                        ],
                     )
 
     def test_ensure_mcp_installed_hermes_prepares_default_profile(self) -> None:
@@ -334,19 +356,78 @@ class TestMcpInstall(unittest.TestCase):
                 return_value=["C:\\OneColleague\\onecolleague.exe", "mcp"],
             ), patch(
                 "no1.daemon.mcp_install.resolve_subprocess_argv",
-                return_value=[r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
+                side_effect=lambda argv: [r"C:\Tools\codex.cmd", *list(argv)[1:]],
             ), patch("no1.daemon.mcp_install.subprocess.run") as mock_run:
-                mock_run.return_value.returncode = 0
+                mock_run.side_effect = [
+                    Mock(returncode=1, stdout="", stderr=""),
+                    Mock(returncode=0, stdout="", stderr=""),
+                ]
 
                 ok = ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",))
 
             self.assertTrue(ok)
-            mock_run.assert_called_once_with(
-                [r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
-                capture_output=True,
-                text=True,
-                cwd=str(cwd),
-                timeout=30,
+            self.assertEqual(
+                mock_run.call_args_list,
+                [
+                    call(
+                        [r"C:\Tools\codex.cmd", "mcp", "get", "cccc"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    ),
+                    call(
+                        [r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
+                        capture_output=True,
+                        text=True,
+                        cwd=str(cwd),
+                        timeout=30,
+                    ),
+                ],
+            )
+
+    def test_ensure_mcp_installed_codex_removes_legacy_cccc_server(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cwd = Path(td)
+            with patch("no1.daemon.mcp_install._runtime_mcp_state", side_effect=["missing", "ready"]), patch(
+                "no1.daemon.mcp_install.get_onecolleague_mcp_stdio_command",
+                return_value=["C:\\OneColleague\\onecolleague.exe", "mcp"],
+            ), patch(
+                "no1.daemon.mcp_install.resolve_subprocess_argv",
+                side_effect=lambda argv: list(argv),
+            ), patch("no1.daemon.mcp_install.subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    Mock(returncode=0, stdout="cccc\n  enabled: true\n", stderr=""),
+                    Mock(returncode=0, stdout="", stderr=""),
+                    Mock(returncode=0, stdout="", stderr=""),
+                ]
+
+                ok = ensure_mcp_installed("codex", cwd, auto_mcp_runtimes=("codex",))
+
+            self.assertTrue(ok)
+            self.assertEqual(
+                mock_run.call_args_list,
+                [
+                    call(
+                        ["codex", "mcp", "get", "cccc"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    ),
+                    call(
+                        ["codex", "mcp", "remove", "cccc"],
+                        capture_output=True,
+                        text=True,
+                        cwd=str(cwd),
+                        timeout=30,
+                    ),
+                    call(
+                        ["codex", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
+                        capture_output=True,
+                        text=True,
+                        cwd=str(cwd),
+                        timeout=30,
+                    ),
+                ],
             )
 
     def test_ensure_mcp_installed_codex_windows_repairs_stale_config(self) -> None:
@@ -371,6 +452,8 @@ class TestMcpInstall(unittest.TestCase):
                                 "  args: mcp\n"
                             ),
                         ),
+                        Mock(returncode=1, stdout="", stderr=""),
+                        Mock(returncode=0, stdout="", stderr=""),
                         Mock(returncode=0, stdout="", stderr=""),
                         Mock(
                             returncode=0,
@@ -393,6 +476,19 @@ class TestMcpInstall(unittest.TestCase):
                                 capture_output=True,
                                 text=True,
                                 timeout=10,
+                            ),
+                            call(
+                                ["codex", "mcp", "get", "cccc"],
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                            ),
+                            call(
+                                ["codex", "mcp", "remove", "onecolleague"],
+                                capture_output=True,
+                                text=True,
+                                cwd=str(cwd),
+                                timeout=30,
                             ),
                             call(
                                 ["codex", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],

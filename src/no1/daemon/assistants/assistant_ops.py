@@ -3129,7 +3129,7 @@ def _append_voice_segment_jsonl(group: Group, *, session_id: str, segment: Dict[
 
 def _display_voice_path(path: Path) -> str:
     resolved = Path(path).expanduser().resolve()
-    raw_home = str(os.environ.get("CCCC_HOME") or "").strip()
+    raw_home = str(os.environ.get("ONECOLLEAGUE_HOME") or os.environ.get("CCCC_HOME") or "").strip()
     if raw_home:
         raw_home_path = Path(raw_home).expanduser()
         try:

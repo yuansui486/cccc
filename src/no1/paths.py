@@ -4,11 +4,19 @@ import os
 from pathlib import Path
 
 
+def _env_path(name: str) -> str:
+    return str(os.environ.get(name) or "").strip()
+
+
+def _default_onecolleague_home() -> Path:
+    return (Path.home() / ".onecolleague").resolve()
+
+
 def onecolleague_home() -> Path:
-    env = os.environ.get("ONECOLLEAGUE_HOME", "").strip() or os.environ.get("CCCC_HOME", "").strip()
+    env = _env_path("ONECOLLEAGUE_HOME") or _env_path("CCCC_HOME")
     if env:
         return Path(env).expanduser().resolve()
-    return (Path.home() / ".cccc").resolve()
+    return _default_onecolleague_home()
 
 
 def ensure_home() -> Path:

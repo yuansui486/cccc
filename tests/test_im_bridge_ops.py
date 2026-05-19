@@ -1,9 +1,11 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from no1.daemon.im.im_bridge_ops import (
     cleanup_invalid_im_bridges,
+    _proc_onecolleague_home,
     read_live_im_bridge_pid,
     stop_all_im_bridges,
     stop_im_bridges_for_group,
@@ -65,8 +67,6 @@ class TestImBridgeOps(unittest.TestCase):
             self.assertFalse(pid_path.exists())
 
     def test_read_live_pid_reaps_exited_child_pidfile(self) -> None:
-        from unittest.mock import patch
-
         with tempfile.TemporaryDirectory() as td:
             pid_path = Path(td) / "im_bridge.pid"
             pid_path.write_text("4321", encoding="utf-8")
@@ -76,6 +76,42 @@ class TestImBridgeOps(unittest.TestCase):
 
             self.assertIsNone(pid)
             self.assertFalse(pid_path.exists())
+
+    def test_proc_home_prefers_onecolleague_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            env_path = root / "1234" / "environ"
+            env_path.parent.mkdir()
+            new_home = root / "onecolleague-home"
+            legacy_home = root / "legacy-home"
+            env_path.write_bytes(
+                b"ONECOLLEAGUE_HOME=" + str(new_home).encode() + b"\x00CCCC_HOME=" + str(legacy_home).encode() + b"\x00"
+            )
+            def fake_path(*parts):
+                if parts == ("/proc",):
+                    return root
+                return Path(*parts)
+
+            with patch("no1.daemon.im.im_bridge_ops.Path", side_effect=fake_path):
+                self.assertEqual(_proc_onecolleague_home(1234), new_home.resolve())
+
+    def test_proc_home_defaults_to_onecolleague_home(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            env_path = root / "1234" / "environ"
+            env_path.parent.mkdir()
+            env_path.write_bytes(b"")
+            expected = root / ".onecolleague"
+            def fake_path(*parts):
+                if parts == ("/proc",):
+                    return root
+                return Path(*parts)
+
+            with patch("no1.daemon.im.im_bridge_ops.Path", side_effect=fake_path), patch(
+                "no1.daemon.im.im_bridge_ops.onecolleague_home",
+                return_value=expected.resolve(),
+            ):
+                self.assertEqual(_proc_onecolleague_home(1234), expected.resolve())
 
 
 class TestImUnsetOrphanScan(unittest.TestCase):

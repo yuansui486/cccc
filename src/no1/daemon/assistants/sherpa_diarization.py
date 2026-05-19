@@ -292,7 +292,8 @@ async def run_sherpa_diarization_file(
         if include_speaker_embeddings:
             argv.append("--include-speaker-embeddings")
         env = os.environ.copy()
-        env["CCCC_HOME"] = str(ensure_home())
+        env["ONECOLLEAGUE_HOME"] = str(ensure_home())
+        env["CCCC_HOME"] = env["ONECOLLEAGUE_HOME"]
         source_root = str(Path(__file__).resolve().parents[3])
         env["PYTHONPATH"] = source_root if not env.get("PYTHONPATH") else f"{source_root}{os.pathsep}{env['PYTHONPATH']}"
         env.pop("__PYVENV_LAUNCHER__", None)

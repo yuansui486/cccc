@@ -137,7 +137,8 @@ def ensure_voice_service(group: Group, *, timeout_seconds: float = DEFAULT_START
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
-    env["CCCC_HOME"] = str(ensure_home())
+    env["ONECOLLEAGUE_HOME"] = str(ensure_home())
+    env["CCCC_HOME"] = env["ONECOLLEAGUE_HOME"]
     env["PYTHONPATH"] = _service_pythonpath()
     selected_model_id = _selected_service_model_id(group)
     managed_command = ""

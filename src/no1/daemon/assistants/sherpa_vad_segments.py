@@ -129,7 +129,8 @@ async def detect_sherpa_vad_segments(
     model_path = ensure_silero_vad_model()
     source_root = str(Path(__file__).resolve().parents[3])
     env = os.environ.copy()
-    env["CCCC_HOME"] = str(ensure_home())
+    env["ONECOLLEAGUE_HOME"] = str(ensure_home())
+    env["CCCC_HOME"] = env["ONECOLLEAGUE_HOME"]
     env["PYTHONPATH"] = source_root if not env.get("PYTHONPATH") else f"{source_root}{os.pathsep}{env['PYTHONPATH']}"
     env.pop("__PYVENV_LAUNCHER__", None)
     process = await asyncio.create_subprocess_exec(

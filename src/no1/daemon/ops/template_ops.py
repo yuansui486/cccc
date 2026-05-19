@@ -164,7 +164,7 @@ def group_template_preview(args: Dict[str, Any]) -> DaemonResponse:
         out = txt.strip()
         if len(out) > limit:
             out = out[:limit] + "\n…"
-        # Prompts embedded in the template become group overrides under CCCC_HOME.
+        # Prompts embedded in the template become group overrides under ONECOLLEAGUE_HOME.
         return {"source": "home", "chars": len(txt), "preview": out}
 
     settings = tpl.settings.model_dump()
@@ -586,7 +586,7 @@ def group_template_import_replace(args: Dict[str, Any]) -> DaemonResponse:
         except Exception:
             pass
 
-    # Apply group prompt overrides under CCCC_HOME (write custom; delete when built-in).
+    # Apply group prompt overrides under ONECOLLEAGUE_HOME (write custom; delete when built-in).
     try:
         prompt_paths = _apply_prompts_replace(group, tpl.prompts)
     except Exception as e:

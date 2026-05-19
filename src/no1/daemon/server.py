@@ -395,10 +395,10 @@ def _inject_actor_context_env(env: Dict[str, Any], *, group_id: str, actor_id: s
     This is runtime-only (not persisted to group docs).
     """
     out: Dict[str, Any] = dict(env or {})
-    out["CCCC_HOME"] = str(ensure_home())
+    out["ONECOLLEAGUE_HOME"] = str(ensure_home())
+    out["CCCC_HOME"] = out["ONECOLLEAGUE_HOME"]
     out["CCCC_GROUP_ID"] = str(group_id or "").strip()
     out["CCCC_ACTOR_ID"] = str(actor_id or "").strip()
-    out["ONECOLLEAGUE_HOME"] = out["CCCC_HOME"]
     out["ONECOLLEAGUE_GROUP_ID"] = out["CCCC_GROUP_ID"]
     out["ONECOLLEAGUE_ACTOR_ID"] = out["CCCC_ACTOR_ID"]
     return out

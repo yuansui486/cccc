@@ -8,7 +8,7 @@ v3 truths:
 Secondary views such as attention slices are computed projections, not
 editable truths.
 
-Storage: ~/.cccc/groups/<group_id>/context/
+Storage: ~/.onecolleague/groups/<group_id>/context/
 """
 
 from __future__ import annotations

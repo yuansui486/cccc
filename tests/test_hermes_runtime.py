@@ -42,6 +42,9 @@ class TestHermesRuntime(unittest.TestCase):
                             "command": command[0],
                             "args": command[1:],
                             "env": {
+                                "ONECOLLEAGUE_HOME": "${ONECOLLEAGUE_HOME}",
+                                "ONECOLLEAGUE_GROUP_ID": "${ONECOLLEAGUE_GROUP_ID}",
+                                "ONECOLLEAGUE_ACTOR_ID": "${ONECOLLEAGUE_ACTOR_ID}",
                                 "CCCC_HOME": "${CCCC_HOME}",
                                 "CCCC_GROUP_ID": "${CCCC_GROUP_ID}",
                                 "CCCC_ACTOR_ID": "${CCCC_ACTOR_ID}",
@@ -122,7 +125,7 @@ class TestHermesRuntime(unittest.TestCase):
             self.assertEqual(ready["mcp"]["status"], "ready")
 
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-            doc["mcp_servers"]["onecolleague"]["env"]["CCCC_ACTOR_ID"] = "peer1"
+            doc["mcp_servers"]["onecolleague"]["env"]["ONECOLLEAGUE_ACTOR_ID"] = "peer1"
             config_path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
             with patch("no1.kernel.hermes_runtime.Path.home", return_value=user_home), patch(
                 "no1.kernel.hermes_runtime.get_onecolleague_mcp_stdio_command",
@@ -177,6 +180,9 @@ class TestHermesRuntime(unittest.TestCase):
                     "--args",
                     "mcp",
                     "--env",
+                    f"ONECOLLEAGUE_HOME={cccc_home}",
+                    "ONECOLLEAGUE_GROUP_ID=g_probe",
+                    "ONECOLLEAGUE_ACTOR_ID=hermes-probe",
                     f"CCCC_HOME={cccc_home}",
                     "CCCC_GROUP_ID=g_probe",
                     "CCCC_ACTOR_ID=hermes-probe",
@@ -184,6 +190,9 @@ class TestHermesRuntime(unittest.TestCase):
             )
             doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
             env = doc["mcp_servers"]["onecolleague"]["env"]
+            self.assertEqual(env["ONECOLLEAGUE_HOME"], "${ONECOLLEAGUE_HOME}")
+            self.assertEqual(env["ONECOLLEAGUE_GROUP_ID"], "${ONECOLLEAGUE_GROUP_ID}")
+            self.assertEqual(env["ONECOLLEAGUE_ACTOR_ID"], "${ONECOLLEAGUE_ACTOR_ID}")
             self.assertEqual(env["CCCC_HOME"], "${CCCC_HOME}")
             self.assertEqual(env["CCCC_GROUP_ID"], "${CCCC_GROUP_ID}")
             self.assertEqual(env["CCCC_ACTOR_ID"], "${CCCC_ACTOR_ID}")
@@ -229,6 +238,9 @@ class TestHermesRuntime(unittest.TestCase):
                     "    args:\n"
                     "    - mcp\n"
                     "    env:\n"
+                    f"      ONECOLLEAGUE_HOME: {cccc_home}\n"
+                    "      ONECOLLEAGUE_GROUP_ID: g_probe\n"
+                    "      ONECOLLEAGUE_ACTOR_ID: hermes-probe\n"
                     f"      CCCC_HOME: {cccc_home}\n"
                     "      CCCC_GROUP_ID: g_probe\n"
                     "      CCCC_ACTOR_ID: hermes-probe\n"
@@ -243,6 +255,9 @@ class TestHermesRuntime(unittest.TestCase):
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("# keep header", text)
             self.assertIn("# keep footer", text)
+            self.assertIn("ONECOLLEAGUE_HOME: ${ONECOLLEAGUE_HOME}", text)
+            self.assertIn("ONECOLLEAGUE_GROUP_ID: ${ONECOLLEAGUE_GROUP_ID}", text)
+            self.assertIn("ONECOLLEAGUE_ACTOR_ID: ${ONECOLLEAGUE_ACTOR_ID}", text)
             self.assertIn("CCCC_HOME: ${CCCC_HOME}", text)
             self.assertIn("CCCC_GROUP_ID: ${CCCC_GROUP_ID}", text)
             self.assertIn("CCCC_ACTOR_ID: ${CCCC_ACTOR_ID}", text)

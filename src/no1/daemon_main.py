@@ -23,8 +23,8 @@ from .util.process import (
 def _spawn_daemon(paths: DaemonPaths) -> int:
     paths.daemon_dir.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    env["CCCC_HOME"] = str(paths.home)
     env["ONECOLLEAGUE_HOME"] = str(paths.home)
+    env["CCCC_HOME"] = str(paths.home)
     with paths.log_path.open("a", encoding="utf-8") as log_f:
         p = subprocess.Popen(
             resolve_background_python_argv([sys.executable, "-m", "no1.daemon_main", "run"]),

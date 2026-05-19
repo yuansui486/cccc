@@ -17,6 +17,7 @@ from ..util.process import resolve_subprocess_argv
 
 MCP_SERVER_NAME = "onecolleague"
 MCP_SERVER_NAMES = (MCP_SERVER_NAME,)
+LEGACY_MCP_SERVER_NAMES = ("cccc",)
 
 
 def _parse_mcp_get_output(output: str) -> Dict[str, str]:
@@ -186,8 +187,19 @@ def build_mcp_remove_command(runtime: str, server_name: str = MCP_SERVER_NAME) -
     name = str(server_name or MCP_SERVER_NAME).strip() or MCP_SERVER_NAME
     if runtime == "claude":
         return ["claude", "mcp", "remove", name, "-s", "user"]
+    if runtime == "codex":
+        return ["codex", "mcp", "remove", name]
     if runtime == "droid":
         return ["droid", "mcp", "remove", name]
+    return None
+
+
+def build_mcp_get_command(runtime: str, server_name: str = MCP_SERVER_NAME) -> list[str] | None:
+    name = str(server_name or MCP_SERVER_NAME).strip() or MCP_SERVER_NAME
+    if runtime == "claude":
+        return ["claude", "mcp", "get", name]
+    if runtime == "codex":
+        return ["codex", "mcp", "get", name]
     return None
 
 
@@ -211,6 +223,27 @@ def _run_cli(
         merged_env.update({str(k): str(v) for k, v in env.items() if isinstance(k, str)})
         kwargs["env"] = merged_env
     return subprocess.run(resolve_subprocess_argv(argv), **kwargs)
+
+
+def _remove_legacy_mcp_servers(runtime: str, cwd: Path, *, env: Dict[str, str] | None = None) -> bool:
+    for server_name in LEGACY_MCP_SERVER_NAMES:
+        get_cmd = build_mcp_get_command(runtime, server_name=server_name)
+        remove_cmd = build_mcp_remove_command(runtime, server_name=server_name)
+        if not get_cmd or not remove_cmd:
+            continue
+        try:
+            get_result = _run_cli(get_cmd, timeout=10, env=env)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        if get_result.returncode != 0:
+            continue
+        try:
+            remove_result = _run_cli(remove_cmd, cwd=cwd, timeout=30, env=env)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+        if remove_result.returncode != 0:
+            return False
+    return True
 
 
 def _json_mcp_state(paths: tuple[Path, ...], expected_cmd: list[str]) -> str:
@@ -396,6 +429,8 @@ def ensure_mcp_installed(
             return False
     try:
         state = _runtime_mcp_state(runtime, env=env)
+        if not _remove_legacy_mcp_servers(runtime, cwd, env=env):
+            return False
         if state == "ready":
             return True
         add_cmd = build_mcp_add_command(runtime)
