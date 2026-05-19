@@ -82,7 +82,7 @@ class TestWebBindPreflight(unittest.TestCase):
         self.assertIn(f"Web port {port} is unavailable", message)
         self.assertIn("already using that port", message)
         self.assertIn("onecolleague --port 9000", message)
-        self.assertIn("CCCC_WEB_PORT=9000 onecolleague", message)
+        self.assertIn("ONECOLLEAGUE_WEB_PORT=9000 onecolleague", message)
 
     def test_windows_access_denied_points_to_excluded_port_ranges(self) -> None:
         from no1.ports.web import bind_preflight
@@ -99,7 +99,7 @@ class TestWebBindPreflight(unittest.TestCase):
         self.assertIn("excluded TCP port range", message)
         self.assertIn("netsh interface ipv4 show excludedportrange protocol=tcp", message)
         self.assertIn("onecolleague --port 9000", message)
-        self.assertIn("$env:CCCC_WEB_PORT=9000; onecolleague", message)
+        self.assertIn("$env:ONECOLLEAGUE_WEB_PORT=9000; onecolleague", message)
 
     def test_windows_addr_in_use_without_listener_points_to_excluded_port_ranges(self) -> None:
         from no1.ports.web import bind_preflight

@@ -14,12 +14,44 @@ PublicPathChecker = Callable[[Request], bool]
 PrincipalResolver = Callable[[Request], object]
 TokensActiveGetter = Callable[[], bool]
 
+ACCESS_TOKEN_COOKIE = "onecolleague_access_token"
+LEGACY_ACCESS_TOKEN_COOKIE = "cccc_access_token"
+SIGNED_OUT_COOKIE = "onecolleague_signed_out"
+LEGACY_SIGNED_OUT_COOKIE = "cccc_signed_out"
+
 
 def _scope_state_get(scope: Scope, key: str, default: object = None) -> object:
     state = scope.setdefault("state", {})
     if not isinstance(state, dict):
         return default
     return state.get(key, default)
+
+
+def get_access_token_cookie(request: Request) -> str:
+    return str(
+        request.cookies.get(ACCESS_TOKEN_COOKIE)
+        or request.cookies.get(LEGACY_ACCESS_TOKEN_COOKIE)
+        or ""
+    ).strip()
+
+
+def has_access_token_cookie(cookies: object) -> bool:
+    try:
+        return bool(
+            str(getattr(cookies, "get")(ACCESS_TOKEN_COOKIE) or getattr(cookies, "get")(LEGACY_ACCESS_TOKEN_COOKIE) or "").strip()
+        )
+    except Exception:
+        return False
+
+
+def delete_access_token_cookies(response: Response, *, path: str = "/", domain: str | None = None) -> None:
+    response.delete_cookie(key=ACCESS_TOKEN_COOKIE, path=path, domain=domain)
+    response.delete_cookie(key=LEGACY_ACCESS_TOKEN_COOKIE, path=path, domain=domain)
+
+
+def delete_signed_out_cookies(response: Response, *, path: str = "/", domain: str | None = None) -> None:
+    response.delete_cookie(key=SIGNED_OUT_COOKIE, path=path, domain=domain)
+    response.delete_cookie(key=LEGACY_SIGNED_OUT_COOKIE, path=path, domain=domain)
 
 
 def _actual_request_scheme(request: Request) -> str:
@@ -33,13 +65,14 @@ def _actual_request_scheme(request: Request) -> str:
 def set_access_token_cookie(response: Response, request: Request, token: str) -> None:
     actual_scheme = _actual_request_scheme(request)
     response.set_cookie(
-        key="cccc_access_token",
+        key=ACCESS_TOKEN_COOKIE,
         value=token,
         httponly=True,
         samesite="none" if actual_scheme == "https" else "lax",
         secure=actual_scheme == "https",
         path="/",
     )
+    response.delete_cookie(key=LEGACY_ACCESS_TOKEN_COOKIE, path="/")
 
 
 class AuthMiddleware:
@@ -69,12 +102,15 @@ class AuthMiddleware:
 
         request = Request(scope, receive=receive)
         provided_token, token_source = self._request_token_parts(request)
-        logout_marker = str(request.cookies.get(self._signed_out_cookie) or "").strip() == "1"
+        logout_marker = (
+            str(request.cookies.get(self._signed_out_cookie) or "").strip() == "1"
+            or str(request.cookies.get(LEGACY_SIGNED_OUT_COOKIE) or "").strip() == "1"
+        )
         if logout_marker and token_source == "cookie":
             provided_token = ""
             token_source = ""
         principal = self._resolve_principal(request if not logout_marker else request)
-        stale_cookie = logout_marker and bool(str(request.cookies.get("cccc_access_token") or "").strip())
+        stale_cookie = logout_marker and has_access_token_cookie(request.cookies)
         if logout_marker and stale_cookie:
             principal = type(principal)(kind="anonymous")
         tokens_active = bool(self._tokens_active())
@@ -108,12 +144,12 @@ class AuthMiddleware:
                 cookie_headers: list[tuple[bytes, bytes]] = []
                 if stale_cookie:
                     temp = Response()
-                    temp.delete_cookie(key="cccc_access_token", path="/")
+                    delete_access_token_cookies(temp, path="/")
                     cookie_headers.extend(temp.raw_headers)
 
                 if logout_marker and principal.kind == "user" and token_source in ("header", "query"):
                     temp = Response()
-                    temp.delete_cookie(key=self._signed_out_cookie, path="/")
+                    delete_signed_out_cookies(temp, path="/")
                     cookie_headers.extend(temp.raw_headers)
 
                 skip_cookie_refresh = bool(self._state_getter(scope, "skip_token_cookie_refresh", False))
@@ -121,7 +157,7 @@ class AuthMiddleware:
                     not skip_cookie_refresh
                     and principal.kind == "user"
                     and provided_token
-                    and str(request.cookies.get("cccc_access_token") or "").strip() != provided_token
+                    and get_access_token_cookie(request) != provided_token
                 ):
                     temp = Response()
                     set_access_token_cookie(temp, request, provided_token)

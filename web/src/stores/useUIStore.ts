@@ -96,10 +96,14 @@ let errorTimeoutId: number | null = null;
 let noticeTimeoutId: number | null = null;
 
 // localStorage key for sidebar collapsed state
-const SIDEBAR_COLLAPSED_KEY = "cccc-sidebar-collapsed";
-const SIDEBAR_WIDTH_KEY = "cccc-sidebar-width";
-const PRESENTATION_SPLIT_WIDTH_KEY = "cccc-presentation-split-width";
-const CHAT_SESSIONS_KEY = "cccc-chat-sessions";
+const SIDEBAR_COLLAPSED_KEY = "onecolleague-sidebar-collapsed";
+const SIDEBAR_WIDTH_KEY = "onecolleague-sidebar-width";
+const PRESENTATION_SPLIT_WIDTH_KEY = "onecolleague-presentation-split-width";
+const CHAT_SESSIONS_KEY = "onecolleague-chat-sessions";
+const LEGACY_SIDEBAR_COLLAPSED_KEY = "cccc-sidebar-collapsed";
+const LEGACY_SIDEBAR_WIDTH_KEY = "cccc-sidebar-width";
+const LEGACY_PRESENTATION_SPLIT_WIDTH_KEY = "cccc-presentation-split-width";
+const LEGACY_CHAT_SESSIONS_KEY = "cccc-chat-sessions";
 
 export function clampSidebarWidth(value: number): number {
   const numeric = Number(value);
@@ -109,7 +113,14 @@ export function clampSidebarWidth(value: number): number {
 
 function loadSidebarCollapsed(): boolean {
   try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+    const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    if (stored !== null) return stored === "true";
+    const legacyStored = localStorage.getItem(LEGACY_SIDEBAR_COLLAPSED_KEY);
+    if (legacyStored !== null) {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, legacyStored);
+      return legacyStored === "true";
+    }
+    return false;
   } catch (e) {
     console.warn("Failed to read sidebar state from localStorage:", e);
     return false;
@@ -126,7 +137,14 @@ function saveSidebarCollapsed(collapsed: boolean): void {
 
 function loadSidebarWidth(): number {
   try {
-    return clampSidebarWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY)));
+    const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (stored !== null) return clampSidebarWidth(Number(stored));
+    const legacyStored = localStorage.getItem(LEGACY_SIDEBAR_WIDTH_KEY);
+    if (legacyStored !== null) {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, legacyStored);
+      return clampSidebarWidth(Number(legacyStored));
+    }
+    return SIDEBAR_DEFAULT_WIDTH;
   } catch (e) {
     console.warn("Failed to read sidebar width from localStorage:", e);
     return SIDEBAR_DEFAULT_WIDTH;
@@ -143,7 +161,14 @@ function saveSidebarWidth(width: number): void {
 
 function loadPresentationSplitWidth(): number {
   try {
-    return clampPresentationSplitWidth(Number(localStorage.getItem(PRESENTATION_SPLIT_WIDTH_KEY)));
+    const stored = localStorage.getItem(PRESENTATION_SPLIT_WIDTH_KEY);
+    if (stored !== null) return clampPresentationSplitWidth(Number(stored));
+    const legacyStored = localStorage.getItem(LEGACY_PRESENTATION_SPLIT_WIDTH_KEY);
+    if (legacyStored !== null) {
+      localStorage.setItem(PRESENTATION_SPLIT_WIDTH_KEY, legacyStored);
+      return clampPresentationSplitWidth(Number(legacyStored));
+    }
+    return PRESENTATION_SPLIT_DEFAULT_WIDTH;
   } catch (e) {
     console.warn("Failed to read presentation split width from localStorage:", e);
     return PRESENTATION_SPLIT_DEFAULT_WIDTH;
@@ -210,7 +235,10 @@ function sanitizeChatSessions(value: unknown): Record<string, ChatSessionState> 
 
 function loadChatSessions(): Record<string, ChatSessionState> {
   try {
-    const raw = localStorage.getItem(CHAT_SESSIONS_KEY);
+    const raw = localStorage.getItem(CHAT_SESSIONS_KEY) || localStorage.getItem(LEGACY_CHAT_SESSIONS_KEY);
+    if (raw && !localStorage.getItem(CHAT_SESSIONS_KEY)) {
+      localStorage.setItem(CHAT_SESSIONS_KEY, raw);
+    }
     if (!raw) return {};
     return sanitizeChatSessions(JSON.parse(raw));
   } catch (e) {

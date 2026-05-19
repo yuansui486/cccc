@@ -32,13 +32,19 @@ from .runtime_control import (
     clear_web_runtime_state,
     write_web_runtime_state,
 )
-from .middleware import AuthMiddleware, ReadOnlyGuardMiddleware, UiCacheControlMiddleware
+from .middleware import (
+    SIGNED_OUT_COOKIE,
+    AuthMiddleware,
+    ReadOnlyGuardMiddleware,
+    UiCacheControlMiddleware,
+    get_access_token_cookie,
+)
 from .schemas import RouteContext
 
 logger = logging.getLogger("no1.web")
 _WEB_LOG_FH: Optional[Any] = None
 _WEB_LOG_PATH: Optional[Path] = None
-_SIGNED_OUT_COOKIE = "cccc_signed_out"
+_SIGNED_OUT_COOKIE = SIGNED_OUT_COOKIE
 
 
 class HttpOnlyMount(Mount):
@@ -132,7 +138,7 @@ def _request_token_parts(request: Request) -> tuple[str, Literal["", "header", "
     if auth.lower().startswith("bearer "):
         return str(auth[7:] or "").strip(), "header"
 
-    cookie = str(request.cookies.get("cccc_access_token") or "").strip()
+    cookie = get_access_token_cookie(request)
     if cookie:
         return cookie, "cookie"
 

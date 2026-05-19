@@ -89,9 +89,12 @@ export const EMPTY_CHAT_BUCKET: GroupChatBucket = {
 export const INITIAL_LEDGER_TAIL_LIMIT = 60;
 export const MAX_UI_EVENTS = 800;
 const GROUP_VIEW_CACHE_TTL_MS = 300_000;
-const GROUP_ORDER_KEY = "cccc-group-order";
-const ARCHIVED_GROUP_IDS_KEY = "cccc-archived-group-ids";
-const SELECTED_GROUP_ID_KEY = "cccc-selected-group-id";
+const GROUP_ORDER_KEY = "onecolleague-group-order";
+const ARCHIVED_GROUP_IDS_KEY = "onecolleague-archived-group-ids";
+const SELECTED_GROUP_ID_KEY = "onecolleague-selected-group-id";
+const LEGACY_GROUP_ORDER_KEY = "cccc-group-order";
+const LEGACY_ARCHIVED_GROUP_IDS_KEY = "cccc-archived-group-ids";
+const LEGACY_SELECTED_GROUP_ID_KEY = "cccc-selected-group-id";
 const RUNTIME_ONLY_UI_EVENT_KINDS = new Set(["actor.activity", "context.sync"]);
 export const HEADLESS_RAW_EVENT_LIMIT = 400;
 
@@ -137,7 +140,10 @@ export function normalizeGroupIdList(ids: string[]): string[] {
 
 export function loadGroupOrder(): string[] {
   try {
-    const stored = localStorage.getItem(GROUP_ORDER_KEY);
+    const stored = localStorage.getItem(GROUP_ORDER_KEY) || localStorage.getItem(LEGACY_GROUP_ORDER_KEY);
+    if (stored && !localStorage.getItem(GROUP_ORDER_KEY)) {
+      localStorage.setItem(GROUP_ORDER_KEY, stored);
+    }
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed)) return normalizeGroupIdList(parsed);
@@ -150,7 +156,10 @@ export function loadGroupOrder(): string[] {
 
 export function loadArchivedGroupIds(): string[] {
   try {
-    const stored = localStorage.getItem(ARCHIVED_GROUP_IDS_KEY);
+    const stored = localStorage.getItem(ARCHIVED_GROUP_IDS_KEY) || localStorage.getItem(LEGACY_ARCHIVED_GROUP_IDS_KEY);
+    if (stored && !localStorage.getItem(ARCHIVED_GROUP_IDS_KEY)) {
+      localStorage.setItem(ARCHIVED_GROUP_IDS_KEY, stored);
+    }
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed)) return normalizeGroupIdList(parsed);
@@ -174,6 +183,7 @@ export function saveArchivedGroupIds(groupIds: string[]): void {
     const next = normalizeGroupIdList(groupIds);
     if (next.length === 0) {
       localStorage.removeItem(ARCHIVED_GROUP_IDS_KEY);
+      localStorage.removeItem(LEGACY_ARCHIVED_GROUP_IDS_KEY);
       return;
     }
     localStorage.setItem(ARCHIVED_GROUP_IDS_KEY, JSON.stringify(next));
@@ -184,7 +194,13 @@ export function saveArchivedGroupIds(groupIds: string[]): void {
 
 export function loadSelectedGroupId(): string {
   try {
-    return String(localStorage.getItem(SELECTED_GROUP_ID_KEY) || "").trim();
+    const stored = String(localStorage.getItem(SELECTED_GROUP_ID_KEY) || "").trim();
+    if (stored) return stored;
+    const legacyStored = String(localStorage.getItem(LEGACY_SELECTED_GROUP_ID_KEY) || "").trim();
+    if (legacyStored) {
+      localStorage.setItem(SELECTED_GROUP_ID_KEY, legacyStored);
+    }
+    return legacyStored;
   } catch (e) {
     console.warn("Failed to read selected group from localStorage:", e);
   }
@@ -196,6 +212,7 @@ export function saveSelectedGroupId(groupId: string): void {
     const gid = String(groupId || "").trim();
     if (!gid) {
       localStorage.removeItem(SELECTED_GROUP_ID_KEY);
+      localStorage.removeItem(LEGACY_SELECTED_GROUP_ID_KEY);
       return;
     }
     localStorage.setItem(SELECTED_GROUP_ID_KEY, gid);

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...contracts.v1.actor import ActorSubmit, AgentRuntime, RunnerKind, RuntimeStateSource
 from ...contracts.v1.automation import AutomationRule
 from ...kernel.access_tokens import list_access_tokens, lookup_access_token
+from .middleware import get_access_token_cookie
 
 
 def _default_runner_kind() -> str:
@@ -714,8 +715,7 @@ def resolve_websocket_principal(websocket: WebSocket) -> Any:
     token = _extract_token_from_headers(getattr(websocket, "headers", {}) or {})
     if not token:
         try:
-            cookies = getattr(websocket, "cookies", None) or {}
-            token = str(cookies.get("cccc_access_token") or "").strip()
+            token = get_access_token_cookie(websocket)  # type: ignore[arg-type]
         except Exception:
             token = ""
     if not token:

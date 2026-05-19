@@ -172,7 +172,7 @@ def handle_web_model_runtime_wait_next_turn(args: Dict[str, Any]) -> DaemonRespo
                 "status": "stopped",
                 "turn": None,
                 "cursor": {"event_id": cursor_event_id, "ts": cursor_ts},
-                "instructions": "This CCCC web_model actor is stopped. Do not continue polling until the actor is started again.",
+                "instructions": "This OneColleague web_model actor is stopped. Do not continue polling until the actor is started again.",
             },
         )
     limit = _coerce_limit(args.get("limit"))

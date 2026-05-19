@@ -8,9 +8,20 @@ from unittest.mock import patch
 class TestRemoteAccessOps(unittest.TestCase):
     def _with_home(self):
         old_home = os.environ.get("CCCC_HOME")
+        env_keys = (
+            "CCCC_WEB_HOST",
+            "CCCC_WEB_PORT",
+            "CCCC_WEB_PUBLIC_URL",
+            "ONECOLLEAGUE_WEB_HOST",
+            "ONECOLLEAGUE_WEB_PORT",
+            "ONECOLLEAGUE_WEB_PUBLIC_URL",
+        )
+        old_env = {key: os.environ.get(key) for key in env_keys}
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
         os.environ["CCCC_HOME"] = td
+        for key in env_keys:
+            os.environ.pop(key, None)
 
         def cleanup() -> None:
             td_ctx.__exit__(None, None, None)
@@ -18,6 +29,11 @@ class TestRemoteAccessOps(unittest.TestCase):
                 os.environ.pop("CCCC_HOME", None)
             else:
                 os.environ["CCCC_HOME"] = old_home
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
         return td, cleanup
 
@@ -419,7 +435,7 @@ class TestRemoteAccessOps(unittest.TestCase):
             self.assertEqual(bool(diagnostics.get("live_runtime_present")), True)
             self.assertEqual(bool(diagnostics.get("live_runtime_matches_binding")), False)
             next_steps = remote.get("next_steps") if isinstance(remote.get("next_steps"), list) else []
-            self.assertTrue(any("Restart the running CCCC Web service" in step for step in next_steps))
+            self.assertTrue(any("Restart the running OneColleague Web service" in step for step in next_steps))
         finally:
             cleanup()
 

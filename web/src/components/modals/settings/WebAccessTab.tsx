@@ -43,6 +43,14 @@ type RestartDialogState = {
 
 type AccessGoal = "local" | "lan" | "public";
 
+const ACCESS_TOKEN_COOKIE = "onecolleague_access_token";
+const LEGACY_ACCESS_TOKEN_COOKIE = "cccc_access_token";
+
+function clearAccessTokenCookies(): void {
+  document.cookie = `${ACCESS_TOKEN_COOKIE}=; path=/; max-age=0`;
+  document.cookie = `${LEGACY_ACCESS_TOKEN_COOKIE}=; path=/; max-age=0`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -497,7 +505,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
     } finally {
       api.setForceTokenLogin();
       api.clearAuthToken();
-      document.cookie = "cccc_access_token=; path=/; max-age=0";
+      clearAccessTokenCookies();
     }
     setSession((prev) => prev ? {
       ...prev,
@@ -731,7 +739,7 @@ export function WebAccessTab({ isDark, isActive = true }: WebAccessTabProps) {
       }
       setPendingDeleteTokenId(null);
       if (resp.result?.deleted_current_session || !resp.result?.access_tokens_remain) {
-        document.cookie = "cccc_access_token=; path=/; max-age=0";
+        clearAccessTokenCookies();
         api.clearAuthToken();
         window.location.reload();
         return;

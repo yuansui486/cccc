@@ -313,7 +313,7 @@ MCP_TOOLS = [
     {
         "name": "onecolleague_file",
         "description": (
-            "CCCC chat attachment operations. Use read/blob_path/info for delivered state/blobs attachments; "
+            "OneColleague chat attachment operations. Use read/blob_path/info for delivered state/blobs attachments; "
             "use send to attach an active-scope local file back to the user or peers."
         ),
         "inputSchema": _obj(
@@ -775,7 +775,7 @@ MCP_TOOLS = [
         "description": (
             "Foreman/admin governance tool to import an agent-prepared normalized capability record (mcp_toolpack or skill). "
             "Alternatively pass source_uri for a GitHub skill repository; repositories containing multiple skills/*/SKILL.md files "
-            "are expanded into one CCCC skill capability per SKILL.md and may be enabled together. "
+            "are expanded into a OneColleague skill capability per SKILL.md and may be enabled together. "
             "Use source_id=agent_self_proposed and capability_id=skill:agent_self_proposed:<stable-slug> for low-risk autonomous capsule skill proposals. "
             "Self-proposed skills must include When to use, Avoid when, Procedure, Pitfalls, and Verification sections; reuse the same capability_id for updates instead of duplicating. "
             "record.source_id is optional; empty/unknown values are normalized to manual_import. "

@@ -4011,6 +4011,132 @@ class TestCodexAppFlow(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_codex_headless_empty_resume_response_falls_back_to_fresh_thread(self) -> None:
+        from no1.daemon.codex_app_thread_ops import start_codex_app_thread
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            record_headless_runtime_session(
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                runtime="codex",
+                cwd=cwd,
+                command=["codex", "app-server", "--listen", "stdio://"],
+                provider_thread_id="thr_stale",
+                status="usable",
+                captured_from="app_server_thread_start",
+                resume_eligible=True,
+            )
+
+            requests: list[tuple[str, dict]] = []
+
+            def fake_request(method, params, *, timeout):
+                requests.append((method, dict(params or {})))
+                if method == "thread/resume":
+                    return {"thread": {}}
+                if method == "thread/start":
+                    return {"thread": {"id": "thr_fresh"}}
+                raise AssertionError(f"unexpected request: {method}")
+
+            thread_id, resumed = start_codex_app_thread(
+                request=fake_request,
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                command=["codex", "app-server", "--listen", "stdio://"],
+            )
+
+            self.assertEqual(thread_id, "thr_fresh")
+            self.assertFalse(resumed)
+            self.assertEqual([item[0] for item in requests], ["thread/resume", "thread/start"])
+            stored = read_runtime_session("g_codex_resume", "peer1")
+            self.assertEqual(stored.get("provider_thread_id"), "thr_fresh")
+            self.assertEqual(stored.get("captured_from"), "app_server_thread_start")
+        finally:
+            cleanup()
+
+    def test_codex_headless_fingerprint_mismatch_starts_fresh_thread(self) -> None:
+        from no1.daemon.codex_app_thread_ops import start_codex_app_thread
+        from no1.daemon.runtime_session_ops import read_runtime_session, record_headless_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            record_headless_runtime_session(
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                runtime="codex",
+                cwd=cwd,
+                command=["codex", "app-server", "--listen", "stdio://"],
+                provider_thread_id="thr_existing",
+                status="usable",
+                captured_from="app_server_thread_start",
+                resume_eligible=True,
+            )
+
+            requests: list[tuple[str, dict]] = []
+
+            def fake_request(method, params, *, timeout):
+                requests.append((method, dict(params or {})))
+                if method == "thread/start":
+                    return {"thread": {"id": "thr_fresh"}}
+                raise AssertionError(f"unexpected request: {method}")
+
+            thread_id, resumed = start_codex_app_thread(
+                request=fake_request,
+                group_id="g_codex_resume",
+                actor_id="peer1",
+                cwd=cwd,
+                command=["codex", "app-server", "--port", "1234"],
+            )
+
+            self.assertEqual(thread_id, "thr_fresh")
+            self.assertFalse(resumed)
+            self.assertEqual([item[0] for item in requests], ["thread/start"])
+            stored = read_runtime_session("g_codex_resume", "peer1")
+            self.assertEqual(stored.get("provider_thread_id"), "thr_fresh")
+            self.assertEqual(stored.get("captured_from"), "app_server_thread_start")
+        finally:
+            cleanup()
+
+    def test_codex_headless_resume_prepare_error_starts_fresh_thread(self) -> None:
+        from no1.daemon.codex_app_thread_ops import start_codex_app_thread
+        from no1.daemon.runtime_session_ops import read_runtime_session
+
+        home, cleanup = self._with_home()
+        try:
+            cwd = Path(home)
+            requests: list[tuple[str, dict]] = []
+
+            def fake_request(method, params, *, timeout):
+                requests.append((method, dict(params or {})))
+                if method == "thread/start":
+                    return {"thread": {"id": "thr_fresh"}}
+                raise AssertionError(f"unexpected request: {method}")
+
+            with patch(
+                "no1.daemon.codex_app_thread_ops.prepare_headless_runtime_resume",
+                side_effect=RuntimeError("fingerprint store unreadable"),
+            ):
+                thread_id, resumed = start_codex_app_thread(
+                    request=fake_request,
+                    group_id="g_codex_resume",
+                    actor_id="peer1",
+                    cwd=cwd,
+                    command=["codex", "app-server", "--listen", "stdio://"],
+                )
+
+            self.assertEqual(thread_id, "thr_fresh")
+            self.assertFalse(resumed)
+            self.assertEqual([item[0] for item in requests], ["thread/start"])
+            stored = read_runtime_session("g_codex_resume", "peer1")
+            self.assertEqual(stored.get("provider_thread_id"), "thr_fresh")
+            self.assertEqual(stored.get("captured_from"), "app_server_thread_start")
+        finally:
+            cleanup()
+
     def test_codex_session_manager_falls_back_when_cli_is_missing(self) -> None:
         from no1.daemon.codex_app_sessions import CodexAppSessionManager
         from no1.daemon.runner_state_ops import headless_state_path
@@ -4146,7 +4272,7 @@ class TestCodexAppFlow(unittest.TestCase):
             ), patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True), patch(
                 "no1.daemon.codex_app_sessions._connect_websocket", return_value=FakeWs()
             ) as connect_ws, patch(
-                "no1.daemon.codex_app_sessions._codex_cli_available", return_value=True
+                "no1.daemon.codex_app_sessions.shutil.which", return_value=r"C:\Tools\codex.cmd"
             ), patch(
                 "no1.daemon.codex_app_sessions.CodexAppSession._request", fake_request
             ), patch(
@@ -4174,7 +4300,7 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertTrue(manager.actor_running("g_test", "peer1"))
             self.assertTrue(session._turn_queue.empty())
             command = list(popen.call_args.args[0])
-            self.assertEqual(command[:3], ["codex", "app-server", "--listen"])
+            self.assertEqual(command[:3], [r"C:\Tools\codex.cmd", "app-server", "--listen"])
             self.assertTrue(str(command[3]).startswith("ws://127.0.0.1:"))
             connect_ws.assert_called_once()
             self.assertEqual([item[0] for item in requests[:2]], ["initialize", "thread/start"])
@@ -4182,7 +4308,7 @@ class TestCodexAppFlow(unittest.TestCase):
             self.assertEqual(
                 started_pty[0]["command"],
                 [
-                    "codex",
+                    r"C:\Tools\codex.cmd",
                     "resume",
                     "-c",
                     "shell_environment_policy.inherit=all",
@@ -4417,6 +4543,21 @@ class TestCodexAppFlow(unittest.TestCase):
                 "thread-123",
             ],
         )
+
+    def test_codex_app_start_reports_missing_cli_without_raw_winerror(self) -> None:
+        from no1.daemon.codex_app_sessions import CodexAppSession
+
+        home, cleanup = self._with_home()
+        try:
+            session = CodexAppSession(group_id="g_test", actor_id="peer1", cwd=Path(home), env={})
+
+            with patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True), patch(
+                "no1.daemon.codex_app_sessions.shutil.which", return_value=""
+            ):
+                with self.assertRaisesRegex(RuntimeError, "runtime unavailable: Codex CLI is not installed or not in PATH"):
+                    session.start()
+        finally:
+            cleanup()
 
     def test_codex_websocket_idle_timeout_does_not_stop_session(self) -> None:
         from no1.daemon.codex_app_sessions import CodexAppSession

@@ -82,7 +82,7 @@ def require_no_other_chatgpt_web_model_actor(
         return
     label = existing.get("title") or existing.get("actor_id") or "ChatGPT Web Model"
     raise ValueError(
-        "ChatGPT Web Model is limited to one actor per CCCC instance "
+        "ChatGPT Web Model is limited to one actor per OneColleague instance "
         f"(existing actor: {label} in group {existing.get('group_id')}). "
         "Remove the existing ChatGPT Web Model actor before creating another."
     )

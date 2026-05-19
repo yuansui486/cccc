@@ -294,7 +294,11 @@ def _wait_tcp_endpoint(port: int, *, timeout_seconds: float) -> bool:
 
 
 def _vnc_viewer_enabled() -> bool:
-    value = str(os.environ.get("CCCC_PROJECTED_BROWSER_VNC", "1") or "").strip().lower()
+    value = str(
+        os.environ.get("ONECOLLEAGUE_PROJECTED_BROWSER_VNC")
+        or os.environ.get("CCCC_PROJECTED_BROWSER_VNC")
+        or "1"
+    ).strip().lower()
     return value not in {"0", "false", "no", "off", "disabled"}
 
 
