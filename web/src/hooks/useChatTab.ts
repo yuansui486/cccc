@@ -882,7 +882,7 @@ export function useChatTab({
 
   // Valid recipient tokens
   const validRecipientSet = useMemo(() => {
-    const out = new Set<string>(["@all", "@foreman", "@peers"]);
+    const out = new Set<string>(["@all"]);
     for (const a of recipientActors) {
       const id = String(a.id || "").trim();
       if (id) out.add(id);
@@ -897,7 +897,7 @@ export function useChatTab({
 
   // Mention suggestions
   const mentionSuggestions = useMemo(() => {
-    const base = ["@all", "@foreman", "@peers"];
+    const base = ["@all"];
     const actorIds = recipientActors.map((a) => String(a.id || "")).filter((id) => id);
     return [...base, ...actorIds];
   }, [recipientActors]);

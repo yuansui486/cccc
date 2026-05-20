@@ -99,8 +99,8 @@ export function VoiceSecretaryWorkspacePanel({
                       "rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors",
                       active
                         ? isDark
-                          ? "bg-white text-slate-950"
-                          : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)]"
+                          ? "bg-blue-500 text-white"
+                          : "bg-blue-600 text-white shadow-[var(--glass-accent-shadow)]"
                         : isDark
                           ? "text-slate-300 hover:bg-white/10"
                           : "text-gray-600 hover:bg-black/5",

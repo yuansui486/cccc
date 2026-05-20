@@ -64,13 +64,13 @@ export const cardClass = (_isDark?: boolean) =>
 export const settingsWorkspaceShellClass = (_isDark?: boolean) =>
   `overflow-hidden rounded-[22px] border backdrop-blur-xl ${
     _isDark
-      ? "border-sky-300/14 bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.14),rgba(255,255,255,0)_38%),linear-gradient(180deg,rgba(13,24,42,0.9),rgba(8,15,28,0.96))] shadow-[0_28px_100px_rgba(15,23,42,0.34)]"
-      : "border-sky-200/70 bg-[radial-gradient(circle_at_top,rgba(219,234,254,0.64),rgba(255,255,255,0)_38%),linear-gradient(180deg,rgba(248,251,255,0.99),rgba(240,247,255,0.96))] shadow-[0_28px_100px_rgba(37,99,235,0.08)]"
+      ? "border-white/12 bg-[linear-gradient(180deg,rgba(24,24,26,0.92),rgba(14,14,16,0.98))] shadow-[0_28px_100px_rgba(0,0,0,0.34)]"
+      : "border-black/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(246,246,245,0.96))] shadow-[0_28px_100px_rgba(15,23,42,0.08)]"
   }`;
 
 export const settingsWorkspaceHeaderClass = (_isDark?: boolean) =>
   `flex items-start justify-between gap-4 px-4 py-4 sm:px-5 sm:py-4 ${
-    _isDark ? "border-b border-sky-200/10 bg-sky-300/[0.035]" : "border-b border-sky-200/60 bg-sky-100/24"
+    _isDark ? "border-b border-white/10 bg-white/[0.035]" : "border-b border-black/10 bg-black/[0.025]"
   }`;
 
 export const settingsWorkspaceBodyClass =
@@ -79,20 +79,20 @@ export const settingsWorkspaceBodyClass =
 export const settingsWorkspacePanelClass = (_isDark?: boolean) =>
   `rounded-[18px] border p-3.5 sm:p-4 ${
     _isDark
-      ? "border-sky-200/10 bg-[linear-gradient(180deg,rgba(16,32,56,0.9),rgba(9,18,34,0.98))]"
-      : "border-sky-200/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(240,247,255,0.94))]"
+      ? "border-white/10 bg-[linear-gradient(180deg,rgba(24,24,26,0.9),rgba(14,14,16,0.98))]"
+      : "border-black/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(248,248,247,0.94))]"
   }`;
 
 export const settingsWorkspaceSoftPanelClass = (_isDark?: boolean) =>
   `rounded-[18px] border px-4 py-3 sm:px-4 sm:py-4 ${
     _isDark
-      ? "border-sky-200/10 bg-sky-300/[0.035]"
-      : "border-sky-200/50 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(239,246,255,0.9))]"
+      ? "border-white/10 bg-white/[0.035]"
+      : "border-black/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,248,247,0.9))]"
   }`;
 
 export const settingsWorkspaceActionBarClass = (_isDark?: boolean) =>
   `mt-0 flex flex-wrap items-center gap-2 border-t px-4 py-3 sm:px-5 ${
-    _isDark ? "border-sky-200/10 bg-sky-300/[0.025]" : "border-sky-200/60 bg-sky-100/24"
+    _isDark ? "border-white/10 bg-white/[0.025]" : "border-black/10 bg-black/[0.025]"
   }`;
 
 export const preClass = (_isDark?: boolean) =>

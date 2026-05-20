@@ -45,7 +45,7 @@ export { getRecipientActorIdsForEvent, getAckRecipientIdsForEvent };
 
 const MAX_RECONCILED_EVENTS = 800;
 const RECONNECT_LEDGER_TAIL_LIMIT = 60;
-export const GROUP_STREAMS_HIDDEN_DISCONNECT_GRACE_MS = 90_000;
+export const GROUP_STREAMS_HIDDEN_DISCONNECT_GRACE_MS = 0;
 
 function translateActorLabel(key: string, defaultValue: string): string {
   return String(i18n.t(`actors:${key}`, { defaultValue }));
@@ -57,6 +57,10 @@ export function shouldStartGroupStreams(documentHidden: boolean): boolean {
 
 export function getGroupStreamsHiddenDisconnectDelayMs(documentHidden: boolean): number | null {
   return documentHidden ? GROUP_STREAMS_HIDDEN_DISCONNECT_GRACE_MS : null;
+}
+
+export function hasHeadlessActors(actors: Actor[]): boolean {
+  return Array.isArray(actors) && actors.some((actor) => isHeadlessActorRunner(actor));
 }
 
 function mergeCanonicalAttachmentsWithOptimisticPreview(
@@ -207,6 +211,14 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
   const updateGroupRuntimeState = useGroupStore((s) => s.updateGroupRuntimeState);
   const refreshActors = useGroupStore((s) => s.refreshActors);
   const refreshPresentation = useGroupStore((s) => s.refreshPresentation);
+  const selectedGroupActorsHydrating = useGroupStore((s) => s.selectedGroupActorsHydrating);
+  const selectedGroupHeadlessActorCount = useGroupStore((s) => {
+    let count = 0;
+    for (const actor of s.actors) {
+      if (isHeadlessActorRunner(actor)) count += 1;
+    }
+    return count;
+  });
 
   const incrementChatUnread = useUIStore((s) => s.incrementChatUnread);
   const setSSEStatus = useUIStore((s) => s.setSSEStatus);
@@ -222,9 +234,11 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
   const reconnectTimerRef = useRef<number | null>(null);
   const headlessReconnectDelayRef = useRef<number>(1000);
   const headlessReconnectTimerRef = useRef<number | null>(null);
+  const headlessHydrationGroupIdRef = useRef<string>("");
   const hiddenDisconnectTimerRef = useRef<number | null>(null);
   const hasConnectedOnceRef = useRef<boolean>(false);
   const needsVisibilityCatchupRef = useRef<boolean>(false);
+  const selectedGroupActorsHydratingRef = useRef<boolean>(selectedGroupActorsHydrating);
   const headlessThreadIdByActorRef = useRef(new Map<string, string>());
   const pendingHeadlessMessageFlushRef = useRef<number | null>(null);
   const pendingHeadlessActivityFlushRef = useRef<number | null>(null);
@@ -251,6 +265,10 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
   useEffect(() => {
     selectedGroupIdRef.current = selectedGroupId;
   }, [selectedGroupId]);
+
+  useEffect(() => {
+    selectedGroupActorsHydratingRef.current = selectedGroupActorsHydrating;
+  }, [selectedGroupActorsHydrating]);
 
   function getNotifyTargetActorId(ev: unknown): string {
     if (ev === null || typeof ev !== "object") return "";
@@ -835,11 +853,21 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
     headlessEventSourceRef.current = null;
   }
 
+  function shouldMaintainHeadlessStream(groupId: string) {
+    const targetGroupId = String(groupId || "").trim();
+    return !!targetGroupId
+      && selectedGroupIdRef.current === targetGroupId
+      && hasHeadlessActors(actorsRef.current);
+  }
+
+  function clearHeadlessReconnectTimer() {
+    if (headlessReconnectTimerRef.current == null) return;
+    window.clearTimeout(headlessReconnectTimerRef.current);
+    headlessReconnectTimerRef.current = null;
+  }
+
   function connectHeadlessStream(groupId: string, options?: { replay?: boolean }) {
-    if (headlessReconnectTimerRef.current) {
-      window.clearTimeout(headlessReconnectTimerRef.current);
-      headlessReconnectTimerRef.current = null;
-    }
+    clearHeadlessReconnectTimer();
     closeHeadlessStream();
 
     const replay = options?.replay !== false;
@@ -855,13 +883,15 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
     headlessEs.onerror = () => {
       if (!sseRegistryRef.current.isCurrent(headlessToken)) return;
       closeHeadlessStream();
-      if (headlessReconnectTimerRef.current) {
-        window.clearTimeout(headlessReconnectTimerRef.current);
-      }
+      clearHeadlessReconnectTimer();
       const delay = headlessReconnectDelayRef.current;
       headlessReconnectTimerRef.current = window.setTimeout(() => {
         headlessReconnectTimerRef.current = null;
-        if (selectedGroupIdRef.current === groupId) {
+        if (
+          selectedGroupIdRef.current === groupId
+          && shouldStartGroupStreams(document.hidden)
+          && shouldMaintainHeadlessStream(groupId)
+        ) {
           connectHeadlessStream(groupId, { replay: true });
         }
       }, delay);
@@ -879,6 +909,42 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
     headlessEventSourceRef.current = headlessEs;
   }
 
+  function ensureHeadlessStream(groupId: string) {
+    const targetGroupId = String(groupId || "").trim();
+    if (!targetGroupId || !shouldStartGroupStreams(document.hidden)) return;
+
+    if (!shouldMaintainHeadlessStream(targetGroupId)) {
+      if (!selectedGroupActorsHydratingRef.current) {
+        clearHeadlessReconnectTimer();
+        closeHeadlessStream();
+      }
+      return;
+    }
+
+    if (headlessEventSourceRef.current || headlessHydrationGroupIdRef.current === targetGroupId) {
+      return;
+    }
+
+    headlessHydrationGroupIdRef.current = targetGroupId;
+    void hydrateHeadlessSnapshot(targetGroupId)
+      .catch(() => {
+        /* ignore snapshot hydration failures */
+      })
+      .finally(() => {
+        if (headlessHydrationGroupIdRef.current === targetGroupId) {
+          headlessHydrationGroupIdRef.current = "";
+        }
+        if (
+          selectedGroupIdRef.current === targetGroupId
+          && shouldStartGroupStreams(document.hidden)
+          && shouldMaintainHeadlessStream(targetGroupId)
+          && !headlessEventSourceRef.current
+        ) {
+          connectHeadlessStream(targetGroupId, { replay: false });
+        }
+      });
+  }
+
   function clearHiddenGroupStreamDisconnectTimer() {
     if (hiddenDisconnectTimerRef.current == null) return;
     window.clearTimeout(hiddenDisconnectTimerRef.current);
@@ -889,6 +955,10 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
     clearHiddenGroupStreamDisconnectTimer();
     const delayMs = getGroupStreamsHiddenDisconnectDelayMs(document.hidden);
     if (delayMs == null) return;
+    if (delayMs <= 0) {
+      disconnectGroupStreams({ resetConnected: false });
+      return;
+    }
     hiddenDisconnectTimerRef.current = window.setTimeout(() => {
       hiddenDisconnectTimerRef.current = null;
       if (!document.hidden) return;
@@ -904,10 +974,7 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    if (headlessReconnectTimerRef.current) {
-      window.clearTimeout(headlessReconnectTimerRef.current);
-      headlessReconnectTimerRef.current = null;
-    }
+    clearHeadlessReconnectTimer();
     closeLedgerStream();
     closeHeadlessStream();
 
@@ -1130,15 +1197,7 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
     });
     eventSourceRef.current = es;
 
-    void hydrateHeadlessSnapshot(groupId)
-      .catch(() => {
-        /* ignore snapshot hydration failures */
-      })
-      .finally(() => {
-        if (selectedGroupIdRef.current === groupId) {
-          connectHeadlessStream(groupId, { replay: false });
-        }
-      });
+    ensureHeadlessStream(groupId);
   }
 
   function disconnectGroupStreams(options?: { resetConnected?: boolean }) {
@@ -1147,12 +1206,10 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    if (headlessReconnectTimerRef.current) {
-      window.clearTimeout(headlessReconnectTimerRef.current);
-      headlessReconnectTimerRef.current = null;
-    }
+    clearHeadlessReconnectTimer();
     closeLedgerStream();
     closeHeadlessStream();
+    headlessHydrationGroupIdRef.current = "";
     const flushBeforeClearing = options?.resetConnected === false;
     if (pendingHeadlessMessageFlushRef.current != null) {
       window.cancelAnimationFrame(pendingHeadlessMessageFlushRef.current);
@@ -1197,17 +1254,7 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
         connectStream(gid);
         return;
       }
-      if (!headlessEventSourceRef.current) {
-        void hydrateHeadlessSnapshot(gid)
-          .catch(() => {
-            /* ignore snapshot hydration failures */
-          })
-          .finally(() => {
-            if (selectedGroupIdRef.current === gid && !headlessEventSourceRef.current) {
-              connectHeadlessStream(gid, { replay: false });
-            }
-          });
-      }
+      ensureHeadlessStream(gid);
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -1216,6 +1263,19 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uses refs and stable store actions; selected group changes are handled by App lifecycle.
   }, []);
+
+  useEffect(() => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid) return;
+    if (!shouldStartGroupStreams(document.hidden)) return;
+    if (selectedGroupHeadlessActorCount > 0) {
+      ensureHeadlessStream(gid);
+      return;
+    }
+    if (selectedGroupActorsHydrating) return;
+    clearHeadlessReconnectTimer();
+    closeHeadlessStream();
+  }, [selectedGroupActorsHydrating, selectedGroupHeadlessActorCount, selectedGroupId]);
 
   function cleanup() {
     disconnectGroupStreams({ resetConnected: true });

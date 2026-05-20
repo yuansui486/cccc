@@ -8,6 +8,9 @@ type ActorAvatarFieldProps = {
   avatarUrl?: string | null;
   previewUrl?: string | null;
   runtime?: string | null;
+  command?: string | string[] | null;
+  env?: Record<string, string> | null;
+  modelHint?: string | null;
   title?: string | null;
   isDark: boolean;
   sizeClassName?: string;
@@ -24,6 +27,9 @@ export function ActorAvatarField({
   avatarUrl,
   previewUrl,
   runtime,
+  command,
+  env,
+  modelHint,
   title,
   isDark,
   sizeClassName = "h-12 w-12",
@@ -57,6 +63,9 @@ export function ActorAvatarField({
             avatarUrl={avatarUrl}
             previewUrl={previewUrl}
             runtime={runtime}
+            command={command}
+            env={env}
+            modelHint={modelHint}
             title={title}
             isDark={isDark}
             sizeClassName={sizeClassName}

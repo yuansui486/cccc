@@ -4,6 +4,7 @@ import type { DirItem, DirSuggestion, SupportedRuntime } from "../types";
 
 interface FormState {
   // Edit Group
+  editGroupId: string;
   editGroupTitle: string;
   editGroupTopic: string;
 
@@ -41,6 +42,7 @@ interface FormState {
   showDirBrowser: boolean;
 
   // Actions - Edit Group
+  setEditGroupId: (v: string) => void;
   setEditGroupTitle: (v: string) => void;
   setEditGroupTopic: (v: string) => void;
 
@@ -82,6 +84,7 @@ interface FormState {
 
 export const useFormStore = create<FormState>((set) => ({
   // Initial state - Edit Group
+  editGroupId: "",
   editGroupTitle: "",
   editGroupTopic: "",
 
@@ -119,6 +122,7 @@ export const useFormStore = create<FormState>((set) => ({
   showDirBrowser: false,
 
   // Actions - Edit Group
+  setEditGroupId: (v) => set({ editGroupId: v }),
   setEditGroupTitle: (v) => set({ editGroupTitle: v }),
   setEditGroupTopic: (v) => set({ editGroupTopic: v }),
 

@@ -63,9 +63,12 @@ type AppShellProps = {
   onArchiveGroup: (groupId: string) => void;
   onRestoreGroup: (groupId: string) => void;
   onOpenSidebar: () => void;
-  onOpenGroupEdit: (() => void) | undefined;
+  onOpenGroupEdit: ((groupId?: string) => void) | undefined;
   onOpenSearch: () => void;
   onOpenContext: () => void;
+  onOpenContextProject: () => void;
+  onOpenContextSummary: () => void;
+  onOpenSkillManagement: () => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
   onSetGroupState: (state: "active" | "idle" | "paused") => void;
@@ -142,6 +145,9 @@ export function AppShell({
   onOpenGroupEdit,
   onOpenSearch,
   onOpenContext,
+  onOpenContextProject,
+  onOpenContextSummary,
+  onOpenSkillManagement,
   onStartGroup,
   onStopGroup,
   onSetGroupState,
@@ -220,11 +226,21 @@ export function AppShell({
         actors={runtimeActors}
         activeTab={activeTab}
         unreadChatCount={chatUnreadCount}
+        theme={theme}
+        textScale={textScale}
+        doneHub={doneHub}
+        groupDoc={groupDoc}
+        selectedGroupRunning={selectedGroupRunning}
+        selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
+        busy={busy}
+        sseStatus={sseStatus}
         isOpen={sidebarOpen}
         isCollapsed={sidebarCollapsed}
         sidebarWidth={sidebarWidth}
         isDark={isDark}
         readOnly={webReadOnly}
+        onThemeChange={onThemeChange}
+        onTextScaleChange={onTextScaleChange}
         onSelectGroup={onSelectGroup}
         onWarmGroup={onWarmGroup}
         onCreateGroup={onCreateGroup}
@@ -236,6 +252,17 @@ export function AppShell({
         onRestoreGroup={onRestoreGroup}
         onTabChange={onTabChange}
         onAddAgent={onAddAgent}
+        onOpenContext={onOpenContext}
+        onOpenContextProject={onOpenContextProject}
+        onOpenContextSummary={onOpenContextSummary}
+        onOpenSkillManagement={onOpenSkillManagement}
+        onOpenSearch={onOpenSearch}
+        onOpenSettings={onOpenSettings}
+        onOpenDoneHubAuth={onOpenDoneHubAuth}
+        onOpenGroupEdit={onOpenGroupEdit}
+        onStartGroup={onStartGroup}
+        onStopGroup={onStopGroup}
+        onSetGroupState={onSetGroupState}
       />
 
       <main
@@ -243,32 +270,34 @@ export function AppShell({
           isDark ? "bg-black/75" : "bg-white/80"
         }`}
       >
-        <AppHeader
-          isDark={isDark}
-          theme={theme}
-          textScale={textScale}
-          onThemeChange={onThemeChange}
-          onTextScaleChange={onTextScaleChange}
-          webReadOnly={webReadOnly}
-          selectedGroupId={selectedGroupId}
-          groupDoc={groupDoc}
-          selectedGroupRunning={selectedGroupRunning}
-          selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
-          actors={actors}
-          sseStatus={sseStatus}
-          busy={busy}
-          doneHub={doneHub}
-          onOpenSidebar={onOpenSidebar}
-          onOpenGroupEdit={onOpenGroupEdit}
-          onOpenSearch={onOpenSearch}
-          onOpenContext={onOpenContext}
-          onStartGroup={onStartGroup}
-          onStopGroup={onStopGroup}
-          onSetGroupState={onSetGroupState}
-          onOpenSettings={onOpenSettings}
-          onOpenDoneHubAuth={onOpenDoneHubAuth}
-          onOpenMobileMenu={onOpenMobileMenu}
-        />
+        <div className="md:hidden">
+          <AppHeader
+            isDark={isDark}
+            theme={theme}
+            textScale={textScale}
+            onThemeChange={onThemeChange}
+            onTextScaleChange={onTextScaleChange}
+            webReadOnly={webReadOnly}
+            selectedGroupId={selectedGroupId}
+            groupDoc={groupDoc}
+            selectedGroupRunning={selectedGroupRunning}
+            selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
+            actors={actors}
+            sseStatus={sseStatus}
+            busy={busy}
+            doneHub={doneHub}
+            onOpenSidebar={onOpenSidebar}
+            onOpenGroupEdit={onOpenGroupEdit}
+            onOpenSearch={onOpenSearch}
+            onOpenContext={onOpenContext}
+            onStartGroup={onStartGroup}
+            onStopGroup={onStopGroup}
+            onSetGroupState={onSetGroupState}
+            onOpenSettings={onOpenSettings}
+            onOpenDoneHubAuth={onOpenDoneHubAuth}
+            onOpenMobileMenu={onOpenMobileMenu}
+          />
+        </div>
 
         <div
           ref={contentRef}

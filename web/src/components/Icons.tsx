@@ -1,6 +1,7 @@
 import type { LucideIcon, LucideProps } from "lucide-react";
 import {
   AppWindow,
+  Archive,
   ArrowDown,
   Bookmark,
   Bell,
@@ -40,6 +41,7 @@ import {
   Plus,
   Power,
   RefreshCw,
+  RotateCcw,
   Reply,
   Rocket,
   Search,
@@ -51,6 +53,7 @@ import {
   Sun,
   TextCursorInput,
   Trash2,
+  UsersRound,
   Download,
   X,
 } from "lucide-react";
@@ -104,6 +107,8 @@ export const ClipboardIcon = createIcon(Clipboard);
 export const CheckIcon = createIcon(Check, 2);
 export const CopyIcon = createIcon(Copy);
 export const RocketIcon = createIcon(Rocket);
+export const ArchiveIcon = createIcon(Archive);
+export const RestoreIcon = createIcon(RotateCcw);
 export const PlayIcon = createControlIcon(Play);
 export const PauseIcon = createControlIcon(Pause);
 export const StopIcon = createControlIcon(Square);
@@ -135,6 +140,7 @@ export const RefreshIcon = createIcon(RefreshCw);
 export const TrashIcon = createIcon(Trash2);
 export const ChevronDownIcon = createIcon(ChevronDown);
 export const SendIcon = createIcon(Send);
+export const TeamIcon = createIcon(UsersRound);
 export const AttachmentIcon = createIcon(Paperclip);
 export const MicrophoneIcon = createIcon(Mic);
 export const CameraIcon = createIcon(Camera, 1.9);

@@ -1,12 +1,15 @@
 import { memo, useMemo, useState } from "react";
 import { classNames } from "../utils/classNames";
 import { withAuthToken } from "../services/api/base";
-import { getRuntimeLogoSrc } from "../utils/runtimeLogos";
+import { getActorLogoSrc, getRuntimeLogoSrc, inferActorModelBrand } from "../utils/runtimeLogos";
 import { ClaudeLogo } from "./runtimeLogos/ClaudeLogo";
 export type ActorAvatarProps = {
   avatarUrl?: string | null;
   previewUrl?: string | null;
   runtime?: string | null;
+  command?: string | string[] | null;
+  env?: Record<string, string> | null;
+  modelHint?: string | null;
   title?: string | null;
   isUser?: boolean;
   isDark: boolean;
@@ -20,6 +23,9 @@ export const ActorAvatar = memo(function ActorAvatar({
   avatarUrl,
   previewUrl,
   runtime,
+  command,
+  env,
+  modelHint,
   title,
   isUser = false,
   isDark,
@@ -43,12 +49,28 @@ export const ActorAvatar = memo(function ActorAvatar({
   const [failedCustomAvatarSrc, setFailedCustomAvatarSrc] = useState<string | null>(null);
   const customAvatarFailed = !!customAvatarSrc && failedCustomAvatarSrc === customAvatarSrc;
 
-  const usesInlineClaudeLogo = !isUser && String(runtime || "").trim().toLowerCase() === "claude";
+  const explicitModelBrand = useMemo(() => {
+    if (isUser) return null;
+    return inferActorModelBrand({ title, command, env, modelHint });
+  }, [command, env, isUser, modelHint, title]);
+
+  const actorLogoSrc = useMemo(() => {
+    if (isUser) return null;
+    return getActorLogoSrc({ runtime, title, command, env, modelHint });
+  }, [command, env, isUser, modelHint, runtime, title]);
+
+  const usesInlineClaudeLogo =
+    !isUser &&
+    !actorLogoSrc &&
+    !explicitModelBrand &&
+    String(runtime || "").trim().toLowerCase() === "claude";
 
   const logoSrc = useMemo(() => {
     if (isUser || usesInlineClaudeLogo) return null;
+    if (actorLogoSrc) return actorLogoSrc;
+    if (explicitModelBrand) return null;
     return getRuntimeLogoSrc(runtime);
-  }, [isUser, runtime, usesInlineClaudeLogo]);
+  }, [actorLogoSrc, explicitModelBrand, isUser, runtime, usesInlineClaudeLogo]);
 
   const fallbackText = isUser ? "U" : (String(title || "").trim() || "?")[0].toUpperCase();
 

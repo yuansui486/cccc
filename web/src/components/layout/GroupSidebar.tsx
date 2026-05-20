@@ -15,13 +15,18 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { Actor, GroupMeta } from "../../types";
+import { Actor, GroupDoc, GroupMeta, GroupRuntimeStatus, TextScale, Theme } from "../../types";
 import { classNames } from "../../utils/classNames";
 import { getAppBrandName, getAppLogoPath } from "../../utils/displayText";
 import { getActorDisplayWorkingState } from "../../utils/terminalWorkingState";
 import { getRuntimeIndicatorState } from "../../utils/statusIndicators";
+import { getGroupStatusFromSource } from "../../utils/groupStatus";
+import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
+import { formatDoneHubQuota } from "../../services/doneHub";
+import { updateGroup } from "../../services/api";
 import {
   useBrandingStore,
+  useGroupStore,
   useTerminalSignalsStore,
   getTerminalSignalKey,
 } from "../../stores";
@@ -31,11 +36,25 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClipboardIcon,
+  MoreIcon,
+  PauseIcon,
+  PlayIcon,
   PlusIcon,
+  RocketIcon,
+  SearchIcon,
   SendIcon,
+  SettingsIcon,
+  SparklesIcon,
+  StopIcon,
+  TeamIcon,
 } from "../Icons";
+import { TextScaleSwitcher } from "../TextScaleSwitcher";
+import { ThemeToggleCompact } from "../ThemeToggle";
+import { ActorAvatar } from "../ActorAvatar";
 import { SortableGroupItem } from "./SortableGroupItem";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../stores/useUIStore";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 export interface GroupSidebarProps {
   orderedGroups: GroupMeta[];
@@ -44,11 +63,27 @@ export interface GroupSidebarProps {
   actors: Actor[];
   activeTab: string;
   unreadChatCount: number;
+  theme: Theme;
+  textScale: TextScale;
+  doneHub?: {
+    status: "idle" | "authenticating" | "connected" | "refreshing" | "error";
+    displayName: string;
+    group?: string;
+    quota: number | null;
+    errorMessage: string;
+  };
+  groupDoc: GroupDoc | null;
+  selectedGroupRunning: boolean;
+  selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
+  busy: string;
+  sseStatus: "connected" | "connecting" | "disconnected";
   isOpen: boolean;
   isCollapsed: boolean;
   sidebarWidth: number;
   isDark: boolean;
   readOnly?: boolean;
+  onThemeChange: (theme: Theme) => void;
+  onTextScaleChange: (scale: TextScale) => void;
   onSelectGroup: (groupId: string) => void;
   onWarmGroup?: (groupId: string) => void;
   onCreateGroup?: () => void;
@@ -60,6 +95,17 @@ export interface GroupSidebarProps {
   onRestoreGroup: (groupId: string) => void;
   onTabChange: (tab: string) => void;
   onAddAgent?: () => void;
+  onOpenContext: () => void;
+  onOpenContextProject: () => void;
+  onOpenContextSummary: () => void;
+  onOpenSkillManagement: () => void;
+  onOpenSearch: () => void;
+  onOpenSettings: () => void;
+  onOpenDoneHubAuth: () => void;
+  onOpenGroupEdit?: (groupId?: string) => void;
+  onStartGroup: () => void;
+  onStopGroup: () => void;
+  onSetGroupState: (state: "active" | "idle" | "paused") => void | Promise<void>;
 }
 
 export function GroupSidebar({
@@ -69,11 +115,21 @@ export function GroupSidebar({
   actors,
   activeTab,
   unreadChatCount,
+  theme,
+  textScale,
+  doneHub,
+  groupDoc,
+  selectedGroupRunning,
+  selectedGroupRuntimeStatus,
+  busy,
+  sseStatus,
   isOpen,
   isCollapsed,
   sidebarWidth,
   isDark,
   readOnly,
+  onThemeChange,
+  onTextScaleChange,
   onSelectGroup,
   onWarmGroup,
   onCreateGroup,
@@ -85,19 +141,41 @@ export function GroupSidebar({
   onRestoreGroup,
   onTabChange,
   onAddAgent,
+  onOpenContext,
+  onOpenContextProject,
+  onOpenContextSummary,
+  onOpenSkillManagement,
+  onOpenSearch,
+  onOpenSettings,
+  onOpenDoneHubAuth,
+  onOpenGroupEdit,
+  onStartGroup,
+  onStopGroup,
+  onSetGroupState,
 }: GroupSidebarProps) {
   const { t } = useTranslation("layout");
   const appBrandName = getAppBrandName();
   const appLogoPath = getAppLogoPath();
   const branding = useBrandingStore((s) => s.branding);
+  const refreshGroups = useGroupStore((s) => s.refreshGroups);
+  const setGroups = useGroupStore((s) => s.setGroups);
+  const setGroupDoc = useGroupStore((s) => s.setGroupDoc);
   const terminalSignals = useTerminalSignalsStore((state) => state.signals);
   const brandName = String(branding.product_name || "").trim() || appBrandName;
   const logoPath = String(branding.logo_icon_url || "").trim() || appLogoPath;
   const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const switcherButtonRef = useRef<HTMLButtonElement | null>(null);
+  const switcherContainerRef = useRef<HTMLElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameSavingRef = useRef(false);
+  const skipRenameBlurCommitRef = useRef(false);
+  const switcherButtonRef = useRef<HTMLDivElement | null>(null);
   const switcherPanelRef = useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [isRenamingGroupTitle, setIsRenamingGroupTitle] = useState(false);
+  const [groupTitleDraft, setGroupTitleDraft] = useState("");
+  const [groupTitleSaving, setGroupTitleSaving] = useState(false);
   const archivedSet = useMemo(() => new Set(archivedGroupIds), [archivedGroupIds]);
   const workingGroups = useMemo(
     () => orderedGroups.filter((g) => !archivedSet.has(String(g.group_id || "").trim())),
@@ -122,6 +200,133 @@ export function GroupSidebar({
   );
   const autoArchivedOpen = selectedArchived || (orderedGroups.length > 0 && workingGroups.length === 0 && archivedGroups.length > 0);
   const archivedPanelOpen = archivedOpen || autoArchivedOpen;
+  const selectedStatus = selectedGroupId ? getGroupStatusFromSource({
+    running: selectedGroupRunning,
+    state: (selectedGroupRuntimeStatus?.lifecycle_state as GroupDoc["state"] | undefined) || groupDoc?.state,
+    runtime_status: selectedGroupRuntimeStatus || undefined,
+  }) : null;
+  const selectedStatusKey = selectedStatus?.key ?? null;
+  const currentGroupTitle = String(selectedGroup?.title || groupDoc?.title || selectedGroupId || "").trim();
+  const currentGroupTopic = String(groupDoc?.topic || selectedGroup?.topic || "").trim();
+  const doneHubStatus = doneHub?.status || "idle";
+  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
+  const doneHubQuota = doneHub?.quota != null ? formatDoneHubQuota(doneHub.quota) : formatDoneHubQuota(0);
+  const doneHubLabel = doneHubConnected
+    ? t("doneHubBalanceInline", { value: doneHubQuota })
+    : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect");
+  const launchMode = getLaunchControlMode(selectedStatusKey);
+  const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
+  const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
+  const stopControl = getGroupControlVisual(selectedStatusKey, "stop", busy);
+  const {
+    launchHardUnavailable,
+    pauseHardUnavailable,
+    stopHardUnavailable,
+    launchDisabled,
+    pauseDisabled,
+    stopDisabled,
+  } = resolveGroupControls({
+    selectedGroupId,
+    actorCount: actors.length,
+    statusKey: selectedStatusKey,
+    busy,
+  });
+  const deliveryToggleIsPause = selectedStatusKey === "run";
+  const deliveryToggleControl = deliveryToggleIsPause ? pauseControl : launchControl;
+  const deliveryToggleDisabled = deliveryToggleIsPause ? pauseDisabled : launchDisabled;
+  const deliveryToggleHardUnavailable = deliveryToggleIsPause ? pauseHardUnavailable : launchHardUnavailable;
+  const deliveryToggleTitle = deliveryToggleIsPause
+    ? t("pauseDelivery")
+    : launchMode === "activate"
+      ? t("resumeDelivery")
+      : t("launchAllAgents");
+
+  useEffect(() => {
+    if (!isRenamingGroupTitle) return;
+    renameInputRef.current?.focus({ preventScroll: true });
+    renameInputRef.current?.select();
+  }, [isRenamingGroupTitle]);
+
+  useEffect(() => {
+    setIsRenamingGroupTitle(false);
+    setGroupTitleSaving(false);
+    renameSavingRef.current = false;
+    skipRenameBlurCommitRef.current = false;
+    setGroupTitleDraft("");
+  }, [selectedGroupId]);
+
+  const beginGroupTitleRename = useCallback(() => {
+    if (readOnly || !selectedGroupId || groupTitleSaving) return;
+    setGroupTitleDraft(currentGroupTitle);
+    setSwitcherOpen(false);
+    setIsRenamingGroupTitle(true);
+  }, [currentGroupTitle, groupTitleSaving, readOnly, selectedGroupId]);
+
+  const cancelGroupTitleRename = useCallback(() => {
+    if (renameSavingRef.current) return;
+    skipRenameBlurCommitRef.current = true;
+    setGroupTitleDraft(currentGroupTitle);
+    setIsRenamingGroupTitle(false);
+  }, [currentGroupTitle]);
+
+  const commitGroupTitleRename = useCallback(async () => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid || readOnly || renameSavingRef.current) return;
+
+    const nextTitle = String(groupTitleDraft || "").trim();
+    const prevTitle = currentGroupTitle;
+    if (!nextTitle || nextTitle === prevTitle) {
+      setGroupTitleDraft(prevTitle);
+      setIsRenamingGroupTitle(false);
+      return;
+    }
+
+    renameSavingRef.current = true;
+    setGroupTitleSaving(true);
+    try {
+      const resp = await updateGroup(gid, nextTitle, currentGroupTopic);
+      if (!resp.ok) {
+        console.error(`Failed to rename group ${gid}:`, resp.error);
+        window.requestAnimationFrame(() => {
+          renameInputRef.current?.focus({ preventScroll: true });
+          renameInputRef.current?.select();
+        });
+        return;
+      }
+
+      const store = useGroupStore.getState();
+      setGroups(
+        store.groups.map((group) =>
+          String(group.group_id || "").trim() === gid ? { ...group, title: nextTitle } : group
+        )
+      );
+      if (store.groupDoc && String(store.groupDoc.group_id || "").trim() === gid) {
+        setGroupDoc({ ...store.groupDoc, title: nextTitle });
+      }
+      void refreshGroups();
+      setGroupTitleDraft(nextTitle);
+      setIsRenamingGroupTitle(false);
+    } catch (error) {
+      console.error(`Failed to rename group ${gid}:`, error);
+      window.requestAnimationFrame(() => {
+        renameInputRef.current?.focus({ preventScroll: true });
+        renameInputRef.current?.select();
+      });
+    } finally {
+      renameSavingRef.current = false;
+      setGroupTitleSaving(false);
+    }
+  }, [
+    currentGroupTitle,
+    currentGroupTopic,
+    groupTitleDraft,
+    readOnly,
+    refreshGroups,
+    selectedGroupId,
+    setGroupDoc,
+    setGroups,
+  ]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -187,6 +392,7 @@ export function GroupSidebar({
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
+      if (switcherContainerRef.current?.contains(target)) return;
       if (switcherPanelRef.current?.contains(target)) return;
       if (switcherButtonRef.current?.contains(target)) return;
       setSwitcherOpen(false);
@@ -203,6 +409,13 @@ export function GroupSidebar({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [switcherOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSwitcherOpen(false);
+      setMoreOpen(false);
+    }
+  }, [isOpen]);
 
   const handleResizeStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -227,6 +440,25 @@ export function GroupSidebar({
     },
     [onClose, onTabChange]
   );
+
+  const handleLaunchClick = useCallback(() => {
+    if (launchDisabled || selectedStatusKey === "run") return;
+    if (launchMode === "activate") {
+      void onSetGroupState("active");
+      return;
+    }
+    onStartGroup();
+  }, [launchDisabled, launchMode, onSetGroupState, onStartGroup, selectedStatusKey]);
+
+  const handlePauseClick = useCallback(() => {
+    if (pauseDisabled || selectedStatusKey === "paused") return;
+    void onSetGroupState("paused");
+  }, [onSetGroupState, pauseDisabled, selectedStatusKey]);
+
+  const handleStopClick = useCallback(() => {
+    if (stopDisabled || selectedStatusKey === "stop") return;
+    onStopGroup();
+  }, [onStopGroup, selectedStatusKey, stopDisabled]);
 
   const renderGroupList = useCallback(
     (groups: GroupMeta[], section: "working" | "archived") => {
@@ -255,6 +487,9 @@ export function GroupSidebar({
                     menuInlineAction
                     menuActionLabel={isArchivedSection ? t("restoreGroup") : t("archiveGroup")}
                     menuAriaLabel={`${t("groupActions")} · ${g.title || gid}`}
+                    secondaryInlineActionLabel={!isArchivedSection && !readOnly && onOpenGroupEdit ? t("edit") : undefined}
+                    secondaryInlineActionAriaLabel={!isArchivedSection && !readOnly && onOpenGroupEdit ? `${t("editGroup")} · ${g.title || gid}` : undefined}
+                    onSecondaryInlineAction={!isArchivedSection && !readOnly && onOpenGroupEdit ? () => onOpenGroupEdit(gid) : undefined}
                     onMenuAction={
                       isArchivedSection
                         ? () => onRestoreGroup(gid)
@@ -266,6 +501,7 @@ export function GroupSidebar({
                     onSelect={() => {
                       setSwitcherOpen(false);
                       onSelectGroup(gid);
+                      onTabChange("chat");
                       if (window.matchMedia("(max-width: 767px)").matches) onClose();
                     }}
                     onWarm={active ? undefined : () => onWarmGroup?.(gid)}
@@ -282,8 +518,10 @@ export function GroupSidebar({
       isDark,
       onArchiveGroup,
       onClose,
+      onOpenGroupEdit,
       onRestoreGroup,
       onSelectGroup,
+      onTabChange,
       onWarmGroup,
       readOnly,
       selectedGroupId,
@@ -297,9 +535,130 @@ export function GroupSidebar({
       const terminalSignal = terminalSignals[getTerminalSignalKey(selectedGroupId, actor.id)];
       const workingState = getActorDisplayWorkingState(actor, terminalSignal);
       const isRunning = actor.running ?? actor.enabled ?? false;
-      return getRuntimeIndicatorState({ isRunning: Boolean(isRunning), workingState });
+      const indicator = getRuntimeIndicatorState({ isRunning: Boolean(isRunning), workingState });
+      const tone = indicator.tone === "working" ? "working" : indicator.tone === "run" ? "run" : "stop";
+      return {
+        ...indicator,
+        statusLabel: t(`actorStatus.${tone}`),
+        statusBadgeClass:
+          tone === "working"
+            ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+            : tone === "run"
+              ? "bg-sky-500/10 text-sky-700 dark:text-sky-300"
+              : "bg-slate-500/12 text-[var(--color-text-tertiary)]",
+      };
     },
-    [selectedGroupId, terminalSignals]
+    [selectedGroupId, t, terminalSignals]
+  );
+
+  const navButtonClass = useCallback(
+    (isActive: boolean) =>
+      classNames(
+        "flex min-h-[52px] w-full items-center gap-4 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors",
+        isActive
+          ? "bg-black/[0.08] text-[var(--color-text-secondary)] dark:bg-white/[0.10]"
+          : "text-[var(--color-text-secondary)] hover:bg-black/[0.045] dark:hover:bg-white/[0.07]"
+      ),
+    []
+  );
+
+  const renderGroupControlButtons = useCallback(
+    () => (
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            if (!deliveryToggleDisabled) {
+              (deliveryToggleIsPause ? handlePauseClick : handleLaunchClick)();
+            }
+          }}
+          disabled={deliveryToggleDisabled}
+          className={classNames(
+            "flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] disabled:pointer-events-none disabled:opacity-45 dark:hover:bg-white/[0.08]",
+            deliveryToggleHardUnavailable && "opacity-45"
+          )}
+          title={deliveryToggleTitle}
+          aria-label={deliveryToggleTitle}
+          aria-pressed={deliveryToggleControl.active}
+        >
+          {deliveryToggleIsPause ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!stopDisabled) handleStopClick();
+          }}
+          disabled={stopDisabled}
+          className={classNames(
+            "flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] disabled:pointer-events-none disabled:opacity-45 dark:hover:bg-white/[0.08]",
+            stopHardUnavailable && "opacity-45"
+          )}
+          title={t("stopAllAgents")}
+          aria-label={t("stopAllAgents")}
+          aria-pressed={stopControl.active}
+        >
+          <StopIcon size={18} />
+        </button>
+      </div>
+    ),
+    [
+      deliveryToggleControl.active,
+      deliveryToggleDisabled,
+      deliveryToggleHardUnavailable,
+      deliveryToggleIsPause,
+      deliveryToggleTitle,
+      handleLaunchClick,
+      handlePauseClick,
+      handleStopClick,
+      stopControl.active,
+      stopDisabled,
+      stopHardUnavailable,
+      t,
+    ]
+  );
+
+  const renderInlineGroupSwitcherContent = useCallback(
+    () => (
+      <div className="max-h-[min(52vh,560px)] overflow-auto px-2 pb-2 pt-2">
+        {renderGroupList(workingGroups, "working")}
+
+        {archivedGroups.length > 0 && (
+          <div className="mt-3 border-t border-[var(--glass-border-subtle)] pt-2">
+            <button
+              type="button"
+              className={classNames(
+                "flex w-full items-center justify-between rounded-xl px-2 py-2 transition-colors",
+                "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
+              )}
+              onClick={() => setArchivedOpen((prev) => !prev)}
+              aria-expanded={archivedPanelOpen}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
+                  {t("archivedGroups")}
+                </span>
+                <span className="rounded-full bg-[var(--glass-panel-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-secondary)]">
+                  {archivedGroups.length}
+                </span>
+              </div>
+              <ChevronDownIcon
+                size={16}
+                className={classNames("transition-transform", archivedPanelOpen ? "rotate-180" : "")}
+              />
+            </button>
+            {archivedPanelOpen && <div className="mt-2">{renderGroupList(archivedGroups, "archived")}</div>}
+          </div>
+        )}
+
+      </div>
+    ),
+    [
+      archivedGroups,
+      archivedPanelOpen,
+      renderGroupList,
+      t,
+      workingGroups,
+    ]
   );
 
   const renderWorkspaceNav = useCallback(() => {
@@ -345,7 +704,6 @@ export function GroupSidebar({
           {actors.map((actor) => {
             const indicator = getActorIndicator(actor);
             const isActive = activeTab === actor.id;
-            const initial = (actor.title || actor.id).charAt(0).toUpperCase();
             return (
               <button
                 key={actor.id}
@@ -358,10 +716,28 @@ export function GroupSidebar({
                   isActive ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105"
                 )}
               >
-                <span className={classNames("text-sm font-semibold", indicator.labelClass || "text-[var(--color-text-primary)]")}>
-                  {initial}
+                <span className="relative flex h-8 w-8 items-center justify-center">
+                  <ActorAvatar
+                    avatarUrl={actor.avatar_url || undefined}
+                    runtime={actor.runtime || undefined}
+                    command={actor.command}
+                    env={actor.env}
+                    title={actor.title || actor.id}
+                    isDark={isDark}
+                    sizeClassName="h-8 w-8"
+                    textClassName="text-xs"
+                    className={classNames(
+                      "shadow-[0_10px_22px_-18px_rgba(15,23,42,0.85)]",
+                      isActive ? "ring-1 ring-white/15" : ""
+                    )}
+                  />
+                  <span
+                    className={classNames(
+                      "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-primary)]",
+                      indicator.dotClass
+                    )}
+                  />
                 </span>
-                <span className={classNames("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-primary)]", indicator.dotClass)} />
                 {(actor.unread_count ?? 0) > 0 && (
                   <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-500 dark:text-indigo-300">
                     {actor.unread_count}
@@ -387,39 +763,146 @@ export function GroupSidebar({
     }
 
     return (
-      <div className="space-y-3">
-        <div className="rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-4 py-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
-            {t("currentGroup")}
+      <div className="space-y-4">
+        <section ref={switcherContainerRef} className="space-y-1">
+          <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
+            <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+              {t("当前团队")}
+            </div>
+            {!readOnly && onCreateGroup && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSwitcherOpen(false);
+                  onCreateGroup();
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
+                aria-label={t("createNewGroup")}
+                title={t("createNewGroup")}
+              >
+                <PlusIcon size={18} />
+              </button>
+            )}
           </div>
-          <div className="mt-2 truncate text-sm font-semibold text-[var(--color-text-primary)]">
-            {selectedGroup?.title || selectedGroupId}
+          <div
+            ref={switcherButtonRef}
+            role="button"
+            tabIndex={0}
+            className={classNames(
+              "flex min-h-[52px] w-full items-center gap-4 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors",
+              "text-[var(--color-text-secondary)] hover:bg-black/[0.045] dark:hover:bg-white/[0.07]"
+            )}
+            onClick={() => {
+              if (isRenamingGroupTitle) return;
+              setSwitcherOpen((prev) => !prev);
+            }}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || isRenamingGroupTitle) return;
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              setSwitcherOpen((prev) => !prev);
+            }}
+            aria-expanded={switcherOpen}
+            aria-label={t("switchGroup")}
+            title={t("switchGroup")}
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--color-text-secondary)]">
+              <TeamIcon size={24} strokeWidth={1.8} />
+            </span>
+            <span className="min-w-0 flex-1" onClick={(event) => event.stopPropagation()}>
+              {isRenamingGroupTitle ? (
+                <input
+                  ref={renameInputRef}
+                  value={groupTitleDraft}
+                  readOnly={groupTitleSaving}
+                  onChange={(event) => setGroupTitleDraft(event.target.value)}
+                  onBlur={() => {
+                    if (skipRenameBlurCommitRef.current) {
+                      skipRenameBlurCommitRef.current = false;
+                      return;
+                    }
+                    void commitGroupTitleRename();
+                  }}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void commitGroupTitleRename();
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelGroupTitleRename();
+                    }
+                  }}
+                  className={classNames(
+                    "block h-8 w-full min-w-0 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] px-2 text-sm font-medium text-[var(--color-text-primary)] outline-none transition-all",
+                    "shadow-sm focus:border-[var(--color-accent-primary)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.16)]",
+                    groupTitleSaving && "opacity-70"
+                  )}
+                  aria-label={t("editGroup")}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    beginGroupTitleRename();
+                  }}
+                  className={classNames(
+                    "block max-w-full rounded-lg px-2 py-1 text-left transition-all duration-150",
+                    "hover:bg-black/[0.035] hover:shadow-[0_10px_24px_-18px_rgba(15,23,42,0.95)] dark:hover:bg-white/[0.06] dark:hover:shadow-[0_10px_24px_-16px_rgba(0,0,0,0.8)]",
+                    readOnly ? "cursor-default" : "cursor-text"
+                  )}
+                  title={currentGroupTitle || selectedGroupId}
+                  aria-label={t("editGroup")}
+                >
+                  <span className="block min-w-0 truncate">{currentGroupTitle || selectedGroupId}</span>
+                </button>
+              )}
+            </span>
+            {selectedStatus && <span className={classNames("rounded-full px-2 py-0.5 text-[10px] font-semibold", selectedStatus.pillClass)}>{selectedStatus.label}</span>}
+            {sseStatus !== "connected" && (
+              <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500" title={sseStatus === "connecting" ? t("reconnecting") : t("disconnected")} />
+            )}
+            <ChevronDownIcon size={18} className={classNames("shrink-0 transition-transform text-[var(--color-text-tertiary)]", switcherOpen ? "rotate-180" : "")} />
           </div>
-        </div>
 
-        <div className="-mx-1 space-y-2">
-          <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
-            {t("groupPages")}
+          {switcherOpen && (
+            <div className="mt-2 rounded-xl bg-black/[0.025] px-2 py-2 dark:bg-white/[0.035]">
+              {renderInlineGroupSwitcherContent()}
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-1">
+          <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
+            <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+              {t("memberManagement")}
+            </div>
+            {!readOnly && onAddAgent && (
+              <button
+                type="button"
+                onClick={onAddAgent}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
+                aria-label={t("addAgent")}
+                title={t("addAgent")}
+              >
+                <PlusIcon size={18} />
+              </button>
+            )}
           </div>
 
           <div className="space-y-1">
             <button
               type="button"
               onClick={() => handleTabSelect("chat")}
-              className={classNames(
-                "glass-tab flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium transition-all",
-                activeTab === "chat"
-                  ? "border-sky-200/90 bg-sky-100/95 text-sky-950 shadow-[0_10px_24px_rgba(125,211,252,0.26),inset_0_1px_0_rgba(255,255,255,0.72)] dark:border-sky-300/20 dark:bg-sky-400/18 dark:text-sky-50 dark:shadow-[0_10px_24px_rgba(14,165,233,0.20),inset_0_1px_0_rgba(255,255,255,0.08)]"
-                  : "border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
-              )}
+              className={navButtonClass(activeTab === "chat")}
             >
               <span
                 className={classNames(
-                  "flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-primary)]",
-                  activeTab === "chat" ? "bg-white/80 dark:bg-sky-300/16" : "bg-[var(--glass-tab-bg-hover)]"
+                  "flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"
                 )}
               >
-                <SendIcon size={16} />
+                <SendIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("groupChat")}</span>
               {unreadChatCount > 0 && (
@@ -437,27 +920,33 @@ export function GroupSidebar({
                   key={actor.id}
                   type="button"
                   onClick={() => handleTabSelect(actor.id)}
-                  className={classNames(
-                    "glass-tab flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-medium transition-all",
-                    isActive
-                      ? "border-sky-200/90 bg-sky-100/95 text-sky-950 shadow-[0_10px_24px_rgba(125,211,252,0.26),inset_0_1px_0_rgba(255,255,255,0.72)] dark:border-sky-300/20 dark:bg-sky-400/18 dark:text-sky-50 dark:shadow-[0_10px_24px_rgba(14,165,233,0.20),inset_0_1px_0_rgba(255,255,255,0.08)]"
-                      : "border-[var(--glass-border-subtle)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
-                  )}
+                  className={navButtonClass(isActive)}
                 >
                   <span
-                    className={classNames(
-                      "relative flex h-8 w-8 items-center justify-center rounded-xl",
-                      isActive ? "bg-white/80 dark:bg-sky-300/16" : "bg-[var(--glass-tab-bg-hover)]"
-                    )}
+                    className="relative flex h-8 w-8 items-center justify-center"
                   >
-                    <span className={classNames("h-2.5 w-2.5 rounded-full", indicator.dotClass)} />
+                    <ActorAvatar
+                      avatarUrl={actor.avatar_url || undefined}
+                      runtime={actor.runtime || undefined}
+                      command={actor.command}
+                      env={actor.env}
+                      title={actor.title || actor.id}
+                      isDark={isDark}
+                      sizeClassName="h-8 w-8"
+                      textClassName="text-xs"
+                      className="shadow-[0_10px_24px_-18px_rgba(15,23,42,0.8)]"
+                    />
+                    <span
+                      className={classNames(
+                        "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-primary)]",
+                        indicator.dotClass
+                      )}
+                    />
                   </span>
-                  <span className={classNames("min-w-0 flex-1 truncate", indicator.labelClass)}>{actor.title || actor.id}</span>
-                  {actor.role === "foreman" && (
-                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-500 dark:text-amber-400">
-                      F
-                    </span>
-                  )}
+                  <span className={classNames("min-w-0 flex-1 truncate", indicator.labelClass || "text-[var(--color-text-secondary)]")}>{actor.title || actor.id}</span>
+                  <span className={classNames("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold", indicator.statusBadgeClass)}>
+                    {indicator.statusLabel}
+                  </span>
                   {(actor.unread_count ?? 0) > 0 && (
                     <span className="rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-500 dark:text-indigo-300">
                       {actor.unread_count}
@@ -467,31 +956,85 @@ export function GroupSidebar({
               );
             })}
 
-            {!readOnly && onAddAgent && (
-              <button
-                type="button"
-                onClick={onAddAgent}
-                className="glass-btn-accent flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-[var(--color-accent-primary)] transition-all"
-              >
-                <PlusIcon size={16} />
-                <span>{t("addAgent")}</span>
-              </button>
-            )}
           </div>
-        </div>
+        </section>
+
+        <section className="space-y-1">
+          <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
+            <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+              {t("goalManagement")}
+            </div>
+            <button
+              type="button"
+              onClick={onOpenContext}
+              disabled={!selectedGroupId}
+              className="rounded px-1 text-[13px] font-semibold text-transparent outline-none transition-colors focus-visible:text-[var(--color-text-tertiary)] disabled:pointer-events-none"
+              aria-label={t("projectContext")}
+              title={t("projectContext")}
+            >
+              上下文
+            </button>
+          </div>
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={onOpenContextProject}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <ClipboardIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("teamGoal")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenSkillManagement}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <SparklesIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("skillManagement")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenContextSummary}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <RocketIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("taskExecution")}</span>
+            </button>
+          </div>
+        </section>
       </div>
     );
   }, [
     activeTab,
     actors,
+    busy,
     getActorIndicator,
+    groupDoc,
     isCollapsed,
+    navButtonClass,
     onAddAgent,
+    onCreateGroup,
+    onOpenContext,
+    renderInlineGroupSwitcherContent,
     handleTabSelect,
-    onTabChange,
+    onOpenContextProject,
+    onOpenContextSummary,
+    onOpenSkillManagement,
     readOnly,
     selectedGroup,
     selectedGroupId,
+    selectedStatus,
+    sseStatus,
+    switcherOpen,
     t,
     unreadChatCount,
   ]);
@@ -528,31 +1071,7 @@ export function GroupSidebar({
 
     return (
       <>
-        <div className="flex items-center justify-between gap-3 border-b border-[var(--glass-border-subtle)] px-4 py-3">
-          <div>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("switchGroup")}</div>
-            <div className="mt-1 text-xs text-[var(--color-text-tertiary)]">{t("workingGroups")}</div>
-          </div>
-          {!readOnly && onCreateGroup && (
-            <button
-              type="button"
-              className="glass-btn-accent flex h-9 w-9 items-center justify-center rounded-xl text-[var(--color-accent-primary)]"
-              onClick={() => {
-                setSwitcherOpen(false);
-                onCreateGroup();
-              }}
-              aria-label={t("createNewGroup")}
-              title={t("createNewGroup")}
-            >
-              <PlusIcon size={16} />
-            </button>
-          )}
-        </div>
-
         <div className="max-h-[min(52vh,560px)] overflow-auto p-3">
-          <div className="mb-3 px-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
-            {t("workingGroups")}
-          </div>
           {renderGroupList(workingGroups, "working")}
 
           {archivedGroups.length > 0 && (
@@ -582,6 +1101,20 @@ export function GroupSidebar({
               {archivedPanelOpen && <div className="mt-2">{renderGroupList(archivedGroups, "archived")}</div>}
             </div>
           )}
+
+          {!readOnly && onCreateGroup && (
+            <button
+              type="button"
+              className="glass-btn-accent mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-[var(--color-accent-primary)] transition-all"
+              onClick={() => {
+                setSwitcherOpen(false);
+                onCreateGroup();
+              }}
+            >
+              <PlusIcon size={16} />
+              <span>{t("createNewGroup")}</span>
+            </button>
+          )}
         </div>
       </>
     );
@@ -600,14 +1133,15 @@ export function GroupSidebar({
     <>
       <aside
         className={classNames(
-          "glass-sidebar fixed z-40 flex h-full flex-col md:relative",
+          "fixed z-40 flex h-full min-h-0 flex-col border-r border-black/10 bg-[#f7f7f6] text-[var(--color-text-primary)] md:relative dark:border-white/10 dark:bg-[#121214]",
+          "onecolleague-sidebar",
           isResizing ? "transition-none" : "transition-[width,transform] duration-300 ease-out",
           isCollapsed ? "w-[60px]" : "w-[280px] md:w-[var(--sidebar-width)]",
           isOpen ? "translate-x-0" : "-translate-x-full",
           "md:translate-x-0"
         )}
       >
-        <div className="px-3 py-4 pb-2">
+        <div className="shrink-0 px-4 py-4 pb-2">
           <div
             className={classNames(
               "flex items-center",
@@ -617,44 +1151,170 @@ export function GroupSidebar({
             <div className={classNames("flex items-center min-w-0", isCollapsed ? "" : "flex-1 gap-3 pr-3")}>
               <div
                 className={classNames(
-                  "glass-btn flex items-center justify-center overflow-hidden rounded-xl",
-                  isCollapsed ? "h-11 w-11" : "h-11 min-w-[44px] max-w-[164px] px-3",
-                  "text-cyan-600 dark:text-cyan-400"
+                  "flex items-center justify-center overflow-hidden",
+                  isCollapsed ? "h-11 w-11" : "h-11 min-w-[44px] max-w-[164px]"
                 )}
               >
                 <img
                   src={logoPath}
                   alt={`${brandName} logo`}
-                  className={classNames("object-contain", isCollapsed ? "h-6 w-6" : "h-6 w-6")}
+                  className={classNames("object-contain", isCollapsed ? "h-7 w-7" : "h-8 w-8")}
                 />
               </div>
               {!isCollapsed && (
-                <span className="min-w-0 truncate text-lg font-bold tracking-tight text-[var(--color-text-primary)]">
+                <span className="min-w-0 truncate text-xl font-semibold text-[var(--color-text-primary)]">
                   {brandName}
                 </span>
               )}
             </div>
 
+            {!isCollapsed && renderGroupControlButtons()}
+
             {!isCollapsed && (
-              <div className="flex shrink-0 items-center gap-2">
-                {!readOnly && onCreateGroup && (
-                  <button
-                    className={classNames(
-                      "glass-btn-accent min-h-[32px] rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all",
-                      isDark ? "text-gray-300" : "text-gray-800"
-                    )}
-                    onClick={onCreateGroup}
-                    title={t("createNewGroup")}
-                    aria-label={t("createNewGroup")}
-                  >
-                    {t("newGroup")}
-                  </button>
+              <button
+                className={classNames(
+                  "glass-btn flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl p-2 transition-all md:hidden",
+                  "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
                 )}
+                onClick={onClose}
+                aria-label={t("closeSidebar")}
+              >
+                <CloseIcon size={18} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className={classNames("min-h-0 flex-1 overflow-auto", isCollapsed ? "p-2" : "px-4 py-3")}>
+          {renderWorkspaceNav()}
+        </div>
+
+        <div className={classNames("shrink-0 border-t border-black/10 dark:border-white/10", isCollapsed ? "p-2" : "px-4 py-3")}>
+          <div className={classNames("flex gap-2", isCollapsed ? "flex-col items-center" : "items-center justify-between")}>
+            {isCollapsed && (
+              <button
+                className={classNames(
+                  "flex h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-black/[0.045] dark:hover:bg-white/[0.07]",
+                  "text-[var(--color-text-primary)]"
+                )}
+                onClick={onToggleCollapse}
+                aria-label={t("expandSidebar")}
+                title={t("expandSidebar")}
+              >
+                <ChevronRightIcon size={18} />
+              </button>
+            )}
+
+            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+              <PopoverTrigger asChild>
                 <button
+                  type="button"
                   className={classNames(
-                    "glass-btn hidden min-h-[36px] min-w-[36px] items-center justify-center rounded-xl p-2 transition-all md:flex",
-                    "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
-                    isDark ? "hover:bg-[var(--glass-tab-bg-hover)]" : "hover:bg-black/5"
+                    "flex items-center rounded-xl transition-colors hover:bg-black/[0.045] dark:hover:bg-white/[0.07]",
+                    isCollapsed ? "h-11 w-11 justify-center" : "min-h-[52px] min-w-0 flex-1 gap-3 px-3 py-2 text-left"
+                  )}
+                  aria-expanded={moreOpen}
+                  aria-label={isCollapsed ? t("moreActions") : t("workspaceBench")}
+                  title={isCollapsed ? t("moreActions") : t("workspaceBench")}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-primary)]">
+                      <MoreIcon size={24} strokeWidth={1.8} />
+                    </span>
+                    {!isCollapsed && (
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{t("workspaceBench")}</div>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side={isCollapsed ? "right" : "top"}
+                align={isCollapsed ? "end" : "start"}
+                sideOffset={12}
+                collisionPadding={12}
+                className={classNames(
+                  "z-[1002] overflow-hidden rounded-[1.25rem] p-2 shadow-2xl",
+                  isCollapsed ? "w-[240px]" : "w-[var(--radix-popover-trigger-width)]"
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    onOpenDoneHubAuth();
+                  }}
+                  className={classNames(
+                    "flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all hover:bg-[var(--glass-tab-bg-hover)]",
+                    doneHubConnected
+                      ? "text-sky-700 dark:text-sky-300"
+                      : doneHubStatus === "error"
+                        ? "text-rose-700 dark:text-rose-300"
+                        : "text-[var(--color-text-primary)]"
+                  )}
+                  title={
+                    doneHubConnected
+                      ? t("doneHubBalanceTitle", { value: doneHubQuota })
+                      : t(doneHubStatus === "error" ? "doneHubNeedsAttention" : "doneHubConnect")
+                  }
+                >
+                  <span className="flex h-5 min-w-5 items-center justify-center">
+                    {doneHubIsPro ? (
+                      <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-amber-700 dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
+                        PRO
+                      </span>
+                    ) : (
+                      <FolderIcon size={17} />
+                    )}
+                  </span>
+                  <span className="min-w-0 truncate">{doneHubLabel}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    onOpenSettings();
+                  }}
+                  disabled={!selectedGroupId}
+                  className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--color-text-primary)] transition-all hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <SettingsIcon size={17} />
+                  <span className="min-w-0 truncate">{t("settings")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    onOpenSearch();
+                  }}
+                  disabled={!selectedGroupId}
+                  className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--color-text-primary)] transition-all hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <SearchIcon size={17} />
+                  <span className="min-w-0 truncate">{t("searchMessages")}</span>
+                </button>
+              </PopoverContent>
+            </Popover>
+
+            {!isCollapsed && (
+              <div className="flex shrink-0 items-center gap-1">
+                <ThemeToggleCompact
+                  theme={theme}
+                  onThemeChange={onThemeChange}
+                  isDark={isDark}
+                  variant="rail"
+                />
+                <TextScaleSwitcher
+                  textScale={textScale}
+                  onTextScaleChange={onTextScaleChange}
+                  variant="rail"
+                />
+                <button
+                  type="button"
+                  className={classNames(
+                    "flex h-9 w-9 min-h-[36px] min-w-[36px] items-center justify-center rounded-[14px] transition-all",
+                    "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
                   )}
                   onClick={onToggleCollapse}
                   aria-label={t("collapseSidebar")}
@@ -662,92 +1322,18 @@ export function GroupSidebar({
                 >
                   <ChevronLeftIcon size={16} />
                 </button>
-                <button
-                  className={classNames(
-                    "glass-btn flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl p-2 transition-all md:hidden",
-                    "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                  )}
-                  onClick={onClose}
-                  aria-label={t("closeSidebar")}
-                >
-                  <CloseIcon size={18} />
-                </button>
               </div>
             )}
+
           </div>
         </div>
 
-        {isCollapsed && (
-          <div className="flex flex-col items-center gap-2 p-2">
-            <button
-              className={classNames(
-                "glass-btn flex h-11 w-11 items-center justify-center rounded-xl transition-all",
-                "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              )}
-              onClick={onToggleCollapse}
-              aria-label={t("expandSidebar")}
-              title={t("expandSidebar")}
-            >
-              <ChevronRightIcon size={18} />
-            </button>
-            {!readOnly && onCreateGroup && (
-              <button
-                className={classNames(
-                  "glass-btn-accent flex h-11 w-11 items-center justify-center rounded-xl transition-all",
-                  "text-[var(--color-accent-primary)]"
-                )}
-                onClick={onCreateGroup}
-                aria-label={t("createNewGroup")}
-                title={t("createNewGroup")}
-              >
-                <PlusIcon size={18} />
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className={classNames("flex-1 overflow-auto", isCollapsed ? "p-2" : "p-3")}>
-          {renderWorkspaceNav()}
-        </div>
-
-        <div className={classNames("border-t border-[var(--glass-border-subtle)]", isCollapsed ? "p-2" : "p-3 pt-2")}>
-          <button
-            ref={switcherButtonRef}
-            type="button"
-            className={classNames(
-              "glass-btn flex items-center rounded-xl transition-all",
-              isCollapsed ? "h-11 w-11 justify-center" : "w-full justify-between gap-3 px-3 py-3 text-left"
-            )}
-            onClick={() => setSwitcherOpen((prev) => !prev)}
-            aria-expanded={isOpen && switcherOpen}
-            aria-label={t("switchGroup")}
-            title={t("switchGroup")}
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--glass-tab-bg-hover)] text-[var(--color-text-primary)]">
-                <FolderIcon size={16} />
-              </span>
-              {!isCollapsed && (
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{t("switchGroup")}</div>
-                  <div className="truncate text-xs text-[var(--color-text-tertiary)]">
-                    {selectedGroup?.title || t("selectGroup")}
-                  </div>
-                </div>
-              )}
-            </div>
-            {!isCollapsed && (
-              <ChevronDownIcon size={16} className={classNames("transition-transform", isOpen && switcherOpen ? "rotate-180" : "")} />
-            )}
-          </button>
-        </div>
-
-        {isOpen && switcherOpen && (
+        {switcherOpen && isCollapsed && (
           <div
             ref={switcherPanelRef}
             className={classNames(
               "glass-panel absolute z-30 overflow-hidden rounded-[1.5rem] border border-[var(--glass-border-subtle)] shadow-2xl",
-              isCollapsed ? "bottom-3 left-[72px] w-[280px]" : "bottom-[84px] left-3 right-3"
+              "bottom-3 left-[72px] w-[280px]"
             )}
           >
             {renderGroupSwitcherContent()}

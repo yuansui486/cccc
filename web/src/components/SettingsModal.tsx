@@ -33,6 +33,7 @@ interface SettingsModalProps {
   isDark: boolean;
   groupId?: string;
   groupDoc?: GroupDoc | null;
+  initialTarget?: { scope?: SettingsScope; tab?: string; nonce: number } | null;
 }
 
 function SettingsTabFallback({ isDark }: { isDark: boolean }) {
@@ -57,6 +58,7 @@ export function SettingsModal({
   isDark,
   groupId,
   groupDoc,
+  initialTarget,
 }: SettingsModalProps) {
   const { t } = useTranslation("settings");
   const { modalRef } = useModalA11y(isOpen, onClose);
@@ -65,6 +67,23 @@ export function SettingsModal({
   const [globalTab, setGlobalTab] = useState<GlobalTabId>("capabilities");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !initialTarget) return;
+    if (initialTarget.scope === "global") {
+      setScope("global");
+      if (initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
+        setGlobalTab(initialTarget.tab);
+      }
+      return;
+    }
+    if (initialTarget.scope === "group") {
+      setScope("group");
+      if (initialTarget.tab === "automation" || initialTarget.tab === "delivery" || initialTarget.tab === "guidance" || initialTarget.tab === "assistants" || initialTarget.tab === "space" || initialTarget.tab === "messaging" || initialTarget.tab === "im" || initialTarget.tab === "transcript" || initialTarget.tab === "copyGroups" || initialTarget.tab === "blueprint") {
+        setGroupTab(initialTarget.tab);
+      }
+    }
+  }, [initialTarget, isOpen]);
 
   // Automation + delivery settings state
   const [nudgeSeconds, setNudgeSeconds] = useState(300);
@@ -184,8 +203,9 @@ export function SettingsModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (initialTarget) return;
     setScope(groupId ? "group" : "global");
-  }, [isOpen, groupId]);
+  }, [initialTarget, isOpen, groupId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1014,7 +1034,7 @@ export function SettingsModal({
                   <button
                     type="button"
                     onClick={() => setScope("group")}
-                    className={`mt-4 px-3 py-2 rounded-lg text-xs ${isDark ? "bg-slate-800 text-slate-100 hover:bg-slate-700" : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"}`}
+                    className={`mt-4 px-3 py-2 rounded-lg text-xs ${isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-blue-600 text-white border border-blue-600 hover:bg-blue-700"}`}
                   >
                     {t("navigation.thisGroup")}
                   </button>

@@ -140,8 +140,8 @@ export function AgentTab({
     canControlRef.current = canControl;
   }, [canControl]);
 
-  // Activate the terminal only after the user has visited this actor tab at least once.
-  // Once activated, keep the PTY session connected even when the tab is hidden to avoid backlog replay and scroll jumps.
+  // Activate the tab once it has been visited so the terminal can be created lazily,
+  // but let the transport layer decide whether the live PTY socket should stay open.
   useEffect(() => {
     if (isVisible) setActivated(true);
   }, [isVisible]);
@@ -201,6 +201,9 @@ export function AgentTab({
   };
 
   const runtimeIndicator = getRuntimeIndicatorState({ isRunning: Boolean(isRunning), workingState });
+  const headerTone = isDark
+    ? { bg: "bg-[#171719]", text: "text-slate-100", border: "border-white/10", statePanel: "border-white/10 bg-white/[0.04]" }
+    : { bg: "bg-[#f7f7f6]", text: "text-zinc-900", border: "border-black/10", statePanel: "border-black/10 bg-black/[0.03]" };
   const statusTone = (() => {
     switch (runtimeIndicator.tone) {
       case "stop":
@@ -215,7 +218,7 @@ export function AgentTab({
           dotClass: runtimeIndicator.dotClass,
           pulse: runtimeIndicator.pulse,
           strongPulse: runtimeIndicator.strongPulse,
-          badgeClass: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
+          badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
         };
       case "run":
       default:
@@ -384,6 +387,7 @@ export function AgentTab({
     sendInterrupt,
   } = useAgentTerminalConnection({
     activated,
+    isVisible,
     isRunning,
     isHeadless,
     groupId,
@@ -522,66 +526,61 @@ export function AgentTab({
                 </div>
               </div>
 
-              <div
-                className={classNames(
-                  "hidden sm:grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-xl border px-3 py-1.5 backdrop-blur-sm",
-                  isDark
-                    ? "max-w-[min(660px,54vw)] border-white/10 bg-white/[0.035]"
-                    : "max-w-[min(660px,54vw)] border-black/8 bg-white/78"
-                )}
-                aria-label={t('agentState')}
-              >
-                <div className="min-w-0">
-                  <div
-                    className={classNames(
-                      "min-w-0 text-sm font-medium leading-[1.15rem]",
-                      stateHeadline !== t('noAgentStateYet')
-                        ? "text-[var(--color-text-primary)]"
-                        : isDark
-                          ? "text-slate-500 italic"
-                          : "text-gray-500 italic"
-                    )}
-                    style={statusClamp2Style}
-                    title={
-                      agentState?.updated_at
-                        ? `${stateHeadline}\nUpdated: ${formatFullTime(agentState.updated_at)}`
-                        : stateHeadline
-                    }
+          <div
+            className={classNames(
+              "hidden sm:flex flex-col gap-1 flex-shrink-0 px-3 py-2 rounded-lg border max-w-[min(460px,40vw)]",
+              headerTone.statePanel
+            )}
+            aria-label={t('agentState')}
+          >
+            <div
+              className={classNames(
+                "text-xs font-medium leading-snug min-w-0",
+                stateHeadline !== t('noAgentStateYet')
+                  ? "text-[var(--color-text-primary)]"
+                  : isDark
+                    ? "text-slate-500 italic"
+                    : "text-gray-500 italic"
+              )}
+              style={statusClamp2Style}
+              title={
+                agentState?.updated_at
+                  ? `${stateHeadline}\nUpdated: ${formatFullTime(agentState.updated_at)}`
+                  : stateHeadline
+              }
+            >
+              <span>{stateHeadline}</span>
+              {agentState?.updated_at ? (
+                <span className={classNames("ml-2 text-[11px] tabular-nums font-normal", "text-[var(--color-text-tertiary)]")}>
+                  · {formatTime(agentState.updated_at)}
+                </span>
+              ) : null}
+            </div>
+            {(stateTask || blockerCount > 0 || stateNext) ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {stateTask ? (
+                  <span className={classNames("text-[11px] px-2 py-0.5 rounded", "bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]")}>
+                    {t("taskShort", { id: stateTask })}
+                  </span>
+                ) : null}
+                {blockerCount > 0 ? (
+                  <span className={classNames("text-[11px] px-2 py-0.5 rounded", "bg-rose-500/15 text-rose-600 dark:text-rose-300")}>
+                    {t("blockersShort", { count: blockerCount })}
+                  </span>
+                ) : null}
+                {stateNext ? (
+                  <span
+                    className={classNames("text-[11px] truncate", "text-[var(--color-text-tertiary)]")}
+                    title={stateNext}
                   >
-                    <span>{stateHeadline}</span>
-                  </div>
-                  {(stateTask || blockerCount > 0 || stateNext) ? (
-                    <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                      {stateTask ? (
-                        <span className={classNames("shrink-0 rounded-full bg-[var(--glass-tab-bg)] px-2 py-0.5 text-[10px] text-[var(--color-text-secondary)]")}>
-                          {t("taskShort", { id: stateTask })}
-                        </span>
-                      ) : null}
-                      {blockerCount > 0 ? (
-                        <span className={classNames("shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-600 dark:text-rose-300")}>
-                          {t("blockersShort", { count: blockerCount })}
-                        </span>
-                      ) : null}
-                      {stateNext ? (
-                        <span
-                          className={classNames("min-w-0 truncate text-[10px] leading-4", "text-[var(--color-text-tertiary)]")}
-                          title={stateNext}
-                        >
-                          {t("nextShort", { value: stateNext })}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-                {agentState?.updated_at ? (
-                  <div className="shrink-0 rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] px-2 py-0.5 text-[10px] font-medium leading-4 text-[var(--color-text-tertiary)]">
-                    {formatTime(agentState.updated_at)}
-                  </div>
+                    {t("nextShort", { value: stateNext })}
+                  </span>
                 ) : null}
               </div>
-            </div>
+            ) : null}
           </div>
-
+        </div>
+          </div>
         </div>
       </div>
 
@@ -649,7 +648,7 @@ export function AgentTab({
                 {canControl && (
                   <button
                     onClick={requestReconnect}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110 font-medium min-h-[44px] transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700 text-white font-medium min-h-[44px] transition-colors dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400"
                   >
                     <RefreshIcon size={16} />
                     {t('reconnect')}
@@ -668,11 +667,11 @@ export function AgentTab({
                 {t('agentStoppedDescription')}
               </div>
               {canControl ? (
-                <button
-                  onClick={onLaunch}
-                  disabled={isBusy}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110 font-medium disabled:opacity-50 min-h-[44px] transition-colors"
-                  aria-label={t('launchAgentLabel')}
+                  <button
+                    onClick={onLaunch}
+                    disabled={isBusy}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700 text-white font-medium disabled:opacity-50 min-h-[44px] transition-colors dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400"
+                    aria-label={t('launchAgentLabel')}
                 >
                   <PlayIcon size={16} />
                   {isBusy ? t('launching') : t('launchAgent')}
@@ -748,7 +747,7 @@ export function AgentTab({
               <button
                 onClick={onLaunch}
                 disabled={isBusy}
-                className={`${primaryActionButtonClass} flex-shrink-0 whitespace-nowrap`}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700 text-white text-sm disabled:opacity-50 min-h-[44px] transition-colors flex-shrink-0 whitespace-nowrap dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400"
                 aria-label={t('launchAgentLabel')}
               >
                 <PlayIcon size={16} />
@@ -784,7 +783,7 @@ export function AgentTab({
               <span
                 className={classNames(
                   "text-[10px] px-1.5 py-0.5 rounded-full font-semibold tracking-tight shadow-sm",
-                  isDark ? "bg-white text-[rgb(20,20,22)]" : "bg-[rgb(35,36,37)] text-white"
+                  isDark ? "bg-blue-400 text-white" : "bg-blue-600 text-white"
                 )}
                 aria-hidden="true"
               >

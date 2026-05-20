@@ -186,22 +186,22 @@
   --glass-panel-bg: rgba(255, 255, 255, 0.78);
   --glass-panel-border: rgba(226, 232, 240, 0.58);
 
-  /* Enhanced Accent System — Light Blue */
-  --glass-accent-bg: rgba(125, 211, 252, 0.1);
-  --glass-accent-bg-hover: rgba(96, 165, 250, 0.16);
-  --glass-accent-border: rgba(96, 165, 250, 0.26);
-  --glass-accent-glow: 0 0 18px rgba(96, 165, 250, 0.14);
-  --glass-accent-shadow: 0 4px 12px rgba(96, 165, 250, 0.18);
+  /* Neutral primary action system */
+  --glass-accent-bg: rgba(35, 36, 37, 0.08);
+  --glass-accent-bg-hover: rgba(35, 36, 37, 0.12);
+  --glass-accent-border: rgba(35, 36, 37, 0.18);
+  --glass-accent-glow: none;
+  --glass-accent-shadow: 0 4px 12px rgba(35, 36, 37, 0.12);
 
   /* Gradient Colors */
-  --gradient-primary: linear-gradient(135deg, #dbeafe 0%, #7dd3fc 52%, #60a5fa 100%);
+  --gradient-primary: linear-gradient(135deg, #3f4144 0%, #232425 100%);
   --gradient-accent: linear-gradient(135deg, #e0f2fe 0%, #93c5fd 48%, #818cf8 100%);
   --gradient-subtle: linear-gradient(180deg, rgba(125, 211, 252, 0.12) 0%, transparent 100%);
   --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
 
   --color-border-primary: #e2e8f0;
   --color-border-secondary: #cbd5e1;
-  --color-border-focus: #60a5fa;
+  --color-border-focus: #232425;
 
   --color-text-primary: #0f172a;
   --color-text-secondary: #475569;
@@ -209,8 +209,8 @@
   --color-text-muted: #94a3b8;
   --color-text-inverse: #ffffff;
 
-  --color-accent-primary: #60a5fa;
-  --color-accent-secondary: #7dd3fc;
+  --color-accent-primary: #232425;
+  --color-accent-secondary: #5f6368;
   --color-accent-warning: #f59e0b;
   --color-accent-danger: #ef4444;
   --background: var(--color-bg-primary);
@@ -301,22 +301,22 @@
   --glass-panel-bg: rgba(20, 20, 28, 0.92);
   --glass-panel-border: rgba(255, 255, 255, 0.08);
 
-  /* Enhanced Accent System */
-  --glass-accent-bg: rgba(96, 165, 250, 0.14);
-  --glass-accent-bg-hover: rgba(129, 140, 248, 0.18);
-  --glass-accent-border: rgba(125, 211, 252, 0.26);
-  --glass-accent-glow: 0 0 20px rgba(96, 165, 250, 0.16);
+  /* Neutral primary action system */
+  --glass-accent-bg: rgba(255, 255, 255, 0.08);
+  --glass-accent-bg-hover: rgba(255, 255, 255, 0.14);
+  --glass-accent-border: rgba(255, 255, 255, 0.16);
+  --glass-accent-glow: none;
   --glass-accent-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 
   /* Gradient Colors */
-  --gradient-primary: linear-gradient(135deg, #38bdf8 0%, #60a5fa 58%, #818cf8 100%);
+  --gradient-primary: linear-gradient(135deg, #f4f4f5 0%, #d4d4d8 100%);
   --gradient-accent: linear-gradient(135deg, #7dd3fc 0%, #93c5fd 48%, #818cf8 100%);
   --gradient-subtle: linear-gradient(180deg, rgba(96, 165, 250, 0.1) 0%, transparent 100%);
   --gradient-shine: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 50%);
 
   --color-border-primary: #1f1f1f;
   --color-border-secondary: #2a2a2a;
-  --color-border-focus: #7dd3fc;
+  --color-border-focus: #d4d4d8;
 
   --color-text-primary: #ffffff;
   --color-text-secondary: #d4d4dc;
@@ -324,8 +324,8 @@
   --color-text-muted: #9396a4;
   --color-text-inverse: #000000;
 
-  --color-accent-primary: #7dd3fc;
-  --color-accent-secondary: #93c5fd;
+  --color-accent-primary: #f4f4f5;
+  --color-accent-secondary: #d4d4d8;
   --color-accent-warning: #f59e0b;
   --color-accent-danger: #ef4444;
   --background: var(--color-bg-primary);
@@ -385,7 +385,7 @@
     
     --color-border-primary: #334155;
     --color-border-secondary: #475569;
-    --color-border-focus: #60a5fa;
+    --color-border-focus: #d4d4d8;
     
     --color-text-primary: #f1f5f9;
     --color-text-secondary: #cbd5e1;
@@ -393,8 +393,8 @@
     --color-text-muted: #64748b;
     --color-text-inverse: #0f172a;
     
-    --color-accent-primary: #60a5fa;
-    --color-accent-secondary: #93c5fd;
+    --color-accent-primary: #f4f4f5;
+    --color-accent-secondary: #d4d4d8;
     --color-accent-warning: #fbbf24;
     --color-accent-danger: #f87171;
     
@@ -570,6 +570,35 @@ button[class*="bg-cyan"]:active:not(:disabled) {
   opacity: 1;
   filter: brightness(0.88);
   transform: scale(0.97);
+}
+
+/* Normalize legacy black button styling to the blue action system. */
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-[#232425]"],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-[rgb(35,36,37)]"],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-[rgb(20,20,22)]"],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class~="bg-black"],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-slate-800"],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-slate-900"] {
+  background-color: rgb(37 99 235) !important;
+  border-color: rgb(37 99 235) !important;
+  color: #ffffff !important;
+}
+
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="hover:bg-[#3f4144]"]:hover,
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class~="hover:bg-black"]:hover,
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="hover:bg-slate-700"]:hover,
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="hover:bg-zinc-200"]:hover {
+  background-color: rgb(29 78 216) !important;
+  border-color: rgb(29 78 216) !important;
+  color: #ffffff !important;
+}
+
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-black/"],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="bg-black["],
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="hover:bg-black/"]:hover,
+:where(button, a, [role="button"], label, summary):not(.onecolleague-sidebar *)[class*="hover:bg-black["]:hover {
+  background-color: rgba(37, 99, 235, 0.1) !important;
+  color: var(--color-accent-primary) !important;
 }
 
 /* Reduced motion preference */
@@ -1298,17 +1327,17 @@ select {
 }
 
 .glass-status-pill-run {
-  background: rgba(16, 185, 129, 0.12);
-  border-color: rgba(16, 185, 129, 0.2);
-  color: #059669;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.22);
+  color: #0284c7;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.15);
 }
 
 .dark .glass-status-pill-run {
-  background: rgba(52, 211, 153, 0.1);
-  border-color: rgba(52, 211, 153, 0.2);
-  color: #34d399;
-  box-shadow: 0 0 10px rgba(52, 211, 153, 0.12);
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.22);
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.12);
 }
 
 .glass-status-pill-paused {

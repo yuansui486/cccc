@@ -90,6 +90,8 @@ export default function App() {
   const sseStatus = useUIStore((s) => s.sseStatus);
 
   const openModal = useModalStore((s) => s.openModal);
+  const openContextTarget = useModalStore((s) => s.openContextTarget);
+  const openSettingsTarget = useModalStore((s) => s.openSettingsTarget);
   const modalFlags = useModalStore((s) => s.modals);
   const editingActor = useModalStore((s) => s.editingActor);
   const peerRuntimeVisibility = useObservabilityStore((state) => state.peerRuntimeVisibility);
@@ -114,7 +116,7 @@ export default function App() {
     setToText,
   } = useComposerStore();
 
-  const { setNewActorRole, setEditGroupTitle, setEditGroupTopic, setDirSuggestions } = useFormStore();
+  const { setNewActorRole, setEditGroupId, setEditGroupTitle, setEditGroupTopic, setDirSuggestions } = useFormStore();
   const clearAllOutbox = useChatOutboxStore((state) => state.clearAll);
 
   const {
@@ -425,12 +427,15 @@ export default function App() {
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenGroupEdit={
           canManageGroups
-            ? () => {
-                if (groupDoc) {
-                  setEditGroupTitle(groupDoc.title || "");
-                  setEditGroupTopic(groupDoc.topic || "");
-                  openModal("groupEdit");
-                }
+            ? (groupId?: string) => {
+                const targetGroupId = String(groupId || selectedGroupId || "").trim();
+                const targetGroup = groups.find((g) => String(g.group_id || "").trim() === targetGroupId);
+                const targetDoc = targetGroupId === selectedGroupId ? groupDoc : null;
+                if (!targetGroupId || (!targetGroup && !targetDoc)) return;
+                setEditGroupId(targetGroupId);
+                setEditGroupTitle(targetDoc?.title || targetGroup?.title || "");
+                setEditGroupTopic(targetDoc?.topic || targetGroup?.topic || "");
+                openModal("groupEdit");
               }
             : undefined
         }
@@ -438,6 +443,18 @@ export default function App() {
         onOpenContext={() => {
           if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
           openModal("context");
+        }}
+        onOpenContextProject={() => {
+          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
+          openContextTarget({ tab: "project", projectMode: "edit" });
+        }}
+        onOpenContextSummary={() => {
+          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
+          openContextTarget({ tab: "tasks" });
+        }}
+        onOpenSkillManagement={() => {
+          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
+          openContextTarget({ tab: "skills" });
         }}
         onStartGroup={handleStartGroup}
         onStopGroup={handleStopGroup}

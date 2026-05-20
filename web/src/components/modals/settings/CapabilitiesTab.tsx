@@ -932,7 +932,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
       return "bg-rose-500/15 text-rose-600 dark:text-rose-400";
     }
     if (status === "enableable") {
-      return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+      return "bg-blue-500/15 text-blue-600 dark:text-blue-300";
     }
     return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
   };
@@ -1478,7 +1478,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
             </button>
             <button
               type="button"
-              className="px-3 py-2 rounded-lg text-xs min-h-[38px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 disabled:opacity-50"
+              className="px-3 py-2 rounded-lg text-xs min-h-[38px] border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400 disabled:opacity-50"
               disabled={!groupId || importablePendingItems.length === 0 || busyKey === "store:confirmAll"}
               onClick={() => void confirmAllPending()}
             >
@@ -1545,7 +1545,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
                       </div>
                       <button
                         type="button"
-                        className="px-2.5 py-1.5 rounded text-xs min-h-[34px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 disabled:opacity-50"
+                        className="px-2.5 py-1.5 rounded text-xs min-h-[34px] border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400 disabled:opacity-50"
                         disabled={!groupId || !item.record || busyKey === `store:confirm:${pendingId}`}
                         onClick={() => void confirmPending(pendingId)}
                       >
@@ -1579,15 +1579,15 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
                           <div className="text-[11px] mt-1 text-[var(--color-text-tertiary)]">{String(row.description_short || "")}</div>
                         ) : null}
                         <div className="mt-1 flex flex-wrap gap-1">
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">{t("capabilities.store.imported")}</span>
-                          {enabledNow ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-sky-500/15 text-sky-600 dark:text-sky-300">{t("capabilities.store.enabled")}</span> : null}
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/15 text-blue-600 dark:text-blue-300">{t("capabilities.store.imported")}</span>
+                          {enabledNow ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-black/[0.06] text-[rgb(35,36,37)] dark:bg-white/[0.08] dark:text-white">{t("capabilities.store.enabled")}</span> : null}
                           {activeNow ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-violet-500/15 text-violet-600 dark:text-violet-300">{t("capabilities.store.active")}</span> : null}
                           {row.policy_level ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{row.policy_level}</span> : null}
                         </div>
                       </div>
                       <button
                         type="button"
-                        className={`px-2.5 py-1.5 rounded text-xs min-h-[34px] border disabled:opacity-50 ${enabledNow ? "bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/30" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"}`}
+                        className={`px-2.5 py-1.5 rounded text-xs min-h-[34px] border disabled:opacity-50 ${enabledNow ? "bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/30" : "border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400"}`}
                         disabled={!groupId || busyKey === `store:enable:${capId}`}
                         onClick={() => void toggleCapabilityEnabled(capId, !enabledNow)}
                       >
@@ -1672,7 +1672,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
                       {row.kind ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{row.kind}</span> : null}
                       {row.source_id ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{row.source_id}</span> : null}
                       {row.policy_level ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{row.policy_level}</span> : null}
-                      {row.recent_success?.success_count ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">{t("capabilities.recentCount", { count: Number(row.recent_success?.success_count || 0) })}</span> : null}
+                      {row.recent_success?.success_count ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/15 text-blue-600 dark:text-blue-300">{t("capabilities.recentCount", { count: Number(row.recent_success?.success_count || 0) })}</span> : null}
                       {blockedNow ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/15 text-rose-600 dark:text-rose-400">{t("capabilities.blocked")}</span> : null}
                     </div>
                     {renderReadinessPreview(readinessPreview)}
@@ -1680,7 +1680,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
-                      className={`px-2.5 py-1.5 rounded text-xs min-h-[32px] ${blockedNow ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30" : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30"} ${busyKey === `block:${capId}` ? "opacity-60 cursor-not-allowed" : ""}`}
+                      className={`px-2.5 py-1.5 rounded text-xs min-h-[32px] ${blockedNow ? "border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400" : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30"} ${busyKey === `block:${capId}` ? "opacity-60 cursor-not-allowed" : ""}`}
                       disabled={busyKey === `block:${capId}`}
                       onClick={() => void toggleBlock(row, !blockedNow)}
                     >
@@ -1715,7 +1715,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
                     <code className="text-xs">{capId}</code>
                     <button
                       type="button"
-                      className="px-2.5 py-1 rounded text-xs min-h-[30px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                      className="px-2.5 py-1 rounded text-xs min-h-[30px] border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400"
                       disabled={busyKey === `block:${capId}`}
                       onClick={() => void toggleBlock(row, false)}
                     >

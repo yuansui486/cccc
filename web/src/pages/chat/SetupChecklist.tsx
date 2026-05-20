@@ -116,7 +116,7 @@ export function SetupChecklist({
           <button
             type="button"
             className={classNames(
-              "flex-shrink-0 font-semibold bg-blue-600 hover:bg-blue-500 text-white",
+              "flex-shrink-0 font-semibold border border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700 text-white dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
               isCompact ? "rounded-xl px-3 py-1.5 min-h-[36px] flex items-center text-[11px]" : "mt-3 w-full rounded-xl px-4 py-2 text-sm"
             )}
             onClick={onAddAgent}
@@ -153,7 +153,7 @@ export function SetupChecklist({
           <button
             type="button"
             className={classNames(
-              "flex-shrink-0 font-semibold bg-blue-600 hover:bg-blue-500 text-white",
+              "flex-shrink-0 font-semibold border border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700 text-white dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
               isCompact ? "rounded-xl px-3 py-1.5 min-h-[36px] flex items-center text-[11px]" : "mt-3 w-full rounded-xl px-4 py-2 text-sm",
               busy === "group-start" ? "opacity-60" : ""
             )}

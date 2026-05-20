@@ -885,7 +885,7 @@ export function IMBridgeTab({
                       <button
                         onClick={() => handleApprovePending(request)}
                         disabled={actionBusy}
-                        className="inline-flex items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/12 px-3 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/18 dark:text-emerald-300 disabled:opacity-50"
+                        className="inline-flex items-center justify-center rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400 disabled:opacity-50"
                       >
                         {pendingActionKey === approveKey ? "..." : t("imBridge.approve", "Approve")}
                       </button>

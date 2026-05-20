@@ -260,7 +260,7 @@ export function ImagePreview({
               "flex items-center justify-center rounded-lg border px-4 py-6 text-xs",
               isGridLayout ? "min-h-32 min-w-32" : "min-h-28 min-w-28",
               isUserMessage
-                ? "border-[rgb(35,36,37)]/40 bg-[rgb(35,36,37)]/16 text-white"
+                ? "border-blue-500/45 bg-blue-500/20 text-white"
                 : "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]",
             )}
           >
@@ -348,7 +348,7 @@ export function ImagePreview({
                     download
                     className={classNames(
                       "inline-flex items-center rounded-lg px-3 py-2 text-xs font-medium transition-colors",
-                      isDark ? "bg-slate-800 text-slate-100 hover:bg-slate-700" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+                      isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
                     )}
                     title={t("download", { name: alt })}
                   >

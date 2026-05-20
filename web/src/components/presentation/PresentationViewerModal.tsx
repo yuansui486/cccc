@@ -746,8 +746,8 @@ function PresentationViewer({
                         "rounded-full px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition-colors",
                         webPreviewMode === "embedded"
                           ? isDark
-                            ? "bg-slate-100 text-slate-950"
-                            : "bg-slate-900 text-white"
+                            ? "bg-blue-500 text-white"
+                            : "bg-blue-600 text-white"
                           : isDark
                             ? "text-slate-300 hover:bg-white/8"
                             : "text-gray-600 hover:bg-black/6",
@@ -830,8 +830,8 @@ function PresentationViewer({
                   "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
                   snapshotMobileTab === "live"
                     ? isDark
-                      ? "bg-slate-100 text-slate-950"
-                      : "bg-slate-900 text-white"
+                      ? "bg-blue-500 text-white"
+                      : "bg-blue-600 text-white"
                     : isDark
                       ? "bg-white/5 text-slate-300 hover:bg-white/10"
                       : "bg-black/5 text-gray-600 hover:bg-black/10",
@@ -846,8 +846,8 @@ function PresentationViewer({
                   "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
                   snapshotMobileTab === "snapshot"
                     ? isDark
-                      ? "bg-slate-100 text-slate-950"
-                      : "bg-slate-900 text-white"
+                      ? "bg-blue-500 text-white"
+                      : "bg-blue-600 text-white"
                     : isDark
                       ? "bg-white/5 text-slate-300 hover:bg-white/10"
                       : "bg-black/5 text-gray-600 hover:bg-black/10",
@@ -1046,8 +1046,8 @@ function PresentationViewer({
                     "rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap transition-colors",
                     webPreviewMode === "embedded"
                       ? isDark
-                        ? "bg-slate-100 text-slate-950"
-                        : "bg-slate-900 text-white"
+                        ? "bg-blue-500 text-white"
+                        : "bg-blue-600 text-white"
                       : isDark
                         ? "text-slate-300 hover:bg-white/8"
                         : "text-gray-600 hover:bg-black/6",
@@ -1083,7 +1083,7 @@ function PresentationViewer({
                 onClick={() => setRefreshTick((value) => value + 1)}
                 className={classNames(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                  isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                  isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
                 )}
                 aria-label={refreshActionLabel}
                 title={refreshActionLabel}
@@ -1101,7 +1101,7 @@ function PresentationViewer({
                   "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
                   copiedReference
                     ? isDark ? "bg-white/[0.08] text-white" : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)]"
-                    : isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                    : isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
                 )}
                 aria-label={copyActionLabel}
                 title={copyActionLabel}
@@ -1115,7 +1115,7 @@ function PresentationViewer({
                 onClick={onOpenWindow}
                 className={classNames(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                  isDark ? "bg-slate-800 text-white hover:bg-slate-700 hover:text-white" : "bg-gray-100 text-[rgb(35,36,37)] hover:bg-gray-200 hover:text-black",
+                  isDark ? "bg-blue-500 text-white hover:bg-blue-400 hover:text-white" : "bg-gray-100 text-[rgb(35,36,37)] hover:bg-gray-200 hover:text-black",
                 )}
                 aria-label={t("presentationOpenWindowAction", { defaultValue: "Open in window" })}
                 title={t("presentationOpenWindowAction", { defaultValue: "Open in window" })}
@@ -1129,7 +1129,7 @@ function PresentationViewer({
                 onClick={() => onReplaceSlot(slot.slot_id)}
                 className={classNames(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                  isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                  isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
                 )}
                 aria-label={editActionLabel}
                 title={editActionLabel}
@@ -1156,7 +1156,7 @@ function PresentationViewer({
               onClick={onClose}
               className={classNames(
                 "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-                isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+                isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
               )}
               aria-label={t("presentationCloseSplitAction", { defaultValue: "Close presentation" })}
               title={t("presentationCloseSplitAction", { defaultValue: "Close presentation" })}

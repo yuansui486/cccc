@@ -5,7 +5,7 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "glass-btn-accent bg-[var(--gradient-primary)] text-[rgb(15,23,42)] shadow-[var(--glass-accent-shadow)] hover:border-[var(--color-accent-primary)] dark:text-white",
+        default: "border border-blue-600 bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:text-white dark:hover:border-blue-300 dark:hover:bg-blue-400",
         secondary: "glass-btn text-[var(--color-text-secondary)]",
         destructive:
           "border border-rose-500/30 bg-rose-500/15 text-rose-600 hover:bg-rose-500/25 dark:text-rose-400",
