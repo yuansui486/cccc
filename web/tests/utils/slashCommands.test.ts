@@ -18,7 +18,7 @@ describe("slashCommands", () => {
 
     expect(commands[0]).toMatchObject({
       command: "/install",
-      capabilityId: "skill:cccc:install",
+      capabilityId: "skill:onecolleague:install",
       sourceType: "builtin_command",
     });
     expect(parseSlashCommandInput("/install https://github.com/obra/superpowers", commands)?.argsText).toBe(
@@ -89,7 +89,7 @@ describe("slashCommands", () => {
         enabled: [],
         active_capsule_skills: [
           {
-            capability_id: "skill:cccc:install",
+            capability_id: "skill:onecolleague:install",
             name: "install",
             description_short: "Install capability",
           },
@@ -101,7 +101,7 @@ describe("slashCommands", () => {
     expect(commands.map((item) => item.command)).toEqual(["/install"]);
     expect(commands[0]).toMatchObject({
       command: "/install",
-      capabilityId: "skill:cccc:install",
+      capabilityId: "skill:onecolleague:install",
       sourceType: "builtin_command",
     });
   });

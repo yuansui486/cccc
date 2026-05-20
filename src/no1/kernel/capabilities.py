@@ -13,6 +13,8 @@ from typing import Dict, Iterable, List, Set, Tuple
 
 from .install_capability import INSTALL_CAPABILITY_ID, INSTALL_CAPABILITY_RECORD
 
+BUILTIN_SKILL_NAMESPACE = "onecolleague"
+LEGACY_BUILTIN_SKILL_NAMESPACE = "cccc"
 
 CORE_BASIC_TOOLS: Tuple[str, ...] = (
     "onecolleague_help",
@@ -180,7 +182,7 @@ BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
 
 BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
     INSTALL_CAPABILITY_ID: INSTALL_CAPABILITY_RECORD,
-    "skill:cccc:app-i18n-localization": {
+    "skill:onecolleague:app-i18n-localization": {
         "name": "app-i18n-localization",
         "description_short": (
             "Plan and review application localization work: hardcoded strings, translation keys, locale files, "
@@ -200,7 +202,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "i18n plan or patch checklist with file/key references",
         "capsule_text": (
-            "You are the app-i18n-localization skill for CCCC agents.\n\n"
+            "You are the app-i18n-localization skill for OneColleague agents.\n\n"
             "Use this skill when app UI or product copy needs localization or i18n cleanup.\n\n"
             "Procedure:\n"
             "1. Identify the existing i18n framework, locale files, naming pattern, and interpolation syntax.\n"
@@ -218,7 +220,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("i18n", "localization", "translation", "frontend", "copy", "onecolleague-glue"),
     },
-    "skill:cccc:briefing-synthesis": {
+    "skill:onecolleague:briefing-synthesis": {
         "name": "briefing-synthesis",
         "description_short": (
             "Turn scattered conversation, notes, files, or research into a concise decision-ready brief "
@@ -238,7 +240,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "source list plus concise fact/gap/action summary",
         "capsule_text": (
-            "You are the briefing-synthesis skill for CCCC agents.\n\n"
+            "You are the briefing-synthesis skill for OneColleague agents.\n\n"
             "Use this skill when scattered context must become a concise, decision-ready brief.\n\n"
             "Procedure:\n"
             "1. Identify the user's decision or action need before summarizing.\n"
@@ -257,7 +259,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("brief", "synthesis", "research", "knowledge", "summary", "onecolleague-glue"),
     },
-    "skill:cccc:capability-vet": {
+    "skill:onecolleague:capability-vet": {
         "name": "capability-vet",
         "description_short": (
             "Audit a skill, plugin, hook, or MCP candidate before enabling it; identify install, permission, "
@@ -268,7 +270,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
             "The task asks whether a capability is safe, lightweight, useful, or worth mounting.",
         ),
         "avoid_when": (
-            "The capability is already a trusted CCCC builtin and the user only wants to use it.",
+            "The capability is already a trusted OneColleague builtin and the user only wants to use it.",
             "The task is general code security review rather than capability installation risk.",
         ),
         "gotchas": (
@@ -277,7 +279,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "inventory, risk class, blockers, and enablement recommendation",
         "capsule_text": (
-            "You are the capability-vet skill for CCCC capability safety review.\n\n"
+            "You are the capability-vet skill for OneColleague capability safety review.\n\n"
             "Use this skill before enabling third-party skills, plugins, hooks, MCP servers, or capability records.\n\n"
             "Procedure:\n"
             "1. Inventory the candidate: source, files, install mode, scripts, hooks, MCP config, declared tools, secrets, and permissions.\n"
@@ -296,7 +298,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("capability", "vet", "security", "mcp", "skill", "policy", "onecolleague-glue"),
     },
-    "skill:cccc:csv-table-analysis": {
+    "skill:onecolleague:csv-table-analysis": {
         "name": "csv-table-analysis",
         "description_short": (
             "Analyze CSV, spreadsheet, or tabular data with lightweight summaries, checks, comparisons, "
@@ -316,7 +318,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "schema summary, checks performed, findings, and recommended artifact",
         "capsule_text": (
-            "You are the csv-table-analysis skill for CCCC agents.\n\n"
+            "You are the csv-table-analysis skill for OneColleague agents.\n\n"
             "Use this skill for lightweight analysis of CSV, XLSX, Markdown tables, or pasted tabular data.\n\n"
             "Procedure:\n"
             "1. Identify the table source, schema, row count if available, units, and key columns.\n"
@@ -334,7 +336,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("csv", "xlsx", "table", "analysis", "data", "onecolleague-glue"),
     },
-    "skill:cccc:decision-log": {
+    "skill:onecolleague:decision-log": {
         "name": "decision-log",
         "description_short": (
             "Convert discussion into durable decision records with context, decision, rationale, owner, date, "
@@ -354,7 +356,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "decision record with source context and follow-up actions",
         "capsule_text": (
-            "You are the decision-log skill for CCCC collaboration artifacts.\n\n"
+            "You are the decision-log skill for OneColleague collaboration artifacts.\n\n"
             "Use this skill when a conversation or work session needs a durable decision record.\n\n"
             "Procedure:\n"
             "1. Identify the concrete decision. If none exists, say no decision is ready to log.\n"
@@ -365,17 +367,17 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
             "Pitfalls:\n"
             "- Do not convert opinions or tentative ideas into final decisions.\n"
             "- Do not omit dissent, risk, or rollback notes when they matter.\n"
-            "- Do not replace CCCC task state; a decision record complements tasks.\n\n"
+            "- Do not replace OneColleague task state; a decision record complements tasks.\n\n"
             "Verification:\n"
             "- The output has a decision, rationale, owner or unknown owner, date, status, and next action if any.\n"
             "- The record can be read later without needing the whole conversation."
         ),
         "tags": ("decision", "log", "collaboration", "notes", "onecolleague-glue"),
     },
-    "skill:cccc:meeting-notes": {
+    "skill:onecolleague:meeting-notes": {
         "name": "meeting-notes",
         "description_short": (
-            "Create concise meeting notes from CCCC group discussion: attendees, topics, decisions, blockers, "
+            "Create concise meeting notes from OneColleague group discussion: attendees, topics, decisions, blockers, "
             "action items, owners, and dates."
         ),
         "use_when": (
@@ -392,7 +394,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "meeting notes with decisions and action items",
         "capsule_text": (
-            "You are the meeting-notes skill for CCCC group collaboration.\n\n"
+            "You are the meeting-notes skill for OneColleague group collaboration.\n\n"
             "Use this skill to turn conversation or transcript context into concise, action-oriented meeting notes.\n\n"
             "Procedure:\n"
             "1. Identify the meeting scope, date, participants, and source material.\n"
@@ -411,7 +413,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("meeting", "notes", "minutes", "collaboration", "summary", "onecolleague-glue"),
     },
-    "skill:cccc:readme-i18n": {
+    "skill:onecolleague:readme-i18n": {
         "name": "readme-i18n",
         "description_short": (
             "Translate and localize README or documentation files while preserving Markdown structure, links, "
@@ -431,7 +433,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "localized Markdown with preserved structure and technical tokens",
         "capsule_text": (
-            "You are the readme-i18n skill for CCCC agents.\n\n"
+            "You are the readme-i18n skill for OneColleague agents.\n\n"
             "Use this skill when translating or localizing README files and technical Markdown documentation.\n\n"
             "Procedure:\n"
             "1. Identify source language, target language, audience, and whether localization should be literal or adapted.\n"
@@ -449,7 +451,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("readme", "i18n", "localization", "translation", "docs", "markdown", "onecolleague-glue"),
     },
-    "skill:cccc:release-notes": {
+    "skill:onecolleague:release-notes": {
         "name": "release-notes",
         "description_short": (
             "Turn commits, diffs, issues, or completed work into concise release notes with user impact, "
@@ -469,7 +471,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "release-note sections tied to source changes or shipped items",
         "capsule_text": (
-            "You are the release-notes skill for CCCC agents.\n\n"
+            "You are the release-notes skill for OneColleague agents.\n\n"
             "Use this skill to turn completed work, commits, diffs, issues, or task summaries into release notes.\n\n"
             "Procedure:\n"
             "1. Identify the audience: users, operators, developers, or internal stakeholders.\n"
@@ -487,7 +489,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("release", "changelog", "notes", "documentation", "collaboration", "onecolleague-glue"),
     },
-    "skill:cccc:api-interface-design": {
+    "skill:onecolleague:api-interface-design": {
         "name": "api-interface-design",
         "description_short": (
             "Design or review APIs, daemon ops, MCP tools, event contracts, and request/response shapes "
@@ -507,7 +509,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "interface review or contract plan with compatibility notes",
         "capsule_text": (
-            "You are the api-interface-design skill for CCCC agents.\n\n"
+            "You are the api-interface-design skill for OneColleague agents.\n\n"
             "Use this skill when designing or reviewing daemon ops, MCP tools, API contracts, event shapes, "
             "request payloads, response fields, or cross-component boundaries.\n\n"
             "Procedure:\n"
@@ -525,7 +527,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("api", "interface", "contract", "mcp", "daemon", "events", "onecolleague-glue"),
     },
-    "skill:cccc:artifact-qa": {
+    "skill:onecolleague:artifact-qa": {
         "name": "artifact-qa",
         "description_short": (
             "Verify generated artifacts such as Markdown, HTML, PDFs, spreadsheets, decks, screenshots, "
@@ -545,7 +547,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "artifact inspection result with path, checks, and pass/fail notes",
         "capsule_text": (
-            "You are the artifact-qa skill for CCCC agents.\n\n"
+            "You are the artifact-qa skill for OneColleague agents.\n\n"
             "Use this skill to verify user-visible generated artifacts before reporting completion.\n\n"
             "Procedure:\n"
             "1. Identify the requested artifact type, path, audience, and acceptance criteria.\n"
@@ -562,7 +564,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("artifact", "qa", "verification", "documents", "reports", "files", "onecolleague-glue"),
     },
-    "skill:cccc:browser-qa": {
+    "skill:onecolleague:browser-qa": {
         "name": "browser-qa",
         "description_short": (
             "Plan and perform browser-facing QA for local web apps: load state, layout, interaction, console errors, "
@@ -582,7 +584,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "browser QA checklist with URL, viewport, interaction, and observed result",
         "capsule_text": (
-            "You are the browser-qa skill for CCCC agents.\n\n"
+            "You are the browser-qa skill for OneColleague agents.\n\n"
             "Use this skill when a web UI needs rendered verification.\n\n"
             "Procedure:\n"
             "1. Identify the target URL, route, viewport, state, and trigger path.\n"
@@ -599,7 +601,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("browser", "qa", "frontend", "playwright", "visual", "responsive", "onecolleague-glue"),
     },
-    "skill:cccc:code-simplification": {
+    "skill:onecolleague:code-simplification": {
         "name": "code-simplification",
         "description_short": (
             "Simplify code paths, remove redundant mechanisms, and reduce states while preserving behavior "
@@ -619,7 +621,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "simplification patch summary with removed states and regression evidence",
         "capsule_text": (
-            "You are the code-simplification skill for CCCC agents.\n\n"
+            "You are the code-simplification skill for OneColleague agents.\n\n"
             "Use this skill when a mechanism should become simpler, clearer, or less noisy.\n\n"
             "Procedure:\n"
             "1. Identify the behavior that must remain true and the evidence that proves it.\n"
@@ -636,7 +638,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("code", "simplification", "refactor", "cleanup", "maintainability", "onecolleague-glue"),
     },
-    "skill:cccc:copy-editing": {
+    "skill:onecolleague:copy-editing": {
         "name": "copy-editing",
         "description_short": (
             "Edit product copy, documentation prose, prompts, and user-facing text for clarity, tone, brevity, "
@@ -656,7 +658,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "edited copy or concise copy review with rationale",
         "capsule_text": (
-            "You are the copy-editing skill for CCCC agents.\n\n"
+            "You are the copy-editing skill for OneColleague agents.\n\n"
             "Use this skill to improve wording without changing meaning.\n\n"
             "Procedure:\n"
             "1. Identify audience, channel, tone, and required facts.\n"
@@ -673,7 +675,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("copy", "editing", "writing", "docs", "prompt", "product", "onecolleague-glue"),
     },
-    "skill:cccc:documentation-adr": {
+    "skill:onecolleague:documentation-adr": {
         "name": "documentation-adr",
         "description_short": (
             "Create or review technical documentation and architecture decision records with context, tradeoffs, "
@@ -693,7 +695,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "technical doc or ADR with decision, tradeoffs, and consequences",
         "capsule_text": (
-            "You are the documentation-adr skill for CCCC agents.\n\n"
+            "You are the documentation-adr skill for OneColleague agents.\n\n"
             "Use this skill for technical documentation, ADRs, and durable architecture notes.\n\n"
             "Procedure:\n"
             "1. Identify the audience, decision status, scope, and source evidence.\n"
@@ -710,7 +712,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("documentation", "adr", "architecture", "design", "technical-writing", "onecolleague-glue"),
     },
-    "skill:cccc:report-writing": {
+    "skill:onecolleague:report-writing": {
         "name": "report-writing",
         "description_short": (
             "Write evidence-based reports, audits, reviews, and investigation summaries with clear findings, "
@@ -730,7 +732,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "durable report with scope, findings, evidence, risks, and next steps",
         "capsule_text": (
-            "You are the report-writing skill for CCCC agents.\n\n"
+            "You are the report-writing skill for OneColleague agents.\n\n"
             "Use this skill to turn completed analysis into a durable report or audit artifact.\n\n"
             "Procedure:\n"
             "1. Define scope, audience, sources, and decision need.\n"
@@ -747,7 +749,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("report", "audit", "review", "investigation", "writing", "evidence", "onecolleague-glue"),
     },
-    "skill:cccc:slide-deck-outline": {
+    "skill:onecolleague:slide-deck-outline": {
         "name": "slide-deck-outline",
         "description_short": (
             "Plan concise slide decks and presentation narratives with audience, storyline, slide structure, "
@@ -767,7 +769,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "deck outline with audience, slide titles, key points, and verification needs",
         "capsule_text": (
-            "You are the slide-deck-outline skill for CCCC agents.\n\n"
+            "You are the slide-deck-outline skill for OneColleague agents.\n\n"
             "Use this skill when a task needs presentation structure or slide planning.\n\n"
             "Procedure:\n"
             "1. Identify audience, purpose, time limit, tone, and required format.\n"
@@ -784,7 +786,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("slides", "ppt", "pptx", "deck", "presentation", "briefing", "onecolleague-glue"),
     },
-    "skill:cccc:test-driven-development": {
+    "skill:onecolleague:test-driven-development": {
         "name": "test-driven-development",
         "description_short": (
             "Plan and implement changes with focused tests, regression coverage, failing-path reproduction, "
@@ -804,7 +806,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "test plan, test patch, and observed test result",
         "capsule_text": (
-            "You are the test-driven-development skill for CCCC agents.\n\n"
+            "You are the test-driven-development skill for OneColleague agents.\n\n"
             "Use this skill when a behavior change should be protected by tests.\n\n"
             "Procedure:\n"
             "1. Identify the behavior contract, regression risk, and smallest failing path.\n"
@@ -821,7 +823,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("testing", "tdd", "regression", "pytest", "verification", "code", "onecolleague-glue"),
     },
-    "skill:cccc:frontend-ui-engineering": {
+    "skill:onecolleague:frontend-ui-engineering": {
         "name": "frontend-ui-engineering",
         "description_short": (
             "Build frontend product surfaces with existing design systems, responsive structure, state clarity, "
@@ -841,7 +843,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "frontend patch plus rendered or test evidence for the affected workflow",
         "capsule_text": (
-            "You are the frontend-ui-engineering skill for CCCC agents.\n\n"
+            "You are the frontend-ui-engineering skill for OneColleague agents.\n\n"
             "Use this skill when implementing or changing product UI.\n\n"
             "Procedure:\n"
             "1. Classify the surface: operational product, dashboard, form/workflow, landing/showcase, or game.\n"
@@ -858,7 +860,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("frontend", "ui", "ux", "product", "react", "browser", "onecolleague-glue"),
     },
-    "skill:cccc:git-workflow-versioning": {
+    "skill:onecolleague:git-workflow-versioning": {
         "name": "git-workflow-versioning",
         "description_short": (
             "Handle git hygiene, diff review, branch-safe commits, changelog boundaries, and versioning "
@@ -878,7 +880,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "git status/diff summary, action taken, commit hash or explicit no-commit state",
         "capsule_text": (
-            "You are the git-workflow-versioning skill for CCCC agents.\n\n"
+            "You are the git-workflow-versioning skill for OneColleague agents.\n\n"
             "Use this skill for git operations, commits, pulls, merges, release boundaries, and diff hygiene.\n\n"
             "Procedure:\n"
             "1. Read `git status --short` before any mutation.\n"
@@ -895,7 +897,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("git", "versioning", "commit", "merge", "release", "diff", "onecolleague-glue"),
     },
-    "skill:cccc:performance-optimization": {
+    "skill:onecolleague:performance-optimization": {
         "name": "performance-optimization",
         "description_short": (
             "Improve runtime, UI, query, or test performance with baseline measurement, bottleneck evidence, "
@@ -915,7 +917,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "baseline, bottleneck hypothesis, change, and before/after verification",
         "capsule_text": (
-            "You are the performance-optimization skill for CCCC agents.\n\n"
+            "You are the performance-optimization skill for OneColleague agents.\n\n"
             "Use this skill when performance is the actual task.\n\n"
             "Procedure:\n"
             "1. Identify the user-visible metric: latency, throughput, memory, render time, test time, or payload size.\n"
@@ -932,7 +934,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("performance", "optimization", "latency", "profiling", "tests", "frontend", "onecolleague-glue"),
     },
-    "skill:cccc:product-requirements": {
+    "skill:onecolleague:product-requirements": {
         "name": "product-requirements",
         "description_short": (
             "Turn product ideas, user feedback, or feature asks into practical requirements, success criteria, "
@@ -952,7 +954,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "requirements brief with user outcome, scope, success criteria, and non-goals",
         "capsule_text": (
-            "You are the product-requirements skill for CCCC agents.\n\n"
+            "You are the product-requirements skill for OneColleague agents.\n\n"
             "Use this skill to shape product ideas into actionable requirements.\n\n"
             "Procedure:\n"
             "1. Identify target user, problem, current workflow, desired outcome, and constraints.\n"
@@ -969,7 +971,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("product", "requirements", "prd", "planning", "scope", "mvp", "onecolleague-glue"),
     },
-    "skill:cccc:security-privacy-review": {
+    "skill:onecolleague:security-privacy-review": {
         "name": "security-privacy-review",
         "description_short": (
             "Review implementation, configuration, or product changes for practical security, privacy, secret, "
@@ -989,7 +991,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "risk review with severity, evidence, impact, mitigation, and residual risk",
         "capsule_text": (
-            "You are the security-privacy-review skill for CCCC agents.\n\n"
+            "You are the security-privacy-review skill for OneColleague agents.\n\n"
             "Use this skill for defensive review of security, privacy, permissions, and data exposure.\n\n"
             "Procedure:\n"
             "1. Identify protected assets: secrets, user data, local files, credentials, tokens, permissions, and external calls.\n"
@@ -1006,7 +1008,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("security", "privacy", "review", "secrets", "permissions", "risk", "onecolleague-glue"),
     },
-    "skill:cccc:spec-driven-development": {
+    "skill:onecolleague:spec-driven-development": {
         "name": "spec-driven-development",
         "description_short": (
             "Use a lightweight spec before implementation when behavior, contracts, user flows, or acceptance "
@@ -1022,11 +1024,11 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "gotchas": (
             "Specs should reduce ambiguity, not become ceremony.",
-            "Do not replace CCCC task state or user-approved scope with a parallel process.",
+            "Do not replace OneColleague task state or user-approved scope with a parallel process.",
         ),
         "evidence_kind": "lightweight spec with behavior, scope, acceptance criteria, and verification plan",
         "capsule_text": (
-            "You are the spec-driven-development skill for CCCC agents.\n\n"
+            "You are the spec-driven-development skill for OneColleague agents.\n\n"
             "Use this skill when a lightweight spec will reduce implementation risk.\n\n"
             "Procedure:\n"
             "1. State the user goal, current behavior, target behavior, and non-goals.\n"
@@ -1043,14 +1045,14 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("spec", "planning", "acceptance", "implementation", "contracts", "onecolleague-glue"),
     },
-    "skill:cccc:runtime-bootstrap": {
+    "skill:onecolleague:runtime-bootstrap": {
         "name": "runtime-bootstrap",
         "description_short": (
-            "Diagnose CCCC daemon/web startup, actor runtime launch, MCP injection, "
+            "Diagnose OneColleague daemon/web startup, actor runtime launch, MCP injection, "
             "bind/LAN reachability, and shutdown residue issues."
         ),
         "use_when": (
-            "CCCC daemon or Web fails to start, bind, or stay reachable.",
+            "OneColleague daemon or Web fails to start, bind, or stay reachable.",
             "Actor runtime launch, MCP injection, or shutdown cleanup looks broken.",
         ),
         "avoid_when": (
@@ -1083,7 +1085,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         "tags": ("runtime", "bootstrap", "diagnostics", "daemon", "web", "mcp"),
         "requires_capabilities": ("pack:diagnostics", "pack:group-runtime"),
     },
-    "skill:cccc:standup-summary": {
+    "skill:onecolleague:standup-summary": {
         "name": "standup-summary",
         "description_short": (
             "Produce concise standup summaries with yesterday/current work, blockers, today's plan, "
@@ -1103,7 +1105,7 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         ),
         "evidence_kind": "standup summary with work, blockers, plan, and follow-ups",
         "capsule_text": (
-            "You are the standup-summary skill for CCCC daily coordination.\n\n"
+            "You are the standup-summary skill for OneColleague daily coordination.\n\n"
             "Use this skill when the user asks for a standup, morning meeting, daily update, or status rollup.\n\n"
             "Procedure:\n"
             "1. Collect each participant's current work, blockers, today's plan, and standby/no-update status from available context.\n"
@@ -1122,6 +1124,17 @@ BUILTIN_CAPSULE_SKILLS: Dict[str, Dict[str, object]] = {
         "tags": ("standup", "daily", "status", "coordination", "collaboration", "onecolleague-glue"),
     },
 }
+
+LEGACY_BUILTIN_CAPSULE_SKILL_ALIASES: Dict[str, str] = {
+    f"skill:{LEGACY_BUILTIN_SKILL_NAMESPACE}:{cap_id.split(':', 2)[2]}": cap_id
+    for cap_id in BUILTIN_CAPSULE_SKILLS
+    if cap_id.startswith(f"skill:{BUILTIN_SKILL_NAMESPACE}:")
+}
+
+
+def canonical_builtin_skill_id(capability_id: str) -> str:
+    cap_id = str(capability_id or "").strip()
+    return LEGACY_BUILTIN_CAPSULE_SKILL_ALIASES.get(cap_id, cap_id)
 
 
 def all_builtin_pack_ids() -> List[str]:

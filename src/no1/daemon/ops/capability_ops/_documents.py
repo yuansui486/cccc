@@ -8,12 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ....util.fs import atomic_write_json, read_json
 from ....util.time import parse_utc_iso, utc_now_iso
+from ....kernel.capabilities import canonical_builtin_skill_id
 
 from ._common import (
     _SOURCE_IDS,
     _STATE_LOCK,
     _CATALOG_LOCK,
     _RUNTIME_LOCK,
+    _normalize_source_id,
     _state_path,
     _catalog_path,
     _runtime_path,
@@ -72,10 +74,7 @@ def _new_catalog_doc() -> Dict[str, Any]:
         "v": 1,
         "created_at": now,
         "updated_at": now,
-        "sources": {
-            "cccc_builtin": _source_state_template("never"),
-            "onecolleague_skill_library": _source_state_template("never"),
-        },
+        "sources": {source_id: _source_state_template("never") for source_id in _SOURCE_IDS},
         "records": {},
     }
 
@@ -184,7 +183,7 @@ def _normalize_state_doc(raw: Any) -> Dict[str, Any]:
     global_blocked: Dict[str, Dict[str, str]] = {}
     if isinstance(global_blocked_raw, dict):
         for capability_id, entry in global_blocked_raw.items():
-            cap_id = str(capability_id or "").strip()
+            cap_id = canonical_builtin_skill_id(str(capability_id or "").strip())
             if not cap_id:
                 continue
             normalized = _normalize_block_entry(entry)
@@ -231,6 +230,13 @@ def _normalize_catalog_doc(raw: Any) -> Dict[str, Any]:
     normalized_sources: Dict[str, Dict[str, Any]] = {}
     for source_id in _SOURCE_IDS:
         item = sources.get(source_id)
+        if not isinstance(item, dict):
+            legacy_items = [
+                state
+                for raw_id, state in sources.items()
+                if _normalize_source_id(raw_id) == source_id and isinstance(state, dict)
+            ]
+            item = legacy_items[0] if legacy_items else item
         normalized = _source_state_template("never")
         if isinstance(item, dict):
             normalized.update(
@@ -251,13 +257,17 @@ def _normalize_catalog_doc(raw: Any) -> Dict[str, Any]:
     records: Dict[str, Dict[str, Any]] = {}
     if isinstance(records_raw, dict):
         for capability_id, item in records_raw.items():
-            cap_id = str(capability_id or "").strip()
-            if not cap_id or not isinstance(item, dict):
+            raw_cap_id = str(capability_id or "").strip()
+            if not raw_cap_id or not isinstance(item, dict):
                 continue
             candidate = dict(item)
-            source_id = str(candidate.get("source_id") or "").strip()
+            cap_id = canonical_builtin_skill_id(str(candidate.get("capability_id") or raw_cap_id).strip())
+            if not cap_id:
+                continue
+            source_id = _normalize_source_id(candidate.get("source_id"))
             if source_id not in _SOURCE_IDS:
                 continue
+            candidate["source_id"] = source_id
             candidate["capability_id"] = cap_id
             _normalize_catalog_enable_supported(cap_id, candidate)
             records[cap_id] = candidate

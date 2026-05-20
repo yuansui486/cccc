@@ -8,11 +8,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from ....contracts.v1 import DaemonError, DaemonResponse
-from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS
+from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, canonical_builtin_skill_id
 from ....kernel.events import publish_event
 from ....util.time import parse_utc_iso, utc_now_iso
 
 from ._common import (
+    BUILTIN_SOURCE_ID,
     _STATE_LOCK,
     _CATALOG_LOCK,
     _RUNTIME_LOCK,
@@ -63,6 +64,10 @@ from ._install import (
 def _pkg():
     """Get parent package module for mock-compatible function lookups."""
     return sys.modules[__name__.rsplit(".", 1)[0]]
+
+
+def _canonical_capability_id(raw: Any) -> str:
+    return canonical_builtin_skill_id(str(raw or "").strip())
 
 
 def _publish_capability_changed_result(result: Dict[str, Any]) -> str:
@@ -132,7 +137,7 @@ def _collect_enabled_capabilities(state_doc: Dict[str, Any], *, group_id: str, a
         if not isinstance(item, dict):
             mutated = True
             continue
-        cap_id = str(item.get("capability_id") or "").strip()
+        cap_id = _canonical_capability_id(item.get("capability_id"))
         expires_at = str(item.get("expires_at") or "").strip()
         dt = parse_utc_iso(expires_at)
         if not cap_id or dt is None:
@@ -142,6 +147,8 @@ def _collect_enabled_capabilities(state_doc: Dict[str, Any], *, group_id: str, a
             mutated = True
             continue
         enabled.append(cap_id)
+        if cap_id != str(item.get("capability_id") or "").strip():
+            mutated = True
         remaining.append({"capability_id": cap_id, "expires_at": expires_at})
 
     if remaining:
@@ -159,7 +166,7 @@ def _collect_enabled_capabilities(state_doc: Dict[str, Any], *, group_id: str, a
     seen: set[str] = set()
     ordered: List[str] = []
     for cap_id in enabled:
-        cid = str(cap_id or "").strip()
+        cid = _canonical_capability_id(cap_id)
         if not cid or cid in seen:
             continue
         seen.add(cid)
@@ -186,7 +193,7 @@ def _set_enabled_capability(
 ) -> None:
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if enabled:
         _set_removed_capability(state_doc, group_id=gid, capability_id=cap_id, removed=False)
     if scope == "group":
@@ -222,7 +229,7 @@ def _set_enabled_capability(
     session_enabled = state_doc.setdefault("session_enabled", {})
     group_map = session_enabled.setdefault(gid, {})
     entries = [x for x in list(group_map.get(aid) or []) if isinstance(x, dict)]
-    entries = [x for x in entries if str(x.get("capability_id") or "").strip() != cap_id]
+    entries = [x for x in entries if _canonical_capability_id(x.get("capability_id")) != cap_id]
     if enabled:
         expires_at = (
             datetime.now(timezone.utc) + timedelta(seconds=max(60, min(ttl_seconds, 24 * 3600)))
@@ -245,7 +252,7 @@ def _collect_hidden_capabilities(state_doc: Dict[str, Any], *, group_id: str, ac
     seen: set[str] = set()
     out: List[str] = []
     for item in items:
-        cap_id = str(item or "").strip()
+        cap_id = _canonical_capability_id(item)
         if not cap_id or cap_id in seen:
             continue
         seen.add(cap_id)
@@ -263,7 +270,7 @@ def _set_hidden_capability(
 ) -> None:
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not gid or not aid or not cap_id:
         return
     actor_hidden = state_doc.setdefault("actor_hidden", {})
@@ -288,7 +295,7 @@ def _remove_capability_bindings(
     capability_id: str,
 ) -> int:
     gid = str(group_id or "").strip()
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not gid or not cap_id:
         return 0
     removed = 0
@@ -334,7 +341,7 @@ def _remove_capability_bindings(
         for item in entries:
             if not isinstance(item, dict):
                 continue
-            if str(item.get("capability_id") or "").strip() == cap_id:
+            if _canonical_capability_id(item.get("capability_id")) == cap_id:
                 hit = True
                 continue
             keep.append(item)
@@ -359,7 +366,7 @@ def _remove_capability_bindings_all_groups(
     *,
     capability_id: str,
 ) -> int:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id:
         return 0
     group_ids: set[str] = set()
@@ -385,7 +392,7 @@ def _set_blocked_capability(
     reason: str,
     ttl_seconds: int,
 ) -> Dict[str, str]:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     gid = str(group_id or "").strip()
     actor = str(by or "").strip()
     ttl = max(0, min(int(ttl_seconds or 0), 30 * 24 * 3600))
@@ -425,7 +432,7 @@ def _unset_blocked_capability(
     group_id: str,
     capability_id: str,
 ) -> bool:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     gid = str(group_id or "").strip()
     removed = False
     if scope == "global":
@@ -454,7 +461,7 @@ def _remove_blocked_capability_all_scopes(
     *,
     capability_id: str,
 ) -> int:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id:
         return 0
     removed = 0
@@ -493,7 +500,7 @@ def _collect_blocked_capabilities(
 
     # Global baseline
     for cap_id, raw in list(global_blocked.items()):
-        cid = str(cap_id or "").strip()
+        cid = _canonical_capability_id(cap_id)
         if not cid or not isinstance(raw, dict):
             global_blocked.pop(cap_id, None)
             mutated = True
@@ -515,7 +522,7 @@ def _collect_blocked_capabilities(
     # Group override / extension
     per_group = group_blocked.get(gid) if isinstance(group_blocked.get(gid), dict) else {}
     for cap_id, raw in list(per_group.items()):
-        cid = str(cap_id or "").strip()
+        cid = _canonical_capability_id(cap_id)
         if not cid or not isinstance(raw, dict):
             per_group.pop(cap_id, None)
             mutated = True
@@ -550,7 +557,7 @@ def _has_any_binding_for_capability(
     *,
     capability_id: str,
 ) -> bool:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id:
         return False
     group_enabled = state_doc.get("group_enabled") if isinstance(state_doc.get("group_enabled"), dict) else {}
@@ -574,7 +581,7 @@ def _has_any_binding_for_capability(
             for item in entries:
                 if not isinstance(item, dict):
                     continue
-                if str(item.get("capability_id") or "").strip() == cap_id:
+                if _canonical_capability_id(item.get("capability_id")) == cap_id:
                     return True
     return False
 
@@ -583,7 +590,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
     actor_id = str(args.get("actor_id") or by).strip()
-    capability_id = str(args.get("capability_id") or "").strip()
+    capability_id = _canonical_capability_id(args.get("capability_id"))
     enabled = bool(args.get("enabled", True))
     cleanup = bool(args.get("cleanup", False))
     ttl_seconds = int(args.get("ttl_seconds") or 3600)
@@ -756,7 +763,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 policy,
                 capability_id=capability_id,
                 kind="mcp_toolpack",
-                source_id="cccc_builtin",
+                source_id=BUILTIN_SOURCE_ID,
                 actor_role=actor_role,
             )
             if enabled and (not _policy_level_visible(policy_level)):
@@ -1494,7 +1501,7 @@ def handle_capability_visibility(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
     actor_id = str(args.get("actor_id") or by or "user").strip() or "user"
-    capability_id = str(args.get("capability_id") or "").strip()
+    capability_id = _canonical_capability_id(args.get("capability_id"))
     hidden = bool(args.get("hidden", True))
     reason = str(args.get("reason") or "").strip()
     if len(reason) > 280:
@@ -1595,7 +1602,7 @@ def handle_capability_block(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
     actor_id = str(args.get("actor_id") or by).strip()
-    capability_id = str(args.get("capability_id") or "").strip()
+    capability_id = _canonical_capability_id(args.get("capability_id"))
     scope = str(args.get("scope") or "group").strip().lower() or "group"
     blocked = bool(args.get("blocked", True))
     ttl_seconds = int(args.get("ttl_seconds") or 0)

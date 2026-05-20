@@ -15,6 +15,7 @@ from ....paths import ensure_home
 from ....util.fs import atomic_write_text
 
 from ._common import (
+    BUILTIN_SOURCE_ID,
     _LEVEL_INDEXED,
     _LEVEL_MOUNTED,
     _LEVELS,
@@ -23,6 +24,8 @@ from ._common import (
     _QUAL_STATES,
     _SOURCE_IDS,
     _error,
+    _is_builtin_source_id,
+    _normalize_source_id,
 )
 
 
@@ -42,7 +45,7 @@ def _policy_level_visible(level: str) -> bool:
 def _external_capability_safety_mode_from_source_levels(source_levels: Any) -> str:
     levels = source_levels if isinstance(source_levels, dict) else {}
     for source_id in _SOURCE_IDS:
-        if source_id == "cccc_builtin":
+        if _is_builtin_source_id(source_id):
             continue
         level = _normalize_policy_level(levels.get(source_id), default=_LEVEL_MOUNTED)
         if level != _LEVEL_INDEXED:
@@ -64,7 +67,7 @@ def _external_capability_safety_mode_from_policy(policy: Any) -> str:
 def _policy_default_compiled() -> Dict[str, Any]:
     return {
         "source_levels": {
-            "cccc_builtin": _LEVEL_MOUNTED,
+            BUILTIN_SOURCE_ID: _LEVEL_MOUNTED,
             "onecolleague_skill_library": _LEVEL_MOUNTED,
         },
         "capability_levels": {},
@@ -198,7 +201,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
     defaults = doc.get("defaults") if isinstance(doc.get("defaults"), dict) else {}
     source_levels = defaults.get("source_level") if isinstance(defaults.get("source_level"), dict) else {}
     for source_id, level in source_levels.items():
-        sid = str(source_id or "").strip()
+        sid = _normalize_source_id(source_id)
         if not sid or sid not in _SOURCE_IDS:
             continue
         compiled["source_levels"][sid] = _normalize_policy_level(level, default=_LEVEL_INDEXED)
@@ -232,7 +235,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
     for item in skills.get("source_overrides") if isinstance(skills.get("source_overrides"), list) else []:
         if not isinstance(item, dict):
             continue
-        sid = str(item.get("source_id") or "").strip()
+        sid = _normalize_source_id(item.get("source_id"))
         if not sid or sid not in _SOURCE_IDS:
             continue
         skill_source_levels[sid] = _normalize_policy_level(item.get("level"), default=_LEVEL_MOUNTED)
@@ -246,7 +249,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
             return
         level = _normalize_policy_level(raw_item.get("level"), default=_LEVEL_MOUNTED)
         capability_levels[cid] = level
-        source_id = str(raw_item.get("source_id") or default_source_id).strip() or default_source_id
+        source_id = _normalize_source_id(raw_item.get("source_id") or default_source_id) or default_source_id
         if source_id not in _SOURCE_IDS:
             return
         trust = str(raw_item.get("trust") or "").strip().lower()
@@ -301,7 +304,7 @@ def _compile_allowlist_policy(raw: Any) -> Dict[str, Any]:
     curated_skill_entries = [
         item
         for item in curated_skill_entries
-        if str(item.get("source_id") or "").strip() in _SOURCE_IDS
+        if _normalize_source_id(item.get("source_id")) in _SOURCE_IDS
     ]
 
     role_defaults = doc.get("role_defaults") if isinstance(doc.get("role_defaults"), dict) else {}

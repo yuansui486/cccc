@@ -13,7 +13,10 @@ from urllib.request import urlopen  # noqa: F401 – re-exported for mock compat
 from ....contracts.v1 import DaemonResponse
 
 from ._common import (  # noqa: F401
+    BUILTIN_SOURCE_ID,
+    LEGACY_BUILTIN_SOURCE_ID,
     _SOURCE_IDS,
+    _SOURCE_ID_ALIASES,
     _MCP_REGISTRY_BASE,
     _MCP_REGISTRY_PAGE_LIMIT,
     _GITHUB_API_BASE,
@@ -57,6 +60,8 @@ from ._common import (  # noqa: F401
     _env_int,
     _env_bool,
     _quota_limit,
+    _normalize_source_id,
+    _is_builtin_source_id,
 )
 from ._documents import (  # noqa: F401
     _source_state_template,
@@ -271,6 +276,7 @@ from ._handlers import (  # noqa: F401
     _sync_catalog,
     _auto_sync_catalog,
     sync_capability_catalog_once,
+    _canonical_capability_id,
     _normalize_capability_id_list,
     _normalize_profile_capability_defaults,
     apply_actor_profile_capability_defaults,

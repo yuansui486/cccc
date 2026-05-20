@@ -16,10 +16,24 @@ from ....kernel.actors import get_effective_role
 from ....kernel.group import load_group
 from ....paths import ensure_home
 
+BUILTIN_SOURCE_ID = "onecolleague_builtin"
+LEGACY_BUILTIN_SOURCE_ID = "cccc_builtin"
+_SOURCE_ID_ALIASES = {
+    LEGACY_BUILTIN_SOURCE_ID: BUILTIN_SOURCE_ID,
+}
 _SOURCE_IDS = (
-    "cccc_builtin",
+    BUILTIN_SOURCE_ID,
     "onecolleague_skill_library",
 )
+
+
+def _normalize_source_id(raw: Any) -> str:
+    source_id = str(raw or "").strip()
+    return _SOURCE_ID_ALIASES.get(source_id, source_id)
+
+
+def _is_builtin_source_id(raw: Any) -> bool:
+    return _normalize_source_id(raw) == BUILTIN_SOURCE_ID
 
 _MCP_REGISTRY_BASE = "https://registry.modelcontextprotocol.io"
 _MCP_REGISTRY_PAGE_LIMIT = 100

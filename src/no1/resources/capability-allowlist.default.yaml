@@ -12,7 +12,7 @@ level_semantics:
 
 defaults:
   source_level:
-    cccc_builtin: mounted
+    onecolleague_builtin: mounted
     onecolleague_skill_library: mounted
 
   # Matches current OneColleague implementation boundary.
@@ -34,9 +34,9 @@ defaults:
     - payment_write
 
 sources:
-  - source_id: cccc_builtin
+  - source_id: onecolleague_builtin
     enabled: true
-    rationale: "Core CCCC packs and built-in skills; always available."
+    rationale: "Core OneColleague packs and built-in skills; always available."
   - source_id: onecolleague_skill_library
     enabled: true
     rationale: "OneColleague skill library source served by done-hub agent-service."

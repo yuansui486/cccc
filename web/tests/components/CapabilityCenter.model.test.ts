@@ -94,7 +94,7 @@ describe("CapabilityCenter model", () => {
       row({ capability_id: "skill:team:review", kind: "skill", source_id: "manual_import" }),
       row({ capability_id: "skill:team:hidden", kind: "skill", source_id: "manual_import" }),
       row({ capability_id: "mcp:context7", kind: "mcp_toolpack", source_id: "mcp_registry_official" }),
-      row({ capability_id: "pack:blocked", kind: "pack", source_id: "cccc_builtin", blocked_global: true }),
+      row({ capability_id: "pack:blocked", kind: "pack", source_id: "onecolleague_builtin", blocked_global: true }),
     ], state);
 
     expect(stats).toMatchObject({
@@ -171,14 +171,14 @@ describe("CapabilityCenter model", () => {
 
   it("protects inactive built-ins and labels row actions by capability type", () => {
     expect(capabilityCenterRemovalAction(row({
-      capability_id: "skill:cccc:install",
+      capability_id: "skill:onecolleague:install",
       kind: "skill",
-      source_id: "cccc_builtin",
+      source_id: "onecolleague_builtin",
     }))).toBe("none");
     expect(capabilityCenterRemovalAction(row({
       capability_id: "pack:diagnostics",
       kind: "pack",
-      source_id: "cccc_builtin",
+      source_id: "onecolleague_builtin",
     }), { enabled: true })).toBe("disable");
     expect(capabilityCenterRemovalAction(row({
       capability_id: "skill:agent_self_proposed:triage",
@@ -221,7 +221,7 @@ describe("CapabilityCenter model", () => {
     expect(capabilityCenterSourceRemovalAction({ source_id: "agent_self_proposed", enabled: true, record_count: 1 })).toBe("delete");
     expect(capabilityCenterSourceRemovalAction({ source_id: "github_skills_curated", enabled: true, record_count: 49 })).toBe("none");
     expect(capabilityCenterSourceRemovalAction({ source_id: "mcp_registry_official", enabled: true, record_count: 1450 })).toBe("none");
-    expect(capabilityCenterSourceRemovalAction({ source_id: "cccc_builtin", enabled: true, record_count: 34 })).toBe("none");
+    expect(capabilityCenterSourceRemovalAction({ source_id: "onecolleague_builtin", enabled: true, record_count: 34 })).toBe("none");
   });
 
   it("reserves a stable actions column for source rows with and without delete", () => {
@@ -240,9 +240,9 @@ describe("CapabilityCenter model", () => {
 
   it("hides readonly builtin system rows by default but preserves search discoverability", () => {
     const items = [
-      row({ capability_id: "pack:diagnostics", kind: "pack", source_id: "cccc_builtin", name: "Terminal Debug" }),
+      row({ capability_id: "pack:diagnostics", kind: "pack", source_id: "onecolleague_builtin", name: "Terminal Debug" }),
       row({ capability_id: "mcp:github/chrome-devtools-mcp", kind: "mcp_toolpack", source_id: "mcp_registry_official", name: "chrome devtools mcp" }),
-      row({ capability_id: "pack:enabled-builtin", kind: "pack", source_id: "cccc_builtin", name: "Enabled Builtin" }),
+      row({ capability_id: "pack:enabled-builtin", kind: "pack", source_id: "onecolleague_builtin", name: "Enabled Builtin" }),
     ];
 
     expect(

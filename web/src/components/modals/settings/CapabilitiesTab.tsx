@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
 import { buildCapabilityCenterUrl } from "../../capabilities/capabilityCenterRoute";
+import { ONECOLLEAGUE_BUILTIN_SOURCE_ID } from "../../capabilities/capabilityCenterModel";
 import {
   Actor,
   CapabilityBlockEntry,
@@ -50,10 +51,10 @@ const ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library";
 const SELF_PROPOSED_SOURCE_ID = "agent_self_proposed";
 const SELF_PROPOSED_OVERVIEW_LIMIT = 200;
 const SELF_PROPOSED_CAPSULE_TEXT_MAX = 2400;
-const VISIBLE_SOURCE_IDS = ["cccc_builtin", ONECOLLEAGUE_SOURCE_ID] as const;
+const VISIBLE_SOURCE_IDS = [ONECOLLEAGUE_BUILTIN_SOURCE_ID, ONECOLLEAGUE_SOURCE_ID] as const;
 const VISIBLE_SOURCE_ID_SET = new Set<string>(VISIBLE_SOURCE_IDS);
 const SOURCE_PRIORITY: Record<string, number> = {
-  cccc_builtin: 0,
+  [ONECOLLEAGUE_BUILTIN_SOURCE_ID]: 0,
   onecolleague_skill_library: 1,
 };
 
@@ -1005,7 +1006,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
       if (registryPolicy === "blocked" && !blockedByReadiness) return false;
       if (registryPolicy === "indexed" && policyLevel !== "indexed") return false;
 
-      if (registrySource !== "all" && String(row.source_id || "").trim() !== registrySource) return false;
+      if (registrySource !== "all" && sourceId !== registrySource) return false;
 
       if (!q) return true;
       const text = [

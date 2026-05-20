@@ -15,6 +15,7 @@ from ....kernel.capabilities import (
     CORE_TOOL_NAMES,
     all_builtin_pack_ids,
     all_builtin_skill_ids,
+    canonical_builtin_skill_id,
     resolve_core_tool_names,
     resolve_visible_tool_names,
 )
@@ -23,6 +24,7 @@ from ....kernel.group import load_group
 from ....util.time import parse_utc_iso, utc_now_iso
 
 from ._common import (
+    BUILTIN_SOURCE_ID,
     _SOURCE_IDS,
     _STATE_LOCK,
     _CATALOG_LOCK,
@@ -38,6 +40,8 @@ from ._common import (
     _ensure_group,
     _is_foreman,
     _quota_limit,
+    _is_builtin_source_id,
+    _normalize_source_id,
 )
 from ._documents import (
     _source_state_template,
@@ -69,6 +73,10 @@ from ._state_views import capability_state_view, is_slash_commands_view
 def _pkg():
     """Get parent package module for mock-compatible function lookups."""
     return sys.modules[__name__.rsplit(".", 1)[0]]
+
+
+def _canonical_capability_id(raw: Any) -> str:
+    return canonical_builtin_skill_id(str(raw or "").strip())
 
 
 def _resolve_actor_role(group: Any, actor_id: str) -> str:
@@ -132,7 +140,7 @@ def _display_name_from_capability_id(capability_id: str) -> str:
 
 
 def _external_policy_evidence(*, policy: Dict[str, Any], source_id: str, policy_level: str) -> Dict[str, str]:
-    if str(source_id or "").strip() not in _SOURCE_IDS:
+    if _normalize_source_id(source_id) not in _SOURCE_IDS:
         return {}
     if _normalize_policy_level(policy_level) != _LEVEL_INDEXED:
         return {}
@@ -272,7 +280,7 @@ def _build_builtin_search_records() -> List[Dict[str, Any]]:
                 "name": str(pack.get("title") or cap_id),
                 "description_short": str(pack.get("description") or ""),
                 "tags": list(pack.get("tags") or []),
-                "source_id": "cccc_builtin",
+                "source_id": BUILTIN_SOURCE_ID,
                 "source_tier": "builtin",
                 "source_uri": "",
                 "trust_tier": "builtin",
@@ -293,7 +301,7 @@ def _build_builtin_search_records() -> List[Dict[str, Any]]:
                 "name": str(skill.get("name") or cap_id),
                 "description_short": str(skill.get("description_short") or ""),
                 "tags": list(skill.get("tags") or []),
-                "source_id": "cccc_builtin",
+                "source_id": BUILTIN_SOURCE_ID,
                 "source_tier": "builtin",
                 "source_uri": "",
                 "trust_tier": "builtin",
@@ -307,7 +315,7 @@ def _build_builtin_search_records() -> List[Dict[str, Any]]:
 
 
 def _is_builtin_search_record(item: Dict[str, Any]) -> bool:
-    return str(item.get("source_id") or "").strip() == "cccc_builtin"
+    return _is_builtin_source_id(item.get("source_id"))
 
 
 def _skill_capsule_preview(value: Any, *, max_lines: int = 4, max_chars: int = 420) -> str:
@@ -566,7 +574,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
         entries: Dict[str, Dict[str, Any]] = {}
 
         def _upsert_entry(row: Dict[str, Any]) -> None:
-            cap_id = str(row.get("capability_id") or "").strip()
+            cap_id = _canonical_capability_id(row.get("capability_id"))
             if not cap_id:
                 return
             current = entries.get(cap_id) if isinstance(entries.get(cap_id), dict) else {}
@@ -580,9 +588,11 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
                 _upsert_entry(row)
         for row in external_rows:
             if isinstance(row, dict):
-                source_id = str(row.get("source_id") or "").strip()
+                source_id = _normalize_source_id(row.get("source_id"))
                 if source_id not in _SOURCE_IDS:
                     continue
+                row["source_id"] = source_id
+                row["capability_id"] = _canonical_capability_id(row.get("capability_id"))
                 _upsert_entry(row)
 
         for cap_id, row in recent_success.items():
@@ -597,7 +607,7 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
         for row in effective_sources:
             if not isinstance(row, dict):
                 continue
-            sid = str(row.get("source_id") or "").strip()
+            sid = _normalize_source_id(row.get("source_id"))
             if not sid or sid not in _SOURCE_IDS:
                 continue
             source_cfg_map[sid] = {
@@ -607,10 +617,12 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
 
         rows: List[Dict[str, Any]] = []
         for cap_id, rec in entries.items():
+            cap_id = _canonical_capability_id(cap_id)
             kind = str(rec.get("kind") or "").strip()
-            source_id = str(rec.get("source_id") or "").strip()
+            source_id = _normalize_source_id(rec.get("source_id"))
             if source_id not in _SOURCE_IDS:
                 continue
+            rec["source_id"] = source_id
             policy_level = _effective_policy_level(
                 policy,
                 capability_id=cap_id,
@@ -730,7 +742,8 @@ def handle_capability_overview(args: Dict[str, Any]) -> DaemonResponse:
             rows = filtered_rows
 
         if source_filter:
-            rows = [row for row in rows if str(row.get("source_id") or "").strip() == source_filter]
+            source_filter = _normalize_source_id(source_filter)
+            rows = [row for row in rows if _normalize_source_id(row.get("source_id")) == source_filter]
 
         def _rank(row: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
             query_score = _score_item_tokens(row, query_tokens) if query_tokens else 0
@@ -852,8 +865,8 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
                     if isinstance(catalog_doc.get("records"), dict)
                     else {}
                 ).values():
-                    if isinstance(item, dict) and str(item.get("source_id") or "").strip() in _SOURCE_IDS:
-                        external_records.append(dict(item))
+                    if isinstance(item, dict) and _normalize_source_id(item.get("source_id")) in _SOURCE_IDS:
+                        external_records.append({**dict(item), "source_id": _normalize_source_id(item.get("source_id"))})
             source_states = _render_source_states(catalog_doc)
 
         records: List[Dict[str, Any]] = _build_builtin_search_records()
@@ -863,7 +876,8 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
         if kind_filter:
             records = [r for r in records if str(r.get("kind") or "").strip().lower() == kind_filter]
         if source_filter:
-            records = [r for r in records if str(r.get("source_id") or "").strip() == source_filter]
+            source_filter = _normalize_source_id(source_filter)
+            records = [r for r in records if _normalize_source_id(r.get("source_id")) == source_filter]
         if trust_filter:
             records = [r for r in records if str(r.get("trust_tier") or "").strip().lower() == trust_filter]
         if qualification_filter:
@@ -875,7 +889,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
         policy_hidden_count = 0
         visible_records: List[Dict[str, Any]] = []
         for rec in records:
-            cap_id = str(rec.get("capability_id") or "").strip()
+            cap_id = _canonical_capability_id(rec.get("capability_id"))
             policy_level = _effective_policy_level(
                 policy,
                 capability_id=cap_id,
@@ -884,6 +898,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
                 actor_role=actor_role,
             )
             next_rec = dict(rec)
+            next_rec["capability_id"] = cap_id
             next_rec["policy_level"] = policy_level
             block_entry = blocked_caps.get(cap_id) if isinstance(blocked_caps.get(cap_id), dict) else None
             if isinstance(block_entry, dict):
@@ -905,7 +920,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
         records = [r for r in records if _search_matches(query, r)]
 
         def _rank(item: Dict[str, Any]) -> Tuple[int, int, int, int, int, str]:
-            cap_id = str(item.get("capability_id") or "")
+            cap_id = _canonical_capability_id(item.get("capability_id"))
             is_builtin = 0 if _is_builtin_search_record(item) else 1
             name_key = str(item.get("name") or cap_id).lower()
             enabled_bias = 0 if cap_id in enabled_set else 1
@@ -945,7 +960,7 @@ def handle_capability_search(args: Dict[str, Any]) -> DaemonResponse:
         sliced = records[:limit]
         items: List[Dict[str, Any]] = []
         for rec in sliced:
-            cap_id = str(rec.get("capability_id") or "")
+            cap_id = _canonical_capability_id(rec.get("capability_id"))
             qualification_status = str(rec.get("qualification_status") or _QUAL_QUALIFIED)
             enable_supported = _pkg()._record_enable_supported(rec, capability_id=cap_id)
             blocked_scope = str(rec.get("blocked_scope") or "").strip().lower()
@@ -1069,7 +1084,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
     actor_id = str(args.get("actor_id") or by).strip()
-    usage_capability_id = str(args.get("capability_id") or "").strip()
+    usage_capability_id = _canonical_capability_id(args.get("capability_id"))
     view = str(args.get("view") or "").strip()
     slash_commands_view = is_slash_commands_view(view)
 
@@ -1087,6 +1102,12 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
         max_dynamic_tools_visible = _quota_limit(
             "CCCC_CAPABILITY_MAX_DYNAMIC_TOOLS_VISIBLE",
             32,
+            minimum=1,
+            maximum=500,
+        )
+        max_active_capsule_skills = _quota_limit(
+            "CCCC_CAPABILITY_MAX_ACTIVE_CAPSULE_SKILLS_VISIBLE",
+            80,
             minimum=1,
             maximum=500,
         )
@@ -1125,7 +1146,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
             )
             if isinstance(capability_artifacts, dict):
                 for cap_id, artifact_id in capability_artifacts.items():
-                    cid = str(cap_id or "").strip()
+                    cid = _canonical_capability_id(cap_id)
                     aid = str(artifact_id or "").strip()
                     install = artifacts.get(aid) if isinstance(artifacts.get(aid), dict) else None
                     if not cid or not aid or not isinstance(install, dict):
@@ -1138,7 +1159,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                 for cap_id, item in per_actor_bindings.items():
                     if not isinstance(item, dict):
                         continue
-                    actor_binding_state_by_cap[str(cap_id)] = {
+                    actor_binding_state_by_cap[_canonical_capability_id(cap_id)] = {
                         "artifact_id": str(item.get("artifact_id") or "").strip(),
                         "state": str(item.get("state") or "").strip() or "unknown",
                         "last_error": str(item.get("last_error") or "").strip(),
@@ -1213,7 +1234,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                 policy,
                 capability_id=cap_id,
                 kind="mcp_toolpack",
-                source_id="cccc_builtin",
+                source_id=BUILTIN_SOURCE_ID,
                 actor_role=actor_role,
             )
             hidden_capabilities.append(
@@ -1307,7 +1328,7 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
         for entry in own_session_entries:
             if not isinstance(entry, dict):
                 continue
-            cap_id = str(entry.get("capability_id") or "").strip()
+            cap_id = _canonical_capability_id(entry.get("capability_id"))
             expires_at = str(entry.get("expires_at") or "").strip()
             if not cap_id or not expires_at:
                 continue
@@ -1342,16 +1363,20 @@ def handle_capability_state(args: Dict[str, Any]) -> DaemonResponse:
                 _pkg()._save_catalog_doc(catalog_path, catalog_doc)
             source_states = {} if slash_commands_view else _render_source_states(catalog_doc)
             records_raw = catalog_doc.get("records") if isinstance(catalog_doc.get("records"), dict) else {}
-            external_records = {
-                str(cid): dict(rec)
-                for cid, rec in records_raw.items()
-                if (
+            external_records = {}
+            for cid, rec in records_raw.items():
+                if not (
                     isinstance(rec, dict)
                     and str(cid)
                     and (not str(cid).startswith("pack:"))
-                    and str(rec.get("source_id") or "").strip() in _SOURCE_IDS
-                )
-            }
+                    and _normalize_source_id(rec.get("source_id")) in _SOURCE_IDS
+                ):
+                    continue
+                external_records[_canonical_capability_id(cid)] = {
+                    **dict(rec),
+                    "capability_id": _canonical_capability_id(cid),
+                    "source_id": _normalize_source_id(rec.get("source_id")),
+                }
 
         actors = group.doc.get("actors") if isinstance(group.doc.get("actors"), list) else []
         actor_record = next(

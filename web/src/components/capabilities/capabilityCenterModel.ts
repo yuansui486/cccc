@@ -22,6 +22,11 @@ export type CapabilityCenterStats = {
 
 export const CAPABILITY_CENTER_DEFAULT_PAGE_SIZE = 80;
 export const CAPABILITY_CENTER_PAGE_SIZE_OPTIONS = [40, 80, 120] as const;
+export const ONECOLLEAGUE_BUILTIN_SOURCE_ID = "onecolleague_builtin";
+
+export function isOneColleagueBuiltinSource(sourceId: unknown): boolean {
+  return String(sourceId || "").trim() === ONECOLLEAGUE_BUILTIN_SOURCE_ID;
+}
 
 export function capabilityCenterSectionTypeFilter(section: CapabilityCenterSection): CapabilityCenterTypeFilter {
   if (section === "skill") return "skill";
@@ -35,7 +40,7 @@ export function capabilityCenterRemovalAction(
 ): CapabilityCenterRemovalAction {
   const sourceId = String(row.source_id || "").trim();
   if (!sourceId) return "none";
-  if (sourceId === "cccc_builtin") return input?.enabled ? "disable" : "none";
+  if (isOneColleagueBuiltinSource(sourceId)) return input?.enabled ? "disable" : "none";
   const type = capabilityCenterType(row);
   if (type === "skill" && sourceId === "agent_self_proposed") return "delete";
   const hasLocalFootprint = Boolean(
@@ -211,7 +216,7 @@ export function filterCapabilityCenterRemovedItems(
 
 export function capabilityCenterIsReadonlySystem(row: CapabilityOverviewItem, state?: CapabilityStateResult | null): boolean {
   const sourceId = String(row.source_id || "").trim();
-  if (sourceId !== "cccc_builtin") return false;
+  if (!isOneColleagueBuiltinSource(sourceId)) return false;
   const capId = String(row.capability_id || "").trim();
   const enabled = capabilityCenterEnabledIds(state).has(capId);
   return capabilityCenterRemovalAction(row, { enabled }) === "none";

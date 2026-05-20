@@ -384,29 +384,29 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 )
                 items = search_result.get("items") if isinstance(search_result.get("items"), list) else []
                 ids = {str(item.get("capability_id") or "") for item in items if isinstance(item, dict)}
-                self.assertIn("skill:cccc:runtime-bootstrap", ids)
+                self.assertIn("skill:onecolleague:runtime-bootstrap", ids)
 
                 use_result = mcp_server.handle_tool_call(
                     "onecolleague_capability_use",
-                    {"capability_id": "skill:cccc:runtime-bootstrap", "scope": "session"},
+                    {"capability_id": "skill:onecolleague:runtime-bootstrap", "scope": "session"},
                 )
                 self.assertTrue(bool(use_result.get("enabled")))
                 self.assertFalse(bool(use_result.get("tool_called")))
                 self.assertEqual(str(use_result.get("state") or ""), "activation_pending")
                 self.assertEqual(str(use_result.get("skill_mode") or ""), "capsule_runtime")
                 skill_payload = use_result.get("skill") if isinstance(use_result.get("skill"), dict) else {}
-                self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:cccc:runtime-bootstrap")
+                self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:onecolleague:runtime-bootstrap")
                 applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
                 self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
 
                 state_result = mcp_server.handle_tool_call("onecolleague_capability_state", {})
                 enabled = set(state_result.get("enabled_capabilities") or [])
-                self.assertIn("skill:cccc:runtime-bootstrap", enabled)
+                self.assertIn("skill:onecolleague:runtime-bootstrap", enabled)
                 self.assertIn("pack:diagnostics", enabled)
                 self.assertIn("pack:group-runtime", enabled)
                 active_skills = state_result.get("active_capsule_skills") if isinstance(state_result.get("active_capsule_skills"), list) else []
                 active_ids = {str(item.get("capability_id") or "") for item in active_skills if isinstance(item, dict)}
-                self.assertIn("skill:cccc:runtime-bootstrap", active_ids)
+                self.assertIn("skill:onecolleague:runtime-bootstrap", active_ids)
                 visible = set(state_result.get("visible_tools") or [])
                 self.assertIn("onecolleague_terminal", visible)
                 self.assertIn("onecolleague_actor", visible)
