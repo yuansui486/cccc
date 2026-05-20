@@ -1165,7 +1165,7 @@ export function ContextModal({
                 }
               }}
             >
-              <div className="absolute inset-0 glass-overlay" />
+              <div className="absolute inset-0 glass-overlay" onPointerDown={handleModalClose} />
               <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
                   <button
@@ -1197,7 +1197,7 @@ export function ContextModal({
                 }
               }}
             >
-              <div className="absolute inset-0 glass-overlay" />
+              <div className="absolute inset-0 glass-overlay" onPointerDown={handleModalClose} />
               <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
                   <button
@@ -1310,7 +1310,10 @@ export function ContextModal({
                 }
               }}
             >
-              <div className="absolute inset-0 glass-overlay" />
+              <div
+                className="absolute inset-0 glass-overlay"
+                onPointerDown={directProjectEditorActive ? handleModalClose : () => setProjectExpanded(false)}
+              />
               <div ref={projectExpandedRef} className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
                   <button

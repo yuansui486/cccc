@@ -214,7 +214,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
         }
       }}
     >
-      <div className="absolute inset-0 glass-overlay" />
+      <div className="absolute inset-0 glass-overlay" onPointerDown={closeEditor} />
       <div className="glass-modal relative flex h-full w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-2rem)]">
         <div className={settingsDialogHeaderClass}>
           <div className="text-base font-semibold text-[var(--color-text-primary)]">
