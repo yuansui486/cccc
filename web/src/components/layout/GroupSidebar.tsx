@@ -834,7 +834,7 @@ export function GroupSidebar({
                     }
                   }}
                   className={classNames(
-                    "block h-8 w-full min-w-0 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] px-2 text-sm font-medium text-[var(--color-text-primary)] outline-none transition-all",
+                    "-ml-2 block h-8 w-[calc(100%+0.5rem)] min-w-0 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] px-2 text-sm font-medium text-[var(--color-text-primary)] outline-none transition-all",
                     "shadow-sm focus:border-[var(--color-accent-primary)] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.16)]",
                     groupTitleSaving && "opacity-70"
                   )}
@@ -848,7 +848,7 @@ export function GroupSidebar({
                     beginGroupTitleRename();
                   }}
                   className={classNames(
-                    "block max-w-full rounded-lg px-2 py-1 text-left transition-all duration-150",
+                    "-ml-2 block max-w-[calc(100%+0.5rem)] rounded-lg px-2 py-1 text-left transition-all duration-150",
                     "hover:bg-black/[0.035] hover:shadow-[0_10px_24px_-18px_rgba(15,23,42,0.95)] dark:hover:bg-white/[0.06] dark:hover:shadow-[0_10px_24px_-16px_rgba(0,0,0,0.8)]",
                     readOnly ? "cursor-default" : "cursor-text"
                   )}
@@ -1152,13 +1152,13 @@ export function GroupSidebar({
               <div
                 className={classNames(
                   "flex items-center justify-center overflow-hidden",
-                  isCollapsed ? "h-11 w-11" : "h-11 min-w-[44px] max-w-[164px]"
+                  isCollapsed ? "h-12 w-12" : "h-12 min-w-[48px] max-w-[164px]"
                 )}
               >
                 <img
                   src={logoPath}
                   alt={`${brandName} logo`}
-                  className={classNames("object-contain", isCollapsed ? "h-7 w-7" : "h-8 w-8")}
+                  className={classNames("object-contain", isCollapsed ? "h-9 w-9" : "h-10 w-10")}
                 />
               </div>
               {!isCollapsed && (
