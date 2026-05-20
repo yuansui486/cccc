@@ -42,6 +42,8 @@ type AppShellProps = {
   sseStatus: "connected" | "connecting" | "disconnected";
   groupLabelById: Record<string, string>;
   chatUnreadCount: number;
+  enabledSkillCount: number;
+  activeTaskCount: number;
   mentionSelectedIndex: number;
   showMentionMenu: boolean;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -119,6 +121,8 @@ export function AppShell({
   sseStatus,
   groupLabelById,
   chatUnreadCount,
+  enabledSkillCount,
+  activeTaskCount,
   mentionSelectedIndex,
   showMentionMenu,
   composerRef,
@@ -226,6 +230,8 @@ export function AppShell({
         textScale={textScale}
         doneHub={doneHub}
         groupDoc={groupDoc}
+        enabledSkillCount={enabledSkillCount}
+        activeTaskCount={activeTaskCount}
         selectedGroupRunning={selectedGroupRunning}
         selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
         busy={busy}

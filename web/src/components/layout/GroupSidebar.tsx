@@ -73,6 +73,8 @@ export interface GroupSidebarProps {
     errorMessage: string;
   };
   groupDoc: GroupDoc | null;
+  enabledSkillCount: number;
+  activeTaskCount: number;
   selectedGroupRunning: boolean;
   selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
   busy: string;
@@ -119,6 +121,8 @@ export function GroupSidebar({
   textScale,
   doneHub,
   groupDoc,
+  enabledSkillCount,
+  activeTaskCount,
   selectedGroupRunning,
   selectedGroupRuntimeStatus,
   busy,
@@ -562,6 +566,19 @@ export function GroupSidebar({
     []
   );
 
+  const renderCountBadge = useCallback(
+    (count: number, options?: { showZero?: boolean }) => {
+      const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+      if (safeCount <= 0 && !options?.showZero) return null;
+      return (
+        <span className="rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-500 dark:text-indigo-300">
+          {safeCount}
+        </span>
+      );
+    },
+    []
+  );
+
   const renderGroupControlButtons = useCallback(
     () => (
       <div className="flex shrink-0 items-center gap-1">
@@ -947,11 +964,7 @@ export function GroupSidebar({
                   <span className={classNames("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold", indicator.statusBadgeClass)}>
                     {indicator.statusLabel}
                   </span>
-                  {(actor.unread_count ?? 0) > 0 && (
-                    <span className="rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-500 dark:text-indigo-300">
-                      {actor.unread_count}
-                    </span>
-                  )}
+                  {renderCountBadge(actor.unread_count ?? 0)}
                 </button>
               );
             })}
@@ -997,6 +1010,7 @@ export function GroupSidebar({
                 <SparklesIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("skillManagement")}</span>
+              {renderCountBadge(enabledSkillCount, { showZero: true })}
             </button>
             <button
               type="button"
@@ -1008,6 +1022,7 @@ export function GroupSidebar({
                 <RocketIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("taskExecution")}</span>
+              {renderCountBadge(activeTaskCount, { showZero: true })}
             </button>
           </div>
         </section>
@@ -1017,6 +1032,8 @@ export function GroupSidebar({
     activeTab,
     actors,
     busy,
+    activeTaskCount,
+    enabledSkillCount,
     getActorIndicator,
     groupDoc,
     isCollapsed,
@@ -1030,6 +1047,7 @@ export function GroupSidebar({
     onOpenContextSummary,
     onOpenSkillManagement,
     readOnly,
+    renderCountBadge,
     selectedGroup,
     selectedGroupId,
     selectedStatus,
