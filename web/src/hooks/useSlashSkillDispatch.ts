@@ -53,6 +53,7 @@ export function useSlashSkillDispatch(args: {
   replyRequired: boolean;
   groupSendBlockedReason: GroupSendBlockedReason | null;
   clearDraft: (groupId: string) => void;
+  setToText: (text: string) => void;
   setChatUnreadCount: (groupId: string, count: number) => void;
   setChatFilter: (groupId: string, filter: ChatFilter) => void;
   setChatMobileSurface: (groupId: string, surface: "messages" | "presentation") => void;
@@ -69,6 +70,7 @@ export function useSlashSkillDispatch(args: {
     replyRequired,
     groupSendBlockedReason,
     clearDraft,
+    setToText,
     setChatUnreadCount,
     setChatFilter,
     setChatMobileSurface,
@@ -133,6 +135,7 @@ export function useSlashSkillDispatch(args: {
     }
 
     clearDraft(selectedGroupId);
+    setToText("");
     setChatUnreadCount(selectedGroupId, 0);
     setChatFilter(selectedGroupId, "all");
     setChatMobileSurface(selectedGroupId, "messages");
@@ -147,6 +150,7 @@ export function useSlashSkillDispatch(args: {
     removeOutbox,
     replyRequired,
     selectedGroupId,
+    setToText,
     setChatFilter,
     setChatMobileSurface,
     setChatUnreadCount,

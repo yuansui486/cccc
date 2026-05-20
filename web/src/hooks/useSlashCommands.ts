@@ -71,10 +71,18 @@ export function useSlashCommands(args: {
 }) {
   const { selectedGroupId, clearComposer, restoreComposerText, showError, showNotice, dispatchMessage, onExecuted, skillScope, t } = args;
   const slashInFlightRef = useRef(false);
-  const { slashCommands, refreshSlashCommands } = useSlashCommandState(selectedGroupId);
+  const { slashCommands, globalSkillCommands, refreshSlashCommands } = useSlashCommandState(selectedGroupId);
+  const teamScopedSlashCommands = useMemo(
+    () => filterSlashCommandsBySkillScope(slashCommands, "team"),
+    [slashCommands],
+  );
+  const globalScopedSlashCommands = useMemo(() => {
+    const nonSkillCommands = slashCommands.filter((item) => item.sourceType !== "capsule_skill");
+    return [...nonSkillCommands, ...globalSkillCommands];
+  }, [globalSkillCommands, slashCommands]);
   const scopedSlashCommands = useMemo(
-    () => filterSlashCommandsBySkillScope(slashCommands, skillScope),
-    [skillScope, slashCommands],
+    () => skillScope === "team" ? teamScopedSlashCommands : globalScopedSlashCommands,
+    [globalScopedSlashCommands, skillScope, teamScopedSlashCommands],
   );
 
   const tryExecuteSlashCommand = useCallback(async (opts: {
@@ -180,5 +188,5 @@ export function useSlashCommands(args: {
     }
   }, [clearComposer, dispatchMessage, onExecuted, refreshSlashCommands, restoreComposerText, scopedSlashCommands, selectedGroupId, showError, showNotice, t]);
 
-  return { slashCommands: scopedSlashCommands, allSlashCommands: slashCommands, refreshSlashCommands, tryExecuteSlashCommand };
+  return { slashCommands: scopedSlashCommands, allSlashCommands: [...teamScopedSlashCommands, ...globalSkillCommands], refreshSlashCommands, tryExecuteSlashCommand };
 }

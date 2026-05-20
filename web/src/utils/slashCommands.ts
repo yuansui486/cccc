@@ -1,4 +1,4 @@
-import type { CapabilityStateResult } from "../types";
+import type { CapabilityOverviewItem, CapabilityStateResult } from "../types";
 import { BUILTIN_SLASH_COMMANDS } from "./builtinSlashCommands";
 
 export type SlashCommandItem = {
@@ -172,6 +172,41 @@ export function buildSlashCommands(args: {
   return sortSlashCommands(commands);
 }
 
+export function buildCapabilityOverviewSkillSlashCommands(args: {
+  items?: CapabilityOverviewItem[] | null;
+  reservedCommands?: SlashCommandItem[];
+}): SlashCommandItem[] {
+  const used = new Set(
+    (Array.isArray(args.reservedCommands) ? args.reservedCommands : [])
+      .filter((item) => item.sourceType !== "capsule_skill")
+      .map((item) => normalizeCommandToken(item.name || item.command))
+      .filter(Boolean),
+  );
+  const commands: SlashCommandItem[] = [];
+  const rows = Array.isArray(args.items) ? args.items : [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    if (String(row.kind || "").trim().toLowerCase() !== "skill") continue;
+    const capabilityId = String(row.capability_id || "").trim();
+    if (!capabilityId) continue;
+    const name = uniqueCommandName([row.name, capabilityIdTail(capabilityId), capabilityId], used);
+    if (!name) continue;
+    used.add(name);
+    const description = String(row.description_short || "").trim()
+      || (Array.isArray(row.use_when) ? String(row.use_when[0] || "").trim() : "")
+      || undefined;
+    commands.push({
+      name,
+      command: `/${name}`,
+      description,
+      capabilityId,
+      sourceType: "capsule_skill",
+      active: false,
+    });
+  }
+  return sortSlashCommands(commands);
+}
+
 export function filterSlashCommands(commands: SlashCommandItem[], input: string): SlashCommandItem[] {
   const text = String(input || "");
   if (text !== text.trimStart()) return [];
@@ -192,7 +227,7 @@ export function filterSlashCommandsBySkillScope(commands: SlashCommandItem[], sc
     if (item.sourceType !== "capsule_skill") return true;
     const activationSources = Array.isArray(item.activationSources) ? item.activationSources : [];
     const hasGroupSource = activationSources.some((source) => String(source?.scope || "").trim().toLowerCase() === "group");
-    return scope === "team" ? hasGroupSource : !hasGroupSource;
+    return scope === "team" ? !hasGroupSource : true;
   });
 }
 
@@ -243,7 +278,8 @@ export function buildCapsuleSkillDispatchText(item: SlashCommandItem, argsText: 
   const text = String(argsText || "").trim();
   if (!text) return "";
   const skillLabel = String(item.command || item.name || "").trim();
-  return `请使用已激活的 ${skillLabel} skill 完成以下任务：\n\n${text}`;
+  const activePrefix = item.active === false ? "" : "已激活的 ";
+  return `请使用${activePrefix}${skillLabel} skill 完成以下任务：\n\n${text}`;
 }
 
 export function resolveCapsuleSkillSlashCommand(

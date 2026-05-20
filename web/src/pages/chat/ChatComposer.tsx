@@ -138,6 +138,7 @@ export function ChatComposer({
   const isUserInputRef = useRef(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const [skillSearchQuery, setSkillSearchQuery] = useState("");
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [slashVisibleCount, setSlashVisibleCount] = useState(SLASH_COMMAND_PAGE_SIZE);
@@ -286,9 +287,20 @@ export function ChatComposer({
     () => slashCommands.filter((item) => item.sourceType === "capsule_skill"),
     [slashCommands],
   );
+  const visibleSkillCommands = useMemo(() => {
+    const query = skillSearchQuery.trim().toLowerCase();
+    if (!query) return scopedSkillCommands;
+    return scopedSkillCommands.filter((item) => {
+      const haystacks = [item.name, item.command, item.description || "", item.capabilityId]
+        .map((value) => String(value || "").toLowerCase());
+      return haystacks.some((value) => value.includes(query));
+    });
+  }, [scopedSkillCommands, skillSearchQuery]);
   const selectedSkill = useMemo(
-    () => skillCommands.find((item) => item.command === selectedSkillCommand) || null,
-    [selectedSkillCommand, skillCommands],
+    () => scopedSkillCommands.find((item) => item.command === selectedSkillCommand)
+      || skillCommands.find((item) => item.command === selectedSkillCommand)
+      || null,
+    [scopedSkillCommands, selectedSkillCommand, skillCommands],
   );
   useEffect(() => {
     if (!selectedSkillCommand) return;
@@ -389,6 +401,16 @@ export function ChatComposer({
 
   // Handle keyboard shortcuts and mention navigation.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Backspace" && selectedSkillCommand) {
+      const target = e.currentTarget;
+      const selectionStart = target.selectionStart ?? 0;
+      const selectionEnd = target.selectionEnd ?? selectionStart;
+      if (selectionStart === 0 && selectionEnd === 0) {
+        e.preventDefault();
+        setSelectedSkillCommand("");
+        return;
+      }
+    }
     if (showSlashMenu && visibleSlashSuggestions.length > 0) {
       const maxIndex = visibleSlashSuggestions.length - 1;
       if (e.key === "ArrowDown") {
@@ -778,15 +800,33 @@ export function ChatComposer({
                         );
                       })}
                     </div>
+                    <div className={classNames("border-b p-2", isDark ? "border-white/8" : "border-black/8")}>
+                      <input
+                        type="search"
+                        value={skillSearchQuery}
+                        onChange={(event) => setSkillSearchQuery(event.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        placeholder={t("searchSkills", { defaultValue: "搜索 skill" })}
+                        className={classNames(
+                          "h-8 w-full rounded-xl border px-3 text-xs outline-none transition-colors",
+                          isDark
+                            ? "border-white/10 bg-white/[0.05] text-slate-100 placeholder:text-slate-500 focus:border-blue-400/60 focus:bg-white/[0.08]"
+                            : "border-gray-200 bg-gray-50 text-gray-900 placeholder:text-gray-400 focus:border-blue-300 focus:bg-white",
+                        )}
+                        autoFocus
+                      />
+                    </div>
                     <div className="max-h-72 overflow-auto py-1 scrollbar-subtle">
-                      {scopedSkillCommands.length === 0 ? (
+                      {visibleSkillCommands.length === 0 ? (
                         <div className={classNames("px-4 py-6 text-center text-xs", isDark ? "text-slate-400" : "text-gray-500")}>
-                          {slashSkillScope === "team"
-                            ? t("noTeamSkills", { defaultValue: "当前团队没有可用 skill" })
-                            : t("noGlobalSkills", { defaultValue: "没有可用的全局 skill" })}
+                          {skillSearchQuery.trim()
+                            ? t("noMatchedSkills", { defaultValue: "没有匹配的 skill" })
+                            : slashSkillScope === "team"
+                              ? t("noTeamSkills", { defaultValue: "当前团队没有可用 skill" })
+                              : t("noGlobalSkills", { defaultValue: "没有可用的全局 skill" })}
                         </div>
                       ) : (
-                        scopedSkillCommands.map((item) => {
+                        visibleSkillCommands.map((item) => {
                           const active = selectedSkillCommand === item.command;
                           return (
                             <button
@@ -913,25 +953,25 @@ export function ChatComposer({
             {/* Row 2 — Textarea */}
             <div className="relative min-w-0 flex-1">
               {selectedSkill && (
-                <div className="px-4 pt-3">
+                <div className="px-4 pt-2.5">
                   <div
                     className={classNames(
-                      "inline-flex max-w-full items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-semibold shadow-sm",
+                      "inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold leading-none shadow-sm",
                       isDark
                         ? "border-blue-400/40 bg-blue-500 text-white shadow-blue-950/30"
                         : "border-blue-600 bg-blue-600 text-white shadow-blue-200/70",
                     )}
                   >
-                    <SparklesIcon size={13} className="shrink-0" />
+                    <SparklesIcon size={11} className="shrink-0" />
                     <span className="min-w-0 truncate">{`$${selectedSkill.name}`}</span>
                     <button
                       type="button"
-                      className="ml-0.5 rounded-full p-0.5 text-white/80 transition-colors hover:bg-white/18 hover:text-white"
+                      className="rounded-full p-0.5 text-white/80 transition-colors hover:bg-white/18 hover:text-white"
                       onClick={() => setSelectedSkillCommand("")}
                       aria-label={t("removeSelectedSkill", { defaultValue: "移除已选 skill" })}
                       title={t("removeSelectedSkill", { defaultValue: "移除已选 skill" })}
                     >
-                      <CloseIcon size={12} />
+                      <CloseIcon size={10} />
                     </button>
                   </div>
                 </div>

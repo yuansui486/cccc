@@ -960,6 +960,7 @@ export function useChatTab({
     replyRequired,
     groupSendBlockedReason,
     clearDraft,
+    setToText,
     setChatUnreadCount,
     setChatFilter,
     setChatMobileSurface,
@@ -1460,6 +1461,7 @@ export function useChatTab({
       }
       setDestGroupId(selectedGroupId);
       clearDraft(selectedGroupId);
+      setToText("");
       if (fileInputRef?.current) fileInputRef.current.value = "";
       if (inChatWindow) {
         closeChatWindow();

@@ -35,6 +35,7 @@ export function getComposerDestGroupDisplayValue(
 interface GroupDraft {
   composerText: string;
   composerFiles: File[];
+  selectedSkillCommand: string;
   toText: string;
   replyTarget: ReplyTarget;
   quotedPresentationRef: PresentationMessageRef | null;
@@ -47,6 +48,7 @@ interface ComposerState {
   // Current active state
   composerText: string;
   composerFiles: File[];
+  selectedSkillCommand: string;
   toText: string;
   replyTarget: ReplyTarget;
   quotedPresentationRef: PresentationMessageRef | null;
@@ -62,6 +64,7 @@ interface ComposerState {
   setComposerText: (text: string | ((prev: string) => string)) => void;
   setComposerFiles: (files: File[]) => void;
   appendComposerFiles: (files: File[]) => void;
+  setSelectedSkillCommand: (command: string) => void;
   setToText: (text: string) => void;
   setReplyToText: (text: string) => void;
   setReplyTarget: (target: ReplyTarget) => void;
@@ -85,6 +88,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   activeGroupId: "",
   composerText: "",
   composerFiles: [],
+  selectedSkillCommand: "",
   toText: "",
   replyTarget: null,
   quotedPresentationRef: null,
@@ -99,6 +103,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       composerText: typeof text === "function" ? text(state.composerText) : text,
     })),
   setComposerFiles: (files) => set({ composerFiles: files }),
+  setSelectedSkillCommand: (command) => set({ selectedSkillCommand: String(command || "").trim() }),
 
   appendComposerFiles: (files) =>
     set((state) => {
@@ -169,6 +174,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       return {
         composerText: "",
         composerFiles: [],
+        selectedSkillCommand: "",
         toText: nextToText,
         replyTarget: null,
         quotedPresentationRef: null,
@@ -197,6 +203,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       const hasContent =
         state.composerText.trim() ||
         state.composerFiles.length > 0 ||
+        state.selectedSkillCommand.trim() ||
         state.toText.trim() ||
         state.replyTarget ||
         state.quotedPresentationRef;
@@ -205,6 +212,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
         newDrafts[normalizedFromGroupId] = {
           composerText: state.composerText,
           composerFiles: state.composerFiles,
+          selectedSkillCommand: state.selectedSkillCommand,
           toText: state.toText,
           replyTarget: state.replyTarget,
           quotedPresentationRef: state.quotedPresentationRef,
@@ -228,6 +236,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       drafts: newDrafts,
       composerText: draft?.composerText || "",
       composerFiles: draft?.composerFiles || [],
+      selectedSkillCommand: draft?.selectedSkillCommand || "",
       toText: nextToText,
       replyTarget: draft?.replyTarget || null,
       quotedPresentationRef: draft?.quotedPresentationRef || null,
