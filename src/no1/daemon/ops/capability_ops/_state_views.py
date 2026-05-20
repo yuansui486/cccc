@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 
 _SLASH_TOOL_FIELDS = {"name", "description", "inputSchema", "capability_id", "real_tool_name"}
-_SLASH_SKILL_FIELDS = {"capability_id", "name", "description_short", "capsule_preview"}
+_SLASH_SKILL_FIELDS = {"capability_id", "name", "description_short", "capsule_preview", "activation_sources"}
 
 
 def _project_rows(rows: Any, allowed_fields: set[str]) -> List[Dict[str, Any]]:

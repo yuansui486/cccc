@@ -6,7 +6,7 @@ import { QUIET_RUN_INDICATOR_DOT_CLASS, STOPPED_INDICATOR_DOT_CLASS } from "../.
 describe("getActorTabIndicatorState", () => {
   it("only accents tabs that are actively working", () => {
     expect(getActorTabIndicatorState({ isRunning: true, workingState: "working" }).labelClass)
-      .toBe("text-emerald-700 dark:text-emerald-300");
+      .toBe("text-amber-700 dark:text-amber-300");
     expect(getActorTabIndicatorState({ isRunning: true, workingState: "stuck" }).labelClass)
       .toBe("");
   });

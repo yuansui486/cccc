@@ -815,6 +815,8 @@ export const MessageBubble = memo(function MessageBubble({
                     <ActorAvatar
                         avatarUrl={senderAvatarUrl || undefined}
                         runtime={senderRuntime || undefined}
+                        command={senderActor?.command}
+                        env={senderActor?.env}
                         title={senderDisplayName}
                         isUser={isUserMessage}
                         isDark={isDark}
@@ -859,6 +861,8 @@ export const MessageBubble = memo(function MessageBubble({
                             fullMessageTimestamp={fullMessageTimestamp}
                             senderAvatarUrl={senderAvatarUrl || undefined}
                             senderRuntime={senderRuntime || undefined}
+                            senderCommand={senderActor?.command}
+                            senderEnv={senderActor?.env}
                             avatarRingClassName={senderAccent?.ring}
                         />
 

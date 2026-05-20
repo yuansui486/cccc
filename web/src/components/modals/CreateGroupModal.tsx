@@ -107,7 +107,7 @@ export function CreateGroupModal({
           </div>
           <div className="text-sm mt-1 text-[var(--color-text-muted)]">{t("createGroup.subtitle")}</div>
         </div>
-        <div className="p-6 space-y-5 overflow-y-auto min-h-0 flex-1 bg-[radial-gradient(circle_at_top,rgba(219,234,254,0.82),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgb(248,251,255),rgb(240,247,255))] dark:bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.16),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(13,24,42,0.98),rgba(8,15,28,1))]">
+        <div className="p-6 space-y-5 overflow-y-auto min-h-0 flex-1 bg-[linear-gradient(180deg,rgb(250,250,249),rgb(244,244,243))] dark:bg-[linear-gradient(180deg,rgba(24,24,26,0.98),rgba(14,14,16,1))]">
           <div>
             <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("createGroup.quickSelect")}</label>
             <div className="grid grid-cols-1 gap-2">

@@ -1530,7 +1530,7 @@ export function AssistantsTab({
                 if (event.target === event.currentTarget) setExpandedPromptBlock(null);
               }}
             >
-              <div className="absolute inset-0 glass-overlay" />
+              <div className="absolute inset-0 glass-overlay" onPointerDown={() => setExpandedPromptBlock(null)} />
               <div className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
                   <button type="button" className={secondaryButtonClass("sm")} onClick={() => setExpandedPromptBlock(null)}>

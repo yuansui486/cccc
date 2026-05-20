@@ -227,7 +227,7 @@ export function SearchModal({ isOpen, onClose, groupId, actors, isDark, onReply,
               <Button
                 onClick={() => void doSearch({ mode: "replace" })}
                 disabled={busy}
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-500"
+                className="rounded-lg bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400"
               >
                 {busy ? "…" : t('common:search')}
               </Button>

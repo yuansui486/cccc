@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { BookmarkIcon, CompassIcon } from "../../components/Icons";
-import { Actor, GroupMeta, HeadlessPreviewSession, LedgerEvent, PresentationMessageRef, StreamingActivity } from "../../types";
+import { Actor, HeadlessPreviewSession, LedgerEvent, PresentationMessageRef, StreamingActivity } from "../../types";
 import { VirtualMessageList } from "../../components/VirtualMessageList";
 import { classNames } from "../../utils/classNames";
 import { ChatComposer } from "./ChatComposer";
@@ -50,12 +50,9 @@ export interface ChatTabProps {
   selectedGroupActorsHydrating: boolean;
   groupLabelById: Record<string, string>;
   actors: Actor[];
-  groups: GroupMeta[];
-
   // Recipient actors for cross-group messaging
   recipientActors: Actor[];
   recipientActorsBusy?: boolean;
-  destGroupScopeLabel?: string;
 
   // Refs (shared with App for external interactions)
   scrollRef: MutableRefObject<HTMLDivElement | null>;
@@ -87,10 +84,8 @@ export function ChatTab({
   selectedGroupActorsHydrating,
   groupLabelById,
   actors,
-  groups,
   recipientActors,
   recipientActorsBusy,
-  destGroupScopeLabel,
   scrollRef,
   composerRef,
   fileInputRef,
@@ -157,9 +152,10 @@ export function ChatTab({
     setPriority,
     setReplyRequired,
     destGroupId,
-    setDestGroupId,
     composerGroupSettled,
     mentionSuggestions,
+    slashSkillScope,
+    setSlashSkillScope,
 
     // Agent state
     agentStates,
@@ -403,6 +399,97 @@ export function ChatTab({
   ];
   const showMessageFilters = !readOnly && !chatWindowProps && hasAnyChatMessages;
 
+  const renderChatSurfaceControls = (variant: "mobile" | "desktop") => {
+    const compact = variant === "mobile";
+    return (
+      <div
+        className={classNames(
+          "inline-flex max-w-full items-center gap-1 rounded-full border backdrop-blur-xl transition-all duration-300",
+          compact ? "p-1" : "p-1.5 shadow-xl",
+          isDark
+            ? compact
+              ? "border-slate-700/50 bg-slate-950/35"
+              : "border-white/10 bg-slate-900/60 shadow-black/40 ring-1 ring-white/5"
+            : compact
+              ? "border-gray-200/70 bg-white/72"
+              : "border-black/5 bg-white/70 shadow-gray-200/50 ring-1 ring-black/5"
+        )}
+      >
+        {showMessageFilters ? (
+          <div
+            className="min-w-0 overflow-x-auto scrollbar-hide"
+            role="tablist"
+            aria-label={t('chatFilters')}
+          >
+            <div className="inline-flex min-w-max items-center gap-1">
+              {filterOptions.map(([key, label]) => {
+                const active = chatFilter === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={classNames(
+                      "min-w-0 rounded-full font-medium transition-all whitespace-nowrap",
+                      compact ? "px-3 py-1.5 text-[11px]" : "px-4 py-1.5 text-xs",
+                      active
+                        ? "bg-blue-600 text-white shadow-sm dark:bg-blue-500"
+                        : isDark
+                          ? "text-slate-500 hover:bg-slate-800/60 hover:text-slate-200"
+                          : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                    )}
+                    onClick={() => setChatFilter(key)}
+                    aria-pressed={active}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {compact ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedGroupId) setChatMobileSurface(selectedGroupId, "presentation");
+            }}
+            className={classNames(
+              "relative inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all duration-200",
+              isDark
+                ? "text-slate-300 hover:bg-slate-800/60 hover:text-slate-100"
+                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+              hasPresentationAttention &&
+                (isDark
+                  ? "presentation-slot-attention presentation-slot-attention-dark"
+                  : "presentation-slot-attention presentation-slot-attention-light")
+            )}
+            aria-label={t("presentationOpenDockAction", { defaultValue: "Open presentation" })}
+            title={t("presentationOpenDockAction", { defaultValue: "Open presentation" })}
+          >
+            <BookmarkIcon size={17} />
+            {hasPresentationAttention ? (
+              <>
+                <span
+                  className={classNames(
+                    "pointer-events-none absolute right-1.5 top-1.5 h-2 w-2 rounded-full animate-ping",
+                    isDark ? "bg-cyan-300/70" : "bg-cyan-500/45"
+                  )}
+                />
+                <span
+                  className={classNames(
+                    "pointer-events-none absolute right-1.5 top-1.5 h-2 w-2 rounded-full",
+                    isDark ? "bg-cyan-200" : "bg-cyan-500"
+                  )}
+                />
+              </>
+            ) : null}
+          </button>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-transparent">
       {/* 1. Header Area: For critical banners/setup only, very space-efficient */}
@@ -493,124 +580,12 @@ export function ChatTab({
                       isDark ? "border-white/5" : "border-black/5"
                     )}
                   >
-                    <div className="flex items-center gap-3">
-                      {showMessageFilters ? (
-                        <div
-                          className={classNames(
-                            "min-w-0 flex-1 overflow-x-auto scrollbar-hide",
-                          )}
-                          role="tablist"
-                          aria-label={t('chatFilters')}
-                        >
-                          <div className={classNames(
-                            "inline-flex min-w-max items-center gap-1 rounded-full border p-1 backdrop-blur-md",
-                            isDark
-                              ? "border-slate-700/50 bg-transparent"
-                              : "border-gray-200/70 bg-transparent"
-                          )}>
-                            {filterOptions.map(([key, label]) => {
-                              const active = chatFilter === key;
-                              return (
-                                <button
-                                  key={key}
-                                  type="button"
-                                  className={classNames(
-                                    "min-w-0 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all whitespace-nowrap",
-                                    active
-                                      ? "bg-blue-600 text-white shadow-sm"
-                                      : isDark
-                                        ? "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
-                                        : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                                  )}
-                                  onClick={() => setChatFilter(key)}
-                                  aria-pressed={active}
-                                >
-                                  {label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : <div className="flex-1" />}
-
-                      <button
-                        type="button"
-                        onClick={() => selectedGroupId && setChatMobileSurface(selectedGroupId, "presentation")}
-                        className={classNames(
-                          "relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full border backdrop-blur-xl transition-all duration-200",
-                          isDark
-                            ? "border-white/10 bg-transparent text-slate-100"
-                            : "border-black/10 bg-transparent text-gray-900",
-                          hasPresentationAttention &&
-                            (isDark
-                              ? "presentation-slot-attention presentation-slot-attention-dark"
-                              : "presentation-slot-attention presentation-slot-attention-light")
-                        )}
-                        aria-label={t("presentationOpenDockAction", { defaultValue: "Open presentation" })}
-                        title={t("presentationOpenDockAction", { defaultValue: "Open presentation" })}
-                      >
-                        <BookmarkIcon size={18} />
-                        {hasPresentationAttention ? (
-                          <>
-                            <span
-                              className={classNames(
-                                "pointer-events-none absolute right-2 top-2 h-2 w-2 rounded-full animate-ping",
-                                isDark ? "bg-cyan-300/70" : "bg-cyan-500/45"
-                              )}
-                            />
-                            <span
-                              className={classNames(
-                                "pointer-events-none absolute right-2 top-2 h-2 w-2 rounded-full",
-                                isDark ? "bg-cyan-200" : "bg-cyan-500"
-                              )}
-                            />
-                          </>
-                        ) : null}
-                      </button>
+                    <div className="flex justify-end">
+                      {renderChatSurfaceControls("mobile")}
                     </div>
                   </div>
 
                 </>
-              )}
-
-              {showMessageFilters && (
-                <div
-                  className="hidden sm:block absolute top-4 left-4 z-20 pointer-events-none"
-                  style={{ width: "calc(100% - 32px)" }}
-                >
-                  <div
-                    className={classNames(
-                      "inline-flex items-center gap-1 xl:gap-2 rounded-full border p-1 sm:p-1.5 shadow-xl pointer-events-auto backdrop-blur-xl transition-all duration-300",
-                      isDark
-                        ? "border-white/10 bg-slate-900/60 shadow-black/40 ring-1 ring-white/5"
-                        : "border-black/5 bg-white/70 shadow-gray-200/50 ring-1 ring-black/5"
-                    )}
-                    role="tablist"
-                    aria-label={t('chatFilters')}
-                  >
-                    {filterOptions.map(([key, label]) => {
-                      const active = chatFilter === key;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          className={classNames(
-                            "text-xs px-4 py-1.5 rounded-full transition-all font-medium",
-                            active
-                              ? "bg-blue-600 text-white shadow-sm"
-                              : isDark
-                                ? "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
-                                : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                          )}
-                          onClick={() => setChatFilter(key)}
-                          aria-pressed={active}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               )}
 
               {isBusinessEmptyState && showSetupCard ? (
@@ -761,6 +736,7 @@ export function ChatTab({
                 attentionSlots={presentationAttention}
                 onOpenSlot={openPresentationSlot}
                 onPinSlot={pinPresentationSlot}
+                dockLeadingContent={showMessageFilters ? renderChatSurfaceControls("desktop") : null}
               />
             </Suspense>
           ) : null}
@@ -795,10 +771,7 @@ export function ChatTab({
             actors={actors}
             recipientActors={recipientActors}
             recipientActorsBusy={recipientActorsBusy}
-            groups={groups}
             destGroupId={destGroupId}
-            setDestGroupId={setDestGroupId}
-            destGroupScopeLabel={destGroupScopeLabel}
             busy={busy}
             recentMessages={chatMessages}
             replyTarget={replyTarget}
@@ -817,6 +790,8 @@ export function ChatTab({
             setComposerText={setComposerText}
             composerGroupSettled={composerGroupSettled}
             slashCommands={slashCommands}
+            slashSkillScope={slashSkillScope}
+            setSlashSkillScope={setSlashSkillScope}
             priority={priority}
             replyRequired={replyRequired}
             setPriority={setPriority}

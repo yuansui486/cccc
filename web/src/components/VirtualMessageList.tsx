@@ -275,6 +275,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
   // 防止 handleScroll 将浏览器裁剪 scrollTop 误判为用户上滑
   const isContainerResizingRef = useRef(false);
   const forceStickToBottomUntilRef = useRef(0);
+  const lastHandledForceStickToBottomTokenRef = useRef(0);
 
   // Track previous resetKey for scroll snapshot before group switch
   const prevResetKeyRef = useRef<string | undefined>(undefined);
@@ -652,12 +653,14 @@ const VirtualMessageListInner = function VirtualMessageListInner({
           if (idx >= 0) {
             setAtBottom(false);
             setFollowMode("detached");
+            onScrollChange?.(false);
             scrollToAnchorStable(idx, Number(initialScrollAnchorOffsetPx || 0));
             return;
           }
         } else if (scrollToMessageAnchor(String(initialScrollAnchorId), Number(initialScrollAnchorOffsetPx || 0))) {
           setAtBottom(false);
           setFollowMode("detached");
+          onScrollChange?.(false);
           return;
         }
         onScrollSnapshot?.({
@@ -679,6 +682,7 @@ const VirtualMessageListInner = function VirtualMessageListInner({
     scheduleForceStickToBottom,
     scheduleScroll,
     onScrollSnapshot,
+    onScrollChange,
     scrollToAnchorStable,
     scrollToBottom,
     scrollToIndexStable,
@@ -690,6 +694,8 @@ const VirtualMessageListInner = function VirtualMessageListInner({
 
   useEffect(() => {
     if (!forceStickToBottomToken) return;
+    if (lastHandledForceStickToBottomTokenRef.current === forceStickToBottomToken) return;
+    lastHandledForceStickToBottomTokenRef.current = forceStickToBottomToken;
     setAtBottom(true);
     setFollowMode("follow");
     scheduleForceStickToBottom();
@@ -985,8 +991,8 @@ const VirtualMessageListInner = function VirtualMessageListInner({
           {/* Scroll Button */}
           {!readOnly && showScrollButton && (
             <button
-              className={`fixed bottom-36 right-6 p-3 rounded-full shadow-xl transition-all z-10 ${isDark
-                ? "bg-slate-800 text-white hover:bg-slate-700 border border-slate-700"
+              className={`fixed bottom-44 right-6 p-3 rounded-full shadow-xl transition-all z-50 ${isDark
+                ? "bg-blue-500 text-white hover:bg-blue-400 border border-blue-400"
                 : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
               }`}
               onClick={() => {

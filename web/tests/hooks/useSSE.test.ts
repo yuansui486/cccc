@@ -28,6 +28,7 @@ import {
   computeGroupRuntimeFromActorActivityUpdate,
   computeGroupRuntimeFromActorActivityUpdates,
   getGroupStreamsHiddenDisconnectDelayMs,
+  hasHeadlessActors,
   shouldStartGroupStreams,
 } from "../../src/hooks/useSSE";
 import type { Actor } from "../../src/types";
@@ -35,12 +36,19 @@ import type { Actor } from "../../src/types";
 void localStorageMock;
 
 describe("computeGroupRuntimeFromActorActivityUpdate", () => {
-  it("starts group SSE only while visible but defers hidden disconnect with a grace period", () => {
+  it("starts group SSE only while visible and disconnects immediately when hidden", () => {
     expect(shouldStartGroupStreams(false)).toBe(true);
     expect(shouldStartGroupStreams(true)).toBe(false);
     expect(getGroupStreamsHiddenDisconnectDelayMs(false)).toBeNull();
     expect(getGroupStreamsHiddenDisconnectDelayMs(true)).toBe(GROUP_STREAMS_HIDDEN_DISCONNECT_GRACE_MS);
-    expect(GROUP_STREAMS_HIDDEN_DISCONNECT_GRACE_MS).toBeGreaterThanOrEqual(60_000);
+    expect(GROUP_STREAMS_HIDDEN_DISCONNECT_GRACE_MS).toBe(0);
+  });
+
+  it("detects whether the selected group actually has headless actors", () => {
+    expect(hasHeadlessActors([])).toBe(false);
+    expect(hasHeadlessActors([{ id: "pty-1", runner: "pty" }])).toBe(false);
+    expect(hasHeadlessActors([{ id: "headless-1", runner: "headless" }])).toBe(true);
+    expect(hasHeadlessActors([{ id: "headless-2", runner_effective: "headless" }])).toBe(true);
   });
 
   it("keeps the group active while another actor is still working", () => {

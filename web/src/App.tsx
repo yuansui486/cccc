@@ -21,9 +21,11 @@ import { useViewportHeight } from "./hooks/useViewportHeight";
 import { useAppChrome } from "./hooks/useAppChrome";
 import { useAppGroupLifecycle } from "./hooks/useAppGroupLifecycle";
 import { useAppTabState } from "./hooks/useAppTabState";
+import * as api from "./services/api";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
 import { buildReplyComposerState } from "./utils/chatReply";
+import { subscribeCapabilityChanged } from "./utils/capabilityEvents";
 import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
 import {
   useGroupStore,
@@ -35,7 +37,46 @@ import {
   useDoneHubStore,
 } from "./stores";
 import { useChatOutboxStore } from "./stores/chatOutboxStore";
-import type { LedgerEvent } from "./types";
+import type { CapabilityOverviewItem, CapabilityStateResult, LedgerEvent, Task, TaskBoardEntry } from "./types";
+
+function countTaskBoardEntries(value: number | TaskBoardEntry[] | undefined): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function countActiveTasksFromTasks(tasks: Task[] | undefined): number {
+  if (!Array.isArray(tasks)) return 0;
+  let count = 0;
+  for (const task of tasks) {
+    if (String(task?.status || "").trim().toLowerCase() === "active") count += 1;
+    count += countActiveTasksFromTasks(task?.children);
+  }
+  return count;
+}
+
+function cleanCapabilityId(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function countEnabledGroupSkillsFromState(
+  state: CapabilityStateResult | null | undefined,
+  items: CapabilityOverviewItem[] | null | undefined,
+): number {
+  const groupEnabledIds = new Set<string>();
+  const entries = Array.isArray(state?.enabled) ? state.enabled : [];
+  for (const row of entries) {
+    if (cleanCapabilityId(row?.scope).toLowerCase() !== "group") continue;
+    const id = cleanCapabilityId(row?.capability_id);
+    if (id) groupEnabledIds.add(id);
+  }
+  if (!Array.isArray(items) || items.length === 0) return groupEnabledIds.size;
+  let count = 0;
+  for (const row of items) {
+    if (cleanCapabilityId(row?.kind).toLowerCase() !== "skill") continue;
+    if (groupEnabledIds.has(cleanCapabilityId(row?.capability_id))) count += 1;
+  }
+  return count;
+}
 
 export default function App() {
   const { theme, setTheme, isDark } = useTheme();
@@ -90,6 +131,8 @@ export default function App() {
   const sseStatus = useUIStore((s) => s.sseStatus);
 
   const openModal = useModalStore((s) => s.openModal);
+  const openContextTarget = useModalStore((s) => s.openContextTarget);
+  const openSettingsTarget = useModalStore((s) => s.openSettingsTarget);
   const modalFlags = useModalStore((s) => s.modals);
   const editingActor = useModalStore((s) => s.editingActor);
   const peerRuntimeVisibility = useObservabilityStore((state) => state.peerRuntimeVisibility);
@@ -114,7 +157,7 @@ export default function App() {
     setToText,
   } = useComposerStore();
 
-  const { setNewActorRole, setEditGroupTitle, setEditGroupTopic, setDirSuggestions } = useFormStore();
+  const { setNewActorRole, setEditGroupId, setEditGroupTitle, setEditGroupTopic, setDirSuggestions } = useFormStore();
   const clearAllOutbox = useChatOutboxStore((state) => state.clearAll);
 
   const {
@@ -136,6 +179,7 @@ export default function App() {
   const [showMentionMenu, setShowMentionMenu] = React.useState(false);
   const [_mentionFilter, setMentionFilter] = React.useState("");
   const [mentionSelectedIndex, setMentionSelectedIndex] = React.useState(0);
+  const [enabledSkillCount, setEnabledSkillCount] = React.useState(0);
   const internalRuntimeActors = useMemo(
     () => internalRuntimeActorsByGroup[String(selectedGroupId || "").trim()] || [],
     [internalRuntimeActorsByGroup, selectedGroupId]
@@ -228,8 +272,55 @@ export default function App() {
   const { handleStartGroup, handleStopGroup, handleSetGroupState } = useGroupActions();
 
   const computedSendGroupId = getEffectiveComposerDestGroupId(destGroupId, activeGroupId, selectedGroupId);
+  const activeTaskCount = useMemo(() => {
+    const summaryActive = groupContext?.tasks_summary?.active;
+    if (typeof summaryActive === "number" && Number.isFinite(summaryActive)) return Math.max(0, summaryActive);
+    const boardActive = countTaskBoardEntries(groupContext?.board?.active);
+    if (boardActive > 0) return boardActive;
+    return countActiveTasksFromTasks(groupContext?.coordination?.tasks);
+  }, [groupContext]);
 
-  const { recipientActors, recipientActorsBusy, destGroupScopeLabel } = useCrossGroupRecipients({
+  const refreshEnabledSkillCount = useCallback(async () => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid) {
+      setEnabledSkillCount(0);
+      return;
+    }
+    try {
+      const [stateResp, overviewResp] = await Promise.all([
+        api.fetchGroupCapabilityState(gid, "user", { noCache: true }),
+        api.fetchCapabilityOverview({ includeIndexed: true, limit: 1200 }),
+      ]);
+      if (!stateResp.ok) {
+        setEnabledSkillCount(0);
+        return;
+      }
+      setEnabledSkillCount(countEnabledGroupSkillsFromState(
+        stateResp.result,
+        overviewResp.ok && Array.isArray(overviewResp.result?.items) ? overviewResp.result.items : null,
+      ));
+    } catch {
+      setEnabledSkillCount(0);
+    }
+  }, [selectedGroupId]);
+
+  useEffect(() => {
+    void refreshEnabledSkillCount();
+  }, [refreshEnabledSkillCount]);
+
+  useEffect(() => {
+    return subscribeCapabilityChanged(selectedGroupId, () => {
+      void refreshEnabledSkillCount();
+    });
+  }, [refreshEnabledSkillCount, selectedGroupId]);
+
+  useEffect(() => {
+    const gid = String(selectedGroupId || "").trim();
+    if (!gid || groupContext) return;
+    void fetchContext(gid, { detail: "summary" });
+  }, [fetchContext, groupContext, selectedGroupId]);
+
+  const { recipientActors, recipientActorsBusy } = useCrossGroupRecipients({
     actors,
     groupDoc,
     selectedGroupId,
@@ -369,7 +460,6 @@ export default function App() {
       <AppShell
         orderedGroups={orderedGroups}
         archivedGroupIds={archivedGroupIds}
-        groups={groups}
         selectedGroupId={selectedGroupId}
         groupDoc={groupDoc}
         groupContext={groupContext}
@@ -377,7 +467,6 @@ export default function App() {
         runtimeActors={visibleRuntimeActors}
         recipientActors={recipientActors}
         recipientActorsBusy={recipientActorsBusy}
-        destGroupScopeLabel={destGroupScopeLabel}
         renderedActorIds={renderedActorIds}
         activeTab={activeTab}
         busy={busy}
@@ -397,6 +486,8 @@ export default function App() {
         sseStatus={sseStatus}
         groupLabelById={groupLabelById}
         chatUnreadCount={chatUnreadCount}
+        enabledSkillCount={enabledSkillCount}
+        activeTaskCount={activeTaskCount}
         mentionSelectedIndex={mentionSelectedIndex}
         showMentionMenu={showMentionMenu}
         composerRef={composerRef}
@@ -425,12 +516,15 @@ export default function App() {
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenGroupEdit={
           canManageGroups
-            ? () => {
-                if (groupDoc) {
-                  setEditGroupTitle(groupDoc.title || "");
-                  setEditGroupTopic(groupDoc.topic || "");
-                  openModal("groupEdit");
-                }
+            ? (groupId?: string) => {
+                const targetGroupId = String(groupId || selectedGroupId || "").trim();
+                const targetGroup = groups.find((g) => String(g.group_id || "").trim() === targetGroupId);
+                const targetDoc = targetGroupId === selectedGroupId ? groupDoc : null;
+                if (!targetGroupId || (!targetGroup && !targetDoc)) return;
+                setEditGroupId(targetGroupId);
+                setEditGroupTitle(targetDoc?.title || targetGroup?.title || "");
+                setEditGroupTopic(targetDoc?.topic || targetGroup?.topic || "");
+                openModal("groupEdit");
               }
             : undefined
         }
@@ -438,6 +532,18 @@ export default function App() {
         onOpenContext={() => {
           if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
           openModal("context");
+        }}
+        onOpenContextProject={() => {
+          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
+          openContextTarget({ tab: "project", projectMode: "edit" });
+        }}
+        onOpenContextSummary={() => {
+          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
+          openContextTarget({ tab: "tasks" });
+        }}
+        onOpenSkillManagement={() => {
+          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
+          openContextTarget({ tab: "skills" });
         }}
         onStartGroup={handleStartGroup}
         onStopGroup={handleStopGroup}

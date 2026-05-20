@@ -1,18 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Actor, DoneHubStatus, GroupDoc, GroupRuntimeStatus, TextScale, Theme } from "../../types";
+import { DoneHubStatus, GroupDoc, GroupRuntimeStatus, TextScale, Theme } from "../../types";
 import { getGroupStatusFromSource } from "../../utils/groupStatus";
-import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
 import { classNames } from "../../utils/classNames";
-import { TextScaleSwitcher } from "../TextScaleSwitcher";
-import { ThemeToggleCompact } from "../ThemeToggle";
-import { formatDoneHubQuota } from "../../services/doneHub";
 import {
-  ClipboardIcon,
-  SearchIcon,
-  RocketIcon,
-  PauseIcon,
-  StopIcon,
-  SettingsIcon,
   EditIcon,
   MoreIcon,
   MenuIcon,
@@ -29,7 +19,7 @@ export interface AppHeaderProps {
   groupDoc: GroupDoc | null;
   selectedGroupRunning: boolean;
   selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
-  actors: Actor[];
+  actors: unknown[];
   sseStatus: "connected" | "connecting" | "disconnected";
   busy: string;
   doneHub?: {
@@ -40,7 +30,7 @@ export interface AppHeaderProps {
     errorMessage: string;
   };
   onOpenSidebar: () => void;
-  onOpenGroupEdit?: () => void;
+  onOpenGroupEdit?: (groupId?: string) => void;
   onOpenSearch: () => void;
   onOpenContext: () => void;
   onStartGroup: () => void;
@@ -52,85 +42,39 @@ export interface AppHeaderProps {
 }
 
 export function AppHeader({
-  isDark,
-  theme,
-  textScale,
-  onThemeChange,
-  onTextScaleChange,
+  isDark: _isDark,
+  theme: _theme,
+  textScale: _textScale,
+  onThemeChange: _onThemeChange,
+  onTextScaleChange: _onTextScaleChange,
   webReadOnly,
   selectedGroupId,
   groupDoc,
   selectedGroupRunning,
   selectedGroupRuntimeStatus,
-  actors,
-  busy,
-  doneHub,
+  actors: _actors,
+  busy: _busy,
+  doneHub: _doneHub,
   onOpenSidebar,
   onOpenGroupEdit,
-  onOpenSearch,
-  onOpenContext,
-  onStartGroup,
-  onStopGroup,
-  onSetGroupState,
-  onOpenSettings,
-  onOpenDoneHubAuth,
+  onOpenSearch: _onOpenSearch,
+  onOpenContext: _onOpenContext,
+  onStartGroup: _onStartGroup,
+  onStopGroup: _onStopGroup,
+  onSetGroupState: _onSetGroupState,
+  onOpenSettings: _onOpenSettings,
+  onOpenDoneHubAuth: _onOpenDoneHubAuth,
   onOpenMobileMenu,
   sseStatus,
 }: AppHeaderProps) {
   const { t } = useTranslation("layout");
   const headerIconButtonBaseClass =
     "flex items-center justify-center w-11 h-11 rounded-xl transition-all shrink-0";
-  const headerRailClass =
-    "flex items-center gap-1 rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] p-1 shadow-sm backdrop-blur-xl";
-  const headerRailButtonClass =
-    "flex items-center justify-center w-10 h-10 rounded-xl transition-all shrink-0 border border-transparent bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-45 disabled:text-[var(--color-text-tertiary)] disabled:hover:bg-transparent disabled:hover:text-[var(--color-text-tertiary)]";
   const selectedStatus = selectedGroupId ? getGroupStatusFromSource({
     running: selectedGroupRunning,
     state: (selectedGroupRuntimeStatus?.lifecycle_state as GroupDoc["state"] | undefined) || groupDoc?.state,
     runtime_status: selectedGroupRuntimeStatus || undefined,
   }) : null;
-  const selectedStatusKey = selectedStatus?.key ?? null;
-  const launchMode = getLaunchControlMode(selectedStatusKey);
-  const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
-  const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
-  const stopControl = getGroupControlVisual(selectedStatusKey, "stop", busy);
-  const {
-    launchHardUnavailable,
-    pauseHardUnavailable,
-    stopHardUnavailable,
-    launchDisabled,
-    pauseDisabled,
-    stopDisabled,
-  } = resolveGroupControls({
-    selectedGroupId,
-    actorCount: actors.length,
-    statusKey: selectedStatusKey,
-    busy,
-  });
-
-  const doneHubStatus = doneHub?.status || "idle";
-  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
-  const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
-  const doneHubQuota = doneHub?.quota != null ? formatDoneHubQuota(doneHub.quota) : formatDoneHubQuota(0);
-
-  const handleLaunchClick = () => {
-    if (launchDisabled || selectedStatusKey === "run") return;
-    if (launchMode === "activate") {
-      void onSetGroupState("active");
-      return;
-    }
-    onStartGroup();
-  };
-
-  const handlePauseClick = () => {
-    if (pauseDisabled || selectedStatusKey === "paused") return;
-    void onSetGroupState("paused");
-  };
-
-  const handleStopClick = () => {
-    if (stopDisabled || selectedStatusKey === "stop") return;
-    onStopGroup();
-  };
 
   return (
     <header className="flex-shrink-0 z-20 px-4 h-14 flex items-center justify-between gap-3 glass-header">
@@ -182,7 +126,7 @@ export function AppHeader({
               "hidden md:inline-flex items-center justify-center gap-1 text-xs px-2.5 py-1.5 rounded-xl transition-all glass-btn",
               "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
             )}
-            onClick={onOpenGroupEdit}
+            onClick={() => onOpenGroupEdit()}
             title={t("editGroup")}
             aria-label={t("editGroup")}
           >
@@ -194,119 +138,6 @@ export function AppHeader({
       <div className="flex items-center gap-1">
         {!webReadOnly && (
           <>
-            <div className="hidden md:flex items-center gap-1.5 mr-2">
-              <div className={headerRailClass}>
-                <button
-                  onClick={onOpenSearch}
-                  disabled={!selectedGroupId}
-                  className={headerRailButtonClass}
-                  title={t("searchMessages")}
-                >
-                  <span className="sr-only">{t("searchMessages")}</span>
-                  <SearchIcon size={18} />
-                </button>
-
-                <button
-                  onClick={onOpenContext}
-                  disabled={!selectedGroupId}
-                  className={headerRailButtonClass}
-                  title={t("context")}
-                >
-                  <span className="sr-only">{t("context")}</span>
-                  <ClipboardIcon size={18} />
-                </button>
-              </div>
-
-              <div className={headerRailClass}>
-                <button
-                  onClick={handleLaunchClick}
-                  disabled={launchDisabled}
-                  className={classNames(
-                    "flex items-center justify-center w-10 h-10 rounded-xl transition-all shrink-0",
-                    launchControl.className,
-                    launchHardUnavailable && "opacity-45"
-                  )}
-                  title={launchMode === "activate" ? t("resumeDelivery") : t("launchAllAgents")}
-                  aria-pressed={launchControl.active}
-                >
-                  <span className="sr-only">{launchMode === "activate" ? t("resumeDelivery") : t("launchAllAgents")}</span>
-                  <RocketIcon size={18} />
-                </button>
-
-                <button
-                  onClick={handlePauseClick}
-                  disabled={pauseDisabled}
-                  className={classNames(
-                    "flex items-center justify-center w-10 h-10 rounded-xl transition-all shrink-0",
-                    pauseControl.className,
-                    pauseHardUnavailable && "opacity-45"
-                  )}
-                  title={t("pauseDelivery")}
-                  aria-pressed={pauseControl.active}
-                >
-                  <span className="sr-only">{t("pauseDelivery")}</span>
-                  <PauseIcon size={18} />
-                </button>
-
-                <button
-                  onClick={handleStopClick}
-                  disabled={stopDisabled}
-                  className={classNames(
-                    "flex items-center justify-center w-10 h-10 rounded-xl transition-all shrink-0",
-                    stopControl.className,
-                    stopHardUnavailable && "opacity-45"
-                  )}
-                  title={t("stopAllAgents")}
-                  aria-pressed={stopControl.active}
-                >
-                  <span className="sr-only">{t("stopAllAgents")}</span>
-                  <StopIcon size={18} />
-                </button>
-              </div>
-
-              <button
-                onClick={onOpenDoneHubAuth}
-                className={classNames(
-                  "hidden md:flex min-w-0 max-w-[180px] items-center gap-2 rounded-xl border px-3 py-2 transition-all glass-btn",
-                  doneHubConnected
-                    ? "border-sky-300/45 bg-sky-400/12 text-sky-700 dark:border-sky-400/20 dark:bg-sky-500/12 dark:text-sky-300"
-                    : doneHubStatus === "error"
-                      ? "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
-                      : "text-[var(--color-text-secondary)]"
-                )}
-                title={
-                  doneHubConnected
-                    ? t("doneHubBalanceTitle", { value: doneHubQuota })
-                    : t(doneHubStatus === "error" ? "doneHubNeedsAttention" : "doneHubConnect")
-                }
-              >
-                {doneHubIsPro ? (
-                  <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-700 shadow-[0_0_0_1px_rgba(245,158,11,0.18)] dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
-                    PRO
-                  </span>
-                ) : null}
-                <span className="min-w-0 truncate text-sm font-medium">
-                  {doneHubConnected
-                    ? t("doneHubBalanceInline", { value: doneHubQuota })
-                    : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect")}
-                </span>
-              </button>
-
-              <div className={headerRailClass}>
-                <ThemeToggleCompact theme={theme} onThemeChange={onThemeChange} isDark={isDark} variant="rail" />
-                <TextScaleSwitcher textScale={textScale} onTextScaleChange={onTextScaleChange} variant="rail" />
-                <button
-                  onClick={onOpenSettings}
-                  disabled={!selectedGroupId}
-                  className={headerRailButtonClass}
-                  title={t("settings")}
-                >
-                  <span className="sr-only">{t("settings")}</span>
-                  <SettingsIcon size={18} />
-                </button>
-              </div>
-            </div>
-
             <button
               className={classNames(
                 "md:hidden",

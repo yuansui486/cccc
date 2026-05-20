@@ -145,7 +145,7 @@ function getRuntimeRingPresentation(tone: RuntimeRingTone, isDark: boolean): Run
           duration: 6.2,
           shineColors: ["#A07CFE", "#FE8FB5", "#FFBE7B"],
         }),
-        unreadBadgeClassName: isDark ? "bg-emerald-300/[0.18] text-emerald-50" : "bg-emerald-500/[0.14] text-emerald-700",
+        unreadBadgeClassName: isDark ? "bg-sky-300/[0.18] text-sky-50" : "bg-sky-500/[0.14] text-sky-700",
       };
     case "attention":
       return {
@@ -165,10 +165,10 @@ function getRuntimeRingPresentation(tone: RuntimeRingTone, isDark: boolean): Run
           RUNTIME_RING_GEOMETRY_CLASS,
           RUNTIME_STATIC_RING_STROKE_CLASS,
           "transition-colors duration-200",
-          isDark ? "border-emerald-300/75" : "border-emerald-500/75",
+          isDark ? "border-sky-300/75" : "border-sky-500/75",
         ),
         ringStyle: {},
-        unreadBadgeClassName: isDark ? "bg-emerald-300/[0.12] text-emerald-50" : "bg-emerald-500/[0.10] text-emerald-700",
+        unreadBadgeClassName: isDark ? "bg-sky-300/[0.12] text-sky-50" : "bg-sky-500/[0.10] text-sky-700",
       };
     case "stopped":
     default:
@@ -359,6 +359,8 @@ function RuntimeDockActorButton({
         <ActorAvatar
             avatarUrl={item.actor.avatar_url || undefined}
             runtime={item.runtime}
+            command={item.actor.command}
+            env={item.actor.env}
             title={item.actorLabel}
             isDark={isDark}
             sizeClassName={isSmallScreen ? "h-[33px] w-[33px]" : "h-[37px] w-[37px]"}

@@ -802,7 +802,7 @@ export function ProjectedBrowserSurfacePanel({
             onClick={() => setIsExpanded((value) => !value)}
             className={classNames(
               "inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-              isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+              isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
             )}
             aria-label={fullScreenLabel}
             title={fullScreenLabel}
@@ -815,7 +815,7 @@ export function ProjectedBrowserSurfacePanel({
           onClick={handleBack}
           className={classNames(
             "rounded-full px-3 py-1 font-medium transition-colors",
-            isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+            isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
           )}
         >
           {texts.back}
@@ -826,7 +826,7 @@ export function ProjectedBrowserSurfacePanel({
             onClick={handleReconnect}
             className={classNames(
               "rounded-full px-3 py-1 font-medium transition-colors",
-              isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
+              isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-gray-100 text-gray-800 hover:bg-gray-200",
             )}
           >
             {texts.reconnect}

@@ -135,8 +135,8 @@ export function VoiceSecretaryDocumentListPanel({
                 className={classNames(
                   "rounded-full px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60",
                   isDark
-                    ? "bg-white text-[rgb(20,20,22)] hover:bg-white/90"
-                    : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110",
+                    ? "bg-blue-500 text-white hover:bg-blue-400"
+                    : "bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:bg-blue-700",
                 )}
               >
                 {actionBusy === "new_doc"

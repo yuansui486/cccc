@@ -1,7 +1,7 @@
 // ChatComposer renders the chat message composer.
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Actor, GroupMeta, LedgerEvent, PresentationMessageRef, ReplyTarget } from "../../types";
+import { Actor, LedgerEvent, PresentationMessageRef, ReplyTarget } from "../../types";
 import { classNames } from "../../utils/classNames";
 import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon } from "../../components/Icons";
 import { ScrollFade } from "../../components/ScrollFade";
@@ -10,8 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { VoiceSecretaryComposerControl, type VoiceSecretaryCaptureMode } from "./VoiceSecretaryComposerControl";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { GroupCombobox } from "../../components/GroupCombobox";
-import { getComposerDestGroupDisplayValue } from "../../stores/useComposerStore";
-import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem } from "../../utils/slashCommands";
+import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem, type SlashSkillScope } from "../../utils/slashCommands";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
 
@@ -43,11 +42,8 @@ export interface ChatComposerProps {
   actors: Actor[];
   recipientActors: Actor[];
   recipientActorsBusy?: boolean;
-  groups: GroupMeta[];
   destGroupId: string;
-  setDestGroupId: (groupId: string) => void;
   composerGroupSettled: boolean;
-  destGroupScopeLabel?: string;
   busy: string;
   recentMessages?: LedgerEvent[];
 
@@ -87,6 +83,8 @@ export interface ChatComposerProps {
   setMentionFilter: Dispatch<SetStateAction<string>>;
   onAppendRecipientToken: (token: string) => void;
   slashCommands: SlashCommandItem[];
+  slashSkillScope: SlashSkillScope;
+  setSlashSkillScope: (scope: SlashSkillScope) => void;
 }
 
 
@@ -97,11 +95,8 @@ export function ChatComposer({
   actors,
   recipientActors,
   recipientActorsBusy,
-  groups,
   destGroupId,
-  setDestGroupId,
   composerGroupSettled,
-  destGroupScopeLabel: _destGroupScopeLabel,
   busy,
   recentMessages = [],
   replyTarget,
@@ -131,6 +126,8 @@ export function ChatComposer({
   setMentionFilter,
   onAppendRecipientToken,
   slashCommands,
+  slashSkillScope,
+  setSlashSkillScope,
 }: ChatComposerProps) {
   const composerHeightRef = useRef(0);
   const isUserInputRef = useRef(false);
@@ -224,8 +221,8 @@ export function ChatComposer({
   const chipBaseClass =
     "flex h-6 flex-shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2 text-[10px] font-medium leading-none transition-all sm:px-2.5 sm:text-[11px]";
   const chipActiveClass = isDark
-    ? "border-white bg-white text-[rgb(20,20,22)] shadow-none"
-    : "border-[rgb(35,36,37)] bg-[rgb(35,36,37)] text-white shadow-none";
+    ? "border-white/10 bg-white/10 text-slate-100 shadow-none"
+    : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] shadow-none";
   const chipInactiveClass = isDark
     ? "bg-white/[0.06] text-[var(--color-text-secondary)] border-white/[0.08] hover:bg-white/[0.1] hover:border-white/[0.14] hover:text-[var(--color-text-primary)]"
     : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)] border-transparent hover:bg-[rgb(237,237,237)] hover:border-black/5 hover:text-[rgb(20,20,22)]";
@@ -260,6 +257,20 @@ export function ChatComposer({
     [slashSuggestions, slashVisibleCount],
   );
   const hasMoreSlashSuggestions = visibleSlashSuggestions.length < slashSuggestions.length;
+  const skillScopeOptions = useMemo(() => ([
+    {
+      value: "team",
+      label: t("teamSkills", { defaultValue: "团队 skills" }),
+      description: t("teamSkillsDesc", { defaultValue: "使用当前团队启用的 skills" }),
+      keywords: ["team", "group", "skills"],
+    },
+    {
+      value: "global",
+      label: t("globalSkills", { defaultValue: "全局 skills" }),
+      description: t("globalSkillsDesc", { defaultValue: "使用全局或个人启用的 skills" }),
+      keywords: ["global", "personal", "skills"],
+    },
+  ]), [t]);
 
   // Handle pasted files (clipboard items).
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -442,9 +453,6 @@ export function ChatComposer({
   const canSend = composerGroupSettled && (composerText.trim() || composerFiles.length > 0);
   const isAttention = priority === "attention";
   const isCrossGroup = !!destGroupId && destGroupId !== selectedGroupId;
-  const destGroupDisplayValue = getComposerDestGroupDisplayValue(destGroupId, selectedGroupId, composerGroupSettled);
-  const canChooseDestGroup =
-    !!selectedGroupId && busy !== "send" && !replyTarget && !quotedPresentationRef && composerFiles.length === 0;
 
   type MessageMode = "normal" | "attention" | "task";
   const modeOptions: Array<{ key: MessageMode; label: string; description: string }> = [
@@ -526,48 +534,6 @@ export function ChatComposer({
     shortcut: sendShortcutLabel,
     defaultValue: "Send message ({{shortcut}})",
   });
-
-  const groupOptions = useMemo(() => {
-    const cur = String(selectedGroupId || "").trim();
-    const list = (groups || []).filter((g) => String(g.group_id || "").trim());
-    // Prefer showing the current group first.
-    const sorted = list.slice().sort((a, b) => {
-      const aId = String(a.group_id || "");
-      const bId = String(b.group_id || "");
-      if (aId === cur && bId !== cur) return -1;
-      if (bId === cur && aId !== cur) return 1;
-      const aTitle = String(a.title || "").trim().toLowerCase();
-      const bTitle = String(b.title || "").trim().toLowerCase();
-      if (aTitle && bTitle) return aTitle.localeCompare(bTitle);
-      if (aTitle && !bTitle) return -1;
-      if (!aTitle && bTitle) return 1;
-      return aId.localeCompare(bId);
-    });
-    return sorted.map((g) => {
-      const value = String(g.group_id || "").trim();
-      const title = String(g.title || "").trim();
-      const topic = String(g.topic || "").trim();
-      const label = title || topic || t('untitledGroup');
-      return {
-        value,
-        label,
-        description: label !== value ? value : undefined,
-        keywords: [value, title, topic].filter(Boolean),
-      };
-    });
-  }, [groups, selectedGroupId, t]);
-
-  const groupSelectClass = useMemo(() => {
-    if (!canChooseDestGroup || groupOptions.length === 0) {
-      return isDark
-        ? "bg-white/[0.07] text-[var(--color-text-tertiary)] border-white/[0.08]"
-        : "bg-white text-gray-400 border-gray-200";
-    }
-    if (isCrossGroup) {
-      return chipActiveClass;
-    }
-    return chipInactiveClass;
-  }, [canChooseDestGroup, chipActiveClass, chipInactiveClass, groupOptions.length, isCrossGroup, isDark]);
 
   return (
     <footer
@@ -719,7 +685,7 @@ export function ChatComposer({
                 : "bg-white/55 focus-within:bg-white/80",
             )}
           >
-            {/* Row 1 — Recipients */}
+            {/* Row 1 — Skill scope and recipients */}
             <div
               className={classNames(
                 "flex items-center gap-1.5 border-b px-2.5 py-1",
@@ -727,36 +693,35 @@ export function ChatComposer({
               )}
             >
               <span className={classNames("flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
-                {t('to', 'To')}
+                {t("skillScope", { defaultValue: "技能范围" })}
               </span>
 
               <div className="flex-shrink-0">
                 <GroupCombobox
-                  items={groupOptions}
-                  value={destGroupDisplayValue}
-                  onChange={setDestGroupId}
-                  placeholder={t('destinationGroup')}
-                  searchPlaceholder={t('searchDestinationGroup', { defaultValue: 'Search groups...' })}
-                  emptyText={t('noMatchingGroups', { defaultValue: 'No matching groups' })}
-                  ariaLabel={t('destinationGroup')}
+                  items={skillScopeOptions}
+                  value={slashSkillScope}
+                  onChange={(nextValue) => setSlashSkillScope(nextValue === "global" ? "global" : "team")}
+                  placeholder={t("skillScope", { defaultValue: "技能范围" })}
+                  searchPlaceholder={t("searchSkillScope", { defaultValue: "搜索技能范围..." })}
+                  emptyText={t("noMatchingSkillScopes", { defaultValue: "没有匹配的技能范围" })}
+                  ariaLabel={t("skillScope", { defaultValue: "技能范围" })}
                   triggerClassName={classNames(
-                    "inline-flex w-auto min-w-[68px] max-w-[148px] sm:max-w-[196px]",
+                    "inline-flex w-auto min-w-[86px] max-w-[160px] sm:max-w-[196px]",
                     "h-6 cursor-pointer gap-1 px-2 text-[10px]",
                     chipBaseClass,
-                    groupSelectClass,
+                    chipInactiveClass,
                   )}
                   contentClassName="max-w-[min(20rem,calc(100vw-1rem))]"
                   descriptionClassName="text-[10px]"
-                  caretClassName={classNames(
-                    !canChooseDestGroup || groupOptions.length === 0
-                      ? (isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")
-                      : isCrossGroup
-                        ? "text-[var(--color-text-primary)]"
-                        : (isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500")
-                  )}
-                  disabled={!canChooseDestGroup || groupOptions.length === 0}
+                  caretClassName={isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500"}
+                  searchable={false}
+                  disabled={busy === "send"}
                 />
               </div>
+
+              <span className={classNames("ml-1 flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
+                {t('to', 'To')}
+              </span>
 
               <ScrollFade
                 className="min-w-0 flex-1"
@@ -769,7 +734,7 @@ export function ChatComposer({
                     recipientActorsBusy ? "opacity-50 pointer-events-none" : "",
                   )}
                 >
-                  {["@all", "@foreman", "@peers"].map((tok) => {
+                  {["@all"].map((tok) => {
                     const active = toTokens.includes(tok);
                     return (
                       <button
@@ -927,9 +892,10 @@ export function ChatComposer({
               <div className="contents sm:flex sm:items-center sm:gap-1.5">
                 <button
                   className={classNames(
-                    "glass-btn flex h-11 w-11 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:opacity-60 sm:h-9 sm:w-9",
+                    "flex h-11 w-11 items-center justify-center rounded-lg border text-[var(--color-text-secondary)] transition-colors disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:opacity-60 sm:h-9 sm:w-9",
+                    isDark ? "border-white/10 bg-white/[0.04]" : "border-black/5 bg-[rgb(245,245,245)]",
                     busy !== "send" && selectedGroupId && !isCrossGroup
-                      ? isDark ? "hover:bg-white/10 hover:text-[var(--color-text-primary)]" : "hover:bg-black/5 hover:text-gray-800"
+                      ? isDark ? "hover:bg-white/10 hover:text-[var(--color-text-primary)]" : "hover:bg-[rgb(237,237,237)] hover:text-gray-800"
                       : "",
                   )}
                   onClick={() => fileInputRef.current?.click()}
@@ -974,8 +940,8 @@ export function ChatComposer({
                                 ? "bg-amber-500/18 text-amber-200 hover:bg-amber-500/26"
                                 : "bg-amber-100 text-amber-700 hover:bg-amber-200"
                               : isDark
-                                ? "text-slate-200 hover:bg-white/10"
-                                : "text-gray-700 hover:bg-black/5",
+                                ? "bg-white/[0.04] text-slate-200 hover:bg-white/10"
+                                : "bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(237,237,237)]",
                       )}
                       disabled={busy === "send" || !selectedGroupId}
                       onClick={() => setShowModeMenu((v) => !v)}
@@ -1014,10 +980,10 @@ export function ChatComposer({
                                 active
                                   ? isDark
                                     ? "bg-white/10"
-                                    : "bg-black/5"
+                                    : "bg-[rgb(237,237,237)]"
                                   : isDark
                                     ? "hover:bg-white/5"
-                                    : "hover:bg-black/5",
+                                    : "hover:bg-[rgb(237,237,237)]",
                               )}
                               role="menuitemradio"
                               aria-checked={active}
@@ -1072,7 +1038,7 @@ export function ChatComposer({
                     "flex h-11 w-11 items-center justify-center rounded-lg font-semibold transition-[background-color,box-shadow,transform] duration-150 disabled:cursor-not-allowed sm:h-9 sm:w-[5.5rem]",
                     busy === "send" || !canSend
                       ? isDark ? "bg-white/[0.06] text-[var(--color-text-tertiary)]" : "bg-gray-100 text-gray-400"
-                      : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110 active:scale-[0.97]",
+                      : "border border-blue-600 bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:border-blue-700 hover:bg-blue-700 active:scale-[0.97] dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
                   )}
                   onClick={onSendMessage}
                   disabled={busy === "send" || !canSend}

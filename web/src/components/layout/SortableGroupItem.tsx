@@ -16,7 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GroupMeta } from "../../types";
 import { classNames } from "../../utils/classNames";
 import { getGroupStatusFromSource } from "../../utils/groupStatus";
-import { GripIcon, MoreIcon } from "../Icons";
+import { ArchiveIcon, EditIcon, GripIcon, MoreIcon, RestoreIcon } from "../Icons";
 
 interface SortableGroupItemProps {
   group: GroupMeta;
@@ -30,6 +30,9 @@ interface SortableGroupItemProps {
   menuActionLabel?: string;
   menuAriaLabel?: string;
   onMenuAction?: () => void;
+  secondaryInlineActionLabel?: string;
+  secondaryInlineActionAriaLabel?: string;
+  onSecondaryInlineAction?: () => void;
   onSelect: () => void;
   onWarm?: () => void;
 }
@@ -46,6 +49,9 @@ export function SortableGroupItem({
   menuActionLabel,
   menuAriaLabel,
   onMenuAction,
+  secondaryInlineActionLabel,
+  secondaryInlineActionAriaLabel,
+  onSecondaryInlineAction,
   onSelect,
   onWarm,
 }: SortableGroupItemProps) {
@@ -137,11 +143,11 @@ export function SortableGroupItem({
     >
       <div
         className={classNames(
-          "w-full text-left px-3 py-3 rounded-xl transition-all min-h-[48px] flex items-center gap-2 relative",
-          isDragging && "opacity-70 shadow-lg ring-2 ring-cyan-500/30",
+          "w-full text-left px-2.5 py-2 rounded-lg transition-colors min-h-[44px] flex items-center gap-2 relative",
+          isDragging && "opacity-70 shadow-lg ring-2 ring-black/10 dark:ring-white/15",
           isActive
-            ? "glass-group-item-active glow-pulse"
-            : "glass-group-item",
+            ? "bg-white/82 shadow-[0_1px_0_rgba(0,0,0,0.04)] dark:bg-white/[0.08]"
+            : "hover:bg-white/55 dark:hover:bg-white/[0.06]",
           isArchived && !isActive && "opacity-90"
         )}
         role="button"
@@ -187,37 +193,52 @@ export function SortableGroupItem({
               className={classNames(
                 "text-sm font-medium truncate",
                 isActive
-                  ? "text-sky-700 dark:text-sky-300"
+                  ? "text-[var(--color-text-primary)]"
                   : "text-[var(--color-text-primary)] group-hover/item:text-[var(--color-text-primary)]"
               )}
             >
               {group.title || gid}
             </span>
           </div>
-          <span
-            className={classNames(
-              "text-[9px] px-2.5 py-1 rounded-full font-semibold flex-shrink-0 uppercase",
-              status.pillClass
-            )}
-          >
-            {status.label}
-          </span>
         </div>
 
         {onMenuAction && menuActionLabel && menuInlineAction && (
           <button
             type="button"
             className={classNames(
-              "glass-btn shrink-0 rounded-xl px-3 py-2 text-xs font-medium transition-colors",
+              "shrink-0 rounded-lg p-1.5 transition-colors hover:bg-black/[0.06] dark:hover:bg-white/[0.08]",
               isActive
-                ? "text-cyan-700 dark:text-cyan-300"
+                ? "text-[var(--color-text-primary)]"
                 : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
             )}
             aria-label={menuAriaLabel || menuActionLabel}
             title={menuAriaLabel || menuActionLabel}
-            onClick={() => onMenuAction()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMenuAction();
+            }}
           >
-            {menuActionLabel}
+            {isArchived ? <RestoreIcon size={15} /> : <ArchiveIcon size={15} />}
+          </button>
+        )}
+
+        {onSecondaryInlineAction && secondaryInlineActionLabel && (
+          <button
+            type="button"
+            className={classNames(
+              "shrink-0 rounded-lg p-1.5 transition-colors hover:bg-black/[0.06] dark:hover:bg-white/[0.08]",
+              isActive
+                ? "text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            )}
+            aria-label={secondaryInlineActionAriaLabel || secondaryInlineActionLabel}
+            title={secondaryInlineActionAriaLabel || secondaryInlineActionLabel}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSecondaryInlineAction();
+            }}
+          >
+            <EditIcon size={15} />
           </button>
         )}
 

@@ -100,7 +100,7 @@ export function RelayMessageModal({
   const dstActorsBusy = !!dstGroupId && dstActorsLoadingFor === dstGroupId;
 
   const availableTokens = useMemo(() => {
-    const base = ["@all", "@foreman", "@peers"];
+    const base = ["@all"];
     const actorIds = (dstActors || []).map((a) => String(a.id || "")).filter((id) => id);
     actorIds.sort();
     return [...base, ...actorIds];

@@ -177,8 +177,6 @@ export function AutomationTab(props: AutomationTabProps) {
 
   const actorTargetOptions = useMemo(() => {
     const out: Array<{ value: string; label: string }> = [
-      { value: "@foreman", label: getRecipientTokenLabel("@foreman") },
-      { value: "@peers", label: getRecipientTokenLabel("@peers") },
       { value: "@all", label: getRecipientTokenLabel("@all") },
     ];
     for (const actor of props.devActors || []) {

@@ -179,7 +179,7 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
           <span className="rounded-full bg-[var(--glass-panel-bg)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
             {tr("context.skillsAvailableCount", "{{count}} 个可用", { count: skillRows.length })}
           </span>
-          <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+          <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-xs text-blue-600 dark:text-blue-300">
             {tr("context.skillsEnabledCount", "已启用 {{count}} 个", { count: enabledSkillCount })}
           </span>
           <button type="button" onClick={() => void load()} disabled={loading} className={ui.buttonSecondaryClass}>
@@ -225,7 +225,7 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
                     ) : null}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {enabled ? (
-                        <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+                        <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">
                           {tr("context.skillGroupDefault", "工作组默认")}
                         </span>
                       ) : null}
