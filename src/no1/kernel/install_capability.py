@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-INSTALL_CAPABILITY_ID = "skill:cccc:install"
+INSTALL_CAPABILITY_ID = "skill:onecolleague:install"
 
 INSTALL_CAPABILITY_RECORD = {
     "name": "install",

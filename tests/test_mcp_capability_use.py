@@ -384,29 +384,29 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 )
                 items = search_result.get("items") if isinstance(search_result.get("items"), list) else []
                 ids = {str(item.get("capability_id") or "") for item in items if isinstance(item, dict)}
-                self.assertIn("skill:cccc:runtime-bootstrap", ids)
+                self.assertIn("skill:onecolleague:runtime-bootstrap", ids)
 
                 use_result = mcp_server.handle_tool_call(
                     "onecolleague_capability_use",
-                    {"capability_id": "skill:cccc:runtime-bootstrap", "scope": "session"},
+                    {"capability_id": "skill:onecolleague:runtime-bootstrap", "scope": "session"},
                 )
                 self.assertTrue(bool(use_result.get("enabled")))
                 self.assertFalse(bool(use_result.get("tool_called")))
                 self.assertEqual(str(use_result.get("state") or ""), "activation_pending")
                 self.assertEqual(str(use_result.get("skill_mode") or ""), "capsule_runtime")
                 skill_payload = use_result.get("skill") if isinstance(use_result.get("skill"), dict) else {}
-                self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:cccc:runtime-bootstrap")
+                self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:onecolleague:runtime-bootstrap")
                 applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
                 self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
 
                 state_result = mcp_server.handle_tool_call("onecolleague_capability_state", {})
                 enabled = set(state_result.get("enabled_capabilities") or [])
-                self.assertIn("skill:cccc:runtime-bootstrap", enabled)
+                self.assertIn("skill:onecolleague:runtime-bootstrap", enabled)
                 self.assertIn("pack:diagnostics", enabled)
                 self.assertIn("pack:group-runtime", enabled)
                 active_skills = state_result.get("active_capsule_skills") if isinstance(state_result.get("active_capsule_skills"), list) else []
                 active_ids = {str(item.get("capability_id") or "") for item in active_skills if isinstance(item, dict)}
-                self.assertIn("skill:cccc:runtime-bootstrap", active_ids)
+                self.assertIn("skill:onecolleague:runtime-bootstrap", active_ids)
                 visible = set(state_result.get("visible_tools") or [])
                 self.assertIn("onecolleague_terminal", visible)
                 self.assertIn("onecolleague_actor", visible)
@@ -610,7 +610,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertEqual(str(result.get("capability_id") or ""), "mcp:io.github.upstash/context7")
         self.assertTrue(bool(result.get("tool_called")))
 
-    def test_capability_use_skips_reenable_when_capability_already_enabled_for_tool_call(self) -> None:
+    def test_capability_use_refreshes_existing_binding_before_tool_call(self) -> None:
         from no1.ports.mcp.server import capability_use
 
         with patch(
@@ -618,6 +618,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
             return_value={"enabled_capabilities": ["mcp:test-server"]},
         ), patch(
             "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            return_value={"state": "runnable", "enabled": True, "refresh_required": False},
         ) as enable_mock, patch(
             "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"result": {"ok": True}},
@@ -631,7 +632,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 tool_arguments={"message": "hello"},
             )
 
-        enable_mock.assert_not_called()
+        enable_mock.assert_called_once()
         self.assertTrue(bool(result.get("tool_called")))
         self.assertTrue(bool(result.get("reused_existing_binding")))
         self.assertEqual(str(result.get("scope") or ""), "session")

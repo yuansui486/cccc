@@ -456,14 +456,20 @@ def capability_use(
             if str(x).strip()
         }
         if call_tool and cap_id in enabled_caps:
-            reused_existing_binding = True
-            enable_result = {
-                "state": "runnable",
-                "enabled": True,
-                "refresh_required": False,
-                "reused_existing_binding": True,
-                "scope": str(scope or "session"),
-            }
+            enable_result = capability_enable(
+                group_id=group_id,
+                by=by,
+                actor_id=target_actor,
+                capability_id=cap_id,
+                scope=scope,
+                enabled=True,
+                ttl_seconds=ttl_seconds,
+                reason=reason or "capability_use_refresh_existing_binding",
+            )
+            enable_state = str(enable_result.get("state") or "").strip().lower()
+            if enable_state in {"activation_pending", "runnable", "verified", "ready"}:
+                reused_existing_binding = True
+                enable_result["reused_existing_binding"] = True
         else:
             enable_result = capability_enable(
                 group_id=group_id,
@@ -478,9 +484,7 @@ def capability_use(
         retry_trace: list[Dict[str, Any]] = []
         state = str(enable_result.get("state") or "").strip().lower()
         diagnostics = _normalize_diagnostics(enable_result)
-        max_retries = 0 if reused_existing_binding else max(
-            0, min(int(os.environ.get("CCCC_CAPABILITY_USE_AUTO_RETRY_MAX") or "1"), 3)
-        )
+        max_retries = max(0, min(int(os.environ.get("CCCC_CAPABILITY_USE_AUTO_RETRY_MAX") or "1"), 3))
         success_states = {"activation_pending", "runnable", "verified"}
         if state not in success_states and _should_retry_enable(diagnostics=diagnostics) and max_retries > 0:
             for idx in range(max_retries):

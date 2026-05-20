@@ -45,7 +45,7 @@ class TestCapabilityOps(unittest.TestCase):
             f"    mcp_registry_official: {mcp_registry_level}\n"
             "    anthropic_skills: mounted\n"
             "    github_skills_curated: indexed\n"
-            "    cccc_builtin: enabled\n"
+            "    onecolleague_builtin: enabled\n"
         )
         if extra.strip():
             body = f"{body}{extra.rstrip()}\n"
@@ -421,6 +421,10 @@ class TestCapabilityOps(unittest.TestCase):
         old_codex_home = os.environ.get("CODEX_HOME")
         try:
             gid = self._create_group()
+            workspace = Path(home) / "workspace"
+            workspace.mkdir()
+            attach_resp, _ = self._call("attach", {"group_id": gid, "path": str(workspace), "by": "user"})
+            self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
             source_codex = Path(home) / "source-codex"
             source_codex.mkdir()
             (source_codex / "auth.json").write_text('{"ok":true}\n', encoding="utf-8")
@@ -522,6 +526,13 @@ class TestCapabilityOps(unittest.TestCase):
                 enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
                 self.assertTrue(bool(enable_result.get("enabled")))
                 self.assertEqual(str(enable_result.get("state") or ""), "runnable")
+                project_package = enable_result.get("project_package") if isinstance(enable_result.get("project_package"), dict) else {}
+                project_path = Path(str(project_package.get("project_path") or ""))
+                managed_path = Path(str(project_package.get("managed_path") or ""))
+                self.assertTrue(project_path.exists(), str(project_path))
+                self.assertTrue(managed_path.exists(), str(managed_path))
+                for rel_path in arbitrary_files:
+                    self.assertTrue((project_path / rel_path).is_file(), rel_path)
 
                 state_resp, _ = self._call("capability_state", {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"})
                 self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
@@ -560,6 +571,83 @@ class TestCapabilityOps(unittest.TestCase):
                 os.environ.pop("CODEX_HOME", None)
             else:
                 os.environ["CODEX_HOME"] = old_codex_home
+            cleanup()
+
+    def test_skill_package_enable_downloads_and_materializes_existing_catalog_record(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        home, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            workspace = Path(home) / "workspace"
+            workspace.mkdir()
+            attach_resp, _ = self._call("attach", {"group_id": gid, "path": str(workspace), "by": "user"})
+            self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
+
+            package_files = {
+                "SKILL.md": "Use image generation.\n",
+                "shierkeji_image_create/scripts/peer_image_generate.py": "print('ok')\n",
+            }
+            package_bytes = self._skill_zip_bytes(package_files)
+            package_sha = hashlib.sha256(package_bytes).hexdigest()
+            cap_id = "skill:onecolleague_skill_library:image"
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][cap_id] = {
+                "capability_id": cap_id,
+                "kind": "skill",
+                "name": "image",
+                "description_short": "Generate images",
+                "source_id": "onecolleague_skill_library",
+                "source_uri": "http://skills.local/skills/image",
+                "source_record_version": "1.0.0",
+                "qualification_status": "qualified",
+                "capsule_text": "Use ./image/shierkeji_image_create/scripts/peer_image_generate.py.",
+                "requires_capabilities": [],
+                "install_mode": "codex_skill_package",
+                "install_spec": {
+                    "package_url": "http://skills.local/packages/image.zip",
+                    "package_sha256": package_sha,
+                    "package_size": len(package_bytes),
+                    "package_format": "zip",
+                    "skill_slug": "image",
+                },
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            with patch(
+                "no1.daemon.ops.capability_ops._skill_packages._download_package_bytes",
+                return_value=package_bytes,
+            ) as download:
+                enable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "peer-1",
+                        "actor_id": "peer-1",
+                        "capability_id": cap_id,
+                        "scope": "actor",
+                        "enabled": True,
+                    },
+                )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            download.assert_called_once()
+            result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            self.assertTrue(bool(result.get("enabled")))
+            self.assertEqual(str(result.get("state") or ""), "runnable")
+            project_package = result.get("project_package") if isinstance(result.get("project_package"), dict) else {}
+            project_path = Path(str(project_package.get("project_path") or ""))
+            self.assertEqual(project_path, workspace / "image")
+            self.assertTrue((project_path / "SKILL.md").is_file())
+            self.assertTrue((project_path / "shierkeji_image_create" / "scripts" / "peer_image_generate.py").is_file())
+            self.assertTrue((workspace / "shierkeji_image_create" / "scripts" / "peer_image_generate.py").is_file())
+            self.assertTrue((workspace / ".onecolleague" / "skills" / "image" / "SKILL.md").is_file())
+            resource_paths = project_package.get("resource_paths") if isinstance(project_package.get("resource_paths"), list) else []
+            self.assertIn(str(workspace / "shierkeji_image_create"), resource_paths)
+            package_install = result.get("package_install") if isinstance(result.get("package_install"), dict) else {}
+            self.assertEqual(str(package_install.get("package_sha256") or ""), package_sha)
+        finally:
             cleanup()
 
     def test_skill_package_rejects_zip_slip_and_symlink(self) -> None:
@@ -1043,11 +1131,11 @@ class TestCapabilityOps(unittest.TestCase):
                 (
                     item
                     for item in items
-                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:cccc:runtime-bootstrap"
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:onecolleague:runtime-bootstrap"
                 ),
                 {},
             )
-            self.assertEqual(str(skill.get("source_id") or ""), "cccc_builtin")
+            self.assertEqual(str(skill.get("source_id") or ""), "onecolleague_builtin")
             self.assertEqual(str(skill.get("kind") or ""), "skill")
         finally:
             cleanup()
@@ -2431,12 +2519,76 @@ class TestCapabilityOps(unittest.TestCase):
         changed = ops._ensure_curated_catalog_records(catalog, policy=policy)
         self.assertTrue(changed)
 
-        rec = catalog.get("records", {}).get("skill:cccc:runtime-bootstrap")
+        rec = catalog.get("records", {}).get("skill:onecolleague:runtime-bootstrap")
         self.assertIsInstance(rec, dict)
-        self.assertEqual(str((rec or {}).get("source_id") or ""), "cccc_builtin")
+        self.assertEqual(str((rec or {}).get("source_id") or ""), "onecolleague_builtin")
         self.assertEqual(str((rec or {}).get("kind") or ""), "skill")
         requires = (rec or {}).get("requires_capabilities") if isinstance(rec, dict) else []
         self.assertEqual(requires, ["pack:diagnostics", "pack:group-runtime"])
+
+    def test_catalog_normalization_accepts_legacy_builtin_source_id(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        raw = ops._new_catalog_doc()
+        raw["sources"] = {
+            "cccc_builtin": {"sync_state": "legacy", "last_synced_at": "2026-01-01T00:00:00Z", "record_count": 1}
+        }
+        raw["records"] = {
+            "skill:legacy:demo": {
+                "capability_id": "skill:legacy:demo",
+                "kind": "skill",
+                "source_id": "cccc_builtin",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+            }
+        }
+
+        normalized = ops._normalize_catalog_doc(raw)
+        sources = normalized.get("sources") if isinstance(normalized.get("sources"), dict) else {}
+        self.assertIn("onecolleague_builtin", sources)
+        self.assertNotIn("cccc_builtin", sources)
+        rec = normalized.get("records", {}).get("skill:legacy:demo")
+        self.assertIsInstance(rec, dict)
+        self.assertEqual(str((rec or {}).get("source_id") or ""), "onecolleague_builtin")
+
+    def test_catalog_normalization_canonicalizes_legacy_builtin_skill_id(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        raw = ops._new_catalog_doc()
+        raw["records"] = {
+            "skill:cccc:runtime-bootstrap": {
+                "capability_id": "skill:cccc:runtime-bootstrap",
+                "kind": "skill",
+                "source_id": "cccc_builtin",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+            }
+        }
+
+        normalized = ops._normalize_catalog_doc(raw)
+        records = normalized.get("records") if isinstance(normalized.get("records"), dict) else {}
+        self.assertIn("skill:onecolleague:runtime-bootstrap", records)
+        self.assertNotIn("skill:cccc:runtime-bootstrap", records)
+        rec = records.get("skill:onecolleague:runtime-bootstrap")
+        self.assertEqual(str((rec or {}).get("capability_id") or ""), "skill:onecolleague:runtime-bootstrap")
+        self.assertEqual(str((rec or {}).get("source_id") or ""), "onecolleague_builtin")
+
+    def test_allowlist_policy_accepts_legacy_builtin_source_id(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        policy = ops._compile_allowlist_policy(
+            {
+                "defaults": {
+                    "source_level": {
+                        "cccc_builtin": "indexed",
+                    }
+                }
+            }
+        )
+
+        source_levels = policy.get("source_levels") if isinstance(policy.get("source_levels"), dict) else {}
+        self.assertEqual(str(source_levels.get("onecolleague_builtin") or ""), "indexed")
+        self.assertNotIn("cccc_builtin", source_levels)
 
     def test_capability_state_reports_scope_mismatch_and_unavailable_hidden_reasons(self) -> None:
         from no1.daemon.ops import capability_ops as ops
@@ -2965,7 +3117,9 @@ class TestCapabilityOps(unittest.TestCase):
             ids = {str(item.get("capability_id") or "") for item in items if isinstance(item, dict)}
             self.assertIn("pack:group-runtime", ids)
             sources = result.get("sources") if isinstance(result.get("sources"), dict) else {}
-            self.assertIn("mcp_registry_official", sources)
+            self.assertIn("onecolleague_builtin", sources)
+            self.assertIn("onecolleague_skill_library", sources)
+            self.assertNotIn("cccc_builtin", sources)
         finally:
             cleanup()
 
@@ -2982,7 +3136,7 @@ class TestCapabilityOps(unittest.TestCase):
                     "actor_id": "peer-1",
                     "by": "peer-1",
                     "scope": "session",
-                    "capability_id": "skill:cccc:install",
+                    "capability_id": "skill:onecolleague:install",
                     "enabled": True,
                 },
             )
@@ -3006,7 +3160,7 @@ class TestCapabilityOps(unittest.TestCase):
                 (
                     item
                     for item in active_capsule_skills
-                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:cccc:install"
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:onecolleague:install"
                 ),
                 {},
             )
@@ -3183,7 +3337,7 @@ class TestCapabilityOps(unittest.TestCase):
                     "group_id": gid,
                     "by": "peer-1",
                     "actor_id": "peer-1",
-                    "capability_id": "skill:cccc:runtime-bootstrap",
+                    "capability_id": "skill:onecolleague:runtime-bootstrap",
                     "scope": "session",
                     "enabled": True,
                 },
@@ -3191,7 +3345,7 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
             enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
             skill_payload = enable_result.get("skill") if isinstance(enable_result.get("skill"), dict) else {}
-            self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:cccc:runtime-bootstrap")
+            self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:onecolleague:runtime-bootstrap")
             applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
             self.assertEqual(applied, ["pack:diagnostics", "pack:group-runtime"])
 
@@ -3202,17 +3356,17 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
             state = state_resp.result if isinstance(state_resp.result, dict) else {}
             enabled = set(state.get("enabled_capabilities") or [])
-            self.assertIn("skill:cccc:runtime-bootstrap", enabled)
+            self.assertIn("skill:onecolleague:runtime-bootstrap", enabled)
             self.assertIn("pack:diagnostics", enabled)
             self.assertIn("pack:group-runtime", enabled)
             active_capsule_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
             active_ids = {str(item.get("capability_id") or "") for item in active_capsule_skills if isinstance(item, dict)}
-            self.assertIn("skill:cccc:runtime-bootstrap", active_ids)
+            self.assertIn("skill:onecolleague:runtime-bootstrap", active_ids)
             active_row = next(
                 (
                     item
                     for item in active_capsule_skills
-                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:cccc:runtime-bootstrap"
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "skill:onecolleague:runtime-bootstrap"
                 ),
                 {},
             )
@@ -3221,6 +3375,39 @@ class TestCapabilityOps(unittest.TestCase):
             visible_tools = set(state.get("visible_tools") or [])
             self.assertIn("onecolleague_terminal", visible_tools)
             self.assertIn("onecolleague_actor", visible_tools)
+        finally:
+            cleanup()
+
+    def test_legacy_builtin_runtime_bootstrap_id_enables_canonical_skill(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "capability_id": "skill:cccc:runtime-bootstrap",
+                    "scope": "session",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            self.assertEqual(str(enable_result.get("capability_id") or ""), "skill:onecolleague:runtime-bootstrap")
+
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            enabled = set(state.get("enabled_capabilities") or [])
+            self.assertIn("skill:onecolleague:runtime-bootstrap", enabled)
+            self.assertNotIn("skill:cccc:runtime-bootstrap", enabled)
         finally:
             cleanup()
 

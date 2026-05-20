@@ -317,6 +317,7 @@ def ensure_codex_skill_package_installed(record: Dict[str, Any]) -> Dict[str, An
 def _copy_or_link(src: Path, dst: Path) -> None:
     if dst.exists() or dst.is_symlink():
         return
+    dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         dst.symlink_to(src, target_is_directory=src.is_dir())
     except Exception:
@@ -325,6 +326,95 @@ def _copy_or_link(src: Path, dst: Path) -> None:
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+
+
+def _active_scope_path_for_group(group: Any) -> Path | None:
+    doc = getattr(group, "doc", {}) if group is not None else {}
+    if not isinstance(doc, dict):
+        return None
+    active_scope_key = str(doc.get("active_scope_key") or "").strip()
+    scopes = doc.get("scopes") if isinstance(doc.get("scopes"), list) else []
+    for item in scopes:
+        if not isinstance(item, dict):
+            continue
+        scope_key = str(item.get("scope_key") or "").strip()
+        if active_scope_key and scope_key != active_scope_key:
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        path = Path(url).expanduser()
+        if path.exists() and path.is_dir():
+            return path.resolve()
+    return None
+
+
+def _managed_project_skill_root(workspace: Path) -> Path:
+    return workspace / ".onecolleague" / "skills"
+
+
+def _materialized_skill_root(workspace: Path, link_name: str) -> Path:
+    return _managed_project_skill_root(workspace) / _safe_token(link_name)
+
+
+def _project_skill_link_name(record: Dict[str, Any], install_row: Dict[str, Any]) -> str:
+    return _safe_token(
+        install_row.get("skill_slug")
+        or (record.get("install_spec") or {}).get("skill_slug")
+        or record.get("name")
+        or str(record.get("capability_id") or "").rsplit(":", 1)[-1]
+    )
+
+
+def materialize_skill_package_for_group(
+    *,
+    group: Any,
+    record: Dict[str, Any],
+    install_row: Dict[str, Any],
+) -> Dict[str, Any]:
+    workspace = _active_scope_path_for_group(group)
+    if workspace is None:
+        return {"project_linked": False, "reason": "missing_active_scope"}
+    extracted_path = Path(str(install_row.get("extracted_path") or ""))
+    if not extracted_path.is_dir() or not (extracted_path / "SKILL.md").is_file():
+        return {"project_linked": False, "reason": "missing_extracted_package"}
+    link_name = _project_skill_link_name(record, install_row)
+    target = workspace / link_name
+    managed_target = _materialized_skill_root(workspace, link_name)
+    managed_target.parent.mkdir(parents=True, exist_ok=True)
+    if not managed_target.exists() and not managed_target.is_symlink():
+        _copy_or_link(extracted_path, managed_target)
+    resource_paths: List[str] = []
+    try:
+        for child in sorted(managed_target.iterdir(), key=lambda p: p.name.lower()):
+            if child.name == "SKILL.md":
+                continue
+            if child.name.startswith("."):
+                continue
+            resource_target = workspace / child.name
+            _copy_or_link(child, resource_target)
+            if resource_target.exists() or resource_target.is_symlink():
+                resource_paths.append(str(resource_target))
+    except Exception:
+        resource_paths = []
+    if target.exists() or target.is_symlink():
+        return {
+            "project_linked": True,
+            "project_path": str(target),
+            "managed_path": str(managed_target),
+            "resource_paths": resource_paths,
+            "source": "existing",
+            "extracted_path": str(extracted_path),
+        }
+    _copy_or_link(managed_target, target)
+    return {
+        "project_linked": True,
+        "project_path": str(target),
+        "managed_path": str(managed_target),
+        "resource_paths": resource_paths,
+        "source": "created",
+        "extracted_path": str(extracted_path),
+    }
 
 
 def _source_codex_home(env: Dict[str, Any], overlay: Path) -> Path:

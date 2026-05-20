@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from ....contracts.v1 import DaemonResponse
-from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, BUILTIN_CAPSULE_SKILLS
+from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, BUILTIN_CAPSULE_SKILLS, canonical_builtin_skill_id
 from ....kernel.actors import list_actors, update_actor
 from ....kernel.group import load_group
 from ....kernel.registry import load_registry
@@ -16,6 +16,7 @@ from ....paths import ensure_home
 from ....util.time import parse_utc_iso, utc_now_iso
 
 from ._common import (
+    BUILTIN_SOURCE_ID,
     _SOURCE_IDS,
     _CATALOG_LOCK,
     _STATE_LOCK,
@@ -33,6 +34,7 @@ from ._common import (
     _normalize_scope,
     _env_bool,
     _quota_limit,
+    _normalize_source_id,
 )
 from ._documents import (
     _source_state_template,
@@ -372,7 +374,7 @@ def _build_builtin_skill_records() -> Dict[str, Dict[str, Any]]:
             "name": name,
             "description_short": description_short,
             "tags": ["skill", "builtin", *tags],
-            "source_id": "cccc_builtin",
+            "source_id": BUILTIN_SOURCE_ID,
             "source_tier": "builtin",
             "source_uri": "",
             "source_record_id": name,
@@ -527,7 +529,7 @@ def _refresh_source_record_counts(catalog: Dict[str, Any]) -> None:
     for rec in records.values() if isinstance(records, dict) else []:
         if not isinstance(rec, dict):
             continue
-        sid = str(rec.get("source_id") or "").strip()
+        sid = _normalize_source_id(rec.get("source_id"))
         if sid in counts:
             counts[sid] += 1
     for source_id in _SOURCE_IDS:
@@ -610,12 +612,16 @@ def _normalize_capability_id_list(raw: Any) -> List[str]:
         return out
     seen: set[str] = set()
     for item in raw:
-        cap_id = str(item or "").strip()
+        cap_id = _canonical_capability_id(item)
         if not cap_id or cap_id in seen:
             continue
         seen.add(cap_id)
         out.append(cap_id)
     return out
+
+
+def _canonical_capability_id(raw: Any) -> str:
+    return canonical_builtin_skill_id(str(raw or "").strip())
 
 
 def _normalize_profile_capability_defaults(raw: Any) -> Dict[str, Any]:
@@ -768,7 +774,7 @@ def _normalize_import_kind(raw_kind: Any) -> str:
 
 
 def _coerce_import_source_id(kind: str, raw_source_id: Any) -> str:
-    source_id = str(raw_source_id or "").strip()
+    source_id = _normalize_source_id(raw_source_id)
     if source_id:
         return source_id if source_id in _SOURCE_IDS else "manual_import"
     return "manual_import"
@@ -1050,7 +1056,7 @@ def _probe_import_record(rec: Dict[str, Any], *, capability_id: str, enabled: bo
 
 
 def _capability_enabled_for_actor(*, group_id: str, actor_id: str, capability_id: str) -> bool:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id:
         return False
     with _STATE_LOCK:
@@ -1086,7 +1092,7 @@ def _self_proposed_origin_group_id(
 
 
 def _remove_actor_autoload_references(group: Any, capability_id: str) -> int:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id or group is None:
         return 0
     removed = 0
@@ -1122,7 +1128,7 @@ def _group_ids_for_actor_autoload_cleanup() -> List[str]:
 
 
 def _remove_actor_autoload_references_all_groups(capability_id: str) -> int:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id:
         return 0
     removed = 0
@@ -1135,7 +1141,7 @@ def _remove_actor_autoload_references_all_groups(capability_id: str) -> int:
 
 
 def _remove_profile_autoload_references(capability_id: str) -> int:
-    cap_id = str(capability_id or "").strip()
+    cap_id = _canonical_capability_id(capability_id)
     if not cap_id:
         return 0
     try:
@@ -1965,7 +1971,7 @@ def handle_capability_uninstall(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
     actor_id = str(args.get("actor_id") or by).strip()
-    capability_id = str(args.get("capability_id") or "").strip()
+    capability_id = _canonical_capability_id(args.get("capability_id"))
     reason = str(args.get("reason") or "").strip()
     if len(reason) > 280:
         reason = reason[:280]
@@ -2177,7 +2183,7 @@ def handle_capability_tool_call(args: Dict[str, Any]) -> DaemonResponse:
     group_id = str(args.get("group_id") or "").strip()
     by = str(args.get("by") or args.get("actor_id") or "").strip()
     actor_id = str(args.get("actor_id") or by).strip()
-    capability_id_hint = str(args.get("capability_id") or "").strip()
+    capability_id_hint = _canonical_capability_id(args.get("capability_id"))
     tool_name = str(args.get("tool_name") or "").strip()
     arguments = args.get("arguments") if isinstance(args.get("arguments"), dict) else {}
 

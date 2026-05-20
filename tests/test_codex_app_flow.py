@@ -623,9 +623,9 @@ class TestCodexAppFlow(unittest.TestCase):
             submit_user_message.assert_called_once()
             submitted_text = str(submit_user_message.call_args.kwargs.get("text") or "")
             self.assertIn("[onecolleague] Slash command: /install", submitted_text)
-            self.assertIn("[onecolleague] Capability: skill:cccc:install", submitted_text)
+            self.assertIn("[onecolleague] Capability: skill:onecolleague:install", submitted_text)
             self.assertIn("scope=group", submitted_text)
-            self.assertIn("Route this request through skill:cccc:install", submitted_text)
+            self.assertIn("Route this request through skill:onecolleague:install", submitted_text)
             self.assertIn("The skill definition is the source of truth", submitted_text)
             self.assertNotIn("Expected procedure:", submitted_text)
             self.assertNotIn("use the skill-installer workflow", submitted_text)
@@ -644,7 +644,7 @@ class TestCodexAppFlow(unittest.TestCase):
             refs = data.get("refs") if isinstance(data.get("refs"), list) else []
             slash_refs = [item for item in refs if isinstance(item, dict) and item.get("command") == "/install"]
             self.assertEqual(len(slash_refs), 1)
-            self.assertEqual(str(slash_refs[0].get("capability_id") or ""), "skill:cccc:install")
+            self.assertEqual(str(slash_refs[0].get("capability_id") or ""), "skill:onecolleague:install")
             self.assertEqual(str(slash_refs[0].get("target_kind") or ""), "github")
         finally:
             cleanup()

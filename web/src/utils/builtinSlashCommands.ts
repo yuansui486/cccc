@@ -5,7 +5,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "install",
     command: "/install",
     description: "Install or enable a skill, MCP toolpack, capability, URL, repo, or local path.",
-    capabilityId: "skill:cccc:install",
+    capabilityId: "skill:onecolleague:install",
     sourceType: "builtin_command",
   },
 ];

@@ -9,6 +9,7 @@ import { Surface } from "./ui/surface";
 interface CapabilityPickerProps {
   isDark: boolean;
   value: string[];
+  inheritedValue?: string[];
   onChange: (next: string[]) => void;
   active?: boolean;
   disabled?: boolean;
@@ -27,6 +28,7 @@ function firstRecommendationLine(value?: string[]) {
 export function CapabilityPicker({
   isDark: _isDark,
   value,
+  inheritedValue,
   onChange,
   active = true,
   disabled = false,
@@ -36,6 +38,9 @@ export function CapabilityPicker({
   const { t } = useTranslation("settings");
   const selected = normalizeCapabilityIdList(value);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const inherited = normalizeCapabilityIdList(inheritedValue);
+  const inheritedSet = useMemo(() => new Set(inherited), [inherited]);
+  const visibleSelected = useMemo(() => normalizeCapabilityIdList([...inherited, ...selected]), [inherited, selected]);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,7 +98,7 @@ export function CapabilityPicker({
     const filtered = rows.filter((row) => {
       const capId = String(row.capability_id || "").trim();
       if (!capId) return false;
-      const candidate = Boolean(row.autoload_candidate) || selectedSet.has(capId);
+      const candidate = Boolean(row.autoload_candidate) || selectedSet.has(capId) || inheritedSet.has(capId);
       if (!candidate) return false;
       if (!q) return true;
       const text = [
@@ -114,8 +119,8 @@ export function CapabilityPicker({
     filtered.sort((a, b) => {
       const aId = String(a.capability_id || "");
       const bId = String(b.capability_id || "");
-      const aSelected = selectedSet.has(aId) ? 0 : 1;
-      const bSelected = selectedSet.has(bId) ? 0 : 1;
+      const aSelected = selectedSet.has(aId) || inheritedSet.has(aId) ? 0 : 1;
+      const bSelected = selectedSet.has(bId) || inheritedSet.has(bId) ? 0 : 1;
       if (aSelected !== bSelected) return aSelected - bSelected;
       const aRecent = Number(a.recent_success?.success_count || 0);
       const bRecent = Number(b.recent_success?.success_count || 0);
@@ -123,11 +128,12 @@ export function CapabilityPicker({
       return String(a.name || aId).localeCompare(String(b.name || bId));
     });
     return filtered;
-  }, [rows, selectedSet, query]);
+  }, [rows, selectedSet, inheritedSet, query]);
 
   const toggle = (capabilityId: string) => {
     const capId = String(capabilityId || "").trim();
     if (!capId) return;
+    if (inheritedSet.has(capId)) return;
     if (selectedSet.has(capId)) {
       onChange(selected.filter((item) => item !== capId));
       return;
@@ -140,21 +146,29 @@ export function CapabilityPicker({
       {label ? <label className="block text-xs font-medium mb-2 text-[var(--color-text-tertiary)]">{label}</label> : null}
 
       <div className="flex flex-wrap gap-1.5 mb-2">
-        {selected.length === 0 ? (
+        {visibleSelected.length === 0 ? (
           <span className="text-xs text-[var(--color-text-muted)]">{t("capabilities.noneSelected")}</span>
         ) : (
-          selected.map((capId) => (
-            <button
-              key={capId}
-              type="button"
-              onClick={() => toggle(capId)}
-              disabled={disabled}
-              className={`px-2 py-1 rounded text-[11px] ${BADGE_CLASS} ${disabled ? "opacity-60 cursor-not-allowed" : "hover:opacity-85"}`}
-              title={t("capabilities.removeFromAutoload")}
-            >
-              {capId}
-            </button>
-          ))
+          visibleSelected.map((capId) => {
+            const inheritedNow = inheritedSet.has(capId);
+            return (
+              <button
+                key={capId}
+                type="button"
+                onClick={() => toggle(capId)}
+                disabled={disabled || inheritedNow}
+                className={`px-2 py-1 rounded text-[11px] ${BADGE_CLASS} ${disabled || inheritedNow ? "opacity-60 cursor-not-allowed" : "hover:opacity-85"}`}
+                title={inheritedNow ? t("capabilities.inheritedEnabled", { defaultValue: "Enabled by group or profile" }) : t("capabilities.removeFromAutoload")}
+              >
+                {capId}
+                {inheritedNow ? (
+                  <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">
+                    {t("capabilities.inheritedBadge", { defaultValue: "inherited" })}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })
         )}
       </div>
 
@@ -196,12 +210,12 @@ export function CapabilityPicker({
             return (
               <label
                 key={capId}
-                className={`flex items-start gap-2 px-3 py-2 border-b last:border-b-0 border-[var(--glass-border-subtle)] text-[var(--color-text-primary)] ${disabledItem ? "opacity-60" : "cursor-pointer"}`}
+                className={`flex items-start gap-2 px-3 py-2 border-b last:border-b-0 border-[var(--glass-border-subtle)] text-[var(--color-text-primary)] ${disabledItem || inheritedSet.has(capId) ? "opacity-60" : "cursor-pointer"}`}
               >
                 <input
                   type="checkbox"
-                  checked={selectedNow}
-                  disabled={disabledItem}
+                  checked={selectedNow || inheritedSet.has(capId)}
+                  disabled={disabledItem || inheritedSet.has(capId)}
                   onChange={() => toggle(capId)}
                   className="mt-0.5"
                 />
@@ -232,6 +246,11 @@ export function CapabilityPicker({
                     {blocked ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-800">
                         {t("capabilities.blocked")}
+                      </span>
+                    ) : null}
+                    {inheritedSet.has(capId) ? (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${BADGE_CLASS}`}>
+                        {t("capabilities.inheritedBadge", { defaultValue: "inherited" })}
                       </span>
                     ) : null}
                   </div>
