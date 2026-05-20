@@ -45,6 +45,7 @@ interface CapabilitiesTabProps {
 type RegistryKindFilter = "all" | "pack" | "mcp" | "skill";
 type RegistryPolicyFilter = "all" | "actionable" | "blocked" | "indexed";
 type ManageQualificationStatus = "qualified" | "blocked";
+type CapabilityStoreInvalidItem = Record<string, unknown>;
 
 const REGISTRY_PAGE_SIZE_OPTIONS = [20, 40, 80];
 const ONECOLLEAGUE_SOURCE_ID = "onecolleague_skill_library";
@@ -72,6 +73,69 @@ function asResultArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
     : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function firstStringField(row: Record<string, unknown> | null, keys: string[]) {
+  if (!row) return "";
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" || typeof value === "number") {
+      const text = String(value || "").trim();
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+function invalidNestedRecords(row: CapabilityStoreInvalidItem) {
+  const records: Array<Record<string, unknown>> = [row];
+  for (const key of ["record", "error", "import_result", "validation_error", "package_error", "diagnostics"]) {
+    const value = asRecord(row[key]);
+    if (value) records.push(value);
+    const nestedError = asRecord(value?.error);
+    if (nestedError) records.push(nestedError);
+  }
+  return records;
+}
+
+export function capabilityStoreInvalidLabel(row: CapabilityStoreInvalidItem) {
+  for (const record of invalidNestedRecords(row)) {
+    const label = firstStringField(record, ["capability_id", "id", "name", "source_record_id"]);
+    if (label) return label;
+  }
+  return "";
+}
+
+export function capabilityStoreInvalidReason(row: CapabilityStoreInvalidItem) {
+  for (const record of invalidNestedRecords(row)) {
+    const reason = firstStringField(record, ["message", "reason", "error", "detail", "details", "code"]);
+    if (reason) return reason;
+  }
+  return "";
+}
+
+export function shouldAutoRefreshOneColleagueStore(input: {
+  isActive: boolean;
+  selfEvolvingSurface: boolean;
+  sourceEnabled: boolean;
+  importedCount: number;
+  activePendingCount: number;
+  busyKey: string;
+  attempted: boolean;
+}) {
+  return Boolean(
+    input.isActive
+    && !input.selfEvolvingSurface
+    && input.sourceEnabled
+    && input.importedCount === 0
+    && input.activePendingCount === 0
+    && !input.busyKey
+    && !input.attempted
+  );
 }
 
 function pendingImportOk(item: OneColleaguePendingCapability): boolean {
@@ -215,6 +279,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
   const [pendingItems, setPendingItems] = useState<OneColleaguePendingCapability[]>([]);
   const [storeSummary, setStoreSummary] = useState<Record<string, number>>({});
   const [storeInvalidCount, setStoreInvalidCount] = useState(0);
+  const [storeInvalidItems, setStoreInvalidItems] = useState<CapabilityStoreInvalidItem[]>([]);
   const [actors, setActors] = useState<Actor[]>([]);
   const [enableActorId, setEnableActorId] = useState(DEFAULT_ENABLE_ACTOR_ID);
   const [actorCapabilityState, setActorCapabilityState] = useState<CapabilityStateResult | null>(null);
@@ -231,9 +296,35 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
   const [manageUsage, setManageUsage] = useState<CapabilityUsageSummary | null>(null);
   const [manageUsageLoading, setManageUsageLoading] = useState(false);
   const overviewRequestSeqRef = useRef(0);
+  const autoStoreRefreshAttemptedRef = useRef(false);
+  const busyKeyRef = useRef("");
   const failedLoadTextRef = useRef("");
 
+  busyKeyRef.current = busyKey;
   failedLoadTextRef.current = t("capabilities.failedLoad");
+
+  const performStoreRefresh = useCallback(async (opts?: { auto?: boolean }) => {
+    const auto = Boolean(opts?.auto);
+    setBusyKey(auto ? "store:autoRefresh" : "store:refresh");
+    setStoreErr("");
+    try {
+      const resp = await api.refreshOneColleagueCapabilitySource({ limit: 200 });
+      if (!resp.ok) {
+        setStoreErr(resp.error?.message || t(auto ? "capabilities.store.autoRefreshFailed" : "capabilities.store.failedRefresh"));
+        return false;
+      }
+      const invalid = asResultArray(resp.result?.invalid);
+      setStoreSummary(resp.result?.summary || {});
+      setStoreInvalidItems(invalid);
+      setStoreInvalidCount(invalid.length);
+      return true;
+    } catch (e) {
+      setStoreErr(e instanceof Error ? e.message : t(auto ? "capabilities.store.autoRefreshFailed" : "capabilities.store.failedRefresh"));
+      return false;
+    } finally {
+      setBusyKey("");
+    }
+  }, [t]);
 
   const load = useCallback(async () => {
     if (!isActive) return;
@@ -280,12 +371,36 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
         groupId ? api.fetchGroupCapabilityState(groupId, enableActorId) : Promise.resolve(null),
       ]);
       if (overviewRequestSeqRef.current !== requestSeq) return;
+      const overviewItems = overviewResp.ok && Array.isArray(overviewResp.result?.items) ? overviewResp.result.items : [];
+      const source = sourceResp.ok ? sourceResp.result?.source || null : null;
+      const pending = pendingResp.ok && Array.isArray(pendingResp.result?.items) ? pendingResp.result.items : [];
+      const importedStoreCount = overviewItems.filter((row) => String(row.source_id || "").trim() === ONECOLLEAGUE_SOURCE_ID).length;
+      const activePendingCount = pending.filter((item) => {
+        const status = String(item.status || "").trim();
+        return status && !["imported", "ignored", "rolled_back"].includes(status);
+      }).length;
+      if (overviewResp.ok && pendingResp.ok && shouldAutoRefreshOneColleagueStore({
+        isActive,
+        selfEvolvingSurface,
+        sourceEnabled: Boolean(source?.enabled),
+        importedCount: importedStoreCount,
+        activePendingCount,
+        busyKey: busyKeyRef.current,
+        attempted: autoStoreRefreshAttemptedRef.current,
+      })) {
+        autoStoreRefreshAttemptedRef.current = true;
+        const refreshed = await performStoreRefresh({ auto: true });
+        if (refreshed && overviewRequestSeqRef.current === requestSeq) {
+          await load();
+          return;
+        }
+      }
       if (!overviewResp.ok) {
         setErr(overviewResp.error?.message || t("capabilities.failedLoad"));
         setItems([]);
         setBlocked([]);
       } else {
-        setItems(Array.isArray(overviewResp.result?.items) ? overviewResp.result.items : []);
+        setItems(overviewItems);
         setBlocked(
           Array.isArray(overviewResp.result?.blocked_capabilities)
             ? overviewResp.result.blocked_capabilities
@@ -293,11 +408,11 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
         );
       }
       if (sourceResp.ok) {
-        setOneColleagueSource(sourceResp.result?.source || null);
-        setStoreSummary(sourceResp.result?.source?.last_summary || {});
+        setOneColleagueSource(source);
+        setStoreSummary(source?.last_summary || {});
       }
       if (pendingResp.ok) {
-        setPendingItems(Array.isArray(pendingResp.result?.items) ? pendingResp.result.items : []);
+        setPendingItems(pending);
       }
       if (actorsResp?.ok) {
         const nextActors = Array.isArray(actorsResp.result?.actors) ? actorsResp.result.actors : [];
@@ -321,7 +436,7 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
         setLoading(false);
       }
     }
-  }, [enableActorId, groupId, isActive, selfEvolvingSurface, t]);
+  }, [enableActorId, groupId, isActive, performStoreRefresh, selfEvolvingSurface, t]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -1073,21 +1188,9 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
   }, [filteredRegistry.length, registryPage, registryPageSize, registryTotalPages, pagedRegistry.length]);
 
   const refreshStore = async () => {
-    setBusyKey("store:refresh");
-    setStoreErr("");
-    try {
-      const resp = await api.refreshOneColleagueCapabilitySource({ limit: 200 });
-      if (!resp.ok) {
-        setStoreErr(resp.error?.message || t("capabilities.store.failedRefresh"));
-        return;
-      }
-      setStoreSummary(resp.result?.summary || {});
-      setStoreInvalidCount(Array.isArray(resp.result?.invalid) ? resp.result.invalid.length : 0);
+    const refreshed = await performStoreRefresh();
+    if (refreshed) {
       await load();
-    } catch (e) {
-      setStoreErr(e instanceof Error ? e.message : t("capabilities.store.failedRefresh"));
-    } finally {
-      setBusyKey("");
     }
   };
 
@@ -1472,10 +1575,10 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
             <button
               type="button"
               className="glass-btn px-3 py-2 rounded-lg text-xs min-h-[38px] text-[var(--color-text-secondary)]"
-              disabled={busyKey === "store:refresh"}
+              disabled={busyKey === "store:refresh" || busyKey === "store:autoRefresh"}
               onClick={() => void refreshStore()}
             >
-              {busyKey === "store:refresh" ? t("common:loading") : t("capabilities.store.refresh")}
+              {busyKey === "store:refresh" || busyKey === "store:autoRefresh" ? t("common:loading") : t("capabilities.store.refresh")}
             </button>
             <button
               type="button"
@@ -1498,6 +1601,34 @@ export function CapabilitiesTab({ isDark: _isDark, isActive, groupId = "", surfa
             </div>
           ))}
         </div>
+
+        {busyKey === "store:autoRefresh" ? (
+          <div className="mt-3 text-xs text-[var(--color-text-muted)]">{t("capabilities.store.autoRefreshing")}</div>
+        ) : null}
+
+        {storeInvalidItems.length ? (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">{t("capabilities.store.invalidTitle")}</div>
+            <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-200/80">{t("capabilities.store.invalidHint")}</div>
+            <div className="mt-2 space-y-1.5">
+              {storeInvalidItems.slice(0, 5).map((item, index) => {
+                const label = capabilityStoreInvalidLabel(item) || `#${index + 1}`;
+                const reason = capabilityStoreInvalidReason(item) || t("capabilities.store.invalidReasonFallback");
+                return (
+                  <div key={`${label}:${index}`} className="min-w-0 rounded border border-amber-500/20 bg-[var(--glass-panel-bg)] px-2 py-1.5">
+                    <div className="truncate text-[11px] font-medium text-[var(--color-text-primary)]">{label}</div>
+                    <div className="mt-0.5 break-words text-[11px] text-[var(--color-text-muted)]">{reason}</div>
+                  </div>
+                );
+              })}
+              {storeInvalidItems.length > 5 ? (
+                <div className="text-[11px] text-amber-700/80 dark:text-amber-200/80">
+                  {t("capabilities.store.invalidMore", { count: storeInvalidItems.length - 5 })}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(180px,240px)] md:items-center">
           <div className="text-[11px] text-[var(--color-text-tertiary)]">{t("capabilities.store.actorHint")}</div>

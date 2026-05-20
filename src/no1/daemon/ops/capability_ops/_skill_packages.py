@@ -24,7 +24,7 @@ from ._documents import _load_catalog_doc
 _PACKAGE_MODE = "codex_skill_package"
 _MAX_PACKAGE_BYTES = 50 * 1024 * 1024
 _MAX_EXTRACTED_BYTES = 100 * 1024 * 1024
-_MAX_PACKAGE_FILES = 1000
+_MAX_PACKAGE_FILES = 10000
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 
 
