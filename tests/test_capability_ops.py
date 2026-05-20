@@ -421,6 +421,10 @@ class TestCapabilityOps(unittest.TestCase):
         old_codex_home = os.environ.get("CODEX_HOME")
         try:
             gid = self._create_group()
+            workspace = Path(home) / "workspace"
+            workspace.mkdir()
+            attach_resp, _ = self._call("attach", {"group_id": gid, "path": str(workspace), "by": "user"})
+            self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
             source_codex = Path(home) / "source-codex"
             source_codex.mkdir()
             (source_codex / "auth.json").write_text('{"ok":true}\n', encoding="utf-8")
@@ -522,6 +526,13 @@ class TestCapabilityOps(unittest.TestCase):
                 enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
                 self.assertTrue(bool(enable_result.get("enabled")))
                 self.assertEqual(str(enable_result.get("state") or ""), "runnable")
+                project_package = enable_result.get("project_package") if isinstance(enable_result.get("project_package"), dict) else {}
+                project_path = Path(str(project_package.get("project_path") or ""))
+                managed_path = Path(str(project_package.get("managed_path") or ""))
+                self.assertTrue(project_path.exists(), str(project_path))
+                self.assertTrue(managed_path.exists(), str(managed_path))
+                for rel_path in arbitrary_files:
+                    self.assertTrue((project_path / rel_path).is_file(), rel_path)
 
                 state_resp, _ = self._call("capability_state", {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"})
                 self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
@@ -560,6 +571,83 @@ class TestCapabilityOps(unittest.TestCase):
                 os.environ.pop("CODEX_HOME", None)
             else:
                 os.environ["CODEX_HOME"] = old_codex_home
+            cleanup()
+
+    def test_skill_package_enable_downloads_and_materializes_existing_catalog_record(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        home, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            workspace = Path(home) / "workspace"
+            workspace.mkdir()
+            attach_resp, _ = self._call("attach", {"group_id": gid, "path": str(workspace), "by": "user"})
+            self.assertTrue(attach_resp.ok, getattr(attach_resp, "error", None))
+
+            package_files = {
+                "SKILL.md": "Use image generation.\n",
+                "shierkeji_image_create/scripts/peer_image_generate.py": "print('ok')\n",
+            }
+            package_bytes = self._skill_zip_bytes(package_files)
+            package_sha = hashlib.sha256(package_bytes).hexdigest()
+            cap_id = "skill:onecolleague_skill_library:image"
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][cap_id] = {
+                "capability_id": cap_id,
+                "kind": "skill",
+                "name": "image",
+                "description_short": "Generate images",
+                "source_id": "onecolleague_skill_library",
+                "source_uri": "http://skills.local/skills/image",
+                "source_record_version": "1.0.0",
+                "qualification_status": "qualified",
+                "capsule_text": "Use ./image/shierkeji_image_create/scripts/peer_image_generate.py.",
+                "requires_capabilities": [],
+                "install_mode": "codex_skill_package",
+                "install_spec": {
+                    "package_url": "http://skills.local/packages/image.zip",
+                    "package_sha256": package_sha,
+                    "package_size": len(package_bytes),
+                    "package_format": "zip",
+                    "skill_slug": "image",
+                },
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            with patch(
+                "no1.daemon.ops.capability_ops._skill_packages._download_package_bytes",
+                return_value=package_bytes,
+            ) as download:
+                enable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "peer-1",
+                        "actor_id": "peer-1",
+                        "capability_id": cap_id,
+                        "scope": "actor",
+                        "enabled": True,
+                    },
+                )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            download.assert_called_once()
+            result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            self.assertTrue(bool(result.get("enabled")))
+            self.assertEqual(str(result.get("state") or ""), "runnable")
+            project_package = result.get("project_package") if isinstance(result.get("project_package"), dict) else {}
+            project_path = Path(str(project_package.get("project_path") or ""))
+            self.assertEqual(project_path, workspace / "image")
+            self.assertTrue((project_path / "SKILL.md").is_file())
+            self.assertTrue((project_path / "shierkeji_image_create" / "scripts" / "peer_image_generate.py").is_file())
+            self.assertTrue((workspace / "shierkeji_image_create" / "scripts" / "peer_image_generate.py").is_file())
+            self.assertTrue((workspace / ".onecolleague" / "skills" / "image" / "SKILL.md").is_file())
+            resource_paths = project_package.get("resource_paths") if isinstance(project_package.get("resource_paths"), list) else []
+            self.assertIn(str(workspace / "shierkeji_image_create"), resource_paths)
+            package_install = result.get("package_install") if isinstance(result.get("package_install"), dict) else {}
+            self.assertEqual(str(package_install.get("package_sha256") or ""), package_sha)
+        finally:
             cleanup()
 
     def test_skill_package_rejects_zip_slip_and_symlink(self) -> None:

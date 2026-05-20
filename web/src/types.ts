@@ -452,6 +452,10 @@ export type CapabilityStateResult = {
     source_uri?: string;
     policy_level?: string;
   }>;
+  autoload_capabilities?: string[];
+  group_autoload_capabilities?: string[];
+  actor_autoload_capabilities?: string[];
+  profile_autoload_capabilities?: string[];
   actor_hidden_capabilities?: string[];
   capability_usage?: CapabilityUsageSummary;
 };

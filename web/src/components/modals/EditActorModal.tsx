@@ -69,6 +69,7 @@ export interface EditActorModalProps {
   onChangeRoleNotes: (value: string) => void;
   roleNotesBusy?: boolean;
   capabilityAutoloadText: string;
+  inheritedCapabilityAutoload?: string[];
   onChangeCapabilityAutoloadText: (value: string) => void;
   onSave: (payload: EditActorSavePayload) => Promise<void>;
   onSaveAndRestart: (payload: EditActorSavePayload) => Promise<void>;
@@ -154,6 +155,7 @@ export function EditActorModal({
   onChangeRoleNotes,
   roleNotesBusy = false,
   capabilityAutoloadText,
+  inheritedCapabilityAutoload,
   onChangeCapabilityAutoloadText,
   onSave,
   onSaveAndRestart,
@@ -967,6 +969,7 @@ export function EditActorModal({
                     <CapabilityPicker
                       isDark={isDark}
                       value={parseCapabilityIdInput(capabilityAutoloadText)}
+                      inheritedValue={inheritedCapabilityAutoload}
                       onChange={(next) => onChangeCapabilityAutoloadText(formatCapabilityIdInput(next))}
                       disabled={busy === "actor-update"}
                       active={capabilitiesPrimed}

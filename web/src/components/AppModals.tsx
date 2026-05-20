@@ -25,7 +25,7 @@ import {
 } from "../features/contextModal/contextRead";
 import { parsePrivateEnvSetText } from "../utils/privateEnvInput";
 import { parseHelpMarkdown, updateActorHelpNote } from "../utils/helpMarkdown";
-import { formatCapabilityIdInput, normalizeCapabilityIdList, parseCapabilityIdInput } from "../utils/capabilityAutoload";
+import { formatCapabilityIdInput, mergeInheritedCapabilityAutoload, normalizeCapabilityIdList, parseCapabilityIdInput } from "../utils/capabilityAutoload";
 import { actorProfileIdentityKey, actorProfileMatchesRef } from "../utils/actorProfiles";
 import { formatRecipientList, getRecipientDisplayLabel } from "../utils/displayText";
 import { findPresentationSlot } from "../utils/presentation";
@@ -261,6 +261,7 @@ export function AppModals({
   const [actorProfiles, setActorProfiles] = useState<ActorProfile[]>([]);
   const [actorProfilesBusy, setActorProfilesBusy] = useState(false);
   const [editActorRoleNotesBusy, setEditActorRoleNotesBusy] = useState(false);
+  const [editActorInheritedCapabilityAutoload, setEditActorInheritedCapabilityAutoload] = useState<string[]>([]);
   const [presentationViewerCacheByGroup, setPresentationViewerCacheByGroup] = useState<Record<string, string[]>>({});
   const editActorRoleNotesBaselineRef = useRef("");
   const editActorRoleNotesSeqRef = useRef(0);
@@ -811,6 +812,7 @@ export function AppModals({
       }
 
       await refreshActors();
+      setEditActorInheritedCapabilityAutoload([]);
       setEditingActor(null);
 
       if (!options.restart) {
@@ -841,6 +843,7 @@ export function AppModals({
     setEditActorTitle(String(actor.title || ""));
     setEditActorRoleNotes("");
     editActorRoleNotesBaselineRef.current = "";
+    setEditActorInheritedCapabilityAutoload([]);
     setEditActorCapabilityAutoloadText(
       formatCapabilityIdInput((actor as { capability_autoload?: unknown[] }).capability_autoload)
     );
@@ -853,6 +856,48 @@ export function AppModals({
     if (!actorId) return;
     void loadEditingActorRoleNotes(selectedGroupId, actorId);
   }, [editingActor, selectedGroupId, loadEditingActorRoleNotes]);
+
+  useEffect(() => {
+    if (!editingActor || !selectedGroupId) {
+      setEditActorInheritedCapabilityAutoload([]);
+      return;
+    }
+    const actorId = String(editingActor.id || "").trim();
+    if (!actorId) {
+      setEditActorInheritedCapabilityAutoload([]);
+      return;
+    }
+    const actorOwnAutoload = new Set(
+      normalizeCapabilityIdList((editingActor as { capability_autoload?: unknown[] }).capability_autoload)
+    );
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const resp = await api.fetchGroupCapabilityState(selectedGroupId, actorId, { noCache: true });
+        if (cancelled) return;
+        if (!resp.ok) {
+          setEditActorInheritedCapabilityAutoload([]);
+          return;
+        }
+        setEditActorInheritedCapabilityAutoload(
+          mergeInheritedCapabilityAutoload({
+            own: Array.from(actorOwnAutoload),
+            actorStateAutoload: resp.result?.actor_autoload_capabilities,
+            effectiveAutoload: resp.result?.autoload_capabilities,
+            groupAutoload: resp.result?.group_autoload_capabilities,
+            profileAutoload: resp.result?.profile_autoload_capabilities,
+            enabled: resp.result?.enabled,
+          })
+        );
+      } catch {
+        if (!cancelled) setEditActorInheritedCapabilityAutoload([]);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [editingActor, selectedGroupId]);
 
   useEffect(() => {
     if (!editingActor) return;
@@ -1302,6 +1347,7 @@ export function AppModals({
     editActorRoleNotesBaselineRef.current = "";
     setEditActorRoleNotesBusy(false);
     setEditActorRoleNotes("");
+    setEditActorInheritedCapabilityAutoload([]);
     setEditingActor(null);
   }, [setEditActorRoleNotes, setEditingActor]);
 
@@ -1777,6 +1823,7 @@ export function AppModals({
         onChangeRoleNotes={setEditActorRoleNotes}
         roleNotesBusy={editActorRoleNotesBusy}
         capabilityAutoloadText={editActorCapabilityAutoloadText}
+        inheritedCapabilityAutoload={editActorInheritedCapabilityAutoload}
         onChangeCapabilityAutoloadText={setEditActorCapabilityAutoloadText}
         onSave={handleSaveEditActorOnly}
         onSaveAndRestart={handleSaveEditActorAndRestart}

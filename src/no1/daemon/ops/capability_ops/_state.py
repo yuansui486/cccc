@@ -1113,6 +1113,51 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
             requires = [str(x).strip() for x in requires_caps if str(x).strip()] if isinstance(requires_caps, list) else []
             applied_dependencies: List[str] = []
             skipped_dependencies: List[Dict[str, str]] = []
+            package_install: Dict[str, Any] = {}
+            project_package: Dict[str, Any] = {}
+            if _pkg().is_codex_skill_package_record(rec):
+                try:
+                    package_install = _pkg().ensure_codex_skill_package_installed(rec)
+                    project_package = _pkg().materialize_skill_package_for_group(
+                        group=group,
+                        record=rec,
+                        install_row=package_install,
+                    )
+                except Exception as e:
+                    message = str(e).strip() or type(e).__name__
+                    _audit(
+                        "failed",
+                        state="failed",
+                        error_code="skill_package_install_failed",
+                        details={"error": message},
+                    )
+                    return DaemonResponse(
+                        ok=True,
+                        result={
+                            "action_id": action_id,
+                            "group_id": group_id,
+                            "actor_id": actor_id,
+                            "capability_id": capability_id,
+                            "scope": scope,
+                            "enabled": False,
+                            "state": "blocked",
+                            "refresh_required": False,
+                            "reason": "skill_package_install_failed",
+                            "error": message,
+                            "policy_level": policy_level,
+                            "diagnostics": [
+                                {
+                                    "code": "skill_package_install_failed",
+                                    "message": message,
+                                    "retryable": True,
+                                    "action_hints": [
+                                        "refresh_onecolleague_skill_library",
+                                        "retry_capability_enable_or_install",
+                                    ],
+                                }
+                            ],
+                        },
+                    )
             with _STATE_LOCK:
                 state_path, state_doc = _load_state_doc()
                 _set_enabled_capability(
@@ -1183,6 +1228,8 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     "skill": True,
                     "applied_dependencies": applied_dependencies,
                     "skipped_dependencies": skipped_dependencies,
+                    **({"package_install": package_install} if package_install else {}),
+                    **({"project_package": project_package} if project_package else {}),
                 },
             )
             result: Dict[str, Any] = {
@@ -1207,6 +1254,12 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     "source_uri": str(rec.get("source_uri") or ""),
                 },
             }
+            if package_install:
+                result["package_install"] = package_install
+                result["skill"]["package_install"] = package_install
+            if project_package:
+                result["project_package"] = project_package
+                result["skill"]["project_package"] = project_package
             if refresh_required:
                 result["wait"] = "relist_or_reconnect"
                 result["refresh_mode"] = "relist_or_reconnect"

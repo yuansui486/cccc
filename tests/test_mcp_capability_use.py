@@ -610,7 +610,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
         self.assertEqual(str(result.get("capability_id") or ""), "mcp:io.github.upstash/context7")
         self.assertTrue(bool(result.get("tool_called")))
 
-    def test_capability_use_skips_reenable_when_capability_already_enabled_for_tool_call(self) -> None:
+    def test_capability_use_refreshes_existing_binding_before_tool_call(self) -> None:
         from no1.ports.mcp.server import capability_use
 
         with patch(
@@ -618,6 +618,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
             return_value={"enabled_capabilities": ["mcp:test-server"]},
         ), patch(
             "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            return_value={"state": "runnable", "enabled": True, "refresh_required": False},
         ) as enable_mock, patch(
             "no1.ports.mcp.handlers.onecolleague_capability._call_daemon_or_raise",
             return_value={"result": {"ok": True}},
@@ -631,7 +632,7 @@ class TestMcpCapabilityUse(unittest.TestCase):
                 tool_arguments={"message": "hello"},
             )
 
-        enable_mock.assert_not_called()
+        enable_mock.assert_called_once()
         self.assertTrue(bool(result.get("tool_called")))
         self.assertTrue(bool(result.get("reused_existing_binding")))
         self.assertEqual(str(result.get("scope") or ""), "session")
