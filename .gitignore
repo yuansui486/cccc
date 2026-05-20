@@ -26,6 +26,7 @@ uv.lock
 /web/.vite/
 /web/dist/
 /src/cccc/ports/web/dist/
+/src/no1/ports/web/dist/
 /space
 
 # Local/editor/platform noise
@@ -67,4 +68,3 @@ AGENTS.md
 .github/*
 !.github/workflows/
 !.github/workflows/**
-src/no1/ports/web/dist/**
