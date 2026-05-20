@@ -1,12 +1,14 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import * as api from "../services/api";
 import type { ReplyTarget } from "../types";
 import {
   buildSlashCommandToolArgumentsForItem,
+  filterSlashCommandsBySkillScope,
   parseSlashCommandInput,
   resolveCapsuleSkillSlashCommand,
   resolveSlashCommandGuard,
+  type SlashSkillScope,
 } from "../utils/slashCommands";
 import { useSlashCommandState } from "./useSlashCommandState";
 
@@ -64,11 +66,16 @@ export function useSlashCommands(args: {
   showNotice: (payload: { message: string }) => void;
   dispatchMessage?: (text: string, options?: SlashDispatchMessageOptions) => Promise<boolean>;
   onExecuted?: () => void;
+  skillScope: SlashSkillScope;
   t: TranslateFn;
 }) {
-  const { selectedGroupId, clearComposer, restoreComposerText, showError, showNotice, dispatchMessage, onExecuted, t } = args;
+  const { selectedGroupId, clearComposer, restoreComposerText, showError, showNotice, dispatchMessage, onExecuted, skillScope, t } = args;
   const slashInFlightRef = useRef(false);
   const { slashCommands, refreshSlashCommands } = useSlashCommandState(selectedGroupId);
+  const scopedSlashCommands = useMemo(
+    () => filterSlashCommandsBySkillScope(slashCommands, skillScope),
+    [skillScope, slashCommands],
+  );
 
   const tryExecuteSlashCommand = useCallback(async (opts: {
     text: string;
@@ -80,7 +87,7 @@ export function useSlashCommands(args: {
     sendGroupId: string;
   }): Promise<boolean> => {
     const gid = String(selectedGroupId || "").trim();
-    const slashCommand = parseSlashCommandInput(opts.text, slashCommands);
+    const slashCommand = parseSlashCommandInput(opts.text, scopedSlashCommands);
     if (!slashCommand || !gid) return false;
     if (slashInFlightRef.current) return true;
 
@@ -171,7 +178,7 @@ export function useSlashCommands(args: {
     } finally {
       slashInFlightRef.current = false;
     }
-  }, [clearComposer, dispatchMessage, onExecuted, refreshSlashCommands, restoreComposerText, selectedGroupId, showError, showNotice, slashCommands, t]);
+  }, [clearComposer, dispatchMessage, onExecuted, refreshSlashCommands, restoreComposerText, scopedSlashCommands, selectedGroupId, showError, showNotice, t]);
 
-  return { slashCommands, refreshSlashCommands, tryExecuteSlashCommand };
+  return { slashCommands: scopedSlashCommands, refreshSlashCommands, tryExecuteSlashCommand };
 }

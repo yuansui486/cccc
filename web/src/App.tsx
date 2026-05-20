@@ -231,7 +231,7 @@ export default function App() {
 
   const computedSendGroupId = getEffectiveComposerDestGroupId(destGroupId, activeGroupId, selectedGroupId);
 
-  const { recipientActors, recipientActorsBusy, destGroupScopeLabel } = useCrossGroupRecipients({
+  const { recipientActors, recipientActorsBusy } = useCrossGroupRecipients({
     actors,
     groupDoc,
     selectedGroupId,
@@ -371,7 +371,6 @@ export default function App() {
       <AppShell
         orderedGroups={orderedGroups}
         archivedGroupIds={archivedGroupIds}
-        groups={groups}
         selectedGroupId={selectedGroupId}
         groupDoc={groupDoc}
         groupContext={groupContext}
@@ -379,7 +378,6 @@ export default function App() {
         runtimeActors={visibleRuntimeActors}
         recipientActors={recipientActors}
         recipientActorsBusy={recipientActorsBusy}
-        destGroupScopeLabel={destGroupScopeLabel}
         renderedActorIds={renderedActorIds}
         activeTab={activeTab}
         busy={busy}

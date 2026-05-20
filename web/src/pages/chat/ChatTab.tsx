@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { BookmarkIcon, CompassIcon } from "../../components/Icons";
-import { Actor, GroupMeta, HeadlessPreviewSession, LedgerEvent, PresentationMessageRef, StreamingActivity } from "../../types";
+import { Actor, HeadlessPreviewSession, LedgerEvent, PresentationMessageRef, StreamingActivity } from "../../types";
 import { VirtualMessageList } from "../../components/VirtualMessageList";
 import { classNames } from "../../utils/classNames";
 import { ChatComposer } from "./ChatComposer";
@@ -50,12 +50,9 @@ export interface ChatTabProps {
   selectedGroupActorsHydrating: boolean;
   groupLabelById: Record<string, string>;
   actors: Actor[];
-  groups: GroupMeta[];
-
   // Recipient actors for cross-group messaging
   recipientActors: Actor[];
   recipientActorsBusy?: boolean;
-  destGroupScopeLabel?: string;
 
   // Refs (shared with App for external interactions)
   scrollRef: MutableRefObject<HTMLDivElement | null>;
@@ -87,10 +84,8 @@ export function ChatTab({
   selectedGroupActorsHydrating,
   groupLabelById,
   actors,
-  groups,
   recipientActors,
   recipientActorsBusy,
-  destGroupScopeLabel,
   scrollRef,
   composerRef,
   fileInputRef,
@@ -157,9 +152,10 @@ export function ChatTab({
     setPriority,
     setReplyRequired,
     destGroupId,
-    setDestGroupId,
     composerGroupSettled,
     mentionSuggestions,
+    slashSkillScope,
+    setSlashSkillScope,
 
     // Agent state
     agentStates,
@@ -775,10 +771,7 @@ export function ChatTab({
             actors={actors}
             recipientActors={recipientActors}
             recipientActorsBusy={recipientActorsBusy}
-            groups={groups}
             destGroupId={destGroupId}
-            setDestGroupId={setDestGroupId}
-            destGroupScopeLabel={destGroupScopeLabel}
             busy={busy}
             recentMessages={chatMessages}
             replyTarget={replyTarget}
@@ -797,6 +790,8 @@ export function ChatTab({
             setComposerText={setComposerText}
             composerGroupSettled={composerGroupSettled}
             slashCommands={slashCommands}
+            slashSkillScope={slashSkillScope}
+            setSlashSkillScope={setSlashSkillScope}
             priority={priority}
             replyRequired={replyRequired}
             setPriority={setPriority}

@@ -10,7 +10,6 @@ import { SIDEBAR_COLLAPSED_WIDTH } from "../../stores/useUIStore";
 type AppShellProps = {
   orderedGroups: GroupMeta[];
   archivedGroupIds: string[];
-  groups: GroupMeta[];
   selectedGroupId: string;
   groupDoc: GroupDoc | null;
   groupContext: GroupContext | null;
@@ -18,7 +17,6 @@ type AppShellProps = {
   runtimeActors: Actor[];
   recipientActors: Actor[];
   recipientActorsBusy: boolean;
-  destGroupScopeLabel: string;
   renderedActorIds: string[];
   activeTab: string;
   busy: string;
@@ -95,7 +93,6 @@ type AppShellProps = {
 export function AppShell({
   orderedGroups,
   archivedGroupIds,
-  groups,
   selectedGroupId,
   groupDoc,
   groupContext,
@@ -103,7 +100,6 @@ export function AppShell({
   runtimeActors,
   recipientActors,
   recipientActorsBusy,
-  destGroupScopeLabel,
   renderedActorIds,
   activeTab,
   busy,
@@ -323,10 +319,8 @@ export function AppShell({
                 selectedGroupActorsHydrating={selectedGroupActorsHydrating}
                 groupLabelById={groupLabelById}
                 actors={actors}
-                groups={groups}
                 recipientActors={recipientActors}
                 recipientActorsBusy={recipientActorsBusy}
-                destGroupScopeLabel={destGroupScopeLabel}
                 scrollRef={eventContainerRef}
                 composerRef={composerRef}
                 fileInputRef={fileInputRef}

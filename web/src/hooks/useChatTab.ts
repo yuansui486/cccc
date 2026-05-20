@@ -1,7 +1,7 @@
 // useChatTab - Encapsulates ChatTab business logic and state.
 // Reduces prop drilling by providing state from stores and computed values directly.
 
-import { useMemo, useCallback, useRef, useState } from "react";
+import { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useGroupStore,
@@ -36,6 +36,7 @@ import {
 import { copyTextToClipboard } from "../utils/copy";
 import { hasRenderableChatMessageContent } from "../utils/ledgerEventHandlers";
 import { useSlashCommands } from "./useSlashCommands";
+import type { SlashSkillScope } from "../utils/slashCommands";
 import { useSlashSkillDispatch } from "./useSlashSkillDispatch";
 
 export const CHAT_SCROLL_SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
@@ -836,6 +837,7 @@ export function useChatTab({
   const enqueueOutbox = useChatOutboxStore((s) => s.enqueue);
   const removeOutbox = useChatOutboxStore((s) => s.remove);
   const sendInFlightRef = useRef(false);
+  const [slashSkillScope, setSlashSkillScope] = useState<SlashSkillScope>("team");
 
   // ============ Computed Values ============
 
@@ -907,6 +909,12 @@ export function useChatTab({
     return getEffectiveComposerDestGroupId(destGroupId, activeGroupId, selectedGroupId);
   }, [destGroupId, activeGroupId, selectedGroupId]);
 
+  useEffect(() => {
+    const selected = String(selectedGroupId || "").trim();
+    if (!selected || String(sendGroupId || "").trim() === selected) return;
+    setDestGroupId(selected);
+  }, [selectedGroupId, sendGroupId, setDestGroupId]);
+
   // Project root
   const projectRoot = useMemo(() => {
     if (!groupDoc) return "";
@@ -966,6 +974,7 @@ export function useChatTab({
     onExecuted: () => {
       if (fileInputRef?.current) fileInputRef.current.value = "";
     },
+    skillScope: slashSkillScope,
     t,
   });
 
@@ -1700,6 +1709,8 @@ export function useChatTab({
     setDestGroupId,
     composerGroupSettled,
     mentionSuggestions,
+    slashSkillScope,
+    setSlashSkillScope,
 
     // Agent state
     agentStates,
