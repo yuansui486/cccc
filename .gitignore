@@ -67,3 +67,4 @@ AGENTS.md
 .github/*
 !.github/workflows/
 !.github/workflows/**
+src/no1/ports/web/dist/**

@@ -3,13 +3,12 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Actor, LedgerEvent, PresentationMessageRef, ReplyTarget } from "../../types";
 import { classNames } from "../../utils/classNames";
-import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon } from "../../components/Icons";
+import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon, SparklesIcon } from "../../components/Icons";
 import { ScrollFade } from "../../components/ScrollFade";
 import { getPresentationRefChipLabel } from "../../utils/presentationRefs";
 import { useTranslation } from 'react-i18next';
 import { VoiceSecretaryComposerControl, type VoiceSecretaryCaptureMode } from "./VoiceSecretaryComposerControl";
 import { SlashCommandMenu } from "./SlashCommandMenu";
-import { GroupCombobox } from "../../components/GroupCombobox";
 import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem, type SlashSkillScope } from "../../utils/slashCommands";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
@@ -68,6 +67,8 @@ export interface ChatComposerProps {
   composerRef: RefObject<HTMLTextAreaElement | null>;
   composerText: string;
   setComposerText: Dispatch<SetStateAction<string>>;
+  selectedSkillCommand: string;
+  setSelectedSkillCommand: (command: string) => void;
   priority: "normal" | "attention";
   replyRequired: boolean;
   setPriority: (priority: "normal" | "attention") => void;
@@ -83,6 +84,7 @@ export interface ChatComposerProps {
   setMentionFilter: Dispatch<SetStateAction<string>>;
   onAppendRecipientToken: (token: string) => void;
   slashCommands: SlashCommandItem[];
+  allSlashCommands: SlashCommandItem[];
   slashSkillScope: SlashSkillScope;
   setSlashSkillScope: (scope: SlashSkillScope) => void;
 }
@@ -113,6 +115,8 @@ export function ChatComposer({
   composerRef,
   composerText,
   setComposerText,
+  selectedSkillCommand,
+  setSelectedSkillCommand,
   priority,
   replyRequired,
   setPriority,
@@ -126,17 +130,20 @@ export function ChatComposer({
   setMentionFilter,
   onAppendRecipientToken,
   slashCommands,
+  allSlashCommands,
   slashSkillScope,
   setSlashSkillScope,
 }: ChatComposerProps) {
   const composerHeightRef = useRef(0);
   const isUserInputRef = useRef(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [slashVisibleCount, setSlashVisibleCount] = useState(SLASH_COMMAND_PAGE_SIZE);
   const [voiceCaptureMode, setVoiceCaptureMode] = useState<VoiceSecretaryCaptureMode>("prompt");
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  const skillMenuRef = useRef<HTMLDivElement | null>(null);
   const { t } = useTranslation('chat');
 
   const readRootFontScale = () => {
@@ -218,11 +225,31 @@ export function ChatComposer({
     };
   }, [showModeMenu]);
 
+  useEffect(() => {
+    if (!showSkillMenu) return;
+
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const node = skillMenuRef.current;
+      if (!node) return;
+      const target = event.target;
+      if (target instanceof Node && !node.contains(target)) {
+        setShowSkillMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [showSkillMenu]);
+
   const chipBaseClass =
     "flex h-6 flex-shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2 text-[10px] font-medium leading-none transition-all sm:px-2.5 sm:text-[11px]";
   const chipActiveClass = isDark
-    ? "border-white/10 bg-white/10 text-slate-100 shadow-none"
-    : "border-black/10 bg-[rgb(245,245,245)] text-[rgb(35,36,37)] shadow-none";
+    ? "border-blue-400 bg-blue-500 text-white shadow-[0_6px_16px_-10px_rgba(59,130,246,0.9)]"
+    : "border-blue-600 bg-blue-600 text-white shadow-[0_6px_16px_-10px_rgba(37,99,235,0.65)]";
   const chipInactiveClass = isDark
     ? "bg-white/[0.06] text-[var(--color-text-secondary)] border-white/[0.08] hover:bg-white/[0.1] hover:border-white/[0.14] hover:text-[var(--color-text-primary)]"
     : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)] border-transparent hover:bg-[rgb(237,237,237)] hover:border-black/5 hover:text-[rgb(20,20,22)]";
@@ -251,26 +278,29 @@ export function ChatComposer({
   const renderRecipientChipContent = useCallback((label: string) => (
     <span className="truncate">{label}</span>
   ), []);
+  const skillCommands = useMemo(
+    () => allSlashCommands.filter((item) => item.sourceType === "capsule_skill"),
+    [allSlashCommands],
+  );
+  const scopedSkillCommands = useMemo(
+    () => slashCommands.filter((item) => item.sourceType === "capsule_skill"),
+    [slashCommands],
+  );
+  const selectedSkill = useMemo(
+    () => skillCommands.find((item) => item.command === selectedSkillCommand) || null,
+    [selectedSkillCommand, skillCommands],
+  );
+  useEffect(() => {
+    if (!selectedSkillCommand) return;
+    if (scopedSkillCommands.some((item) => item.command === selectedSkillCommand)) return;
+    setSelectedSkillCommand("");
+  }, [scopedSkillCommands, selectedSkillCommand, setSelectedSkillCommand]);
   const slashSuggestions = useMemo(() => filterSlashCommands(slashCommands, composerText), [composerText, slashCommands]);
   const visibleSlashSuggestions = useMemo(
     () => getVisibleSlashCommandPage(slashSuggestions, slashVisibleCount),
     [slashSuggestions, slashVisibleCount],
   );
   const hasMoreSlashSuggestions = visibleSlashSuggestions.length < slashSuggestions.length;
-  const skillScopeOptions = useMemo(() => ([
-    {
-      value: "team",
-      label: t("teamSkills", { defaultValue: "团队 skills" }),
-      description: t("teamSkillsDesc", { defaultValue: "使用当前团队启用的 skills" }),
-      keywords: ["team", "group", "skills"],
-    },
-    {
-      value: "global",
-      label: t("globalSkills", { defaultValue: "全局 skills" }),
-      description: t("globalSkillsDesc", { defaultValue: "使用全局或个人启用的 skills" }),
-      keywords: ["global", "personal", "skills"],
-    },
-  ]), [t]);
 
   // Handle pasted files (clipboard items).
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -386,6 +416,7 @@ export function ChatComposer({
         e.preventDefault();
         setShowSlashMenu(false);
         setSlashSelectedIndex(0);
+        setShowSkillMenu(false);
         return;
       }
     }
@@ -423,6 +454,7 @@ export function ChatComposer({
       setShowMentionMenu(false);
       setShowSlashMenu(false);
       setShowModeMenu(false);
+      setShowSkillMenu(false);
       onCancelReply();
     }
   };
@@ -685,38 +717,123 @@ export function ChatComposer({
                 : "bg-white/55 focus-within:bg-white/80",
             )}
           >
-            {/* Row 1 — Skill scope and recipients */}
+            {/* Row 1 — Skill picker and recipients */}
             <div
               className={classNames(
                 "flex items-center gap-1.5 border-b px-2.5 py-1",
                 isDark ? "border-white/[0.04]" : "border-black/[0.04]",
               )}
             >
-              <span className={classNames("flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
-                {t("skillScope", { defaultValue: "技能范围" })}
-              </span>
-
-              <div className="flex-shrink-0">
-                <GroupCombobox
-                  items={skillScopeOptions}
-                  value={slashSkillScope}
-                  onChange={(nextValue) => setSlashSkillScope(nextValue === "global" ? "global" : "team")}
-                  placeholder={t("skillScope", { defaultValue: "技能范围" })}
-                  searchPlaceholder={t("searchSkillScope", { defaultValue: "搜索技能范围..." })}
-                  emptyText={t("noMatchingSkillScopes", { defaultValue: "没有匹配的技能范围" })}
-                  ariaLabel={t("skillScope", { defaultValue: "技能范围" })}
-                  triggerClassName={classNames(
-                    "inline-flex w-auto min-w-[86px] max-w-[160px] sm:max-w-[196px]",
-                    "h-6 cursor-pointer gap-1 px-2 text-[10px]",
+              <div ref={skillMenuRef} className="relative flex-shrink-0">
+                <button
+                  type="button"
+                  className={classNames(
                     chipBaseClass,
-                    chipInactiveClass,
+                    "gap-1.5 px-2.5",
+                    selectedSkill ? chipActiveClass : chipInactiveClass,
                   )}
-                  contentClassName="max-w-[min(20rem,calc(100vw-1rem))]"
-                  descriptionClassName="text-[10px]"
-                  caretClassName={isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500"}
-                  searchable={false}
+                  onClick={() => setShowSkillMenu((value) => !value)}
                   disabled={busy === "send"}
-                />
+                  aria-expanded={showSkillMenu}
+                  aria-label={t("skillPicker", { defaultValue: "技能选择" })}
+                  title={t("skillPicker", { defaultValue: "技能选择" })}
+                >
+                  <SparklesIcon size={12} />
+                  <span className="max-w-[9rem] truncate">
+                    {selectedSkill ? `$${selectedSkill.name}` : t("skillPicker", { defaultValue: "技能选择" })}
+                  </span>
+                  <ChevronDownIcon size={12} className={classNames("transition-transform", showSkillMenu ? "rotate-180" : "")} />
+                </button>
+
+                {showSkillMenu && (
+                  <div
+                    className={classNames(
+                      "absolute bottom-full left-0 z-40 mb-2 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border shadow-2xl",
+                      isDark
+                        ? "border-white/10 bg-slate-950/95 text-slate-100"
+                        : "border-black/10 bg-white text-gray-900",
+                    )}
+                  >
+                    <div className={classNames("flex items-center gap-1 border-b p-2", isDark ? "border-white/8" : "border-black/8")}>
+                      {(["team", "global"] as SlashSkillScope[]).map((scope) => {
+                        const active = slashSkillScope === scope;
+                        return (
+                          <button
+                            key={scope}
+                            type="button"
+                            className={classNames(
+                              "flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors",
+                              active
+                                ? "bg-blue-600 text-white"
+                                : isDark
+                                  ? "text-slate-400 hover:bg-white/[0.06] hover:text-slate-100"
+                                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-900",
+                            )}
+                            onClick={() => setSlashSkillScope(scope)}
+                          >
+                            {scope === "team"
+                              ? t("teamSkills", { defaultValue: "团队 skills" })
+                              : t("globalSkills", { defaultValue: "全局 skills" })}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="max-h-72 overflow-auto py-1 scrollbar-subtle">
+                      {scopedSkillCommands.length === 0 ? (
+                        <div className={classNames("px-4 py-6 text-center text-xs", isDark ? "text-slate-400" : "text-gray-500")}>
+                          {slashSkillScope === "team"
+                            ? t("noTeamSkills", { defaultValue: "当前团队没有可用 skill" })
+                            : t("noGlobalSkills", { defaultValue: "没有可用的全局 skill" })}
+                        </div>
+                      ) : (
+                        scopedSkillCommands.map((item) => {
+                          const active = selectedSkillCommand === item.command;
+                          return (
+                            <button
+                              key={`${item.capabilityId}:${item.name}`}
+                              type="button"
+                              className={classNames(
+                                "flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors",
+                                active
+                                  ? "bg-blue-600 text-white"
+                                  : isDark
+                                    ? "text-slate-200 hover:bg-white/[0.06]"
+                                    : "text-gray-800 hover:bg-gray-50",
+                              )}
+                              onClick={() => {
+                                setSelectedSkillCommand(item.command);
+                                setShowSkillMenu(false);
+                                requestAnimationFrame(() => composerRef.current?.focus());
+                              }}
+                            >
+                              <span className={classNames(
+                                "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                                active
+                                  ? "bg-white/18 text-white"
+                                  : isDark
+                                    ? "bg-white/[0.06] text-blue-200"
+                                    : "bg-blue-50 text-blue-600",
+                              )}>
+                                <SparklesIcon size={14} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-semibold">{`$${item.name}`}</span>
+                                {item.description ? (
+                                  <span className={classNames(
+                                    "mt-0.5 line-clamp-2 block text-xs leading-5",
+                                    active ? "text-blue-50/90" : isDark ? "text-slate-400" : "text-gray-500",
+                                  )}>
+                                    {item.description}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <span className={classNames("ml-1 flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
@@ -795,10 +912,35 @@ export function ChatComposer({
 
             {/* Row 2 — Textarea */}
             <div className="relative min-w-0 flex-1">
+              {selectedSkill && (
+                <div className="px-4 pt-3">
+                  <div
+                    className={classNames(
+                      "inline-flex max-w-full items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-semibold shadow-sm",
+                      isDark
+                        ? "border-blue-400/40 bg-blue-500 text-white shadow-blue-950/30"
+                        : "border-blue-600 bg-blue-600 text-white shadow-blue-200/70",
+                    )}
+                  >
+                    <SparklesIcon size={13} className="shrink-0" />
+                    <span className="min-w-0 truncate">{`$${selectedSkill.name}`}</span>
+                    <button
+                      type="button"
+                      className="ml-0.5 rounded-full p-0.5 text-white/80 transition-colors hover:bg-white/18 hover:text-white"
+                      onClick={() => setSelectedSkillCommand("")}
+                      aria-label={t("removeSelectedSkill", { defaultValue: "移除已选 skill" })}
+                      title={t("removeSelectedSkill", { defaultValue: "移除已选 skill" })}
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
               <textarea
                 ref={composerRef as RefObject<HTMLTextAreaElement>}
                 className={classNames(
-                  "w-full bg-transparent border-0 px-4 py-3 resize-none overflow-y-auto scrollbar-hide focus:outline-none focus:ring-0",
+                  "w-full bg-transparent border-0 px-4 resize-none overflow-y-auto scrollbar-hide focus:outline-none focus:ring-0",
+                  selectedSkill ? "pb-3 pt-2" : "py-3",
                   isDark
                     ? "text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)]"
                     : "text-gray-900 placeholder-gray-400",

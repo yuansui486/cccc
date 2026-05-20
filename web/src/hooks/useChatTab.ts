@@ -654,6 +654,7 @@ export type FailedSendComposerSnapshot = {
   originGroupId: string;
   composerText: string;
   composerFiles: File[];
+  selectedSkillCommand: string;
   toText: string;
   replyTarget: ReplyTarget;
   quotedPresentationRef: PresentationMessageRef | null;
@@ -665,6 +666,7 @@ type FailedSendComposerRestoreActions = Pick<
   ReturnType<typeof useComposerStore.getState>,
   | "setComposerText"
   | "setComposerFiles"
+  | "setSelectedSkillCommand"
   | "setToText"
   | "setReplyTarget"
   | "setQuotedPresentationRef"
@@ -689,6 +691,7 @@ export function restoreFailedSendComposerState(
   if (stillOnOriginGroup) {
     restoreActions.setComposerText(snapshot.composerText);
     restoreActions.setComposerFiles(snapshot.composerFiles);
+    restoreActions.setSelectedSkillCommand(snapshot.selectedSkillCommand);
     restoreActions.setReplyTarget(snapshot.replyTarget);
     restoreActions.setQuotedPresentationRef(snapshot.quotedPresentationRef);
     restoreActions.setPriority(snapshot.priority);
@@ -700,6 +703,7 @@ export function restoreFailedSendComposerState(
   restoreActions.upsertDraft(originGroupId, () => ({
     composerText: snapshot.composerText,
     composerFiles: snapshot.composerFiles,
+    selectedSkillCommand: snapshot.selectedSkillCommand,
     toText: snapshot.toText,
     replyTarget: snapshot.replyTarget,
     quotedPresentationRef: snapshot.quotedPresentationRef,
@@ -807,6 +811,7 @@ export function useChatTab({
     activeGroupId,
     composerText,
     composerFiles,
+    selectedSkillCommand,
     toText,
     replyTarget,
     quotedPresentationRef,
@@ -815,6 +820,7 @@ export function useChatTab({
     destGroupId,
     setComposerText,
     setComposerFiles,
+    setSelectedSkillCommand,
     setToText,
     setReplyToText,
     setReplyTarget,
@@ -964,7 +970,7 @@ export function useChatTab({
     t,
   });
 
-  const { slashCommands, tryExecuteSlashCommand } = useSlashCommands({
+  const { slashCommands, allSlashCommands, tryExecuteSlashCommand } = useSlashCommands({
     selectedGroupId,
     clearComposer,
     restoreComposerText: setComposerText,
@@ -1214,13 +1220,17 @@ export function useChatTab({
     const originGroupId = routingSnapshot.selectedGroupId;
 
     const txt = String(composerStateSnapshot.composerText || "").trim();
+    const selectedSkillCommandSnapshot = String(composerStateSnapshot.selectedSkillCommand || "").trim();
+    const sendText = selectedSkillCommandSnapshot && txt
+      ? `${selectedSkillCommandSnapshot} ${txt}`
+      : txt;
     const composerFilesSnapshot = composerStateSnapshot.composerFiles.slice();
     if (!txt && composerFilesSnapshot.length === 0) return;
 
     const dstGroup = routingSnapshot.destGroupId;
     const isCrossGroup = routingSnapshot.isCrossGroup;
     if (await tryExecuteSlashCommand({
-      text: composerStateSnapshot.composerText,
+      text: sendText,
       composerFilesCount: composerFilesSnapshot.length,
       hasReplyTarget: !!composerStateSnapshot.replyTarget,
       replyTarget: composerStateSnapshot.replyTarget,
@@ -1292,6 +1302,7 @@ export function useChatTab({
           originGroupId,
           composerText: txt,
           composerFiles: composerFilesSnapshot,
+          selectedSkillCommand: selectedSkillCommandSnapshot,
           toText: toTextSnapshot,
           replyTarget: replyTargetSnapshot,
           quotedPresentationRef: quotedPresentationRefSnapshot,
@@ -1301,6 +1312,7 @@ export function useChatTab({
         {
           setComposerText,
           setComposerFiles,
+          setSelectedSkillCommand,
           setReplyTarget,
           setQuotedPresentationRef,
           setPriority,
@@ -1485,6 +1497,7 @@ export function useChatTab({
     clearComposer,
     setComposerText,
     setComposerFiles,
+    setSelectedSkillCommand,
     setReplyTarget,
     setQuotedPresentationRef,
     setPriority,
@@ -1690,6 +1703,8 @@ export function useChatTab({
     // Composer state
     composerText,
     setComposerText,
+    selectedSkillCommand,
+    setSelectedSkillCommand,
     composerFiles,
     setComposerFiles,
     removeComposerFile,
@@ -1719,6 +1734,7 @@ export function useChatTab({
     // Actions
     sendMessage,
     slashCommands,
+    allSlashCommands,
     copyMessageLink,
     copyMessageText,
     startReply,

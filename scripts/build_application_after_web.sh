@@ -50,7 +50,7 @@ fi
 
 echo "==> Build bundled Web UI"
 bash "$REPO_ROOT/scripts/build_web.sh"
-test -f "$REPO_ROOT/src/cccc/ports/web/dist/index.html"
+test -f "$REPO_ROOT/src/no1/ports/web/dist/index.html"
 
 echo "==> Build Python package"
 rm -rf "$REPO_ROOT/dist"
@@ -64,13 +64,14 @@ if command -v rsync >/dev/null 2>&1; then
     --exclude '/node_modules/' \
     --exclude '/web/node_modules/' \
     --exclude '/dist/' \
+    --exclude '*.egg-info/' \
     "$REPO_ROOT/" "$BUILD_ROOT/"
 else
   mkdir -p "$BUILD_ROOT"
   cp -R "$REPO_ROOT/." "$BUILD_ROOT/"
   rm -rf "$BUILD_ROOT/.git" "$BUILD_ROOT/.venv" "$BUILD_ROOT/dist" "$BUILD_ROOT/web/node_modules"
 fi
-perl -0pi -e 's/^name\s*=\s*"cccc-pair"/name = "no1"/m' "$BUILD_ROOT/pyproject.toml"
+rm -rf "$BUILD_ROOT"/src/*.egg-info
 if ! command -v uv >/dev/null 2>&1; then
   echo "ERROR: uv is required to build the no1 package." >&2
   exit 1
@@ -87,8 +88,8 @@ fi
 
 WHEEL_LIST="$BUILD_TMP_ROOT/wheel-files.txt"
 unzip -Z1 "$LATEST_WHL" > "$WHEEL_LIST"
-if ! grep -Fxq 'cccc/ports/web/dist/index.html' "$WHEEL_LIST"; then
-  echo "ERROR: built wheel is missing bundled Web UI: cccc/ports/web/dist/index.html" >&2
+if ! grep -Fxq 'no1/ports/web/dist/index.html' "$WHEEL_LIST"; then
+  echo "ERROR: built wheel is missing bundled Web UI: no1/ports/web/dist/index.html" >&2
   exit 1
 fi
 
@@ -120,12 +121,19 @@ if [[ -x "$BIZ_VENV_PYTHON" ]]; then
   "$BIZ_VENV_PYTHON" - <<'PY'
 import importlib.metadata as metadata
 import pathlib
+import shutil
+import site
 
-import cccc
+import no1
 
-dist = pathlib.Path(cccc.__file__).resolve().parent / "ports" / "web" / "dist" / "index.html"
+for site_dir in site.getsitepackages():
+    stale = pathlib.Path(site_dir) / "cccc"
+    if stale.exists():
+        shutil.rmtree(stale)
+
+dist = pathlib.Path(no1.__file__).resolve().parent / "ports" / "web" / "dist" / "index.html"
 print(f"installed no1={metadata.version('no1')}")
-print(f"cccc={pathlib.Path(cccc.__file__).resolve()}")
+print(f"no1={pathlib.Path(no1.__file__).resolve()}")
 print(f"web_dist_index={dist}")
 PY
 else

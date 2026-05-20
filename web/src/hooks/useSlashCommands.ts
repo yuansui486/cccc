@@ -180,5 +180,5 @@ export function useSlashCommands(args: {
     }
   }, [clearComposer, dispatchMessage, onExecuted, refreshSlashCommands, restoreComposerText, scopedSlashCommands, selectedGroupId, showError, showNotice, t]);
 
-  return { slashCommands: scopedSlashCommands, refreshSlashCommands, tryExecuteSlashCommand };
+  return { slashCommands: scopedSlashCommands, allSlashCommands: slashCommands, refreshSlashCommands, tryExecuteSlashCommand };
 }

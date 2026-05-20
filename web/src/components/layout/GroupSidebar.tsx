@@ -675,18 +675,52 @@ export function GroupSidebar({
 
   const renderWorkspaceNav = useCallback(() => {
     if (!selectedGroupId) {
+      const hasGroups = orderedGroups.length > 0;
+
       return (
         <div className={classNames(
           "rounded-2xl border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)]",
           isCollapsed ? "p-3" : "p-4"
         )}>
-          {!isCollapsed && (
+          {isCollapsed ? (
+            !hasGroups && !readOnly && onCreateGroup ? (
+              <button
+                type="button"
+                className="glass-btn-accent flex h-11 w-11 items-center justify-center rounded-xl text-[var(--color-accent-primary)] transition-all"
+                onClick={onCreateGroup}
+                aria-label={t("createFirstGroup")}
+                title={t("createFirstGroup")}
+              >
+                <PlusIcon size={18} />
+              </button>
+            ) : null
+          ) : hasGroups ? (
             <>
               <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-tertiary)]">
                 {t("groupPages")}
               </div>
               <div className="mt-2 text-sm text-[var(--color-text-secondary)]">{t("selectGroup")}</div>
             </>
+          ) : (
+            <div className="text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--glass-panel-bg)] text-[var(--color-text-tertiary)] shadow-[inset_0_0_0_1px_var(--glass-border-subtle)]">
+                <TeamIcon size={24} strokeWidth={1.8} />
+              </div>
+              <div className="text-sm font-semibold text-[var(--color-text-primary)]">{t("noGroupsYet")}</div>
+              <div className="mx-auto mt-2 max-w-[210px] text-xs leading-relaxed text-[var(--color-text-tertiary)]">
+                {t("noGroupsDescription")}
+              </div>
+              {!readOnly && onCreateGroup && (
+                <button
+                  type="button"
+                  className="glass-btn-accent mt-4 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--color-accent-primary)] transition-all"
+                  onClick={onCreateGroup}
+                >
+                  <PlusIcon size={16} />
+                  <span>{t("createFirstGroup")}</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       );
@@ -779,7 +813,7 @@ export function GroupSidebar({
         <section ref={switcherContainerRef} className="space-y-1">
           <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
             <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-              {t("当前团队")}
+              {t("currentGroup")}
             </div>
             {!readOnly && onCreateGroup && (
               <button
@@ -1034,6 +1068,7 @@ export function GroupSidebar({
     onAddAgent,
     onCreateGroup,
     onOpenContext,
+    orderedGroups.length,
     renderInlineGroupSwitcherContent,
     handleTabSelect,
     onOpenContextProject,

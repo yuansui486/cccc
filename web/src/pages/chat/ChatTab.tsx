@@ -137,6 +137,8 @@ export function ChatTab({
     // Composer state
     composerText,
     setComposerText,
+    selectedSkillCommand,
+    setSelectedSkillCommand,
     composerFiles,
     removeComposerFile,
     replyTarget,
@@ -164,6 +166,7 @@ export function ChatTab({
     // Actions
     sendMessage,
     slashCommands,
+    allSlashCommands,
     copyMessageLink,
     copyMessageText,
     startReply,
@@ -788,8 +791,11 @@ export function ChatTab({
             composerRef={composerRef}
             composerText={composerText}
             setComposerText={setComposerText}
+            selectedSkillCommand={selectedSkillCommand}
+            setSelectedSkillCommand={setSelectedSkillCommand}
             composerGroupSettled={composerGroupSettled}
             slashCommands={slashCommands}
+            allSlashCommands={allSlashCommands}
             slashSkillScope={slashSkillScope}
             setSlashSkillScope={setSlashSkillScope}
             priority={priority}
