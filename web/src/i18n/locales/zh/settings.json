@@ -209,6 +209,7 @@
       "lastError": "上次错误",
       "test": "测试连接",
       "refresh": "刷新商店",
+      "autoRefreshing": "本机导入列表为空，正在自动刷新一次 OneColleague skill 商店...",
       "importAll": "导入全部待处理",
       "summary": {
         "new": "新增",
@@ -225,10 +226,15 @@
       "versionChange": "{{old}} -> {{next}}",
       "importedTitle": "已导入能力",
       "noImported": "本机还没有导入 OneColleague skill。",
+      "invalidTitle": "未导入的 skill",
+      "invalidHint": "这些记录在上次刷新时被拒绝。",
+      "invalidReasonFallback": "后端未返回原因。",
+      "invalidMore": "还有 {{count}} 条被拒绝的记录。",
       "imported": "已导入",
       "enabled": "已启用",
       "active": "运行中可见",
       "failedRefresh": "刷新商店失败。",
+      "autoRefreshFailed": "自动刷新商店失败。",
       "failedTest": "测试商店连接失败。",
       "failedConfirm": "导入 skill 失败。",
       "partialConfirmFailed": "{{count}} 个 skill 导入失败，请查看错误后重试。"

@@ -209,6 +209,7 @@
       "lastError": "Last error",
       "test": "Test",
       "refresh": "Refresh store",
+      "autoRefreshing": "Import list is empty. Refreshing the OneColleague skill store once...",
       "importAll": "Import all pending",
       "summary": {
         "new": "New",
@@ -225,10 +226,15 @@
       "versionChange": "{{old}} -> {{next}}",
       "importedTitle": "Imported capabilities",
       "noImported": "No OneColleague skills are imported on this machine yet.",
+      "invalidTitle": "Skills not imported",
+      "invalidHint": "These records were rejected during the last refresh.",
+      "invalidReasonFallback": "No reason returned.",
+      "invalidMore": "{{count}} more rejected record(s).",
       "imported": "Imported",
       "enabled": "Enabled",
       "active": "Active",
       "failedRefresh": "Failed to refresh store.",
+      "autoRefreshFailed": "Automatic store refresh failed.",
       "failedTest": "Failed to test store connection.",
       "failedConfirm": "Failed to import skill.",
       "partialConfirmFailed": "{{count}} skill(s) failed to import. Check the error and retry."

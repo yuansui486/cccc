@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { CapabilitiesTab } from "../../src/components/modals/settings/CapabilitiesTab";
+import {
+  CapabilitiesTab,
+  capabilityStoreInvalidLabel,
+  capabilityStoreInvalidReason,
+  shouldAutoRefreshOneColleagueStore,
+} from "../../src/components/modals/settings/CapabilitiesTab";
 import enSettings from "../../src/i18n/locales/en/settings.json";
 
 vi.mock("react-i18next", () => ({
@@ -45,5 +50,60 @@ describe("CapabilitiesTab rendering", () => {
 
     expect(pickerSource).toContain("includeSourceInstances: false");
     expect(tabSource).toContain("includeSourceInstances: false");
+  });
+
+  it("auto-refreshes the OneColleague store only for an enabled empty local catalog", () => {
+    expect(shouldAutoRefreshOneColleagueStore({
+      isActive: true,
+      selfEvolvingSurface: false,
+      sourceEnabled: true,
+      importedCount: 0,
+      activePendingCount: 0,
+      busyKey: "",
+      attempted: false,
+    })).toBe(true);
+    expect(shouldAutoRefreshOneColleagueStore({
+      isActive: true,
+      selfEvolvingSurface: false,
+      sourceEnabled: true,
+      importedCount: 1,
+      activePendingCount: 0,
+      busyKey: "",
+      attempted: false,
+    })).toBe(false);
+    expect(shouldAutoRefreshOneColleagueStore({
+      isActive: true,
+      selfEvolvingSurface: false,
+      sourceEnabled: true,
+      importedCount: 0,
+      activePendingCount: 0,
+      busyKey: "store:refresh",
+      attempted: false,
+    })).toBe(false);
+    expect(shouldAutoRefreshOneColleagueStore({
+      isActive: true,
+      selfEvolvingSurface: false,
+      sourceEnabled: true,
+      importedCount: 0,
+      activePendingCount: 0,
+      busyKey: "",
+      attempted: true,
+    })).toBe(false);
+  });
+
+  it("extracts invalid OneColleague store labels and nested failure reasons", () => {
+    const row = {
+      record: {
+        capability_id: "skill:onecolleague_skill_library:creat-ppt",
+      },
+      import_result: {
+        error: {
+          message: "skill package has too many files",
+        },
+      },
+    };
+
+    expect(capabilityStoreInvalidLabel(row)).toBe("skill:onecolleague_skill_library:creat-ppt");
+    expect(capabilityStoreInvalidReason(row)).toBe("skill package has too many files");
   });
 });

@@ -650,6 +650,50 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_skill_package_default_file_limit_allows_large_skill_package(self) -> None:
+        from no1.daemon.ops.capability_ops import ensure_codex_skill_package_installed
+
+        _, cleanup = self._with_home()
+        old_limit = os.environ.get("CCCC_SKILL_PACKAGE_MAX_FILES")
+        try:
+            package_files = {"large-skill/SKILL.md": "Use this large skill package.\n"}
+            for idx in range(1001):
+                package_files[f"large-skill/assets/file-{idx:04d}.txt"] = "ok\n"
+            package_bytes = self._skill_zip_bytes(package_files)
+            rec = {
+                "capability_id": "skill:onecolleague_skill_library:large",
+                "kind": "skill",
+                "name": "large",
+                "install_mode": "codex_skill_package",
+                "install_spec": {
+                    "package_url": "http://skills.local/packages/large.zip",
+                    "package_sha256": hashlib.sha256(package_bytes).hexdigest(),
+                    "package_size": len(package_bytes),
+                    "package_format": "zip",
+                    "skill_slug": "large",
+                    "package_version": "1.0.0",
+                },
+            }
+
+            with patch("no1.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=package_bytes):
+                installed = ensure_codex_skill_package_installed(rec)
+            self.assertEqual(str(installed.get("state") or ""), "installed")
+            extracted = Path(str(installed.get("extracted_path") or ""))
+            self.assertTrue((extracted / "SKILL.md").is_file())
+            self.assertTrue((extracted / "assets" / "file-1000.txt").is_file())
+
+            os.environ["CCCC_SKILL_PACKAGE_MAX_FILES"] = "1000"
+            rec["capability_id"] = "skill:onecolleague_skill_library:large-limited"
+            with patch("no1.daemon.ops.capability_ops._skill_packages._download_package_bytes", return_value=package_bytes):
+                with self.assertRaisesRegex(ValueError, "too many files"):
+                    ensure_codex_skill_package_installed(rec)
+        finally:
+            if old_limit is None:
+                os.environ.pop("CCCC_SKILL_PACKAGE_MAX_FILES", None)
+            else:
+                os.environ["CCCC_SKILL_PACKAGE_MAX_FILES"] = old_limit
+            cleanup()
+
     def test_skill_package_rejects_zip_slip_and_symlink(self) -> None:
         from no1.daemon.ops.capability_ops import ensure_codex_skill_package_installed
 

@@ -209,6 +209,7 @@
       "lastError": "最終エラー",
       "test": "テスト",
       "refresh": "ストアを更新",
+      "autoRefreshing": "インポート済みリストが空です。OneColleague skill ストアを一度自動更新しています...",
       "importAll": "保留中をすべてインポート",
       "summary": {
         "new": "新規",
@@ -225,10 +226,15 @@
       "versionChange": "{{old}} -> {{next}}",
       "importedTitle": "インポート済み capability",
       "noImported": "この端末にはまだ OneColleague skill がインポートされていません。",
+      "invalidTitle": "インポートされなかった skill",
+      "invalidHint": "これらのレコードは前回の更新で拒否されました。",
+      "invalidReasonFallback": "理由は返されていません。",
+      "invalidMore": "ほかに {{count}} 件の拒否レコードがあります。",
       "imported": "インポート済み",
       "enabled": "有効",
       "active": "稼働中",
       "failedRefresh": "ストアの更新に失敗しました。",
+      "autoRefreshFailed": "ストアの自動更新に失敗しました。",
       "failedTest": "ストア接続のテストに失敗しました。",
       "failedConfirm": "skill のインポートに失敗しました。",
       "partialConfirmFailed": "{{count}} 件の skill のインポートに失敗しました。エラーを確認して再試行してください。"
