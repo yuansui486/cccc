@@ -281,6 +281,7 @@ class TestCliDefaultEntryOwnership(unittest.TestCase):
             self.assertEqual(kwargs.get("creationflags"), 0x208)
             self.assertEqual(kwargs.get("stdin"), common.subprocess.DEVNULL)
             self.assertEqual(kwargs.get("cwd"), str(home))
+            self.assertEqual(kwargs.get("env", {}).get("ONECOLLEAGUE_HOME"), str(home))
             self.assertEqual(kwargs.get("env", {}).get("CCCC_HOME"), str(home))
             self.assertEqual(kwargs.get("env", {}).get("CCCC_DAEMON_SUPERVISOR_PID"), "9999")
         finally:

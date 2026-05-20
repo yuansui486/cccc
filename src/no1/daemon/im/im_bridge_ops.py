@@ -7,6 +7,7 @@ import signal
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
+from ...paths import onecolleague_home
 from ...util.process import pid_is_alive
 
 
@@ -52,27 +53,30 @@ def read_live_im_bridge_pid(pid_path: Path) -> Optional[int]:
 
 
 def _proc_onecolleague_home(pid: int) -> Optional[Path]:
-    """Best-effort read CCCC_HOME for a pid (Linux /proc only)."""
+    """Best-effort read the OneColleague home for a pid (Linux /proc only)."""
     try:
         env_path = Path("/proc") / str(pid) / "environ"
         raw = env_path.read_bytes()
     except Exception:
         return None
-    onecolleague_home = None
+    home_value = None
     try:
         for item in raw.split(b"\x00"):
+            if item.startswith(b"ONECOLLEAGUE_HOME="):
+                home_value = item.split(b"=", 1)[1].decode("utf-8", "ignore").strip()
+                break
             if item.startswith(b"CCCC_HOME="):
-                onecolleague_home = item.split(b"=", 1)[1].decode("utf-8", "ignore").strip()
+                home_value = item.split(b"=", 1)[1].decode("utf-8", "ignore").strip()
                 break
     except Exception:
-        onecolleague_home = None
-    if onecolleague_home:
+        home_value = None
+    if home_value:
         try:
-            return Path(onecolleague_home).expanduser().resolve()
+            return Path(home_value).expanduser().resolve()
         except Exception:
             return None
     try:
-        return (Path.home() / ".cccc").resolve()
+        return onecolleague_home()
     except Exception:
         return None
 

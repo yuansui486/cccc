@@ -67,7 +67,7 @@
     "duplicateSecretsHint": "正在从“{{source}}”复制：这里显示来源变量键，保存后会复制到新配置。",
     "envPlaceholder": "PUBLIC_KEY=value",
     "secrets": "密钥环境变量",
-    "secretsHint": "只写并保存在本机 CCCC_HOME/state/secrets 下。鼠标悬停键名可查看脱敏值。",
+    "secretsHint": "只写并保存在本机 ONECOLLEAGUE_HOME/state/secrets 下。鼠标悬停键名可查看脱敏值。",
     "noSecrets": "未配置变量。",
     "setSecrets": "设置 / 更新变量",
     "setSecretsPlaceholder": "SECRET_KEY=value",
@@ -436,7 +436,7 @@
   "automation": {
     "title": "自动化",
     "description": "配置内建自动化和定时规则。",
-    "configPathFallback": "CCCC_HOME/…/group.yaml",
+    "configPathFallback": "ONECOLLEAGUE_HOME/…/group.yaml",
     "openFromGroup": "请从工作组中打开此标签页。",
     "rulesTitle": "规则与模板",
     "rulesDescription": "定义定时提醒、操作动作以及可复用的消息模板。",
@@ -828,7 +828,7 @@
   },
   "guidance": {
     "openFromGroup": "请从工作组中打开此标签页。",
-    "overridesHint": "引导覆盖保存在 <0>CCCC_HOME</0>（按工作组）。",
+    "overridesHint": "引导覆盖保存在 <0>ONECOLLEAGUE_HOME</0>（按工作组）。",
     "preambleTitle": "启动引导（Preamble）",
     "preambleHint": "启动或重启后的第一次投递前会自动注入。",
     "helpTitle": "帮助（参考）",

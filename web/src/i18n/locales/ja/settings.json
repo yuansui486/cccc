@@ -63,7 +63,7 @@
     "duplicateSecretsHint": "「{{source}}」から複製中: ここに表示される変数キーは保存時に新しいプロファイルへコピーされます。",
     "envPlaceholder": "PUBLIC_KEY=value",
     "secrets": "機密環境変数",
-    "secretsHint": "書き込み専用で、ローカルの CCCC_HOME/state/secrets に保存されます。キーにホバーするとマスク表示を確認できます。",
+    "secretsHint": "書き込み専用で、ローカルの ONECOLLEAGUE_HOME/state/secrets に保存されます。キーにホバーするとマスク表示を確認できます。",
     "noSecrets": "変数は未設定です。",
     "setSecrets": "変数を設定 / 更新",
     "setSecretsPlaceholder": "SECRET_KEY=value",
@@ -436,7 +436,7 @@
   "automation": {
     "title": "自動化",
     "description": "組み込み自動化とスケジュール済みルールを構成します。",
-    "configPathFallback": "CCCC_HOME/.../group.yaml",
+    "configPathFallback": "ONECOLLEAGUE_HOME/.../group.yaml",
     "openFromGroup": "グループからこのタブを開きます。",
     "rulesTitle": "ルールとスニペット",
     "rulesDescription": "スケジュールされたリマインダー、操作アクション、再利用可能なメッセージスニペットを定義します。",
@@ -531,7 +531,7 @@
     "copiedLines": "最後の{{n}}行をコピーしました",
     "failedToLoadTranscript": "ターミナルログの読み込みに失敗しました",
     "failedToClearTranscript": "ターミナルログのクリアに失敗しました",
-    "resetGuidanceConfirm": "{{kind}}をリセットしますか？これにより、CCCC_HOME の下の {{filename}} オーバーライドが削除されます。これを元に戻すことはできません。",
+    "resetGuidanceConfirm": "{{kind}}をリセットしますか？これにより、ONECOLLEAGUE_HOME の下の {{filename}} オーバーライドが削除されます。これを元に戻すことはできません。",
     "removeRegistryConfirm": "欠損しているグループエントリを {{count}} 件レジストリから削除しますか？",
     "noRecipientsAvailable": "選択できる宛先がありません。",
     "noTargetsAvailable": "選択できるターゲットがありません。"
@@ -828,7 +828,7 @@
   },
   "guidance": {
     "openFromGroup": "グループからこのタブを開きます。",
-    "overridesHint": "ガイダンスのオーバーライドは、<0>CCCC_HOME</0> (グループごと) に保存されます。",
+    "overridesHint": "ガイダンスのオーバーライドは、<0>ONECOLLEAGUE_HOME</0> (グループごと) に保存されます。",
     "preambleTitle": "ブートストラップ (プリアンブル)",
     "preambleHint": "起動/再起動後の最初の配信前に自動的に挿入されます。",
     "helpTitle": "ヘルプ（参考）",
@@ -846,7 +846,7 @@
     "failedToSave": "{{kind}} を保存できませんでした",
     "failedToReset": "{{kind}} をリセットできませんでした",
     "expandTitle": "全画面エディタを開く",
-    "saveOverrideTitle": "CCCC_HOME の下にオーバーライドを保存",
+    "saveOverrideTitle": "ONECOLLEAGUE_HOME の下にオーバーライドを保存",
     "helpEditorTitle": "ヘルプエディタ",
     "helpEditorHint": "構造化モードでは common / role / actor ノートを編集し、Raw モードでは全文 Markdown を直接編集できます。",
     "structuredView": "構造化",
@@ -871,7 +871,7 @@
     "scopedNoteConfigured": "設定済み",
     "unknownRole": "不明な役割",
     "legacyRoleNotesHint": "旧形式の Role Notes を検出し、構造化フィールドへマッピングしました。ここで保存すると最新の scoped help 形式へ正規化されます。",
-    "noScopeWarning": "このグループにはまだ scope が紐づいていません。guidance override 自体は CCCC_HOME 配下に保存されるため機能しますが、repo 連携が必要な機能は scope を紐づけるまで利用できない場合があります。"
+    "noScopeWarning": "このグループにはまだ scope が紐づいていません。guidance override 自体は ONECOLLEAGUE_HOME 配下に保存されるため機能しますが、repo 連携が必要な機能は scope を紐づけるまで利用できない場合があります。"
   },
   "blueprint": {
     "openFromGroup": "グループからこのタブを開きます。",
@@ -889,7 +889,7 @@
     "working": "処理中…",
     "applyReplace": "適用（置き換え）",
     "pickFileFirst": "最初にプレビューするファイルを選択してください",
-    "replaceConfirm": "このグループのエージェント、設定、自動化ルール、およびガイダンスを「{{filename}}」で置き換えますか？\n\nこれにより、エージェントの実行が停止され、CCCC_HOME でグループガイダンスの上書きが適用されます。\n- ONECOLLEAGUE_PREAMBLE.md\n- ONECOLLEAGUE_HELP.md",
+    "replaceConfirm": "このグループのエージェント、設定、自動化ルール、およびガイダンスを「{{filename}}」で置き換えますか？\n\nこれにより、エージェントの実行が停止され、ONECOLLEAGUE_HOME でグループガイダンスの上書きが適用されます。\n- ONECOLLEAGUE_PREAMBLE.md\n- ONECOLLEAGUE_HELP.md",
     "failedToPreview": "チーム設定のプレビューに失敗しました",
     "failedToExport": "チーム設定のエクスポートに失敗しました",
     "failedToImport": "チーム設定のインポートに失敗しました",

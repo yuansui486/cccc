@@ -267,7 +267,7 @@ def create_group(reg: Registry, *, title: str, topic: str = "") -> Group:
         "scopes": [],
         "actors": [],
         "capability_defaults": default_group_capability_defaults(),
-        # Single-layer storage: automation rules/snippets live in group.yaml under CCCC_HOME.
+        # Single-layer storage: automation rules/snippets live in group.yaml under ONECOLLEAGUE_HOME.
         "automation": default_automation_ruleset_doc(),
     }
     atomic_write_text(gp / "group.yaml", yaml.safe_dump(group_doc, allow_unicode=True, sort_keys=False))

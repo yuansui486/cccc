@@ -90,10 +90,10 @@ def _group_prompts_root(group: Group) -> Path:
 
 
 def read_group_prompt_file(group: Group, filename: str) -> PromptFile:
-    """Read a group prompt override from CCCC_HOME.
+    """Read a group prompt override from ONECOLLEAGUE_HOME.
 
     Overrides live under:
-      CCCC_HOME/groups/<group_id>/prompts/<filename>
+      ONECOLLEAGUE_HOME/groups/<group_id>/prompts/<filename>
     """
     root = _group_prompts_root(group)
     path = (root / filename).expanduser()
@@ -118,7 +118,7 @@ def delete_group_prompt_file(group: Group, filename: str) -> PromptFile:
 
 
 def write_group_prompt_file(group: Group, filename: str, content: str) -> PromptFile:
-    """Create or update a group prompt override file under CCCC_HOME."""
+    """Create or update a group prompt override file under ONECOLLEAGUE_HOME."""
     root = _group_prompts_root(group)
     root.mkdir(parents=True, exist_ok=True)
     path = (root / filename).expanduser()

@@ -25,6 +25,9 @@ HERMES_PROVIDER_ID = "xai-oauth"
 HERMES_MCP_SERVER_NAME = "onecolleague"
 
 HERMES_MCP_ENV_PLACEHOLDERS: Dict[str, str] = {
+    "ONECOLLEAGUE_HOME": "${ONECOLLEAGUE_HOME}",
+    "ONECOLLEAGUE_GROUP_ID": "${ONECOLLEAGUE_GROUP_ID}",
+    "ONECOLLEAGUE_ACTOR_ID": "${ONECOLLEAGUE_ACTOR_ID}",
     "CCCC_HOME": "${CCCC_HOME}",
     "CCCC_GROUP_ID": "${CCCC_GROUP_ID}",
     "CCCC_ACTOR_ID": "${CCCC_ACTOR_ID}",
@@ -203,7 +206,7 @@ def _normalize_mcp_config_placeholders(config_path: Path) -> None:
 
     Hermes' official `mcp add` discovers tools by launching the server
     immediately, so setup must pass concrete runtime env values to avoid creating a
-    literal `${CCCC_HOME}` directory during discovery. The persisted shared
+    literal `${ONECOLLEAGUE_HOME}` directory during discovery. The persisted shared
     profile, however, must retain placeholders so each actor process resolves
     its own OneColleague identity at launch time.
     """
@@ -377,6 +380,9 @@ def hermes_runtime_status(
         build_hermes_mcp_add_command(
             expected_cmd,
             env_values={
+                "ONECOLLEAGUE_HOME": str(root),
+                "ONECOLLEAGUE_GROUP_ID": HERMES_DISCOVERY_GROUP_ID,
+                "ONECOLLEAGUE_ACTOR_ID": HERMES_DISCOVERY_ACTOR_ID,
                 "CCCC_HOME": str(root),
                 "CCCC_GROUP_ID": HERMES_DISCOVERY_GROUP_ID,
                 "CCCC_ACTOR_ID": HERMES_DISCOVERY_ACTOR_ID,
@@ -501,6 +507,9 @@ def prepare_hermes_runtime(
                 }
             cmd = build_hermes_mcp_add_command(
                 env_values={
+                    "ONECOLLEAGUE_HOME": str(root),
+                    "ONECOLLEAGUE_GROUP_ID": HERMES_DISCOVERY_GROUP_ID,
+                    "ONECOLLEAGUE_ACTOR_ID": HERMES_DISCOVERY_ACTOR_ID,
                     "CCCC_HOME": str(root),
                     "CCCC_GROUP_ID": HERMES_DISCOVERY_GROUP_ID,
                     "CCCC_ACTOR_ID": HERMES_DISCOVERY_ACTOR_ID,
@@ -562,6 +571,9 @@ def run_hermes_mcp_test(
     root = Path(home).expanduser().resolve() if home is not None else ensure_home()
     cmd = build_hermes_mcp_test_command()
     env = {
+        "ONECOLLEAGUE_HOME": str(root),
+        "ONECOLLEAGUE_GROUP_ID": str(group_id or "g_probe"),
+        "ONECOLLEAGUE_ACTOR_ID": str(actor_id or "hermes-probe"),
         "CCCC_HOME": str(root),
         "CCCC_GROUP_ID": str(group_id or "g_probe"),
         "CCCC_ACTOR_ID": str(actor_id or "hermes-probe"),

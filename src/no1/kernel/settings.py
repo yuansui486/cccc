@@ -1,6 +1,6 @@
 """Global settings management for OneColleague.
 
-Settings are stored in ~/.cccc/settings.yaml and include:
+Settings are stored in ~/.onecolleague/settings.yaml and include:
 - runtime_pool: Prioritized list of agent runtimes with scenarios
 - Other global preferences
 """
@@ -336,7 +336,7 @@ def get_observability_settings() -> Dict[str, Any]:
 
 
 def update_observability_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
-    """Update observability settings in ~/.cccc/settings.yaml and return merged result."""
+    """Update observability settings in ~/.onecolleague/settings.yaml and return merged result."""
     settings = load_settings()
     current = _merge_observability(settings.get("observability"))
     if not isinstance(patch, dict):
@@ -469,7 +469,7 @@ def resolve_remote_access_web_binding() -> Dict[str, Any]:
 
 
 def update_remote_access_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
-    """Update remote access settings in ~/.cccc/settings.yaml and return merged result.
+    """Update remote access settings in ~/.onecolleague/settings.yaml and return merged result.
 
     Only persists fields that are explicitly in the patch (plus fields already
     present in the raw settings).  This avoids writing default values (e.g.
@@ -537,7 +537,7 @@ def update_remote_access_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_web_branding_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
-    """Update web branding settings in ~/.cccc/settings.yaml and return merged result."""
+    """Update web branding settings in ~/.onecolleague/settings.yaml and return merged result."""
     settings = load_settings()
     current = _merge_web_branding(settings.get("web_branding"))
     if not isinstance(patch, dict) or not patch:
@@ -575,7 +575,7 @@ def _settings_path() -> Path:
 
 
 def load_settings() -> Dict[str, Any]:
-    """Load global settings from ~/.cccc/settings.yaml."""
+    """Load global settings from ~/.onecolleague/settings.yaml."""
     p = _settings_path()
     if not p.exists():
         return {}
@@ -587,7 +587,7 @@ def load_settings() -> Dict[str, Any]:
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
-    """Save global settings to ~/.cccc/settings.yaml."""
+    """Save global settings to ~/.onecolleague/settings.yaml."""
     p = _settings_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(p, yaml.safe_dump(settings, allow_unicode=True, sort_keys=False))

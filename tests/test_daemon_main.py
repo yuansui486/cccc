@@ -90,6 +90,7 @@ class TestDaemonMain(unittest.TestCase):
                 self.assertEqual(kwargs.get("creationflags"), 0x208)
                 self.assertEqual(kwargs.get("stdin"), daemon_main.subprocess.DEVNULL)
                 self.assertEqual(kwargs.get("cwd"), str(paths.home))
+                self.assertEqual(kwargs.get("env", {}).get("ONECOLLEAGUE_HOME"), str(paths.home))
                 self.assertEqual(kwargs.get("env", {}).get("CCCC_HOME"), str(paths.home))
         finally:
             cleanup()

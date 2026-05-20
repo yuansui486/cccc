@@ -156,7 +156,7 @@ def handle_group_use(args: Dict[str, Any]) -> DaemonResponse:
         return _error("group_not_found", f"group not found: {group_id}")
     path = Path(str(args.get("path") or "."))
     if _is_exact_cccc_home_path(path):
-        return _error("invalid_scope_path", "workspace scope must be a project directory, not CCCC_HOME")
+        return _error("invalid_scope_path", "workspace scope must be a project directory, not ONECOLLEAGUE_HOME")
     scope = detect_scope(path)
     reg = load_registry()
     try:

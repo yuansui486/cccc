@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-import os
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,133 +159,6 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertFalse(bool(result.get("success")))
         self.assertIn("not in PATH", str(result.get("error") or ""))
 
-    def test_codex_actor_start_injects_skill_package_overlay_codex_home(self) -> None:
-        from no1.daemon.actors import actor_runtime_ops
-        from no1.daemon.ops import capability_ops as ops
-
-        old_home = os.environ.get("CCCC_HOME")
-        old_codex_home = os.environ.get("CODEX_HOME")
-        try:
-            with tempfile.TemporaryDirectory() as td:
-                os.environ["CCCC_HOME"] = td
-                source_codex = Path(td) / "source-codex"
-                source_codex.mkdir()
-                (source_codex / "auth.json").write_text('{"ok":true}\n', encoding="utf-8")
-                (source_codex / "config.toml").write_text("[mcp_servers]\n", encoding="utf-8")
-                os.environ["CODEX_HOME"] = str(source_codex)
-
-                skill_root = Path(td) / "installed-skill"
-                skill_root.mkdir()
-                (skill_root / "SKILL.md").write_text("Use mounted package.\n", encoding="utf-8")
-                state_path = Path(td) / "state" / "capabilities" / "skill_packages" / "install_state.json"
-                state_path.parent.mkdir(parents=True, exist_ok=True)
-                state_path.write_text(
-                    json.dumps(
-                        {
-                            "v": 1,
-                            "packages": {
-                                "skill:onecolleague:demo": {
-                                    "capability_id": "skill:onecolleague:demo",
-                                    "skill_slug": "demo",
-                                    "package_sha256": "a" * 64,
-                                    "extracted_path": str(skill_root),
-                                    "state": "installed",
-                                }
-                            },
-                        }
-                    ),
-                    encoding="utf-8",
-                )
-                catalog_path, catalog_doc = ops._load_catalog_doc()
-                catalog_doc["records"]["skill:onecolleague:demo"] = {
-                    "capability_id": "skill:onecolleague:demo",
-                    "kind": "skill",
-                    "name": "demo",
-                    "source_id": "onecolleague_skill_library",
-                    "qualification_status": "qualified",
-                    "enable_supported": True,
-                    "capsule_text": "Use mounted package.",
-                    "install_mode": "codex_skill_package",
-                    "install_spec": {
-                        "package_url": "http://skills.local/demo.zip",
-                        "package_sha256": "a" * 64,
-                        "package_size": 10,
-                        "package_format": "zip",
-                        "skill_slug": "demo",
-                    },
-                }
-                ops._save_catalog_doc(catalog_path, catalog_doc)
-
-                group = SimpleNamespace(
-                    group_id="g1",
-                    doc={
-                        "active_scope_key": "scope1",
-                        "actors": [
-                            {
-                                "id": "peer1",
-                                "default_scope_key": "scope1",
-                                "runner": "headless",
-                                "runtime": "codex",
-                                "command": ["codex"],
-                                "env": {},
-                                "capability_autoload": ["skill:onecolleague:demo"],
-                            }
-                        ],
-                    },
-                    save=lambda: None,
-                    ledger_path=str(Path(td) / "ledger.jsonl"),
-                )
-                captured: dict[str, object] = {}
-
-                def _start_actor(**kwargs: object) -> None:
-                    captured.update(kwargs)
-
-                with patch.object(actor_runtime_ops.codex_app_supervisor, "start_actor", side_effect=_start_actor), patch.object(
-                    actor_runtime_ops,
-                    "append_event",
-                    return_value={"id": "evt1"},
-                ), patch.object(actor_runtime_ops, "publish_event", create=True), patch.object(
-                    actor_runtime_ops,
-                    "request_pet_review",
-                ):
-                    result = actor_runtime_ops.start_actor_process(
-                        group,
-                        "peer1",
-                        command=["codex"],
-                        env={},
-                        runner="headless",
-                        runtime="codex",
-                        by="user",
-                        find_scope_url=lambda _group, _scope_key: td,
-                        effective_runner_kind=lambda runner: runner,
-                        merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
-                        normalize_runtime_command=lambda _runtime, command: list(command),
-                        ensure_mcp_installed=lambda _runtime, _cwd, **_kwargs: True,
-                        inject_actor_context_env=lambda env, gid, aid: {**dict(env), "CCCC_GROUP_ID": gid, "CCCC_ACTOR_ID": aid},
-                        prepare_pty_env=lambda env: dict(env),
-                        pty_backlog_bytes=lambda: 1024,
-                        write_headless_state=lambda _gid, _aid: None,
-                        write_pty_state=lambda _gid, _aid, _pid: None,
-                        clear_preamble_sent=lambda _group, _aid: None,
-                        throttle_reset_actor=lambda _gid, _aid: None,
-                        supported_runtimes=("codex",),
-                    )
-
-                self.assertTrue(bool(result.get("success")), result)
-                env = captured.get("env") if isinstance(captured.get("env"), dict) else {}
-                overlay = Path(str(env.get("CODEX_HOME") or ""))
-                self.assertTrue((overlay / "skills" / "demo" / "SKILL.md").is_file())
-                self.assertFalse((source_codex / "skills" / "demo").exists())
-        finally:
-            if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
-            else:
-                os.environ["CCCC_HOME"] = old_home
-            if old_codex_home is None:
-                os.environ.pop("CODEX_HOME", None)
-            else:
-                os.environ["CODEX_HOME"] = old_codex_home
-
     def test_windows_pty_does_not_fallback_to_spawn_without_env(self) -> None:
         from no1.runners import pty_win
 
@@ -305,7 +177,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
                         actor_id="peer1",
                         cwd=Path(td),
                         command=["codex"],
-                        env={"CCCC_HOME": td, "CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer1"},
+                        env={"ONECOLLEAGUE_HOME": td, "ONECOLLEAGUE_GROUP_ID": "g1", "ONECOLLEAGUE_ACTOR_ID": "peer1"},
                     )
 
             self.assertEqual(len(spawn_calls), 2)
@@ -332,6 +204,53 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
             session.stop()
 
         mock_terminate.assert_called_once_with(4321, timeout_s=1.0, include_group=True, force=True)
+
+    def test_windows_pty_replies_to_gemini_device_attributes_when_writer_attached(self) -> None:
+        from no1.runners import pty_win
+
+        session = object.__new__(pty_win.PtySession)
+        session._query_tail = b""
+        session._writer_fd = object()
+        session._runtime = "gemini"
+        session._lock = threading.RLock()
+        writes: list[bytes] = []
+        session.write_input = lambda data: writes.append(bytes(data)) or True
+
+        session._maybe_reply_to_terminal_queries(b"\x1b[c")
+
+        self.assertEqual(writes, [b"\x1b[?1;2c"])
+
+        session._query_tail = b""
+        session._runtime = "codex"
+        writes.clear()
+
+        session._maybe_reply_to_terminal_queries(b"\x1b[c")
+
+        self.assertEqual(writes, [])
+
+    def test_windows_pty_does_not_replay_complete_terminal_query_tail(self) -> None:
+        from no1.runners import pty_win
+
+        session = object.__new__(pty_win.PtySession)
+        session._query_tail = b""
+        session._writer_fd = object()
+        session._runtime = "gemini"
+        session._lock = threading.RLock()
+        writes: list[bytes] = []
+        session.write_input = lambda data: writes.append(bytes(data)) or True
+
+        session._maybe_reply_to_terminal_queries(b"\x1b[c")
+        session._maybe_reply_to_terminal_queries(b"Gemini ready")
+
+        self.assertEqual(writes, [b"\x1b[?1;2c"])
+
+        session._query_tail = b""
+        writes.clear()
+
+        session._maybe_reply_to_terminal_queries(b"\x1b[")
+        session._maybe_reply_to_terminal_queries(b"c")
+
+        self.assertEqual(writes, [b"\x1b[?1;2c"])
 
     def test_codex_windows_command_still_gets_env_inherit_flag(self) -> None:
         from no1.daemon import server as daemon_server

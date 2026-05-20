@@ -108,7 +108,7 @@ class ActorCreateRequest(BaseModel):
     env: Dict[str, str] = Field(default_factory=dict)
     capability_autoload: list[str] = Field(default_factory=list)
     capability_hidden: list[str] = Field(default_factory=list)
-    # Write-only runtime-only secrets (stored under CCCC_HOME/state; never persisted into ledger).
+    # Write-only runtime-only secrets (stored under ONECOLLEAGUE_HOME/state; never persisted into ledger).
     # Values are never returned by the daemon; only keys can be listed via the dedicated endpoints.
     env_private: Optional[Dict[str, str]] = None
     profile_id: Optional[str] = None

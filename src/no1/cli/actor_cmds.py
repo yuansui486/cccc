@@ -341,7 +341,7 @@ def cmd_actor_update(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_actor_secrets(args: argparse.Namespace) -> int:
-    """Manage per-actor runtime-only secrets env (stored under CCCC_HOME/state, not in ledger)."""
+    """Manage per-actor runtime-only secrets env (stored under ONECOLLEAGUE_HOME/state, not in ledger)."""
     group_id = _resolve_group_id(getattr(args, "group", ""))
     if not group_id:
         _print_json({"ok": False, "error": {"code": "missing_group_id", "message": "missing group_id (no active group?)"}})

@@ -27,7 +27,7 @@ def _is_exact_cccc_home_path(path: Path) -> bool:
 def handle_attach(args: Dict[str, Any]) -> DaemonResponse:
     path = Path(str(args.get("path") or "."))
     if _is_exact_cccc_home_path(path):
-        return _error("invalid_scope_path", "workspace scope must be a project directory, not CCCC_HOME")
+        return _error("invalid_scope_path", "workspace scope must be a project directory, not ONECOLLEAGUE_HOME")
     if not path.exists():
         try:
             path.mkdir(parents=True, exist_ok=True)

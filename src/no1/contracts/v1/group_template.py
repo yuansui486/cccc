@@ -66,7 +66,7 @@ class GroupTemplatePrompts(BaseModel):
 
     When a prompt field is omitted / null, the template uses the built-in
     default and import-replace will reset (delete) the corresponding group
-    prompt override file under CCCC_HOME.
+    prompt override file under ONECOLLEAGUE_HOME.
     """
 
     preamble: Optional[str] = None

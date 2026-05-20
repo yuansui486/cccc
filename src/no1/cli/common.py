@@ -201,7 +201,7 @@ def _same_home_daemon_pids(home: Path) -> list[int]:
         except Exception:
             env_doc = {}
 
-        raw_home = str(env_doc.get("CCCC_HOME") or "").strip()
+        raw_home = str(env_doc.get("ONECOLLEAGUE_HOME") or env_doc.get("CCCC_HOME") or "").strip()
         proc_home = str(Path(raw_home).resolve()) if raw_home else default_home
         if proc_home != target_home:
             continue
@@ -540,6 +540,7 @@ def _default_entry(*, web_host_override: str = "", web_port_override: Optional[i
             log_file = log_path.open("a", encoding="utf-8")
             try:
                 daemon_env = os.environ.copy()
+                daemon_env["ONECOLLEAGUE_HOME"] = str(home)
                 daemon_env["CCCC_HOME"] = str(home)
                 daemon_env["CCCC_DAEMON_SUPERVISOR_PID"] = str(os.getpid())
                 daemon_process = subprocess.Popen(

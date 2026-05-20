@@ -12,19 +12,19 @@ from fastapi.testclient import TestClient
 
 class TestWebActorRoutesCache(unittest.TestCase):
     def _with_home(self):
-        old_home = os.environ.get("CCCC_HOME")
+        old_home = os.environ.get("ONECOLLEAGUE_HOME")
         old_mode = os.environ.get("CCCC_WEB_MODE")
         old_new_mode = os.environ.get("ONECOLLEAGUE_WEB_MODE")
         td_ctx = tempfile.TemporaryDirectory()
         td = td_ctx.__enter__()
-        os.environ["CCCC_HOME"] = td
+        os.environ["ONECOLLEAGUE_HOME"] = td
 
         def cleanup() -> None:
             td_ctx.__exit__(None, None, None)
             if old_home is None:
-                os.environ.pop("CCCC_HOME", None)
+                os.environ.pop("ONECOLLEAGUE_HOME", None)
             else:
-                os.environ["CCCC_HOME"] = old_home
+                os.environ["ONECOLLEAGUE_HOME"] = old_home
             if old_mode is None:
                 os.environ.pop("CCCC_WEB_MODE", None)
             else:
@@ -527,6 +527,35 @@ class TestWebActorRoutesCache(unittest.TestCase):
             self.assertEqual(actor["effective_working_state"], "working")
             self.assertEqual(actor["effective_working_reason"], "headless_working")
             self.assertEqual(actor["effective_active_task_id"], "turn-1")
+        finally:
+            cleanup()
+
+    def test_actor_list_route_projects_runtime_session_resume_failure(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from no1.daemon.runtime_session_ops import write_runtime_session
+
+            os.environ.pop("CCCC_WEB_MODE", None)
+            group_id = self._create_group()
+            self._add_actor(group_id, runtime="codex")
+            write_runtime_session(
+                group_id,
+                "peer-1",
+                {
+                    "status": "resume_failed",
+                    "resume_eligible": False,
+                    "last_resume_error": "thread not found",
+                },
+            )
+
+            with self._client() as client:
+                resp = client.get(f"/api/v1/groups/{group_id}/actors")
+
+            self.assertEqual(resp.status_code, 200)
+            actor = resp.json()["result"]["actors"][0]
+            self.assertEqual(actor["runtime_session_status"], "resume_failed")
+            self.assertFalse(bool(actor["runtime_session_resume_eligible"]))
+            self.assertEqual(actor["runtime_session_last_resume_error"], "thread not found")
         finally:
             cleanup()
 

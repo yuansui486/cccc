@@ -2098,7 +2098,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.put("/prompts/{kind}")
     async def prompts_put(group_id: str, kind: str, req: RepoPromptUpdateRequest) -> Dict[str, Any]:
-        """Create or update a group prompt override file under CCCC_HOME."""
+        """Create or update a group prompt override file under ONECOLLEAGUE_HOME."""
         group = load_group(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
@@ -2139,7 +2139,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.delete("/prompts/{kind}")
     async def prompts_delete(group_id: str, kind: str, confirm: str = "") -> Dict[str, Any]:
-        """Reset a group prompt override by deleting the CCCC_HOME file (requires confirm=kind)."""
+        """Reset a group prompt override by deleting the ONECOLLEAGUE_HOME file (requires confirm=kind)."""
         if str(confirm or "").strip().lower() != str(kind or "").strip().lower():
             raise HTTPException(status_code=400, detail={"code": "confirmation_required", "message": f"confirm must equal kind: {kind}"})
 

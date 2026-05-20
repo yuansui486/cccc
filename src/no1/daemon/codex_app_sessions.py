@@ -25,10 +25,11 @@ from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .mcp_install import ensure_mcp_installed
 from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
 from .runner_state_ops import headless_state_path, remove_headless_state
-from .codex_app_thread_ops import start_codex_app_thread
+from .codex_app_thread_ops import prepare_codex_app_tui_resume, start_codex_app_thread
+from .runtime_session_ops import record_codex_app_thread_runtime_session, runtime_resume_enabled
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
-from ..util.process import pid_is_alive
+from ..util.process import pid_is_alive, resolve_subprocess_argv, terminate_pid
 from ..util.time import utc_now_iso
 from .voice_secretary_control_turns import (
     control_completion_state as _shared_voice_secretary_control_completion_state,
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 _TURN_STALL_SECONDS = 45.0
 _TURN_WAIT_POLL_SECONDS = 5.0
+_WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 0.2
 
 
 def _free_loopback_ws_url() -> str:
@@ -70,6 +72,81 @@ def _connect_websocket(url: str, *, timeout: float):
     return ws
 
 
+def _close_websocket_bounded(ws: Any) -> None:
+    if ws is None:
+        return
+    shutdown = getattr(ws, "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown()
+            return
+        except Exception:
+            pass
+    try:
+        settimeout = getattr(ws, "settimeout", None)
+        if callable(settimeout):
+            settimeout(_WEBSOCKET_CLOSE_TIMEOUT_SECONDS)
+        else:
+            sock = getattr(ws, "sock", None)
+            sock_settimeout = getattr(sock, "settimeout", None)
+            if callable(sock_settimeout):
+                sock_settimeout(_WEBSOCKET_CLOSE_TIMEOUT_SECONDS)
+    except Exception:
+        pass
+    close = getattr(ws, "close", None)
+    if not callable(close):
+        return
+    close_done = threading.Event()
+
+    def _close() -> None:
+        try:
+            close(timeout=_WEBSOCKET_CLOSE_TIMEOUT_SECONDS)
+        except TypeError:
+            try:
+                close()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        finally:
+            close_done.set()
+
+    try:
+        close_thread = threading.Thread(target=_close, name="onecolleague-codex-ws-close", daemon=True)
+        close_thread.start()
+        close_done.wait(timeout=_WEBSOCKET_CLOSE_TIMEOUT_SECONDS)
+    except Exception:
+        pass
+
+
+def _is_subprocess_popen(proc: Any) -> bool:
+    popen_type = getattr(subprocess, "Popen", None)
+    return bool(isinstance(popen_type, type) and isinstance(proc, popen_type))
+
+
+def _terminate_codex_app_server_process(proc: Any) -> None:
+    if proc is None:
+        return
+    pid = int(getattr(proc, "pid", 0) or 0)
+    if os.name == "nt" and pid > 0 and _is_subprocess_popen(proc):
+        try:
+            if terminate_pid(pid, timeout_s=2.0, include_group=True, force=True):
+                return
+        except Exception:
+            pass
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=2.0)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _is_websocket_idle_timeout(exc: BaseException) -> bool:
     if isinstance(exc, (TimeoutError, socket.timeout)):
         return True
@@ -80,41 +157,20 @@ def _is_websocket_idle_timeout(exc: BaseException) -> bool:
     return "timed out" in message and "websocket" in name
 
 
-def _env_path(env: Dict[str, str]) -> str:
-    return str((env or {}).get("PATH") or os.environ.get("PATH") or "")
-
-
-def _resolve_codex_cli(env: Dict[str, str]) -> str:
-    return str(shutil.which("codex", path=_env_path(env)) or "").strip()
-
-
-def _codex_command_stem(value: str) -> str:
+def _command_stem(command: str) -> str:
+    raw = str(command or "").strip()
+    if not raw:
+        return ""
     try:
-        return os.path.splitext(ntpath.basename(str(value or "")))[0].lower()
+        return str(Path(ntpath.basename(raw)).stem or "").strip().lower()
     except Exception:
-        return str(value or "").strip().lower()
+        return str(raw).strip().lower()
 
 
-def _codex_remote_tui_command(
-    base_command: list[str] | None,
-    listen_url: str,
-    thread_id: str = "",
-    *,
-    env: Dict[str, str] | None = None,
-) -> list[str]:
+def _codex_remote_tui_command(base_command: list[str] | None, listen_url: str, *, resume_thread_id: str = "") -> list[str]:
     command = list(base_command or [])
-    if not command or _codex_command_stem(str(command[0] or "")) != "codex":
-        if env is None:
-            command = ["codex"]
-        else:
-            executable = _resolve_codex_cli(dict(env or {}))
-            if not executable:
-                raise RuntimeError("codex CLI not found")
-            command = [executable]
-    elif env is not None and _codex_command_stem(str(command[0] or "")) == "codex":
-        executable = _resolve_codex_cli(dict(env or {}))
-        if executable:
-            command[0] = executable
+    if not command or _command_stem(str(command[0] or "")) != "codex":
+        command = ["codex"]
     filtered: list[str] = [str(command[0])]
     takes_value = {
         "-a",
@@ -158,11 +214,9 @@ def _codex_remote_tui_command(
             i += 1
             continue
         break
-    thread_id = str(thread_id or "").strip()
-    if thread_id:
-        executable = filtered[0]
-        options = filtered[1:]
-        return [executable, "resume", *options, "--remote", str(listen_url), thread_id]
+    resume_target = str(resume_thread_id or "").strip()
+    if resume_target:
+        filtered.extend(["resume", resume_target])
     filtered.extend(["--remote", str(listen_url)])
     return filtered
 
@@ -170,14 +224,14 @@ def _codex_remote_tui_command(
 def _is_missing_codex_cli_error(exc: BaseException) -> bool:
     if isinstance(exc, FileNotFoundError):
         filename = str(getattr(exc, "filename", "") or "").strip().lower()
-        if not filename or _codex_command_stem(filename) == "codex":
+        if not filename or Path(filename).name == "codex":
             return True
     message = str(exc or "").strip().lower()
     return "no such file or directory" in message and "codex" in message
 
 
 def _codex_cli_available(env: Dict[str, str]) -> bool:
-    return bool(_resolve_codex_cli(env))
+    return bool(shutil.which("codex", path=str((env or {}).get("PATH") or os.environ.get("PATH") or "")))
 
 
 def _is_closed_stream_logging_error(exc: BaseException) -> bool:
@@ -357,6 +411,33 @@ class CodexAppSession:
                 **state,
             },
         )
+
+    def _record_remote_tui_thread_runtime_session(self, thread_id: str, *, captured_from: str) -> None:
+        thread_id = str(thread_id or "").strip()
+        if not thread_id or not self.start_remote_tui or not runtime_resume_enabled():
+            return
+        command = list(self._runtime_command or ["codex", "app-server", "--listen", self.listen_url])
+        try:
+            record_codex_app_thread_runtime_session(
+                group_id=self.group_id,
+                actor_id=self.actor_id,
+                cwd=self.cwd,
+                command=command,
+                model=self.model,
+                provider_thread_id=thread_id,
+                runner="pty",
+                status="usable",
+                captured_from=captured_from,
+                resume_eligible=True,
+            )
+        except Exception:
+            logger.debug(
+                "failed to record remote TUI codex thread: group=%s actor=%s thread=%s",
+                self.group_id,
+                self.actor_id,
+                thread_id,
+                exc_info=True,
+            )
 
     def _emit_activity(
         self,
@@ -572,32 +653,28 @@ class CodexAppSession:
             self._stop_requested = False
             env = os.environ.copy()
             env.update(self.env)
-            env.setdefault("CCCC_HOME", str(ensure_home()))
+            resolved_home = str(env.get("ONECOLLEAGUE_HOME") or env.get("CCCC_HOME") or ensure_home())
+            env.setdefault("ONECOLLEAGUE_HOME", resolved_home)
+            env.setdefault("CCCC_HOME", env["ONECOLLEAGUE_HOME"])
+            env["ONECOLLEAGUE_GROUP_ID"] = self.group_id
+            env["ONECOLLEAGUE_ACTOR_ID"] = self.actor_id
             env["CCCC_GROUP_ID"] = self.group_id
             env["CCCC_ACTOR_ID"] = self.actor_id
             env = with_node_deprecation_warnings_suppressed(env)
             if not ensure_mcp_installed("codex", self.cwd, auto_mcp_runtimes=("codex",), env=env):
                 raise RuntimeError("failed to install MCP for runtime: codex")
-            codex_executable = _resolve_codex_cli(env)
-            if not codex_executable:
-                raise RuntimeError("runtime unavailable: Codex CLI is not installed or not in PATH")
-            self._runtime_command = [codex_executable, "app-server", "--listen", self.listen_url]
-            logical_runtime_command = ["codex", "app-server", "--listen", self.listen_url]
-            try:
-                self._proc = subprocess.Popen(
-                    self._runtime_command,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=str(self.cwd),
-                    env=env,
-                    text=True,
-                    bufsize=1,
-                )
-            except FileNotFoundError as exc:
-                if _is_missing_codex_cli_error(exc):
-                    raise RuntimeError("runtime unavailable: Codex CLI is not installed or not in PATH") from exc
-                raise
+            self._runtime_command = ["codex", "app-server", "--listen", self.listen_url]
+            popen_command = resolve_subprocess_argv(self._runtime_command)
+            self._proc = subprocess.Popen(
+                popen_command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(self.cwd),
+                env=env,
+                text=True,
+                bufsize=1,
+            )
             self._running = True
 
         if self.transport == "websocket":
@@ -632,16 +709,29 @@ class CodexAppSession:
                 },
                 timeout=10.0,
             )
-            thread_id, resumed = start_codex_app_thread(
-                request=self._request,
-                group_id=self.group_id,
-                actor_id=self.actor_id,
-                cwd=self.cwd,
-                command=logical_runtime_command,
-                model=self.model,
-            )
+            if self.start_remote_tui:
+                thread_result = prepare_codex_app_tui_resume(
+                    request=self._request,
+                    group_id=self.group_id,
+                    actor_id=self.actor_id,
+                    cwd=self.cwd,
+                    command=self._runtime_command,
+                    model=self.model,
+                )
+            else:
+                thread_result = start_codex_app_thread(
+                    request=self._request,
+                    group_id=self.group_id,
+                    actor_id=self.actor_id,
+                    cwd=self.cwd,
+                    command=self._runtime_command,
+                    model=self.model,
+                    runner="headless",
+                )
+            thread_id = thread_result.thread_id
+            resumed = thread_result.resumed
             with self._lock:
-                self._session_state.thread_id = thread_id
+                self._session_state.thread_id = thread_id or None
                 self._session_state.status = "idle"
                 self._session_state.updated_at = utc_now_iso()
             self._persist_state()
@@ -650,16 +740,7 @@ class CodexAppSession:
             if not self.start_remote_tui:
                 self._queue_bootstrap_control_turn()
             if self.start_remote_tui:
-                remote_command = _codex_remote_tui_command(self.remote_tui_base_command, self.listen_url, thread_id, env=env)
-                self._pty_session = pty_runner.SUPERVISOR.start_actor(
-                    group_id=self.group_id,
-                    actor_id=self.actor_id,
-                    cwd=self.cwd,
-                    command=remote_command,
-                    env=env,
-                    runtime="codex",
-                    max_backlog_bytes=self.max_backlog_bytes,
-                )
+                self._start_remote_tui(env=env, resume_thread_id=thread_id if resumed else "")
             self._turn_thread.start()
         except Exception:
             self.stop()
@@ -688,7 +769,7 @@ class CodexAppSession:
             pass
         try:
             if ws is not None:
-                ws.close()
+                _close_websocket_bounded(ws)
         except Exception:
             pass
         if self.start_remote_tui:
@@ -697,18 +778,7 @@ class CodexAppSession:
             except Exception:
                 pass
             self._pty_session = None
-        if proc is not None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-            try:
-                proc.wait(timeout=2.0)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+        _terminate_codex_app_server_process(proc)
         self._emit("headless.session.stopped", {})
         if persist_actor_stopped and not was_stop_requested:
             persist_actor_process_exit_stopped(group_id=self.group_id, actor_id=self.actor_id, runner="headless")
@@ -718,6 +788,21 @@ class CodexAppSession:
             proc = self._proc
             return bool(self._running and proc is not None and proc.poll() is None)
 
+    def remote_tui_running(self) -> bool:
+        if not self.start_remote_tui or self.remote_tui_pid() <= 0:
+            return False
+        try:
+            return bool(pty_runner.SUPERVISOR.actor_running(group_id=self.group_id, actor_id=self.actor_id))
+        except Exception:
+            return False
+
+    def actor_running(self) -> bool:
+        if not self.is_running():
+            return False
+        if self.start_remote_tui:
+            return self.remote_tui_running()
+        return True
+
     def state(self) -> Dict[str, Any]:
         with self._lock:
             return self._session_state.to_headless_state(group_id=self.group_id, actor_id=self.actor_id)
@@ -725,6 +810,33 @@ class CodexAppSession:
     def remote_tui_pid(self) -> int:
         session = self._pty_session
         return int(getattr(session, "pid", 0) or 0)
+
+    def handle_remote_tui_exit(self, *, pid: int = 0) -> bool:
+        if not self.start_remote_tui:
+            return False
+        current_pid = self.remote_tui_pid()
+        if pid > 0 and current_pid > 0 and int(pid) != current_pid:
+            return False
+        if not self.is_running():
+            return False
+        self.stop(persist_actor_stopped=False)
+        return True
+
+    def _start_remote_tui(self, *, env: Dict[str, str], resume_thread_id: str = "") -> Any:
+        remote_command = resolve_subprocess_argv(
+            _codex_remote_tui_command(self.remote_tui_base_command, self.listen_url, resume_thread_id=resume_thread_id)
+        )
+        session = pty_runner.SUPERVISOR.start_actor(
+            group_id=self.group_id,
+            actor_id=self.actor_id,
+            cwd=self.cwd,
+            command=remote_command,
+            env=env,
+            runtime="codex",
+            max_backlog_bytes=self.max_backlog_bytes,
+        )
+        self._pty_session = session
+        return session
 
     def _control_turn_kind(self) -> str:
         with self._lock:
@@ -1256,6 +1368,22 @@ class CodexAppSession:
                     return
                 self._session_state.updated_at = now
             self._persist_state()
+            self._record_remote_tui_thread_runtime_session(thread_id, captured_from="app_server_remote_tui_status")
+            return
+        if method == "thread/started":
+            thread = params.get("thread") if isinstance(params.get("thread"), dict) else {}
+            thread_id = str((thread or {}).get("id") or "").strip()
+            if not thread_id:
+                return
+            with self._lock:
+                current_thread_id = str(self._session_state.thread_id or "").strip()
+                if current_thread_id and current_thread_id != thread_id and not self.start_remote_tui:
+                    return
+                self._session_state.thread_id = thread_id
+                self._session_state.status = self._session_state.status or "idle"
+                self._session_state.updated_at = now
+            self._persist_state()
+            self._record_remote_tui_thread_runtime_session(thread_id, captured_from="app_server_remote_tui_thread_started")
             return
         if method == "turn/started":
             turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
@@ -1270,6 +1398,7 @@ class CodexAppSession:
                 self._session_state.current_task_id = turn_id or None
                 self._session_state.updated_at = now
             self._persist_state()
+            self._record_remote_tui_thread_runtime_session(thread_id, captured_from="app_server_remote_tui_turn_started")
             self._item_snapshots_by_id.clear()
             self._plan_activity_id = ""
             if control_kind:
@@ -1798,6 +1927,14 @@ class _FallbackCodexAppSession:
         return True
 
 
+def _manager_session_running(session: Any) -> bool:
+    actor_running = getattr(session, "actor_running", None)
+    if callable(actor_running):
+        return bool(actor_running())
+    is_running = getattr(session, "is_running", None)
+    return bool(callable(is_running) and is_running())
+
+
 class CodexAppSessionManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -1859,9 +1996,20 @@ class CodexAppSessionManager:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
         if not key[0] or not key[1]:
             raise ValueError("missing group_id/actor_id")
+        stale_session: Any = None
         with self._lock:
             session = self._sessions.get(key)
-            if session is not None and session.is_running():
+            if isinstance(session, CodexAppSession) and session.actor_running():
+                return session
+            if session is not None:
+                stale_session = session
+                self._sessions.pop(key, None)
+                session.request_stop()
+        if stale_session is not None:
+            stale_session.stop()
+        with self._lock:
+            session = self._sessions.get(key)
+            if isinstance(session, CodexAppSession) and session.actor_running():
                 return session
             if not _codex_cli_available(env):
                 raise RuntimeError("codex CLI not found")
@@ -1897,6 +2045,14 @@ class CodexAppSessionManager:
         if session is not None:
             session.stop()
 
+    def handle_remote_tui_exit(self, *, group_id: str, actor_id: str, pid: int = 0) -> bool:
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        with self._lock:
+            session = self._sessions.get(key)
+        if isinstance(session, CodexAppSession):
+            return bool(session.handle_remote_tui_exit(pid=int(pid or 0)))
+        return False
+
     def stop_group(self, *, group_id: str) -> None:
         gid = str(group_id or "").strip()
         if not gid:
@@ -1928,7 +2084,7 @@ class CodexAppSessionManager:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
         with self._lock:
             session = self._sessions.get(key)
-        return bool(session and session.is_running())
+        return bool(session and _manager_session_running(session))
 
     def group_running(self, group_id: str) -> bool:
         gid = str(group_id or "").strip()
@@ -1936,7 +2092,7 @@ class CodexAppSessionManager:
             return False
         with self._lock:
             sessions = [session for (session_gid, _), session in self._sessions.items() if session_gid == gid]
-        return any(session.is_running() for session in sessions)
+        return any(_manager_session_running(session) for session in sessions)
 
     def get_state(self, *, group_id: str, actor_id: str) -> Optional[Dict[str, Any]]:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())

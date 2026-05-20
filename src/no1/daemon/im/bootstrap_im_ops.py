@@ -50,6 +50,7 @@ def autostart_enabled_im_bridges(home: Path) -> None:
         try:
             with log_path.open("a", encoding="utf-8") as log_file:
                 env = os.environ.copy()
+                env["ONECOLLEAGUE_HOME"] = str(home)
                 env["CCCC_HOME"] = str(home)
                 proc = subprocess.Popen(
                     resolve_background_python_argv([sys.executable, "-m", "no1.ports.im.bridge", group_id, platform]),

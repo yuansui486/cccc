@@ -257,7 +257,7 @@ def preview_group_template_replace(group: Group, template: GroupTemplate) -> Gro
             settings_changed[k] = (cur, nxt)
 
     # Prompts diff summary (changed, current_len, new_len, current_source, new_source).
-    # Source is "home" (group override exists under CCCC_HOME) or "builtin" (no override file).
+    # Source is "home" (group override exists under ONECOLLEAGUE_HOME) or "builtin" (no override file).
     prompts_changed: Dict[str, Tuple[bool, int, int, str, str]] = {}
     for kind, filename, builtin in (
         ("preamble", PREAMBLE_FILENAME, DEFAULT_PREAMBLE_BODY),

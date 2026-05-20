@@ -189,6 +189,7 @@ def spawn_web_child(
         argv.append("--reload")
 
     env = os.environ.copy()
+    env["ONECOLLEAGUE_HOME"] = str(home)
     env["CCCC_HOME"] = str(home)
     env["ONECOLLEAGUE_WEB_MODE"] = str(mode or "normal")
     env["CCCC_WEB_MODE"] = str(mode or "normal")

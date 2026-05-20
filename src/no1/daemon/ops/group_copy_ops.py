@@ -776,7 +776,7 @@ def group_copy_import(args: Dict[str, Any]) -> DaemonResponse:
 
         effective_workspace_root = workspace_root or _primary_workspace_root(doc)
         if _is_exact_cccc_home_path(effective_workspace_root):
-            raise ValueError("workspace_root must be a project directory, not CCCC_HOME")
+            raise ValueError("workspace_root must be a project directory, not ONECOLLEAGUE_HOME")
 
         old_active_scope_key, new_active_scope_key = _apply_workspace_remap(
             doc,

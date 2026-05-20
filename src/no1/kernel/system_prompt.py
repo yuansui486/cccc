@@ -148,7 +148,7 @@ def render_role_system_prompt(
         "- For strategy or scope discussion, align first; implement only after explicit action intent.",
     ]
 
-    # Group override: ONECOLLEAGUE_PREAMBLE.md under CCCC_HOME.
+    # Group override: ONECOLLEAGUE_PREAMBLE.md under ONECOLLEAGUE_HOME.
     pf = read_group_prompt_file(group, PREAMBLE_FILENAME)
     custom_body = str(pf.content or "").strip() if pf.found else ""
 
