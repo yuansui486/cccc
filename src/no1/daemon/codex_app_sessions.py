@@ -29,7 +29,7 @@ from .codex_app_thread_ops import prepare_codex_app_tui_resume, start_codex_app_
 from .runtime_session_ops import record_codex_app_thread_runtime_session, runtime_resume_enabled
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
-from ..util.process import pid_is_alive, resolve_subprocess_argv, terminate_pid
+from ..util.process import pid_is_alive, resolve_subprocess_argv, terminate_pid, windowless_subprocess_popen_kwargs
 from ..util.time import utc_now_iso
 from .voice_secretary_control_turns import (
     control_completion_state as _shared_voice_secretary_control_completion_state,
@@ -674,6 +674,7 @@ class CodexAppSession:
                 env=env,
                 text=True,
                 bufsize=1,
+                **windowless_subprocess_popen_kwargs(),
             )
             self._running = True
 
