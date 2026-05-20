@@ -42,7 +42,6 @@ import {
   PlayIcon,
   PlusIcon,
   RocketIcon,
-  SearchIcon,
   SendIcon,
   SettingsIcon,
   SparklesIcon,
@@ -73,7 +72,6 @@ export interface GroupSidebarProps {
     errorMessage: string;
   };
   groupDoc: GroupDoc | null;
-  enabledSkillCount: number;
   activeTaskCount: number;
   selectedGroupRunning: boolean;
   selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
@@ -101,7 +99,6 @@ export interface GroupSidebarProps {
   onOpenContextProject: () => void;
   onOpenContextSummary: () => void;
   onOpenSkillManagement: () => void;
-  onOpenSearch: () => void;
   onOpenSettings: () => void;
   onOpenDoneHubAuth: () => void;
   onOpenGroupEdit?: (groupId?: string) => void;
@@ -121,7 +118,6 @@ export function GroupSidebar({
   textScale,
   doneHub,
   groupDoc,
-  enabledSkillCount,
   activeTaskCount,
   selectedGroupRunning,
   selectedGroupRuntimeStatus,
@@ -149,7 +145,6 @@ export function GroupSidebar({
   onOpenContextProject,
   onOpenContextSummary,
   onOpenSkillManagement,
-  onOpenSearch,
   onOpenSettings,
   onOpenDoneHubAuth,
   onOpenGroupEdit,
@@ -1010,7 +1005,6 @@ export function GroupSidebar({
                 <SparklesIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("skillManagement")}</span>
-              {renderCountBadge(enabledSkillCount, { showZero: true })}
             </button>
             <button
               type="button"
@@ -1022,7 +1016,7 @@ export function GroupSidebar({
                 <RocketIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("taskExecution")}</span>
-              {renderCountBadge(activeTaskCount, { showZero: true })}
+              {renderCountBadge(activeTaskCount)}
             </button>
           </div>
         </section>
@@ -1033,7 +1027,6 @@ export function GroupSidebar({
     actors,
     busy,
     activeTaskCount,
-    enabledSkillCount,
     getActorIndicator,
     groupDoc,
     isCollapsed,
@@ -1299,18 +1292,6 @@ export function GroupSidebar({
                 >
                   <SettingsIcon size={17} />
                   <span className="min-w-0 truncate">{t("settings")}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    onOpenSearch();
-                  }}
-                  disabled={!selectedGroupId}
-                  className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--color-text-primary)] transition-all hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <SearchIcon size={17} />
-                  <span className="min-w-0 truncate">{t("searchMessages")}</span>
                 </button>
               </PopoverContent>
             </Popover>

@@ -230,7 +230,6 @@ export function AppShell({
         textScale={textScale}
         doneHub={doneHub}
         groupDoc={groupDoc}
-        enabledSkillCount={enabledSkillCount}
         activeTaskCount={activeTaskCount}
         selectedGroupRunning={selectedGroupRunning}
         selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
@@ -258,7 +257,6 @@ export function AppShell({
         onOpenContextProject={onOpenContextProject}
         onOpenContextSummary={onOpenContextSummary}
         onOpenSkillManagement={onOpenSkillManagement}
-        onOpenSearch={onOpenSearch}
         onOpenSettings={onOpenSettings}
         onOpenDoneHubAuth={onOpenDoneHubAuth}
         onOpenGroupEdit={onOpenGroupEdit}
