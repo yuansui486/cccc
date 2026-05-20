@@ -34,6 +34,46 @@ describe("runtime presets", () => {
     ).toBe("claude --dangerously-skip-permissions --model deepseek-v4-pro[1m]");
   });
 
+  it("adds the Qwen Claude preset with fixed DashScope environment", () => {
+    const preset = runtimePresetById("model:qwen3.6-max-claude");
+    expect(preset).toBeTruthy();
+    expect(
+      commandForRuntimePreset(preset!, {
+        name: "claude",
+        display_name: "Claude Code",
+        available: true,
+        recommended_command: "claude --dangerously-skip-permissions",
+      })
+    ).toBe("claude --dangerously-skip-permissions --model qwen3.6-max-preview");
+
+    const secrets = mergePresetSecrets("", preset!, "ignored-token");
+    expect(secrets).toContain('ANTHROPIC_BASE_URL="https://dashscope.aliyuncs.com/apps/anthropic"');
+    expect(secrets).toContain('ANTHROPIC_AUTH_TOKEN="sk-ec022412cf4447d092935f05d604a7f4"');
+    expect(secrets).toContain('ANTHROPIC_MODEL="qwen3.6-max-preview"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL="qwen3.6-max-preview"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="qwen3.6-plus"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="qwen3.6-flash"');
+    expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="qwen3.6-plus"');
+    expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
+    expect(secrets).not.toContain("ignored-token");
+  });
+
+  it("uses the fixed DeepSeek Claude provider environment", () => {
+    const preset = runtimePresetById("model:deepseek-v4-pro-claude");
+    expect(preset).toBeTruthy();
+    const secrets = mergePresetSecrets("", preset!, "ignored-token");
+
+    expect(secrets).toContain('ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"');
+    expect(secrets).toContain('ANTHROPIC_AUTH_TOKEN="sk-7f21d214c2dc4947b06a7289c357f558"');
+    expect(secrets).toContain('ANTHROPIC_MODEL="deepseek-v4-pro[1m]"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"');
+    expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"');
+    expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
+    expect(secrets).not.toContain("ignored-token");
+  });
+
   it("replaces stale Claude model command flags", () => {
     const doubao = runtimePresetById("model:doubao-code-claude");
     expect(doubao).toBeTruthy();

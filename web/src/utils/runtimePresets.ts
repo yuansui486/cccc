@@ -4,6 +4,7 @@ export type RuntimePresetId =
   | "default:claude"
   | "default:codex"
   | "model:deepseek-v4-pro-claude"
+  | "model:qwen3.6-max-claude"
   | "model:doubao-code-claude"
   | "model:gpt-5.4-codex"
   | "model:gpt-5.5-codex"
@@ -32,12 +33,29 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     runtime: "claude",
     model: "deepseek-v4-pro[1m]",
     envPrivate: {
-      ANTHROPIC_BASE_URL: "https://peer.shierkeji.com/claude",
+      ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "sk-7f21d214c2dc4947b06a7289c357f558",
       ANTHROPIC_MODEL: "deepseek-v4-pro[1m]",
       ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro[1m]",
       ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro[1m]",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
       CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash",
+      CLAUDE_CODE_EFFORT_LEVEL: "max",
+    },
+  },
+  {
+    id: "model:qwen3.6-max-claude",
+    label: "Qwen3.6-Max（Claude）",
+    runtime: "claude",
+    model: "qwen3.6-max-preview",
+    envPrivate: {
+      ANTHROPIC_BASE_URL: "https://dashscope.aliyuncs.com/apps/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "sk-ec022412cf4447d092935f05d604a7f4",
+      ANTHROPIC_MODEL: "qwen3.6-max-preview",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "qwen3.6-max-preview",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "qwen3.6-plus",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "qwen3.6-flash",
+      CLAUDE_CODE_SUBAGENT_MODEL: "qwen3.6-plus",
       CLAUDE_CODE_EFFORT_LEVEL: "max",
     },
   },
@@ -123,7 +141,7 @@ export function secretsTextForRuntimePreset(preset: RuntimePreset, authToken?: s
     lines.push(`${key}=${quoteEnvValue(value)}`);
   }
   const authKey = authSecretKeyForRuntimePreset(preset);
-  if (authKey) {
+  if (authKey && env[authKey] === undefined) {
     const token = String(authToken || "").trim();
     if (token) {
       lines.splice(1, 0, `${authKey}=${quoteEnvValue(token)}`);
