@@ -3843,7 +3843,8 @@ class TestCodexAppFlow(unittest.TestCase):
 
             with (
                 patch("no1.daemon.codex_app_sessions.ensure_mcp_installed", return_value=True),
-                patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()),
+                patch("no1.daemon.codex_app_sessions.windowless_subprocess_popen_kwargs", return_value={"creationflags": 0x08000000}) as no_window_kwargs,
+                patch("no1.daemon.codex_app_sessions.subprocess.Popen", return_value=FakeProc()) as popen,
                 patch("no1.daemon.codex_app_sessions.threading.Thread", side_effect=FakeThread),
                 patch.object(session, "_request", side_effect=fake_request),
                 patch.object(session, "_persist_state"),
@@ -3851,6 +3852,8 @@ class TestCodexAppFlow(unittest.TestCase):
             ):
                 session.start()
 
+            no_window_kwargs.assert_called_once()
+            self.assertEqual(popen.call_args.kwargs.get("creationflags"), 0x08000000)
             self.assertEqual(requests[1][0], "thread/resume")
             self.assertEqual(requests[1][1].get("threadId"), "thr_existing")
             self.assertEqual(requests[1][1].get("approvalPolicy"), "never")

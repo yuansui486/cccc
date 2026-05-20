@@ -103,6 +103,19 @@ class TestProcessUtils(unittest.TestCase):
 
         self.assertEqual(kwargs, {"creationflags": 0x208})
 
+    def test_windowless_subprocess_popen_kwargs_windows_uses_no_window(self) -> None:
+        from no1.util import process as process_utils
+
+        with patch.object(process_utils.os, "name", "nt"), patch.object(
+            process_utils.subprocess,
+            "CREATE_NO_WINDOW",
+            0x08000000,
+            create=True,
+        ):
+            kwargs = process_utils.windowless_subprocess_popen_kwargs()
+
+        self.assertEqual(kwargs, {"creationflags": 0x08000000})
+
     def test_pid_is_alive_windows_prefers_native_process_query(self) -> None:
         from no1.util import process as process_utils
 

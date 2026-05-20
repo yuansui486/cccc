@@ -46,6 +46,7 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
         with (
             patch("no1.daemon.claude_app_sessions.subprocess.Popen", return_value=proc) as popen,
             patch("no1.daemon.claude_app_sessions.ensure_mcp_installed", return_value=True) as ensure_mcp,
+            patch("no1.daemon.claude_app_sessions.windowless_subprocess_popen_kwargs", return_value={"creationflags": 0x08000000}) as no_window_kwargs,
             patch("no1.daemon.claude_app_sessions.threading.Thread", side_effect=threads),
             patch("no1.daemon.claude_app_sessions.time.sleep", return_value=None),
             patch.object(session, "_persist_state"),
@@ -54,6 +55,8 @@ class TestHeadlessBootstrapControlTurns(unittest.TestCase):
             session.start()
 
         self.assertEqual(order, ["stdout", "stderr", "bootstrap", "turn"])
+        no_window_kwargs.assert_called_once()
+        self.assertEqual(popen.call_args.kwargs.get("creationflags"), 0x08000000)
         self.assertIn("--include-hook-events", popen.call_args.args[0])
         ensure_mcp.assert_called_once()
         popen_env = popen.call_args.kwargs.get("env") or {}

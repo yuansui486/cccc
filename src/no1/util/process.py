@@ -170,6 +170,14 @@ def supervised_process_popen_kwargs() -> dict[str, Any]:
     return {"creationflags": creationflags} if creationflags else {}
 
 
+def windowless_subprocess_popen_kwargs() -> dict[str, Any]:
+    """Return Popen kwargs that prevent Windows console windows for background children."""
+    if os.name != "nt":
+        return {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": creationflags} if creationflags else {}
+
+
 def _windows_taskkill_pid_tree(pid: int, *, force: bool) -> bool:
     if os.name != "nt":
         return False

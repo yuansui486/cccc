@@ -39,7 +39,7 @@ from .runtime_session_ops import (
 )
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
-from ..util.process import pid_is_alive
+from ..util.process import pid_is_alive, windowless_subprocess_popen_kwargs
 from ..util.time import utc_now_iso
 from .voice_secretary_control_turns import (
     control_completion_state as _shared_voice_secretary_control_completion_state,
@@ -580,6 +580,7 @@ class ClaudeAppSession:
                 env=env,
                 text=True,
                 bufsize=1,
+                **windowless_subprocess_popen_kwargs(),
             )
             self._running = True
 
