@@ -10,8 +10,8 @@
     </filter>
   </defs>
 
-  <!--
-       Concentric Circles Design
+  <!-- 
+       Concentric Circles Design 
        Center: 256, 256
        Gap: ~60 degrees on the right (Opening)
        Path draws from Angle 45 to Angle 315 (Large Arc)
@@ -22,7 +22,7 @@
   -->
 
   <g stroke="url(#gradient-c)" stroke-linecap="round" fill="none" filter="url(#shadow)">
-    <!--
+    <!-- 
       Radius 200
       Start Angle: 45 deg (Lower Right quadrant) -> x = 256 + 141, y = 256 + 141
       End Angle: 315 deg (-45) (Upper Right quadrant) -> x = 256 + 141, y = 256 - 141
@@ -30,7 +30,7 @@
     -->
     <path stroke-width="36" d="M 397.4 397.4 A 200 200 0 1 1 397.4 114.6" />
 
-    <!--
+    <!-- 
       Radius 145
       Angles the same for visual alignment of the gap
     -->
