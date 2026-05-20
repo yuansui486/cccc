@@ -10,8 +10,11 @@ export type SlashCommandItem = {
   realToolName?: string;
   inputSchema?: Record<string, unknown>;
   sourceType: "dynamic_tool" | "capsule_skill" | "builtin_command";
+  activationSources?: Array<{ scope?: string }>;
   active?: boolean;
 };
+
+export type SlashSkillScope = "team" | "global";
 
 export type ParsedSlashCommand = {
   item: SlashCommandItem;
@@ -137,6 +140,7 @@ export function buildSlashCommands(args: {
       description: String(skill.description_short || skill.capsule_preview || "").trim() || undefined,
       capabilityId,
       sourceType: "capsule_skill",
+      activationSources: Array.isArray(skill.activation_sources) ? skill.activation_sources : [],
       active: true,
     });
   }
@@ -181,6 +185,15 @@ export function filterSlashCommands(commands: SlashCommandItem[], input: string)
         .map((value) => value.toLowerCase());
       return haystacks.some((value) => value.includes(query));
     });
+}
+
+export function filterSlashCommandsBySkillScope(commands: SlashCommandItem[], scope: SlashSkillScope): SlashCommandItem[] {
+  return commands.filter((item) => {
+    if (item.sourceType !== "capsule_skill") return true;
+    const activationSources = Array.isArray(item.activationSources) ? item.activationSources : [];
+    const hasGroupSource = activationSources.some((source) => String(source?.scope || "").trim().toLowerCase() === "group");
+    return scope === "team" ? hasGroupSource : !hasGroupSource;
+  });
 }
 
 export function getVisibleSlashCommandPage(commands: SlashCommandItem[], visibleCount: number): SlashCommandItem[] {

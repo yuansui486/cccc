@@ -450,6 +450,7 @@ export type CapabilityStateResult = {
     capsule_text?: string;
     source_id?: string;
     source_uri?: string;
+    activation_sources?: Array<{ scope?: string; actor_id?: string; expires_at?: string; ttl_seconds?: number }>;
     policy_level?: string;
   }>;
   autoload_capabilities?: string[];

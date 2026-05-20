@@ -591,6 +591,7 @@ export function EditActorModal({
                       label={null}
                       avatarUrl={avatarUrl}
                       runtime={runtime}
+                      command={command}
                       title={title || actorId}
                       isDark={isDark}
                       sizeClassName="h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]"

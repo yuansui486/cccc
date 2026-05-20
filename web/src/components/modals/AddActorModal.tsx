@@ -266,6 +266,7 @@ export function AddActorModal({
                       avatarUrl={undefined}
                       previewUrl={avatarPreviewUrl}
                       runtime={previewRuntime}
+                      command={newActorUseProfile ? selectedProfile?.command : newActorCommand}
                       title={previewTitle}
                       isDark={isDark}
                       sizeClassName="h-14 w-14"

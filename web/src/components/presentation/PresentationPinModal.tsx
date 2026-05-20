@@ -518,7 +518,7 @@ export function PresentationPinModal({
             disabled={busy}
             className={classNames(
               "rounded-full px-4 py-2 text-sm font-medium text-white transition-colors",
-              busy ? "bg-black/40 dark:bg-white/40" : "border border-[rgb(35,36,37)] bg-[rgb(35,36,37)] hover:bg-black dark:border-white dark:bg-white dark:text-[rgb(35,36,37)] dark:hover:bg-white/92",
+              busy ? "bg-blue-400/55 dark:bg-blue-300/45" : "border border-blue-600 bg-blue-600 hover:border-blue-700 hover:bg-blue-700 dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
             )}
           >
             {replaceMode

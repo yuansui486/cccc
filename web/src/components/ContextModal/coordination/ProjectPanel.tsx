@@ -7,6 +7,8 @@ import { CollapseIcon, ExpandIcon } from "../../Icons";
 
 interface ProjectPanelProps {
   expanded?: boolean;
+  cardShell?: boolean;
+  hideExpandToggle?: boolean;
   isDark: boolean;
   tr: ContextTranslator;
   ui: ContextModalUi;
@@ -30,6 +32,8 @@ interface ProjectPanelProps {
 
 export function ProjectPanel({
   expanded = false,
+  cardShell = false,
+  hideExpandToggle = false,
   isDark,
   tr,
   ui,
@@ -51,7 +55,9 @@ export function ProjectPanel({
   onSaveProject,
 }: ProjectPanelProps) {
   const shellClass = expanded
-    ? "flex h-full min-h-0 flex-col"
+    ? cardShell
+      ? classNames("flex min-h-[68dvh] flex-col rounded-xl border p-4", "glass-card")
+      : "flex h-full min-h-0 flex-col"
     : classNames("rounded-xl border p-4", "glass-card");
   const contentClass = expanded ? "mt-4 min-h-0 flex flex-1 flex-col" : "mt-4";
   const textAreaClass = classNames(
@@ -71,7 +77,7 @@ export function ProjectPanel({
           <div className={classNames("mt-1 text-xs", ui.mutedTextClass)}>{projectBusy ? tr("common:loading", "Loading…") : projectPathLabel}</div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {!expanded ? (
+          {hideExpandToggle ? null : !expanded ? (
             <button
               type="button"
               onClick={onExpand}

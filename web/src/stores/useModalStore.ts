@@ -21,6 +21,8 @@ interface PresentationPinState {
 }
 
 type PresentationAttentionState = Record<string, Record<string, boolean>>;
+export type ContextTarget = "summary" | "project" | "log" | "skills" | "tasks";
+export type ContextProjectMode = "view" | "edit";
 
 interface ModalState {
   // Modal visibility state
@@ -40,6 +42,7 @@ interface ModalState {
   relayEventId: string | null;
   relaySource: RelaySource | null;
   contextTaskId: string | null;
+  contextTarget: { tab?: ContextTarget; projectMode?: ContextProjectMode; nonce: number } | null;
   presentationViewer: PresentationViewerState | null;
   presentationPin: PresentationPinState | null;
   presentationAttention: PresentationAttentionState;
@@ -54,6 +57,7 @@ interface ModalState {
   setRecipientsModal: (eventId: string | null) => void;
   setRelayModal: (eventId: string | null, groupId?: string, event?: LedgerEvent | null) => void;
   openContextTask: (taskId: string) => void;
+  openContextTarget: (target: { tab?: ContextTarget; projectMode?: ContextProjectMode }) => void;
   clearContextTask: () => void;
   setPresentationViewer: (viewer: PresentationViewerState | null) => void;
   setPresentationPin: (pin: PresentationPinState | null) => void;
@@ -79,6 +83,7 @@ export const useModalStore = create<ModalState>((set) => ({
   relayEventId: null,
   relaySource: null,
   contextTaskId: null,
+  contextTarget: null,
   presentationViewer: null,
   presentationPin: null,
   presentationAttention: {},
@@ -93,7 +98,7 @@ export const useModalStore = create<ModalState>((set) => ({
   closeModal: (name) =>
     set((state) => ({
       modals: { ...state.modals, [name]: false },
-      ...(name === "context" ? { contextTaskId: null } : {}),
+      ...(name === "context" ? { contextTaskId: null, contextTarget: null } : {}),
       ...(name === "settings" ? { settingsTarget: null } : {}),
     })),
 
@@ -118,9 +123,29 @@ export const useModalStore = create<ModalState>((set) => ({
   openContextTask: (taskId) =>
     set((state) => ({
       contextTaskId: String(taskId || "").trim() || null,
+      contextTarget: null,
       modals: { ...state.modals, context: true },
     })),
-  clearContextTask: () => set({ contextTaskId: null }),
+  openContextTarget: (target) =>
+    set((state) => ({
+      contextTaskId: null,
+      contextTarget: {
+        tab:
+          target.tab === "project"
+            ? "project"
+            : target.tab === "log"
+              ? "log"
+              : target.tab === "skills"
+                ? "skills"
+                : target.tab === "tasks"
+                  ? "tasks"
+                : "summary",
+        projectMode: target.projectMode === "edit" ? "edit" : undefined,
+        nonce: Date.now(),
+      },
+      modals: { ...state.modals, context: true },
+    })),
+  clearContextTask: () => set({ contextTaskId: null, contextTarget: null }),
   setPresentationViewer: (viewer) =>
     set((state) => {
       if (!viewer) {

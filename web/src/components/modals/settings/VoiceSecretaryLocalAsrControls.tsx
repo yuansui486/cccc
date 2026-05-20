@@ -186,7 +186,7 @@ export function VoiceSecretaryLocalAsrControls({
 
   return (
     <div className={`mt-4 space-y-4 ${settingsWorkspaceSoftPanelClass(isDark)}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-black/10 bg-black/[0.025] p-3 dark:border-white/10 dark:bg-white/[0.04]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-xs font-semibold text-[var(--color-text-primary)]">

@@ -10,7 +10,6 @@ import { SIDEBAR_COLLAPSED_WIDTH } from "../../stores/useUIStore";
 type AppShellProps = {
   orderedGroups: GroupMeta[];
   archivedGroupIds: string[];
-  groups: GroupMeta[];
   selectedGroupId: string;
   groupDoc: GroupDoc | null;
   groupContext: GroupContext | null;
@@ -18,7 +17,6 @@ type AppShellProps = {
   runtimeActors: Actor[];
   recipientActors: Actor[];
   recipientActorsBusy: boolean;
-  destGroupScopeLabel: string;
   renderedActorIds: string[];
   activeTab: string;
   busy: string;
@@ -44,6 +42,8 @@ type AppShellProps = {
   sseStatus: "connected" | "connecting" | "disconnected";
   groupLabelById: Record<string, string>;
   chatUnreadCount: number;
+  enabledSkillCount: number;
+  activeTaskCount: number;
   mentionSelectedIndex: number;
   showMentionMenu: boolean;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -63,9 +63,12 @@ type AppShellProps = {
   onArchiveGroup: (groupId: string) => void;
   onRestoreGroup: (groupId: string) => void;
   onOpenSidebar: () => void;
-  onOpenGroupEdit: (() => void) | undefined;
+  onOpenGroupEdit: ((groupId?: string) => void) | undefined;
   onOpenSearch: () => void;
   onOpenContext: () => void;
+  onOpenContextProject: () => void;
+  onOpenContextSummary: () => void;
+  onOpenSkillManagement: () => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
   onSetGroupState: (state: "active" | "idle" | "paused") => void;
@@ -92,7 +95,6 @@ type AppShellProps = {
 export function AppShell({
   orderedGroups,
   archivedGroupIds,
-  groups,
   selectedGroupId,
   groupDoc,
   groupContext,
@@ -100,7 +102,6 @@ export function AppShell({
   runtimeActors,
   recipientActors,
   recipientActorsBusy,
-  destGroupScopeLabel,
   renderedActorIds,
   activeTab,
   busy,
@@ -120,6 +121,8 @@ export function AppShell({
   sseStatus,
   groupLabelById,
   chatUnreadCount,
+  enabledSkillCount,
+  activeTaskCount,
   mentionSelectedIndex,
   showMentionMenu,
   composerRef,
@@ -142,6 +145,9 @@ export function AppShell({
   onOpenGroupEdit,
   onOpenSearch,
   onOpenContext,
+  onOpenContextProject,
+  onOpenContextSummary,
+  onOpenSkillManagement,
   onStartGroup,
   onStopGroup,
   onSetGroupState,
@@ -220,11 +226,22 @@ export function AppShell({
         actors={runtimeActors}
         activeTab={activeTab}
         unreadChatCount={chatUnreadCount}
+        theme={theme}
+        textScale={textScale}
+        doneHub={doneHub}
+        groupDoc={groupDoc}
+        activeTaskCount={activeTaskCount}
+        selectedGroupRunning={selectedGroupRunning}
+        selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
+        busy={busy}
+        sseStatus={sseStatus}
         isOpen={sidebarOpen}
         isCollapsed={sidebarCollapsed}
         sidebarWidth={sidebarWidth}
         isDark={isDark}
         readOnly={webReadOnly}
+        onThemeChange={onThemeChange}
+        onTextScaleChange={onTextScaleChange}
         onSelectGroup={onSelectGroup}
         onWarmGroup={onWarmGroup}
         onCreateGroup={onCreateGroup}
@@ -236,6 +253,16 @@ export function AppShell({
         onRestoreGroup={onRestoreGroup}
         onTabChange={onTabChange}
         onAddAgent={onAddAgent}
+        onOpenContext={onOpenContext}
+        onOpenContextProject={onOpenContextProject}
+        onOpenContextSummary={onOpenContextSummary}
+        onOpenSkillManagement={onOpenSkillManagement}
+        onOpenSettings={onOpenSettings}
+        onOpenDoneHubAuth={onOpenDoneHubAuth}
+        onOpenGroupEdit={onOpenGroupEdit}
+        onStartGroup={onStartGroup}
+        onStopGroup={onStopGroup}
+        onSetGroupState={onSetGroupState}
       />
 
       <main
@@ -243,32 +270,34 @@ export function AppShell({
           isDark ? "bg-black/75" : "bg-white/80"
         }`}
       >
-        <AppHeader
-          isDark={isDark}
-          theme={theme}
-          textScale={textScale}
-          onThemeChange={onThemeChange}
-          onTextScaleChange={onTextScaleChange}
-          webReadOnly={webReadOnly}
-          selectedGroupId={selectedGroupId}
-          groupDoc={groupDoc}
-          selectedGroupRunning={selectedGroupRunning}
-          selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
-          actors={actors}
-          sseStatus={sseStatus}
-          busy={busy}
-          doneHub={doneHub}
-          onOpenSidebar={onOpenSidebar}
-          onOpenGroupEdit={onOpenGroupEdit}
-          onOpenSearch={onOpenSearch}
-          onOpenContext={onOpenContext}
-          onStartGroup={onStartGroup}
-          onStopGroup={onStopGroup}
-          onSetGroupState={onSetGroupState}
-          onOpenSettings={onOpenSettings}
-          onOpenDoneHubAuth={onOpenDoneHubAuth}
-          onOpenMobileMenu={onOpenMobileMenu}
-        />
+        <div className="md:hidden">
+          <AppHeader
+            isDark={isDark}
+            theme={theme}
+            textScale={textScale}
+            onThemeChange={onThemeChange}
+            onTextScaleChange={onTextScaleChange}
+            webReadOnly={webReadOnly}
+            selectedGroupId={selectedGroupId}
+            groupDoc={groupDoc}
+            selectedGroupRunning={selectedGroupRunning}
+            selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
+            actors={actors}
+            sseStatus={sseStatus}
+            busy={busy}
+            doneHub={doneHub}
+            onOpenSidebar={onOpenSidebar}
+            onOpenGroupEdit={onOpenGroupEdit}
+            onOpenSearch={onOpenSearch}
+            onOpenContext={onOpenContext}
+            onStartGroup={onStartGroup}
+            onStopGroup={onStopGroup}
+            onSetGroupState={onSetGroupState}
+            onOpenSettings={onOpenSettings}
+            onOpenDoneHubAuth={onOpenDoneHubAuth}
+            onOpenMobileMenu={onOpenMobileMenu}
+          />
+        </div>
 
         <div
           ref={contentRef}
@@ -294,10 +323,8 @@ export function AppShell({
                 selectedGroupActorsHydrating={selectedGroupActorsHydrating}
                 groupLabelById={groupLabelById}
                 actors={actors}
-                groups={groups}
                 recipientActors={recipientActors}
                 recipientActorsBusy={recipientActorsBusy}
-                destGroupScopeLabel={destGroupScopeLabel}
                 scrollRef={eventContainerRef}
                 composerRef={composerRef}
                 fileInputRef={fileInputRef}

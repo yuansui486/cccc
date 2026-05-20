@@ -22,6 +22,7 @@ const STARTUP_RACE_RECONNECT_DELAY_MS = 750;
 
 export function useAgentTerminalConnection(args: {
   activated: boolean;
+  isVisible: boolean;
   isRunning: boolean;
   isHeadless: boolean;
   groupId: string;
@@ -38,6 +39,7 @@ export function useAgentTerminalConnection(args: {
 }) {
   const {
     activated,
+    isVisible,
     isRunning,
     isHeadless,
     groupId,
@@ -115,7 +117,7 @@ export function useAgentTerminalConnection(args: {
   });
 
   useEffect(() => {
-    if (!activated || !isRunning || isHeadless || !terminalRef.current) return;
+    if (!activated || !isVisible || !isRunning || isHeadless || !terminalRef.current) return;
 
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -271,7 +273,7 @@ export function useAgentTerminalConnection(args: {
         wsRef.current = null;
         const noRetry = event.code === 1000 || event.code === 4401 || terminalAttachNoRetryRef.current;
 
-        if (!noRetry && isRunningRef.current && !isHeadless) {
+        if (!noRetry && isVisible && isRunningRef.current && !isHeadless) {
           const startupRace = terminalAttachStartupRaceRef.current;
           const attempt = startupRace ? 0 : reconnectAttemptRef.current;
           if (!startupRace && attempt >= MAX_RECONNECT_ATTEMPTS) {
@@ -361,16 +363,17 @@ export function useAgentTerminalConnection(args: {
     groupId,
     isHeadless,
     isRunning,
+    isVisible,
     terminalConnectionKey,
     terminalRef,
   ]);
 
   useEffect(() => {
-    if (!activated || isHeadless || !isRunning || !terminalRef.current) return;
+    if (!activated || !isVisible || isHeadless || !isRunning || !terminalRef.current) return;
     if (lastTermEpochRef.current === termEpoch) return;
     lastTermEpochRef.current = termEpoch;
     requestReconnect();
-  }, [activated, isHeadless, isRunning, requestReconnect, termEpoch, terminalRef]);
+  }, [activated, isHeadless, isRunning, isVisible, requestReconnect, termEpoch, terminalRef]);
 
   return {
     connectionStatus,

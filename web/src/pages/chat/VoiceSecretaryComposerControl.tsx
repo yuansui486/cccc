@@ -3927,8 +3927,8 @@ export function VoiceSecretaryComposerControl({
                       className={classNames(
                         "inline-flex min-h-[34px] items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60",
                         isDark
-                          ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/10"
-                          : "border-black/10 bg-white text-gray-700 hover:bg-black/5",
+                          ? "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/8"
+                          : "border-black/10 bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(237,237,237)]",
                       )}
                       onClick={() => void setAssistantEnabledForGroup(!assistantEnabled)}
                       disabled={actionBusy === "enable" || !selectedGroupId || recordingInOtherGroup}
@@ -3943,7 +3943,7 @@ export function VoiceSecretaryComposerControl({
                         className={classNames(
                           "relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
                           assistantEnabled
-                            ? isDark ? "bg-white" : "bg-[rgb(35,36,37)]"
+                            ? isDark ? "bg-blue-400" : "bg-blue-600"
                             : isDark ? "bg-white/15" : "bg-gray-300",
                         )}
                       >
@@ -3986,43 +3986,43 @@ export function VoiceSecretaryComposerControl({
                     ) : null}
                   </div>
                 </div>
-                {onCaptureModeChange ? (
-                  <div
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 self-end">
+                  {onCaptureModeChange ? (
+                    <div
                     className={classNames(
-                      "inline-flex min-h-[38px] w-full items-center rounded-full border p-0.5 sm:w-auto lg:justify-self-center",
+                      "inline-flex min-h-[38px] items-center rounded-full border p-0.5",
                       isDark ? "border-white/10 bg-white/[0.04]" : "border-black/10 bg-white",
-                    )}
-                    role="group"
-                    aria-label={t("voiceSecretaryModeSelector", { defaultValue: "Voice Secretary capture mode" })}
-                  >
-                    {assistantRowModeOptions.map((option) => {
-                      const active = option.key === captureMode;
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          className={classNames(
-                            "min-w-0 flex-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none",
-                            active
-                              ? isDark
-                                ? "bg-white text-slate-950 shadow-sm"
-                                : "bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)]"
-                              : isDark
-                                ? "text-slate-300 hover:bg-white/10 hover:text-white"
-                                : "text-gray-600 hover:bg-black/5 hover:text-gray-900",
-                          )}
-                          onClick={() => handleAssistantRowModeChange(option.key)}
-                          disabled={recording || controlDisabled}
-                          aria-pressed={active}
-                          title={modeChangeDisabledReason || option.description}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-start lg:justify-end">
+                      )}
+                      role="group"
+                      aria-label={t("voiceSecretaryModeSelector", { defaultValue: "Voice Secretary capture mode" })}
+                    >
+                      {assistantRowModeOptions.map((option) => {
+                        const active = option.key === captureMode;
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            className={classNames(
+                              "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45",
+                              active
+                                ? isDark
+                                  ? "bg-white/10 text-slate-100 shadow-sm"
+                                  : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)] shadow-none"
+                                : isDark
+                                  ? "text-slate-300 hover:bg-white/10 hover:text-white"
+                                  : "text-gray-600 hover:bg-black/5 hover:text-gray-900",
+                            )}
+                            onClick={() => handleAssistantRowModeChange(option.key)}
+                            disabled={recording || controlDisabled}
+                            aria-pressed={active}
+                            title={modeChangeDisabledReason || option.description}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                   {assistantEnabled ? (
                     <>
                       <label className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 text-[11px] font-semibold text-[var(--color-text-secondary)] sm:inline-flex">
@@ -4315,8 +4315,8 @@ export function VoiceSecretaryComposerControl({
                     className={classNames(
                       "mt-3 w-full rounded-2xl border px-3 py-2.5 text-xs font-semibold transition-colors disabled:opacity-60",
                       isDark
-                        ? "border-white bg-white text-[rgb(20,20,22)] hover:bg-white/90"
-                        : "border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] text-[var(--color-text-inverse)] shadow-[var(--glass-accent-shadow)] hover:brightness-110",
+                        ? "border-blue-400 bg-blue-500 text-white hover:border-blue-300 hover:bg-blue-400"
+                        : "border-blue-600 bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:border-blue-700 hover:bg-blue-700",
                     )}
                     onClick={() => void sendPanelRequest()}
                     disabled={!!actionBusy || !documentInstruction.trim()}
@@ -4662,7 +4662,9 @@ export function VoiceSecretaryComposerControl({
                 ? isDark
                   ? "border-rose-400/30 bg-rose-500/10"
                   : "border-rose-200 bg-rose-50/70"
-                : "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)]",
+                : isDark
+                  ? "border-white/10 bg-white/[0.04]"
+                  : "border-black/5 bg-[rgb(245,245,245)]",
             )}
             role="group"
             aria-label={t("voiceSecretaryTitle", { defaultValue: "Voice Secretary" })}
@@ -4679,7 +4681,7 @@ export function VoiceSecretaryComposerControl({
                     ? "text-[var(--color-text-tertiary)]"
                     : isDark
                       ? "text-[var(--color-text-secondary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-                      : "text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-gray-900",
+                      : "text-[var(--color-text-secondary)] hover:bg-[rgb(237,237,237)] hover:text-gray-900",
                 !controlDisabled && !actionBusy && "active:scale-[0.96]",
               )}
               onClick={(event) => void handleAssistantRowRecordClick(event)}
@@ -4703,7 +4705,7 @@ export function VoiceSecretaryComposerControl({
                       "inline-flex h-11 min-w-0 shrink items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:shrink-0",
                       isDark
                         ? "text-[var(--color-text-secondary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-                        : "text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-gray-900",
+                        : "text-[var(--color-text-secondary)] hover:bg-[rgb(237,237,237)] hover:text-gray-900",
                     )}
                     disabled={controlDisabled || recording}
                     title={modeChangeDisabledReason || `${t("voiceSecretaryModeSelector", { defaultValue: "Voice Secretary capture mode" })}: ${assistantRowCurrentMode.label}`}
@@ -4733,10 +4735,10 @@ export function VoiceSecretaryComposerControl({
                             active
                               ? isDark
                                 ? "bg-white/10"
-                                : "bg-black/5"
+                                : "bg-[rgb(237,237,237)]"
                               : isDark
                                 ? "hover:bg-white/5"
-                                : "hover:bg-black/5",
+                                : "hover:bg-[rgb(237,237,237)]",
                           )}
                           role="menuitemradio"
                           aria-checked={active}
@@ -4800,7 +4802,7 @@ export function VoiceSecretaryComposerControl({
                       : "bg-amber-50 text-amber-800"
                     : isDark
                       ? "text-[var(--color-text-secondary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-                      : "text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-gray-900",
+                      : "text-[var(--color-text-secondary)] hover:bg-[rgb(237,237,237)] hover:text-gray-900",
                   !controlDisabled && !actionBusy && canOptimizeComposerPrompt && "active:scale-[0.96]",
                 )}
                 onClick={(event) => handlePromptOptimizeClick(event)}
@@ -4819,7 +4821,7 @@ export function VoiceSecretaryComposerControl({
                     "inline-flex h-11 shrink-0 items-center justify-center rounded-md px-1.5 text-[10px] font-bold tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:h-8",
                     isDark
                       ? "text-[var(--color-text-secondary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-                      : "text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-gray-900",
+                      : "text-[var(--color-text-secondary)] hover:bg-[rgb(237,237,237)] hover:text-gray-900",
                   )}
                   disabled={controlDisabled || !assistantEnabled || recording || recognitionLanguageSaving}
                   title={recording ? recordingSettingsLockedTitle : `${t("voiceSecretaryLanguage", { defaultValue: "Language" })}: ${configuredRecognitionLanguageLabel}`}
@@ -4848,10 +4850,10 @@ export function VoiceSecretaryComposerControl({
                           active
                             ? isDark
                               ? "bg-white/10"
-                              : "bg-black/5"
+                              : "bg-[rgb(237,237,237)]"
                             : isDark
                               ? "hover:bg-white/5"
-                              : "hover:bg-black/5",
+                              : "hover:bg-[rgb(237,237,237)]",
                         )}
                         role="menuitemradio"
                         aria-checked={active}
@@ -4888,10 +4890,10 @@ export function VoiceSecretaryComposerControl({
                 open
                   ? isDark
                     ? "bg-white/10 text-[var(--color-text-primary)]"
-                    : "bg-black/5 text-gray-900"
+                    : "bg-[rgb(237,237,237)] text-gray-900"
                   : isDark
                     ? "text-[var(--color-text-secondary)] hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-                    : "text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-gray-900",
+                    : "text-[var(--color-text-secondary)] hover:bg-[rgb(237,237,237)] hover:text-gray-900",
                 !controlDisabled && "active:scale-[0.96]",
               )}
               onClick={() => {

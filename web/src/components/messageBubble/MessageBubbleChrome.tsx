@@ -14,6 +14,8 @@ export function MessageMetadataHeader({
   fullMessageTimestamp,
   senderAvatarUrl,
   senderRuntime,
+  senderCommand,
+  senderEnv,
   avatarRingClassName,
 }: {
   mobile?: boolean;
@@ -25,6 +27,8 @@ export function MessageMetadataHeader({
   fullMessageTimestamp: string;
   senderAvatarUrl?: string;
   senderRuntime?: string;
+  senderCommand?: string | string[];
+  senderEnv?: Record<string, string> | null;
   avatarRingClassName?: string;
 }) {
   const senderTextClass = isUserMessage
@@ -48,6 +52,8 @@ export function MessageMetadataHeader({
         <ActorAvatar
           avatarUrl={senderAvatarUrl}
           runtime={senderRuntime}
+          command={senderCommand}
+          env={senderEnv}
           title={senderDisplayName}
           isUser={isUserMessage}
           isDark={isDark}

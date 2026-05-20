@@ -88,7 +88,7 @@ const sectionItems: Array<{
 ];
 
 function statusBadgeClass(kind: "neutral" | "good" | "warn" | "danger") {
-  if (kind === "good") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  if (kind === "good") return "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300";
   if (kind === "warn") return "border-amber-500/28 bg-amber-500/12 text-amber-700 dark:text-amber-300";
   if (kind === "danger") return "border-rose-500/28 bg-rose-500/12 text-rose-700 dark:text-rose-300";
   return "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]";
@@ -1201,7 +1201,7 @@ function BlockCapabilityButton({ blocked, busy, compact, onClick }: { blocked: b
             type="button"
             className={`inline-flex items-center justify-center rounded-lg border text-xs ${compact ? "h-10 w-10" : "h-8 w-8"} ${
               blocked
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
                 : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
             } ${busy ? "cursor-not-allowed opacity-60" : ""}`}
             disabled={busy}

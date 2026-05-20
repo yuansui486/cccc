@@ -40,7 +40,7 @@ import { settingsDialogBodyClass, settingsDialogPanelClass } from "../modals/set
 import { parseHelpMarkdown, updatePetHelpNote } from "../../utils/helpMarkdown";
 import { AgentsView } from "./agents/AgentsView";
 import { ProjectPanel } from "./coordination/ProjectPanel";
-import { SteeringPanel } from "./coordination/SteeringPanel";
+import { SteeringActivityCard, SteeringPanel, SteeringSummaryCard } from "./coordination/SteeringPanel";
 import { TaskBoard } from "./coordination/TaskBoard";
 import { TaskEditorPanel } from "./coordination/TaskEditorPanel";
 import { DesktopPetView } from "./desktopPet/DesktopPetView";
@@ -73,6 +73,8 @@ import {
 } from "./model";
 import { createContextModalUi } from "./ui";
 
+type ContextInitialTab = SteeringTab | ContextModalView;
+
 interface ContextModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -84,6 +86,8 @@ interface ContextModalProps {
   settings?: GroupSettings | null;
   onUpdateSettings?: (settings: Partial<GroupSettings>) => Promise<boolean | void>;
   initialTaskId?: string | null;
+  initialTab?: ContextInitialTab | null;
+  initialProjectMode?: "view" | "edit" | null;
   onInitialTaskHandled?: () => void;
 }
 
@@ -98,6 +102,8 @@ export function ContextModal({
   settings,
   onUpdateSettings,
   initialTaskId,
+  initialTab,
+  initialProjectMode,
   onInitialTaskHandled,
 }: ContextModalProps) {
   const { t } = useTranslation("modals");
@@ -130,6 +136,9 @@ export function ContextModal({
   const [editingProject, setEditingProject] = useState(false);
   const [projectText, setProjectText] = useState("");
   const [projectExpanded, setProjectExpanded] = useState(false);
+  const [directProjectEditorActive, setDirectProjectEditorActive] = useState(false);
+  const [directSkillsViewActive, setDirectSkillsViewActive] = useState(false);
+  const [directTaskExecutionActive, setDirectTaskExecutionActive] = useState(false);
   const [notifyAgents, setNotifyAgents] = useState(false);
   const [notifyError, setNotifyError] = useState("");
 
@@ -327,6 +336,9 @@ export function ContextModal({
     setEditingProject(false);
     setProjectText("");
     setProjectExpanded(false);
+    setDirectProjectEditorActive(false);
+    setDirectSkillsViewActive(false);
+    setDirectTaskExecutionActive(false);
     setPetHelpPrompt(null);
     setPetPersonaDraft("");
     setPetPersonaBusy(false);
@@ -357,6 +369,24 @@ export function ContextModal({
     setTaskEditorMode("edit");
     onInitialTaskHandled?.();
   }, [initialTaskId, isOpen, onInitialTaskHandled]);
+
+  useEffect(() => {
+    if (!isOpen || !initialTab || initialTaskId || (initialTab === "project" && initialProjectMode === "edit")) return;
+    if (initialTab === "skills") {
+      setActiveView("skills");
+      setDirectSkillsViewActive(true);
+    } else if (initialTab === "tasks") {
+      setActiveView("tasks");
+      setDirectTaskExecutionActive(true);
+    } else if (initialTab === "agents" || initialTab === "desktop_pet") {
+      setActiveView(initialTab);
+    } else {
+      setActiveView("coordination");
+      setSteeringTab(initialTab === "project" ? "project" : initialTab === "log" ? "log" : "summary");
+      if (initialTab === "project") void loadProjectMd();
+    }
+    onInitialTaskHandled?.();
+  }, [initialProjectMode, initialTab, initialTaskId, isOpen, loadProjectMd, onInitialTaskHandled]);
 
   const applyContextWriteback = useCallback(
     async <T,>(response: ApiResponse<T>) =>
@@ -868,6 +898,15 @@ export function ContextModal({
     setEditingProject(true);
   }, [loadProjectMd, openSteeringTab]);
 
+  useEffect(() => {
+    if (!isOpen || initialTaskId || initialTab !== "project" || initialProjectMode !== "edit") return;
+    setActiveView("coordination");
+    setDirectProjectEditorActive(true);
+    setProjectExpanded(true);
+    void handleEditProject();
+    onInitialTaskHandled?.();
+  }, [handleEditProject, initialProjectMode, initialTab, initialTaskId, isOpen, onInitialTaskHandled]);
+
   const handleSaveProject = useCallback(async () => {
     if (!groupId) return;
     setProjectBusy(true);
@@ -979,6 +1018,45 @@ export function ContextModal({
     />
   );
 
+  const taskBoardPanel = (
+    <TaskBoard
+      tr={tr}
+      ui={ui}
+      syncBusy={syncBusy}
+      taskQuery={taskQuery}
+      assigneeFilter={assigneeFilter}
+      assigneeOptions={assigneeOptions}
+      taskFilter={taskFilter}
+      tasksSummary={tasksSummary}
+      attentionCounts={attentionCounts}
+      unassignedCount={unassignedCount}
+      hasArchivedTasks={hasArchivedTasks}
+      archivedExpanded={archivedExpanded}
+      hasVisibleTasks={hasVisibleTasks}
+      hiddenArchivedMatches={hiddenArchivedMatches}
+      filteredBoard={filteredBoard}
+      taskMap={taskMap}
+      selectedTaskId={selectedTaskId}
+      dragTaskId={dragTaskId}
+      sensors={sensors}
+      onTaskQueryChange={setTaskQuery}
+      onAssigneeFilterChange={setAssigneeFilter}
+      onTaskFilterChange={setTaskFilter}
+      onClearFilters={() => {
+        setTaskQuery("");
+        setTaskFilter("all");
+        setAssigneeFilter("__all__");
+      }}
+      onArchivedExpandedChange={setArchivedExpanded}
+      onOpenCreate={handleOpenCreate}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setDragTaskId("")}
+      onSelectTask={selectTask}
+      onMoveTaskToStatus={(task, nextStatus) => void moveTaskToStatus(task, nextStatus)}
+    />
+  );
+
   if (!isOpen) return null;
 
   const viewButtonClass = (active: boolean) => classNames(
@@ -990,6 +1068,7 @@ export function ContextModal({
 
   return (
     <>
+      {!directProjectEditorActive && !directSkillsViewActive && !directTaskExecutionActive ? (
       <ModalFrame
         isDark={isDark}
         onClose={handleModalClose}
@@ -1043,42 +1122,7 @@ export function ContextModal({
                   onAddCoordinationNote={(kind) => void handleAddCoordinationNote(kind)}
                 />
 
-                <TaskBoard
-                  tr={tr}
-                  ui={ui}
-                  syncBusy={syncBusy}
-                  taskQuery={taskQuery}
-                  assigneeFilter={assigneeFilter}
-                  assigneeOptions={assigneeOptions}
-                  taskFilter={taskFilter}
-                  tasksSummary={tasksSummary}
-                  attentionCounts={attentionCounts}
-                  unassignedCount={unassignedCount}
-                  hasArchivedTasks={hasArchivedTasks}
-                  archivedExpanded={archivedExpanded}
-                  hasVisibleTasks={hasVisibleTasks}
-                  hiddenArchivedMatches={hiddenArchivedMatches}
-                  filteredBoard={filteredBoard}
-                  taskMap={taskMap}
-                  selectedTaskId={selectedTaskId}
-                  dragTaskId={dragTaskId}
-                  sensors={sensors}
-                  onTaskQueryChange={setTaskQuery}
-                  onAssigneeFilterChange={setAssigneeFilter}
-                  onTaskFilterChange={setTaskFilter}
-                  onClearFilters={() => {
-                    setTaskQuery("");
-                    setTaskFilter("all");
-                    setAssigneeFilter("__all__");
-                  }}
-                  onArchivedExpandedChange={setArchivedExpanded}
-                  onOpenCreate={handleOpenCreate}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                  onDragCancel={() => setDragTaskId("")}
-                  onSelectTask={selectTask}
-                  onMoveTaskToStatus={(task, nextStatus) => void moveTaskToStatus(task, nextStatus)}
-                />
+                {taskBoardPanel}
               </div>
             ) : activeView === "agents" ? (
               <AgentsView agents={agents} tr={tr} ui={ui} />
@@ -1107,6 +1151,100 @@ export function ContextModal({
           </div>
         </div>
       </ModalFrame>
+      ) : null}
+
+      {directSkillsViewActive && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[70] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  handleModalClose();
+                }
+              }}
+            >
+              <div className="absolute inset-0 glass-overlay" onPointerDown={handleModalClose} />
+              <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
+                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                  <button
+                    type="button"
+                    className={ui.buttonSecondaryClass}
+                    onClick={handleModalClose}
+                  >
+                    {tr("common:close", "Close")}
+                  </button>
+                </div>
+                <div className={settingsDialogBodyClass}>
+                  <SkillsView groupId={groupId} agents={agents} tr={tr} ui={ui} />
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {directTaskExecutionActive && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[70] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  handleModalClose();
+                }
+              }}
+            >
+              <div className="absolute inset-0 glass-overlay" onPointerDown={handleModalClose} />
+              <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
+                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                  <button
+                    type="button"
+                    className={ui.buttonSecondaryClass}
+                    onClick={handleModalClose}
+                  >
+                    {tr("common:close", "Close")}
+                  </button>
+                </div>
+                <div className={settingsDialogBodyClass}>
+                  <div className="space-y-4">
+                    {syncError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{syncError}</div> : null}
+                    <SteeringSummaryCard
+                      tr={tr}
+                      ui={ui}
+                      brief={brief}
+                      editingBrief={editingBrief}
+                      briefDraft={briefDraft}
+                      syncBusy={syncBusy}
+                      onStartBriefEdit={startBriefEdit}
+                      onCancelBriefEdit={cancelBriefEdit}
+                      onSaveBrief={() => void handleSaveBrief()}
+                      onBriefDraftChange={(updater) => setBriefDraft((prev) => updater(prev))}
+                    />
+                    <SteeringActivityCard
+                      tr={tr}
+                      ui={ui}
+                      activityBusyKind={activityBusyKind}
+                      activityError={activityError}
+                      recentDecisions={recentDecisions}
+                      recentHandoffs={recentHandoffs}
+                      decisionDraft={decisionDraft}
+                      handoffDraft={handoffDraft}
+                      activeTaskOptions={activeTaskOptions}
+                      onDecisionDraftChange={(updater) => setDecisionDraft((prev) => updater(prev))}
+                      onHandoffDraftChange={(updater) => setHandoffDraft((prev) => updater(prev))}
+                      onAddCoordinationNote={(kind) => void handleAddCoordinationNote(kind)}
+                    />
+                    {taskBoardPanel}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       {taskEditorVisible && typeof document !== "undefined"
         ? createPortal(
@@ -1156,26 +1294,41 @@ export function ContextModal({
           )
         : null}
 
-      {projectExpanded && typeof document !== "undefined"
+      {(projectExpanded || directProjectEditorActive) && typeof document !== "undefined"
         ? createPortal(
             <div
               className="fixed inset-0 z-[70] animate-fade-in"
               role="dialog"
               aria-modal="true"
               onPointerDown={(event) => {
-                if (event.target === event.currentTarget) setProjectExpanded(false);
+                if (event.target === event.currentTarget) {
+                  if (directProjectEditorActive) {
+                    handleModalClose();
+                  } else {
+                    setProjectExpanded(false);
+                  }
+                }
               }}
             >
-              <div className="absolute inset-0 glass-overlay" />
+              <div
+                className="absolute inset-0 glass-overlay"
+                onPointerDown={directProjectEditorActive ? handleModalClose : () => setProjectExpanded(false)}
+              />
               <div ref={projectExpandedRef} className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
-                  <button type="button" className={ui.buttonSecondaryClass} onClick={() => setProjectExpanded(false)}>
+                  <button
+                    type="button"
+                    className={ui.buttonSecondaryClass}
+                    onClick={directProjectEditorActive ? handleModalClose : () => setProjectExpanded(false)}
+                  >
                     {tr("common:close", "Close")}
                   </button>
                 </div>
                 <div className={settingsDialogBodyClass}>
                   <ProjectPanel
                     expanded
+                    cardShell={directProjectEditorActive}
+                    hideExpandToggle={directProjectEditorActive}
                     isDark={isDark}
                     tr={tr}
                     ui={ui}

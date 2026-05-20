@@ -513,8 +513,8 @@ export function HeadlessLiveTrace({
                         "block rounded-full",
                         density === "expanded" ? "h-3 w-3" : "h-2.5 w-2.5",
                         group.entry.streamPhase === "final_answer"
-                          ? (group.entry.live ? (isDark ? "bg-white" : "bg-[rgb(35,36,37)]") : (isDark ? "bg-white/55" : "bg-[rgb(35,36,37)]/55"))
-                          : (group.entry.live ? (isDark ? "bg-white" : "bg-[rgb(35,36,37)]") : (isDark ? "bg-white/30" : "bg-slate-400"))
+                          ? (group.entry.live ? "bg-blue-500" : (isDark ? "bg-blue-300/55" : "bg-blue-600/55"))
+                          : (group.entry.live ? "bg-blue-500" : (isDark ? "bg-white/30" : "bg-slate-400"))
                       )}
                     />
                   </div>
@@ -566,7 +566,7 @@ export function HeadlessLiveTrace({
                     <span className={classNames(
                       "block rounded-full",
                       density === "expanded" ? "h-3 w-3" : "h-2.5 w-2.5",
-                      group.live ? (isDark ? "bg-white" : "bg-[rgb(35,36,37)]") : (isDark ? "bg-white/20" : "bg-slate-400")
+                      group.live ? "bg-blue-500" : (isDark ? "bg-white/20" : "bg-slate-400")
                     )} />
                   </div>
                   <div className={getActivityBandClassName(density)}>

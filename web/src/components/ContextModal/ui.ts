@@ -54,7 +54,7 @@ export function createContextModalUi(isDark: boolean): ContextModalUi {
     switchTrackClass: (active: boolean) => classNames(
       "relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
       active
-        ? (isDark ? "border-white/16 bg-white/18" : "border-[var(--glass-accent-border)] bg-[var(--color-accent-primary)]")
+        ? (isDark ? "border-blue-400/60 bg-blue-500" : "border-blue-600 bg-blue-600")
         : (isDark ? "border-slate-700 bg-slate-900" : "border-gray-300 bg-gray-200")
     ),
     switchThumbClass: (active: boolean) => classNames(

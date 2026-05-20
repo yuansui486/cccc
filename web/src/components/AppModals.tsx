@@ -180,6 +180,8 @@ export function AppModals({
     clearContextTask,
   } = useModalStore();
   const contextTaskId = useModalStore((state) => state.contextTaskId);
+  const contextTarget = useModalStore((state) => state.contextTarget);
+  const settingsTarget = useModalStore((state) => state.settingsTarget);
 
   const { inboxActorId, inboxMessages, setInboxMessages } = useInboxStore();
   const setQuotedPresentationRef = useComposerStore((state) => state.setQuotedPresentationRef);
@@ -190,8 +192,10 @@ export function AppModals({
     : "modal";
 
   const {
+    editGroupId,
     editGroupTitle,
     editGroupTopic,
+    setEditGroupId,
     setEditGroupTitle,
     setEditGroupTopic,
     editActorRuntime,
@@ -573,38 +577,47 @@ export function AppModals({
   };
 
   const handleSaveGroupEdit = async () => {
-    if (!selectedGroupId) return;
+    const targetGroupId = String(editGroupId || selectedGroupId || "").trim();
+    if (!targetGroupId) return;
     setBusy("group-update");
     try {
-      const resp = await api.updateGroup(selectedGroupId, editGroupTitle, editGroupTopic);
+      const resp = await api.updateGroup(targetGroupId, editGroupTitle, editGroupTopic);
       if (!resp.ok) {
         showError(`${resp.error.code}: ${resp.error.message}`);
         return;
       }
       closeModal("groupEdit");
+      setEditGroupId("");
       await refreshGroups();
-      await loadGroup(selectedGroupId);
+      if (targetGroupId === selectedGroupId) await loadGroup(selectedGroupId);
     } finally {
       setBusy("");
     }
   };
 
   const handleDeleteGroup = async () => {
-    if (!selectedGroupId) return;
-    if (!window.confirm(t('deleteGroupConfirm', { name: groupDoc?.title || selectedGroupId }))) return;
+    const targetGroupId = String(editGroupId || selectedGroupId || "").trim();
+    const targetGroup = groups.find((g) => String(g.group_id || "").trim() === targetGroupId);
+    const targetTitle = targetGroupId === selectedGroupId ? groupDoc?.title : targetGroup?.title;
+    if (!targetGroupId) return;
+    if (!window.confirm(t('deleteGroupConfirm', { name: targetTitle || targetGroupId }))) return;
     setBusy("group-delete");
     try {
-      const resp = await api.deleteGroup(selectedGroupId);
+      const resp = await api.deleteGroup(targetGroupId);
       if (!resp.ok) {
         showError(`${resp.error.code}: ${resp.error.message}`);
         return;
       }
-      setSelectedGroupId("");
-      setGroupDoc(null);
-      useGroupStore.getState().setEvents([]);
-      useGroupStore.getState().setActors([]);
-      setGroupContext(null);
-      setGroupSettings(null);
+      if (targetGroupId === selectedGroupId) {
+        setSelectedGroupId("");
+        setGroupDoc(null);
+        useGroupStore.getState().setEvents([]);
+        useGroupStore.getState().setActors([]);
+        setGroupContext(null);
+        setGroupSettings(null);
+      }
+      closeModal("groupEdit");
+      setEditGroupId("");
       await refreshGroups();
     } finally {
       setBusy("");
@@ -1610,6 +1623,7 @@ export function AppModals({
         onOpenDoneHubAuth={() => openModal("doneHubAuth")}
         onOpenGroupEdit={canManageGroups ? () => {
           if (groupDoc) {
+            setEditGroupId(selectedGroupId || groupDoc.group_id || "");
             setEditGroupTitle(groupDoc.title || "");
             setEditGroupTopic(groupDoc.topic || "");
             openModal("groupEdit");
@@ -1735,6 +1749,8 @@ export function AppModals({
             groupId={selectedGroupId}
             context={groupContext}
             initialTaskId={contextTaskId}
+            initialTab={contextTarget?.tab || null}
+            initialProjectMode={contextTarget?.projectMode || null}
             onInitialTaskHandled={clearContextTask}
             onOpenContext={() => openContextModalData(fetchContext, selectedGroupId)}
             onSyncContext={() => syncContextModalData(fetchContext, selectedGroupId)}
@@ -1755,6 +1771,7 @@ export function AppModals({
             isDark={isDark}
             groupId={selectedGroupId}
             groupDoc={groupDoc}
+            initialTarget={settingsTarget}
           />
         </Suspense>
       ) : null}
@@ -1781,10 +1798,11 @@ export function AppModals({
       <GroupEditModal
         isOpen={modals.groupEdit}
         busy={busy}
-        groupId={selectedGroupId || groupDoc?.group_id || ""}
+        groupId={editGroupId || selectedGroupId || groupDoc?.group_id || ""}
         ccccHome={ccccHome}
         projectRoot={
           (() => {
+            if (editGroupId && editGroupId !== selectedGroupId) return "";
             const key = String(groupDoc?.active_scope_key || "").trim();
             const scopes = Array.isArray(groupDoc?.scopes) ? groupDoc?.scopes : [];
             const active = scopes.find((s) => String(s?.scope_key || "").trim() === key);
@@ -1797,7 +1815,10 @@ export function AppModals({
         onChangeTitle={setEditGroupTitle}
         onChangeTopic={setEditGroupTopic}
         onSave={handleSaveGroupEdit}
-        onCancel={() => closeModal("groupEdit")}
+        onCancel={() => {
+          setEditGroupId("");
+          closeModal("groupEdit");
+        }}
         onDelete={handleDeleteGroup}
       />
 
