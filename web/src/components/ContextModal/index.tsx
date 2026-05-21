@@ -1175,7 +1175,7 @@ export function ContextModal({
               <div className="absolute inset-0 glass-overlay" onPointerDown={handleModalClose} />
               <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
                 <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--glass-border-subtle)] px-3 py-3 sm:px-5 sm:py-4">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <h2 className="text-base font-semibold text-[var(--color-text-primary)] sm:text-lg">
                       {tr("context.skillsTitle", "技能")}
                     </h2>
@@ -1223,7 +1223,7 @@ export function ContextModal({
                     {tr("common:close", "Close")}
                   </button>
                 </div>
-                <div className={settingsDialogBodyClass}>
+                <div className={classNames(settingsDialogBodyClass, "pt-0 sm:pt-1 lg:pt-2")}>
                   <div className="space-y-4">
                     {syncError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{syncError}</div> : null}
                     <SteeringSummaryCard
@@ -1330,7 +1330,15 @@ export function ContextModal({
                 onPointerDown={directProjectEditorActive ? handleModalClose : () => setProjectExpanded(false)}
               />
               <div ref={projectExpandedRef} className={settingsDialogPanelClass("xl")}>
-                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--glass-border-subtle)] px-3 py-3 sm:px-5 sm:py-4">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-[var(--color-text-primary)] sm:text-lg">
+                      {tr("layout:teamGoal", "设置目标")}
+                    </h2>
+                    <p className="mt-1 text-xs text-[var(--color-text-muted)] sm:text-sm">
+                      {tr("context.projectOverview", "编辑团队目标、任务执行和分工协作。")}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     className={ui.buttonSecondaryClass}
@@ -1339,17 +1347,15 @@ export function ContextModal({
                     {tr("common:close", "Close")}
                   </button>
                 </div>
-                <div className={settingsDialogBodyClass}>
+                <div className={classNames(settingsDialogBodyClass, "pt-3 sm:pt-4 lg:pt-4")}>
                   <div className="space-y-4">
                     {directProjectEditorActive ? (
-                      <div className="flex flex-wrap gap-2 px-1 pb-1">
-                        <button type="button" className={directSectionTabClass(directProjectSection === "teamGoal")} onClick={() => setDirectProjectSection("teamGoal")}>{tr("context.teamGoal", "团队目标")}</button>
-                        <button type="button" className={directSectionTabClass(directProjectSection === "taskExecution")} onClick={() => setDirectProjectSection("taskExecution")}>{tr("context.taskExecution", "任务执行")}</button>
-                        <button type="button" className={directSectionTabClass(directProjectSection === "collaboration")} onClick={() => setDirectProjectSection("collaboration")}>{tr("context.collaboration", "分工协作")}</button>
-                      </div>
-                    ) : null}
-                    {directProjectEditorActive ? (
                       <>
+                        <div className="flex flex-wrap gap-2 px-1">
+                          <button type="button" className={directSectionTabClass(directProjectSection === "teamGoal")} onClick={() => setDirectProjectSection("teamGoal")}>{tr("context.teamGoal", "团队目标")}</button>
+                          <button type="button" className={directSectionTabClass(directProjectSection === "taskExecution")} onClick={() => setDirectProjectSection("taskExecution")}>{tr("context.taskExecution", "任务执行")}</button>
+                          <button type="button" className={directSectionTabClass(directProjectSection === "collaboration")} onClick={() => setDirectProjectSection("collaboration")}>{tr("context.collaboration", "分工协作")}</button>
+                        </div>
                         {directProjectSection === "teamGoal" ? (
                           <div className="space-y-4">
                             <ProjectPanel

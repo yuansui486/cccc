@@ -407,20 +407,65 @@ export function ChatTab({
     return (
       <div
         className={classNames(
-          "inline-flex max-w-full items-center gap-1 rounded-full border backdrop-blur-xl transition-all duration-300",
-          compact ? "p-1" : "p-1.5 shadow-xl",
+          "relative isolate inline-flex max-w-full items-center gap-1 overflow-hidden rounded-full border backdrop-blur-2xl transition-all duration-300",
+          compact ? "p-1" : "p-1.5 shadow-[0_22px_54px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.38),inset_0_-1px_0_rgba(15,23,42,0.09)]",
           isDark
             ? compact
-              ? "border-slate-700/50 bg-slate-950/35"
-              : "border-white/10 bg-slate-900/60 shadow-black/40 ring-1 ring-white/5"
+              ? "border-transparent bg-slate-950/24 shadow-[0_16px_42px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.08),inset_0_-1px_0_rgba(0,0,0,0.40)]"
+              : "border-transparent bg-slate-950/28 shadow-[0_22px_54px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08),inset_0_-1px_0_rgba(0,0,0,0.42)]"
             : compact
-              ? "border-gray-200/70 bg-white/72"
-              : "border-black/5 bg-white/70 shadow-gray-200/50 ring-1 ring-black/5"
+              ? "border-transparent bg-white/30 shadow-[0_16px_42px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.30),inset_0_-1px_0_rgba(15,23,42,0.09)]"
+              : "border-transparent bg-white/28 shadow-[0_22px_54px_rgba(15,23,42,0.13),inset_0_1px_0_rgba(255,255,255,0.30),inset_0_-1px_0_rgba(15,23,42,0.10)]"
         )}
       >
+        <span
+          aria-hidden="true"
+          className={classNames(
+            "pointer-events-none absolute inset-px rounded-full border opacity-75",
+            isDark
+              ? "border-transparent bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015)_42%,rgba(255,255,255,0)_80%)]"
+              : "border-transparent bg-[linear-gradient(180deg,rgba(255,255,255,0.16),rgba(255,255,255,0.05)_46%,rgba(255,255,255,0)_84%)]"
+          )}
+        />
+        <span
+          aria-hidden="true"
+          className={classNames(
+            "pointer-events-none absolute inset-x-3 top-0 h-[68%] rounded-full opacity-70 blur-[1px]",
+            isDark
+              ? "bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.04)_44%,transparent_82%)]"
+              : "bg-[linear-gradient(180deg,rgba(255,255,255,0.52),rgba(255,255,255,0.16)_46%,transparent_84%)]"
+          )}
+        />
+        <span
+          aria-hidden="true"
+          className={classNames(
+            "pointer-events-none absolute inset-x-1 bottom-0 h-[70%] rounded-full opacity-65 blur-[0.5px]",
+            isDark
+              ? "bg-[linear-gradient(0deg,rgba(0,0,0,0.24),transparent_70%)]"
+              : "bg-[linear-gradient(0deg,rgba(15,23,42,0.09),transparent_72%)]"
+          )}
+        />
+        <span
+          aria-hidden="true"
+          className={classNames(
+            "pointer-events-none absolute inset-y-1 left-0 w-6 rounded-full opacity-70 blur-[0.5px]",
+            isDark
+              ? "bg-[linear-gradient(90deg,rgba(255,255,255,0.08),transparent_78%)]"
+              : "bg-[linear-gradient(90deg,rgba(255,255,255,0.18),transparent_84%)]"
+          )}
+        />
+        <span
+          aria-hidden="true"
+          className={classNames(
+            "pointer-events-none absolute inset-y-1 right-0 w-6 rounded-full opacity-70 blur-[0.5px]",
+            isDark
+              ? "bg-[linear-gradient(270deg,rgba(0,0,0,0.12),transparent_78%)]"
+              : "bg-[linear-gradient(270deg,rgba(15,23,42,0.06),transparent_84%)]"
+          )}
+        />
         {showMessageFilters ? (
           <div
-            className="min-w-0 overflow-x-auto scrollbar-hide"
+            className="relative z-10 min-w-0 overflow-x-auto scrollbar-hide"
             role="tablist"
             aria-label={t('chatFilters')}
           >
@@ -432,13 +477,13 @@ export function ChatTab({
                     key={key}
                     type="button"
                     className={classNames(
-                      "min-w-0 rounded-full font-medium transition-all whitespace-nowrap",
+                      "min-w-0 rounded-full font-medium transition-all whitespace-nowrap overflow-hidden",
                       compact ? "px-3 py-1.5 text-[11px]" : "px-4 py-1.5 text-xs",
                       active
-                        ? "bg-blue-600 text-white shadow-sm dark:bg-blue-500"
+                        ? "bg-[linear-gradient(180deg,rgba(59,130,246,0.98),rgba(37,99,235,0.92))] text-white shadow-[0_6px_14px_rgba(37,99,235,0.16),0_1px_0_rgba(255,255,255,0.14)] ring-1 ring-blue-200/20 dark:bg-[linear-gradient(180deg,rgba(59,130,246,0.96),rgba(37,99,235,0.90))] dark:ring-blue-300/10"
                         : isDark
-                          ? "text-slate-500 hover:bg-slate-800/60 hover:text-slate-200"
-                          : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                          ? "text-slate-400 hover:bg-white/8 hover:text-slate-100"
+                          : "text-slate-600 hover:bg-white/48 hover:text-slate-950"
                     )}
                     onClick={() => setChatFilter(key)}
                     aria-pressed={active}
@@ -458,10 +503,10 @@ export function ChatTab({
               if (selectedGroupId) setChatMobileSurface(selectedGroupId, "presentation");
             }}
             className={classNames(
-              "relative inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all duration-200",
+              "relative z-10 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border backdrop-blur-2xl transition-all duration-200",
               isDark
-                ? "text-slate-300 hover:bg-slate-800/60 hover:text-slate-100"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                ? "border-transparent bg-slate-950/28 text-slate-200 shadow-[0_16px_40px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08),inset_0_-1px_0_rgba(0,0,0,0.34)] hover:bg-white/10 hover:text-white"
+                : "border-transparent bg-white/32 text-slate-800 shadow-[0_16px_40px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.30),inset_0_-1px_0_rgba(15,23,42,0.09)] hover:bg-white/52 hover:text-slate-950",
               hasPresentationAttention &&
                 (isDark
                   ? "presentation-slot-attention presentation-slot-attention-dark"
@@ -470,7 +515,16 @@ export function ChatTab({
             aria-label={t("presentationOpenDockAction", { defaultValue: "Open presentation" })}
             title={t("presentationOpenDockAction", { defaultValue: "Open presentation" })}
           >
-            <BookmarkIcon size={17} />
+            <span
+              aria-hidden="true"
+              className={classNames(
+                "pointer-events-none absolute inset-x-1 top-0 h-1/2 rounded-full blur-[0.5px]",
+                isDark
+                  ? "bg-[linear-gradient(180deg,rgba(255,255,255,0.12),transparent_78%)]"
+                  : "bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(255,255,255,0.08)_64%,transparent)]"
+              )}
+            />
+            <BookmarkIcon size={17} className="relative z-10" />
             {hasPresentationAttention ? (
               <>
                 <span
