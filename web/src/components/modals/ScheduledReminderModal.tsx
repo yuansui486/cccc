@@ -29,7 +29,7 @@ export function ScheduledReminderModal({
   busy,
   onUpdateSettings,
 }: ScheduledReminderModalProps) {
-  const { t } = useTranslation(["common"]);
+  const { t } = useTranslation(["common", "settings"]);
   const { modalRef } = useModalA11y(isOpen, onClose);
   const ui = createContextModalUi(isDark);
   const [devActors, setDevActors] = useState<Actor[]>([]);
@@ -70,7 +70,15 @@ export function ScheduledReminderModal({
     >
       <div className="absolute inset-0 glass-overlay" onPointerDown={onClose} />
       <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
-        <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--glass-border-subtle)] px-3 py-3 sm:px-5 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)] sm:text-lg">
+              {t("settings:automation.title")}
+            </h2>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)] sm:text-sm">
+              {t("settings:automation.description")}
+            </p>
+          </div>
           <button type="button" className={ui.buttonSecondaryClass} onClick={onClose}>
             {t("common:close")}
           </button>
@@ -79,6 +87,7 @@ export function ScheduledReminderModal({
           <AutomationTab
             isDark={isDark}
             groupId={groupId}
+            hideHeader
             devActors={devActors}
             busy={busy}
             {...automationPolicyDraft}

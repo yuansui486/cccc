@@ -37,6 +37,7 @@ import {
 interface AutomationTabProps {
   isDark: boolean;
   groupId?: string;
+  hideHeader?: boolean;
   devActors: Actor[];
   busy: boolean;
 
@@ -552,14 +553,16 @@ export function AutomationTab(props: AutomationTabProps) {
 
   return (
     <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className={settingsWorkspaceShellClass(isDark)}>
-        <div className={settingsWorkspaceHeaderClass(isDark)}>
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("automation.title")}</h3>
-            <p className="mt-1 max-w-3xl text-xs text-[var(--color-text-muted)]">{t("automation.description")}</p>
+      {props.hideHeader ? null : (
+        <div className={settingsWorkspaceShellClass(isDark)}>
+          <div className={settingsWorkspaceHeaderClass(isDark)}>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{t("automation.title")}</h3>
+              <p className="mt-1 max-w-3xl text-xs text-[var(--color-text-muted)]">{t("automation.description")}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <AutomationPoliciesSection
         isDark={isDark}

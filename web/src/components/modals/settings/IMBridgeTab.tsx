@@ -24,6 +24,7 @@ const IM_PENDING_AUTO_REFRESH_MS = 12000;
 interface IMBridgeTabProps {
   isDark: boolean;
   groupId?: string; // Reserved for future use.
+  hideHeaderText?: boolean;
   imStatus: IMStatus | null;
   imPlatform: IMPlatform;
   onPlatformChange: (v: IMPlatform) => void;
@@ -130,6 +131,7 @@ function WeixinQrCode({
 export function IMBridgeTab({
   isDark: _isDark,
   groupId,
+  hideHeaderText = false,
   imStatus,
   imPlatform,
   onPlatformChange,
@@ -406,12 +408,14 @@ export function IMBridgeTab({
   return (
     <div className="space-y-5">
       <section className={settingsWorkspaceShellClass(_isDark)}>
-        <div className={settingsWorkspaceHeaderClass(_isDark)}>
-          <div>
-            <h3 className={sectionTitleClass}>{t("imBridge.title")}</h3>
-            <p className="mt-1 max-w-3xl text-xs text-[var(--color-text-muted)]">{t("imBridge.description")}</p>
+        {hideHeaderText ? null : (
+          <div className={settingsWorkspaceHeaderClass(_isDark)}>
+            <div>
+              <h3 className={sectionTitleClass}>{t("imBridge.title")}</h3>
+              <p className="mt-1 max-w-3xl text-xs text-[var(--color-text-muted)]">{t("imBridge.description")}</p>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className={settingsWorkspaceBodyClass}>
       {imStatus && (
@@ -998,9 +1002,8 @@ export function IMBridgeTab({
 
       {/* Help */}
       <div className={settingsWorkspacePanelClass(_isDark)}>
-        <div className={sectionTitleClass}>{t("common:help", { defaultValue: "Help" })}</div>
+        <div className={sectionTitleClass}>{t("imBridge.setupGuide", { defaultValue: "使用说明" })}</div>
         <div className="mt-3 text-xs space-y-1 text-[var(--color-text-muted)]">
-        <p>{t("imBridge.setupGuide")}</p>
         <ol className="list-decimal list-inside space-y-0.5 ml-2">
           <li>{t("imBridge.setupStep1")}</li>
           <li>{t("imBridge.setupStep2")}</li>

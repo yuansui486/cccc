@@ -1174,7 +1174,15 @@ export function ContextModal({
             >
               <div className="absolute inset-0 glass-overlay" onPointerDown={handleModalClose} />
               <div ref={modalRef} className={settingsDialogPanelClass("xl")}>
-                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--glass-border-subtle)] px-3 py-3 sm:px-5 sm:py-4">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-[var(--color-text-primary)] sm:text-lg">
+                      {tr("context.skillsTitle", "技能")}
+                    </h2>
+                    <p className="mt-1 text-xs text-[var(--color-text-muted)] sm:text-sm">
+                      {tr("context.skillsHint", "设置工作组默认技能。工作组启用的技能会立即对当前智能体生效，并由后续新增智能体继承。")}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     className={ui.buttonSecondaryClass}
@@ -1184,7 +1192,7 @@ export function ContextModal({
                   </button>
                 </div>
                 <div className={settingsDialogBodyClass}>
-                  <SkillsView groupId={groupId} agents={agents} tr={tr} ui={ui} />
+                  <SkillsView groupId={groupId} agents={agents} tr={tr} ui={ui} hideHeaderText />
                 </div>
               </div>
             </div>,

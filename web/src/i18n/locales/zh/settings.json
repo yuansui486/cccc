@@ -814,7 +814,7 @@
     "verboseUserOnly": "仅用户消息",
     "verboseOnHint": "当前接收所有消息。点击切换为仅接收用户相关消息。",
     "verboseOffHint": "当前仅接收用户相关消息。点击切换为接收所有消息。",
-    "setupGuide": "使用 IM 桥接：",
+    "setupGuide": "使用说明",
     "setupStep1": "在你的 IM 平台创建一个 bot",
     "setupStep2": "将令牌设置为环境变量",
     "setupStep3": "保存配置并启动桥接",

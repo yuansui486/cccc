@@ -10,6 +10,7 @@ interface SkillsViewProps {
   agents: AgentState[];
   tr: ContextTranslator;
   ui: ContextModalUi;
+  hideHeaderText?: boolean;
 }
 
 function cleanId(value: unknown): string {
@@ -46,7 +47,7 @@ function groupDefaultSetFromState(state: CapabilityStateResult | null): Set<stri
   return out;
 }
 
-export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
+export function SkillsView({ groupId, agents, tr, ui, hideHeaderText = false }: SkillsViewProps) {
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
@@ -166,35 +167,38 @@ export function SkillsView({ groupId, agents, tr, ui }: SkillsViewProps) {
 
   return (
     <section className={classNames(ui.surfaceClass, "p-4")}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className={classNames("text-lg font-semibold", "text-[var(--color-text-primary)]")}>
-            {tr("context.skillsTitle", "技能")}
+      <div className="flex flex-col gap-3">
+        {hideHeaderText ? null : (
+          <div className="min-w-0">
+            <div className={classNames("text-lg font-semibold", "text-[var(--color-text-primary)]")}>
+              {tr("context.skillsTitle", "技能")}
+            </div>
+            <div className={classNames("mt-1 text-sm", ui.subtleTextClass)}>
+              {tr("context.skillsHint", "设置工作组默认技能。工作组启用的技能会立即对当前智能体生效，并由后续新增智能体继承。")}
+            </div>
           </div>
-          <div className={classNames("mt-1 text-sm", ui.subtleTextClass)}>
-            {tr("context.skillsHint", "设置工作组默认技能。工作组启用的技能会立即对当前智能体生效，并由后续新增智能体继承。")}
+        )}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="min-w-0 flex-1">
+            <input
+              className={ui.inputClass}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={tr("context.skillsSearchPlaceholder", "搜索技能")}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <span className="rounded-full bg-[var(--glass-panel-bg)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
+              {tr("context.skillsAvailableCount", "{{count}} 个可用", { count: skillRows.length })}
+            </span>
+            <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-xs text-blue-600 dark:text-blue-300">
+              {tr("context.skillsEnabledCount", "已启用 {{count}} 个", { count: enabledSkillCount })}
+            </span>
+            <button type="button" onClick={() => void load()} disabled={loading} className={ui.buttonSecondaryClass}>
+              {loading ? tr("context.loading", "加载中…") : tr("context.refresh", "刷新")}
+            </button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-[var(--glass-panel-bg)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
-            {tr("context.skillsAvailableCount", "{{count}} 个可用", { count: skillRows.length })}
-          </span>
-          <span className="rounded-full bg-blue-500/15 px-2.5 py-1 text-xs text-blue-600 dark:text-blue-300">
-            {tr("context.skillsEnabledCount", "已启用 {{count}} 个", { count: enabledSkillCount })}
-          </span>
-          <button type="button" onClick={() => void load()} disabled={loading} className={ui.buttonSecondaryClass}>
-            {loading ? tr("context.loading", "加载中…") : tr("context.refresh", "刷新")}
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <input
-          className={ui.inputClass}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={tr("context.skillsSearchPlaceholder", "搜索技能")}
-        />
       </div>
 
       {error ? (
