@@ -43,7 +43,6 @@ import {
   PlusIcon,
   RocketIcon,
   SendIcon,
-  SettingsIcon,
   ShareIcon,
   SparklesIcon,
   StopIcon,
@@ -54,7 +53,6 @@ import { ThemeToggleCompact } from "../ThemeToggle";
 import { ActorAvatar } from "../ActorAvatar";
 import { SortableGroupItem } from "./SortableGroupItem";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../stores/useUIStore";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 export interface GroupSidebarProps {
   orderedGroups: GroupMeta[];
@@ -174,7 +172,6 @@ export function GroupSidebar({
   const switcherPanelRef = useRef<HTMLDivElement | null>(null);
   const [isResizing, setIsResizing] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [isRenamingGroupTitle, setIsRenamingGroupTitle] = useState(false);
   const [groupTitleDraft, setGroupTitleDraft] = useState("");
   const [groupTitleSaving, setGroupTitleSaving] = useState(false);
@@ -1271,54 +1268,25 @@ export function GroupSidebar({
               </button>
             )}
 
-            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className={classNames(
-                    "flex items-center rounded-xl transition-colors hover:bg-black/[0.045] dark:hover:bg-white/[0.07]",
-                    isCollapsed ? "h-11 w-11 justify-center" : "min-h-[52px] min-w-0 flex-1 gap-3 px-3 py-2 text-left"
-                  )}
-                  aria-expanded={moreOpen}
-                  aria-label={isCollapsed ? t("moreActions") : t("workspaceBench")}
-                  title={isCollapsed ? t("moreActions") : t("workspaceBench")}
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-primary)]">
-                      <MoreIcon size={24} strokeWidth={1.8} />
-                    </span>
-                    {!isCollapsed && (
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{t("workspaceBench")}</div>
-                      </div>
-                    )}
-                  </div>
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                side={isCollapsed ? "right" : "top"}
-                align={isCollapsed ? "end" : "start"}
-                sideOffset={12}
-                collisionPadding={12}
-                className={classNames(
-                  "z-[1002] overflow-hidden rounded-[1.25rem] p-2 shadow-2xl",
-                  isCollapsed ? "w-[240px]" : "w-[var(--radix-popover-trigger-width)]"
-                )}
+            {!isCollapsed && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                disabled={!selectedGroupId}
+                className="flex min-h-[52px] min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-black/[0.045] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/[0.07]"
+                aria-label={t("workspaceBench")}
+                title={t("workspaceBench")}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    onOpenSettings();
-                  }}
-                  disabled={!selectedGroupId}
-                  className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--color-text-primary)] transition-all hover:bg-[var(--glass-tab-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <SettingsIcon size={17} />
-                  <span className="min-w-0 truncate">{t("settings")}</span>
-                </button>
-              </PopoverContent>
-            </Popover>
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-primary)]">
+                    <MoreIcon size={24} strokeWidth={1.8} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{t("workspaceBench")}</div>
+                  </div>
+                </div>
+              </button>
+            )}
 
             {!isCollapsed && (
               <div className="flex shrink-0 items-center gap-1">
