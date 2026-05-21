@@ -61,6 +61,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
       title={title}
       closeAriaLabel={t("common:close")}
       panelClassName="w-full sm:max-w-xl min-h-[420px] max-h-[min(88dvh,720px)]"
+      rootClassName="z-[80]"
       modalRef={modalRef}
     >
       <div className="flex-1 overflow-y-auto px-5 py-5">

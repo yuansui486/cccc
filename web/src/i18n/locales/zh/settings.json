@@ -31,6 +31,13 @@
     "globalLockedTitle": "需要管理员权限",
     "globalLockedContent": "全局设置仅限管理员使用。若要调整工作组内设置，请从某个工作组打开设置；若要管理全局设置，请使用管理员访问令牌登录。"
   },
+  "account": {
+    "connect": "登录",
+    "balanceInline": "余额 {{value}}",
+    "balanceTitle": "账户余额 {{value}}",
+    "needsAttention": "请重新登录",
+    "errorShort": "需登录"
+  },
   "actorProfiles": {
     "searchPlaceholder": "按名称/ID/runtime 搜索",
     "newProfile": "新建配置",

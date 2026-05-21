@@ -1622,7 +1622,6 @@ export function AppModals({
           openModal("context");
         }}
         onOpenSettings={() => openModal("settings")}
-        onOpenDoneHubAuth={() => openModal("doneHubAuth")}
         onOpenGroupEdit={canManageGroups ? () => {
           if (groupDoc) {
             setEditGroupId(selectedGroupId || groupDoc.group_id || "");
@@ -1774,6 +1773,7 @@ export function AppModals({
             groupId={selectedGroupId}
             groupDoc={groupDoc}
             initialTarget={settingsTarget}
+            onOpenDoneHubAuth={() => openModal("doneHubAuth")}
           />
         </Suspense>
       ) : null}

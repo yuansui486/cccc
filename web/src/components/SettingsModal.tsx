@@ -3,7 +3,9 @@ import { lazy, Suspense, useState, useEffect, useRef, useMemo, useCallback } fro
 import { useTranslation } from "react-i18next";
 import { Actor, GroupDoc, GroupSettings, WebAccessSession } from "../types";
 import * as api from "../services/api";
+import { formatDoneHubQuota } from "../services/doneHub";
 import { useObservabilityStore } from "../stores";
+import { useDoneHubStore } from "../stores/useDoneHubStore";
 import type { RuntimeVisibilityMode } from "../utils/runtimeVisibility";
 import {
   SettingsScope,
@@ -31,6 +33,7 @@ interface SettingsModalProps {
   groupId?: string;
   groupDoc?: GroupDoc | null;
   initialTarget?: { scope?: SettingsScope; tab?: string; nonce: number } | null;
+  onOpenDoneHubAuth?: () => void;
 }
 
 function SettingsTabFallback({ isDark }: { isDark: boolean }) {
@@ -56,6 +59,7 @@ export function SettingsModal({
   groupId,
   groupDoc,
   initialTarget,
+  onOpenDoneHubAuth,
 }: SettingsModalProps) {
   const { t } = useTranslation("settings");
   const { modalRef } = useModalA11y(isOpen, onClose);
@@ -64,6 +68,8 @@ export function SettingsModal({
   const [globalTab, setGlobalTab] = useState<GlobalTabId>(groupId ? "blueprint" : "capabilities");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
+  const doneHubStatus = useDoneHubStore((state) => state.status);
+  const doneHubSession = useDoneHubStore((state) => state.session);
 
   useEffect(() => {
     if (!isOpen || !initialTarget) return;
@@ -542,6 +548,20 @@ export function SettingsModal({
 
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
   const activeTab = scope === "group" ? groupTab : globalTab;
+  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
+  const doneHubIsPro = String(doneHubSession?.group || "").trim().toLowerCase() === "pro";
+  const doneHubQuota = doneHubSession?.quota != null ? formatDoneHubQuota(doneHubSession.quota) : formatDoneHubQuota(0);
+  const doneHubAccount = onOpenDoneHubAuth ? {
+    label: doneHubConnected
+      ? t("account.balanceInline", { value: doneHubQuota })
+      : t(doneHubStatus === "error" ? "account.errorShort" : "account.connect"),
+    title: doneHubConnected
+      ? t("account.balanceTitle", { value: doneHubQuota })
+      : t(doneHubStatus === "error" ? "account.needsAttention" : "account.connect"),
+    status: doneHubStatus,
+    isPro: doneHubIsPro,
+    onClick: onOpenDoneHubAuth,
+  } : undefined;
   const setActiveTab = (tab: GroupTabId | GlobalTabId) => {
     if (scope === "group") setGroupTab(tab as GroupTabId);
     else setGlobalTab(tab as GlobalTabId);
@@ -612,6 +632,7 @@ export function SettingsModal({
           tabs={tabs}
           activeTab={activeTab}
           onTabChange={(tab) => setActiveTab(tab as GroupTabId | GlobalTabId)}
+          account={doneHubAccount}
         />
 
         {/* Main Content Area */}

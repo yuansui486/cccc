@@ -264,7 +264,6 @@ export function AppShell({
         onOpenScheduledReminder={onOpenScheduledReminder}
         onOpenRemoteLink={onOpenRemoteLink}
         onOpenSettings={onOpenSettings}
-        onOpenDoneHubAuth={onOpenDoneHubAuth}
         onOpenGroupEdit={onOpenGroupEdit}
         onStartGroup={onStartGroup}
         onStopGroup={onStopGroup}

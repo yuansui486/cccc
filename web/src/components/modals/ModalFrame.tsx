@@ -11,6 +11,7 @@ interface ModalFrameProps {
   headerActions?: ReactNode;
   floatingCloseClassName?: string;
   floatingCloseButtonClassName?: string;
+  rootClassName?: string;
   modalRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }
@@ -26,6 +27,7 @@ export function ModalFrame({
   headerActions,
   floatingCloseClassName = "",
   floatingCloseButtonClassName = "",
+  rootClassName = "z-50",
   modalRef,
   children,
 }: ModalFrameProps) {
@@ -33,7 +35,7 @@ export function ModalFrame({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-stretch justify-center p-0 transition-[opacity,visibility] duration-200 sm:items-center sm:p-4 ${
+      className={`fixed inset-0 flex items-stretch justify-center p-0 transition-[opacity,visibility] duration-200 sm:items-center sm:p-4 ${rootClassName} ${
         isOpen ? "visible opacity-100 animate-fade-in" : "pointer-events-none invisible opacity-0"
       }`}
       style={isOpen ? { backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" } : undefined}

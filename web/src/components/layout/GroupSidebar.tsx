@@ -22,7 +22,6 @@ import { getActorDisplayWorkingState } from "../../utils/terminalWorkingState";
 import { getRuntimeIndicatorState } from "../../utils/statusIndicators";
 import { getGroupStatusFromSource } from "../../utils/groupStatus";
 import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } from "../../utils/groupControls";
-import { formatDoneHubQuota } from "../../services/doneHub";
 import { updateGroup } from "../../services/api";
 import {
   useBrandingStore,
@@ -104,7 +103,6 @@ export interface GroupSidebarProps {
   onOpenScheduledReminder: () => void;
   onOpenRemoteLink: () => void;
   onOpenSettings: () => void;
-  onOpenDoneHubAuth: () => void;
   onOpenGroupEdit?: (groupId?: string) => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
@@ -120,7 +118,7 @@ export function GroupSidebar({
   unreadChatCount,
   theme,
   textScale,
-  doneHub,
+  doneHub: _doneHub,
   groupDoc,
   activeTaskCount,
   selectedGroupRunning,
@@ -152,7 +150,6 @@ export function GroupSidebar({
   onOpenScheduledReminder,
   onOpenRemoteLink,
   onOpenSettings,
-  onOpenDoneHubAuth,
   onOpenGroupEdit,
   onStartGroup,
   onStopGroup,
@@ -213,13 +210,6 @@ export function GroupSidebar({
   const selectedStatusKey = selectedStatus?.key ?? null;
   const currentGroupTitle = String(selectedGroup?.title || groupDoc?.title || selectedGroupId || "").trim();
   const currentGroupTopic = String(groupDoc?.topic || selectedGroup?.topic || "").trim();
-  const doneHubStatus = doneHub?.status || "idle";
-  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
-  const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
-  const doneHubQuota = doneHub?.quota != null ? formatDoneHubQuota(doneHub.quota) : formatDoneHubQuota(0);
-  const doneHubLabel = doneHubConnected
-    ? t("doneHubBalanceInline", { value: doneHubQuota })
-    : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect");
   const launchMode = getLaunchControlMode(selectedStatusKey);
   const launchControl = getGroupControlVisual(selectedStatusKey, "launch", busy);
   const pauseControl = getGroupControlVisual(selectedStatusKey, "pause", busy);
@@ -1315,37 +1305,6 @@ export function GroupSidebar({
                   isCollapsed ? "w-[240px]" : "w-[var(--radix-popover-trigger-width)]"
                 )}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    onOpenDoneHubAuth();
-                  }}
-                  className={classNames(
-                    "flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all hover:bg-[var(--glass-tab-bg-hover)]",
-                    doneHubConnected
-                      ? "text-sky-700 dark:text-sky-300"
-                      : doneHubStatus === "error"
-                        ? "text-rose-700 dark:text-rose-300"
-                        : "text-[var(--color-text-primary)]"
-                  )}
-                  title={
-                    doneHubConnected
-                      ? t("doneHubBalanceTitle", { value: doneHubQuota })
-                      : t(doneHubStatus === "error" ? "doneHubNeedsAttention" : "doneHubConnect")
-                  }
-                >
-                  <span className="flex h-5 min-w-5 items-center justify-center">
-                    {doneHubIsPro ? (
-                      <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-amber-700 dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
-                        PRO
-                      </span>
-                    ) : (
-                      <FolderIcon size={17} />
-                    )}
-                  </span>
-                  <span className="min-w-0 truncate">{doneHubLabel}</span>
-                </button>
                 <button
                   type="button"
                   onClick={() => {

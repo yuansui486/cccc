@@ -5,7 +5,6 @@ import { getGroupControlVisual, getLaunchControlMode, resolveGroupControls } fro
 import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { TextScaleSwitcher } from "../TextScaleSwitcher";
-import { formatDoneHubQuota } from "../../services/doneHub";
 import {
   SearchIcon,
   ClipboardIcon,
@@ -44,7 +43,6 @@ export interface MobileMenuSheetProps {
   onOpenSearch: () => void;
   onOpenContext: () => void;
   onOpenSettings: () => void;
-  onOpenDoneHubAuth: () => void;
   onOpenGroupEdit?: () => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
@@ -62,14 +60,13 @@ export function MobileMenuSheet({
   selectedGroupRuntimeStatus,
   actors,
   busy,
-  doneHub,
+  doneHub: _doneHub,
   onClose,
   onThemeChange,
   onTextScaleChange,
   onOpenSearch,
   onOpenContext,
   onOpenSettings,
-  onOpenDoneHubAuth,
   onOpenGroupEdit,
   onStartGroup,
   onStopGroup,
@@ -114,10 +111,6 @@ export function MobileMenuSheet({
   const sectionTitleClass = "px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]";
   const rowButtonClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3.5 py-3 text-sm transition-all text-[var(--color-text-primary)] hover:bg-black/5 disabled:opacity-45 dark:hover:bg-white/6";
 
-  const doneHubStatus = doneHub?.status || "idle";
-  const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
-  const doneHubIsPro = String(doneHub?.group || "").trim().toLowerCase() === "pro";
-  const doneHubQuota = doneHub?.quota != null ? formatDoneHubQuota(doneHub.quota) : formatDoneHubQuota(0);
 
   const handleLaunchClick = () => {
     if (launchDisabled || selectedStatusKey === "run") return;
@@ -257,35 +250,6 @@ export function MobileMenuSheet({
               </button>
             ) : null}
           </section>
-
-          <button
-            className={classNames(
-              "w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-2xl text-sm font-medium transition-all min-h-[52px] glass-btn border",
-              doneHubConnected
-                ? "border-sky-300/45 bg-sky-400/12 text-sky-700 dark:border-sky-400/20 dark:bg-sky-500/12 dark:text-sky-300"
-                : doneHubStatus === "error"
-                  ? "border-rose-400/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
-                  : "border-[var(--glass-border-subtle)] text-[var(--color-text-primary)]"
-            )}
-            onClick={() => {
-              onClose();
-              onOpenDoneHubAuth();
-            }}
-          >
-            <span>{t("doneHubEntry")}</span>
-            <span className="flex items-center gap-2">
-              {doneHubIsPro ? (
-                <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-700 shadow-[0_0_0_1px_rgba(245,158,11,0.18)] dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
-                  PRO
-                </span>
-              ) : null}
-              <span className="text-xs font-semibold">
-                {doneHubConnected
-                  ? t("doneHubBalanceInline", { value: doneHubQuota })
-                  : t(doneHubStatus === "error" ? "doneHubErrorShort" : "doneHubConnect")}
-              </span>
-            </span>
-          </button>
 
           <section className={sectionCardClass}>
             <div className={sectionTitleClass}>{t("appearanceSection")}</div>

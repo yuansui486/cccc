@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ScrollFade } from "../../ScrollFade";
+import { FolderIcon } from "../../Icons";
 import {
   settingsWorkspaceSoftPanelClass,
 } from "./types";
@@ -14,6 +15,13 @@ interface SettingsNavigationProps {
   tabs: SettingsTabOption[];
   activeTab: string;
   onTabChange: (tabId: string) => void;
+  account?: {
+    label: string;
+    title: string;
+    status: "idle" | "authenticating" | "connected" | "refreshing" | "error";
+    isPro: boolean;
+    onClick: () => void;
+  };
 }
 
 export function SettingsNavigation({
@@ -21,6 +29,7 @@ export function SettingsNavigation({
   tabs,
   activeTab,
   onTabChange,
+  account,
 }: SettingsNavigationProps) {
   const { t } = useTranslation("settings");
   const tabButtonClass = (active: boolean) =>
@@ -44,17 +53,44 @@ export function SettingsNavigation({
             {t("navigation.sections", { defaultValue: "Sections" })}
           </div>
           <div className="space-y-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={tabButtonClass(activeTab === tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className={tabButtonClass(activeTab === tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </nav>
+        {account ? (
+          <div className="border-t border-[var(--glass-border-subtle)] px-4 py-4">
+            <button
+              type="button"
+              onClick={account.onClick}
+              className={`flex min-h-[48px] w-full items-center gap-3 rounded-[16px] border border-[var(--glass-border-subtle)] bg-transparent px-3.5 py-3 text-left text-sm font-medium transition-all hover:bg-[var(--glass-tab-bg-hover)] ${
+                account.status === "error"
+                  ? "text-rose-700 dark:text-rose-300"
+                  : account.status === "connected" || account.status === "refreshing"
+                    ? "text-sky-700 dark:text-sky-300"
+                    : "text-[var(--color-text-primary)]"
+              }`}
+              title={account.title}
+            >
+              <span className="flex h-5 min-w-5 items-center justify-center">
+                {account.isPro ? (
+                  <span className="rounded-full border border-amber-300/65 bg-amber-400/18 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-amber-700 dark:border-amber-300/30 dark:bg-amber-300/14 dark:text-amber-200">
+                    PRO
+                  </span>
+                ) : (
+                  <FolderIcon size={17} />
+                )}
+              </span>
+              <span className="min-w-0 truncate">{account.label}</span>
+            </button>
+          </div>
+        ) : null}
       </aside>
 
       <div className="sm:hidden flex flex-col flex-shrink-0">
