@@ -37,6 +37,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardIcon,
+  ClockIcon,
   MoreIcon,
   PauseIcon,
   PlayIcon,
@@ -44,6 +45,7 @@ import {
   RocketIcon,
   SendIcon,
   SettingsIcon,
+  ShareIcon,
   SparklesIcon,
   StopIcon,
   TeamIcon,
@@ -99,6 +101,8 @@ export interface GroupSidebarProps {
   onOpenContextProject: () => void;
   onOpenContextSummary: () => void;
   onOpenSkillManagement: () => void;
+  onOpenScheduledReminder: () => void;
+  onOpenRemoteLink: () => void;
   onOpenSettings: () => void;
   onOpenDoneHubAuth: () => void;
   onOpenGroupEdit?: (groupId?: string) => void;
@@ -145,6 +149,8 @@ export function GroupSidebar({
   onOpenContextProject,
   onOpenContextSummary,
   onOpenSkillManagement,
+  onOpenScheduledReminder,
+  onOpenRemoteLink,
   onOpenSettings,
   onOpenDoneHubAuth,
   onOpenGroupEdit,
@@ -1052,6 +1058,28 @@ export function GroupSidebar({
               <span className="min-w-0 flex-1 truncate">{t("taskExecution")}</span>
               {renderCountBadge(activeTaskCount)}
             </button>
+            <button
+              type="button"
+              onClick={onOpenScheduledReminder}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <ClockIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("scheduledReminder")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenRemoteLink}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <ShareIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("remoteLink")}</span>
+            </button>
           </div>
         </section>
       </div>
@@ -1074,6 +1102,8 @@ export function GroupSidebar({
     onOpenContextProject,
     onOpenContextSummary,
     onOpenSkillManagement,
+    onOpenScheduledReminder,
+    onOpenRemoteLink,
     readOnly,
     renderCountBadge,
     selectedGroup,

@@ -1,7 +1,7 @@
 // SettingsModal renders the settings modal.
 import { lazy, Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Actor, GroupDoc, GroupSettings, IMStatus, IMPlatform, WebAccessSession, WeixinLoginStatus } from "../types";
+import { Actor, GroupDoc, GroupSettings, WebAccessSession } from "../types";
 import * as api from "../services/api";
 import { useObservabilityStore } from "../stores";
 import type { RuntimeVisibilityMode } from "../utils/runtimeVisibility";
@@ -12,9 +12,10 @@ import {
 } from "./modals/settings/types";
 import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
-import { IMConfigDraft, saveAndStartIMBridge, saveIMConfigDraft } from "./modals/settings/imBridgeConfig";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { copyTextToClipboard } from "../utils/copy";
+import { useAutomationPolicyDraft } from "./modals/settings/useAutomationPolicyDraft";
+import { useIMBridgeSettings } from "./modals/settings/useIMBridgeSettings";
 
 const AutomationTab = lazy(() => import("./modals/settings/AutomationTab").then((module) => ({ default: module.AutomationTab })));
 const IMBridgeTab = lazy(() => import("./modals/settings/IMBridgeTab").then((module) => ({ default: module.IMBridgeTab })));
@@ -86,20 +87,13 @@ export function SettingsModal({
     }
   }, [initialTarget, isOpen]);
 
-  // Automation + delivery settings state
-  const [nudgeSeconds, setNudgeSeconds] = useState(300);
-  const [replyRequiredNudgeSeconds, setReplyRequiredNudgeSeconds] = useState(300);
-  const [attentionAckNudgeSeconds, setAttentionAckNudgeSeconds] = useState(600);
-  const [unreadNudgeSeconds, setUnreadNudgeSeconds] = useState(900);
-  const [nudgeDigestMinIntervalSeconds, setNudgeDigestMinIntervalSeconds] = useState(120);
-  const [nudgeMaxRepeatsPerObligation, setNudgeMaxRepeatsPerObligation] = useState(3);
-  const [nudgeEscalateAfterRepeats, setNudgeEscalateAfterRepeats] = useState(2);
-  const [idleSeconds, setIdleSeconds] = useState(0);
-  const [keepaliveSeconds, setKeepaliveSeconds] = useState(120);
-  const [keepaliveMax, setKeepaliveMax] = useState(3);
-  const [silenceSeconds, setSilenceSeconds] = useState(0);
-  const [helpNudgeIntervalSeconds, setHelpNudgeIntervalSeconds] = useState(600);
-  const [helpNudgeMinMessages, setHelpNudgeMinMessages] = useState(10);
+  const automationPolicyDraft = useAutomationPolicyDraft({
+    active: isOpen,
+    settings,
+    onUpdateSettings,
+  });
+
+  // Delivery settings state
   const [autoMarkOnDelivery, setAutoMarkOnDelivery] = useState(false);
 
   // Messaging policy
@@ -121,32 +115,11 @@ export function SettingsModal({
   const [tailBusy, setTailBusy] = useState(false);
   const [tailCopyInfo, setTailCopyInfo] = useState("");
 
-  // IM Bridge state
-  const [imStatus, setImStatus] = useState<IMStatus | null>(null);
-  const [imPlatform, setImPlatform] = useState<IMPlatform>("telegram");
-  const [imBotTokenEnv, setImBotTokenEnv] = useState("");
-  const [imAppTokenEnv, setImAppTokenEnv] = useState("");
-  // Feishu fields
-  const [imFeishuDomain, setImFeishuDomain] = useState("https://open.feishu.cn");
-  const [imFeishuAppId, setImFeishuAppId] = useState("");
-  const [imFeishuAppSecret, setImFeishuAppSecret] = useState("");
-  // DingTalk fields
-  const [imDingtalkAppKey, setImDingtalkAppKey] = useState("");
-  const [imDingtalkAppSecret, setImDingtalkAppSecret] = useState("");
-  const [imDingtalkRobotCode, setImDingtalkRobotCode] = useState("");
-  // WeCom fields
-  const [imWecomBotId, setImWecomBotId] = useState("");
-  const [imWecomSecret, setImWecomSecret] = useState("");
-  // Weixin fields
-  const [imWeixinAccountId, setImWeixinAccountId] = useState("");
-  const [weixinLoginStatus, setWeixinLoginStatus] = useState<WeixinLoginStatus | null>(null);
-  const [imBusy, setImBusy] = useState(false);
-  const imLoadSeq = useRef(0);
-  const weixinAutoStartRef = useRef(false);
+  const imBridgeSettings = useIMBridgeSettings({
+    active: isOpen,
+    groupId,
+  });
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
-
-  // IM config drafts cache (per-platform local edits, not yet saved to server)
-  const [imConfigDrafts, setImConfigDrafts] = useState<Partial<Record<IMPlatform, IMConfigDraft>>>({});
 
   // Global observability (developer mode)
   const [developerMode, setDeveloperMode] = useState(false);
@@ -181,19 +154,6 @@ export function SettingsModal({
 
   useEffect(() => {
     if (isOpen && settings) {
-      setNudgeSeconds(settings.nudge_after_seconds);
-      setReplyRequiredNudgeSeconds(settings.reply_required_nudge_after_seconds ?? 300);
-      setAttentionAckNudgeSeconds(settings.attention_ack_nudge_after_seconds ?? 600);
-      setUnreadNudgeSeconds(settings.unread_nudge_after_seconds ?? 900);
-      setNudgeDigestMinIntervalSeconds(settings.nudge_digest_min_interval_seconds ?? 120);
-      setNudgeMaxRepeatsPerObligation(settings.nudge_max_repeats_per_obligation ?? 3);
-      setNudgeEscalateAfterRepeats(settings.nudge_escalate_after_repeats ?? 2);
-      setIdleSeconds(settings.actor_idle_timeout_seconds);
-      setKeepaliveSeconds(settings.keepalive_delay_seconds);
-      setKeepaliveMax(settings.keepalive_max_per_actor ?? 3);
-      setSilenceSeconds(settings.silence_timeout_seconds);
-      setHelpNudgeIntervalSeconds(settings.help_nudge_interval_seconds ?? 600);
-      setHelpNudgeMinMessages(settings.help_nudge_min_messages ?? 10);
       setAutoMarkOnDelivery(Boolean(settings.auto_mark_on_delivery));
       setDefaultSendTo(settings.default_send_to || "foreman");
       setTerminalVisibility(settings.terminal_transcript_visibility || "foreman");
@@ -233,150 +193,6 @@ export function SettingsModal({
       cancelled = true;
     };
   }, [isOpen, groupId]);
-
-  const resetIMState = () => {
-    setImStatus(null);
-    setImPlatform("telegram");
-    setImBotTokenEnv("");
-    setImAppTokenEnv("");
-    setImFeishuDomain("https://open.feishu.cn");
-    setImFeishuAppId("");
-    setImFeishuAppSecret("");
-    setImDingtalkAppKey("");
-    setImDingtalkAppSecret("");
-    setImDingtalkRobotCode("");
-    setImWecomBotId("");
-    setImWecomSecret("");
-    setImWeixinAccountId("");
-  };
-
-  const loadIMStatus = useCallback(async (opts?: { resetFirst?: boolean }) => {
-    const gid = String(groupId || "").trim();
-    const seq = ++imLoadSeq.current;
-    if (opts?.resetFirst) resetIMState();
-    if (!gid) return;
-    try {
-      const statusResp = await api.fetchIMStatus(gid);
-      if (seq !== imLoadSeq.current) return;
-      if (statusResp.ok) {
-        setImStatus(statusResp.result);
-        if (statusResp.result.platform) {
-          setImPlatform(statusResp.result.platform as IMPlatform);
-        }
-      }
-      const configResp = await api.fetchIMConfig(gid);
-      if (seq !== imLoadSeq.current) return;
-      if (configResp.ok && configResp.result.im) {
-        const im = configResp.result.im;
-        if (im.platform) setImPlatform(im.platform);
-        setImBotTokenEnv(im.bot_token_env || im.bot_token || im.token_env || im.token || "");
-        setImAppTokenEnv(im.app_token_env || im.app_token || "");
-        {
-          const raw = String(im.feishu_domain || "https://open.feishu.cn").trim();
-          const canon = raw
-            .replace(/\/+$/, "")
-            .replace(/\/open-apis$/, "")
-            .replace(/^open\.larksuite\.com$/i, "https://open.larkoffice.com")
-            .replace(/^https?:\/\/open\.larksuite\.com$/i, "https://open.larkoffice.com")
-            .replace(/^open\.larkoffice\.com$/i, "https://open.larkoffice.com");
-          setImFeishuDomain(canon);
-        }
-        setImFeishuAppId(im.feishu_app_id || im.feishu_app_id_env || "");
-        setImFeishuAppSecret(im.feishu_app_secret || im.feishu_app_secret_env || "");
-        setImDingtalkAppKey(im.dingtalk_app_key || im.dingtalk_app_key_env || "");
-        setImDingtalkAppSecret(im.dingtalk_app_secret || im.dingtalk_app_secret_env || "");
-        setImDingtalkRobotCode(im.dingtalk_robot_code || im.dingtalk_robot_code_env || "");
-        setImWecomBotId(im.wecom_bot_id || "");
-        setImWecomSecret(im.wecom_secret || "");
-        setImWeixinAccountId(im.weixin_account_id || "");
-      }
-    } catch (e) {
-      console.error("Failed to load IM status:", e);
-    }
-  }, [groupId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    loadIMStatus({ resetFirst: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only load when the modal opens or groupId changes.
-  }, [isOpen, groupId]);
-
-  const toWeixinErrorStatus = useCallback((message: string): WeixinLoginStatus => ({
-    status: "error",
-    logged_in: false,
-    account_id: "",
-    qrcode_url: "",
-    qr_ascii: "",
-    error: String(message || "").trim(),
-    running: false,
-    pid: null,
-    updated_at: new Date().toISOString(),
-  }), []);
-
-  useEffect(() => {
-    if (!isOpen || !groupId || imPlatform !== "weixin") return;
-    let cancelled = false;
-    const loadWeixinStatus = async () => {
-      try {
-        const resp = await api.fetchWeixinLoginStatus(groupId);
-        if (cancelled) return;
-        if (resp.ok) {
-          setWeixinLoginStatus(resp.result ?? null);
-        } else {
-          setWeixinLoginStatus(toWeixinErrorStatus(resp.error?.message || t("imBridge.weixinStatusLoadFailed")));
-        }
-      } catch {
-        if (!cancelled) {
-          setWeixinLoginStatus(toWeixinErrorStatus(t("imBridge.weixinStatusLoadFailed")));
-        }
-      }
-    };
-    void loadWeixinStatus();
-    // Only poll while waiting for QR scan; stop once logged in or idle
-    const needsPoll = weixinLoginStatus?.status === "waiting_scan";
-    if (!needsPoll) return () => { cancelled = true; };
-    const timer = window.setInterval(() => {
-      void loadWeixinStatus();
-    }, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [isOpen, groupId, imPlatform, weixinLoginStatus?.status, t, toWeixinErrorStatus]);
-
-  useEffect(() => {
-    if (imPlatform !== "weixin") {
-      weixinAutoStartRef.current = false;
-      return;
-    }
-    if (!groupId) return;
-    if (!weixinLoginStatus?.logged_in) return;
-    if (!imStatus?.configured || String(imStatus.platform || "") !== "weixin") return;
-    if (!imStatus.enabled) {
-      weixinAutoStartRef.current = false;
-      return;
-    }
-    if (imStatus.running) {
-      weixinAutoStartRef.current = false;
-      return;
-    }
-    if (weixinAutoStartRef.current) return;
-
-    weixinAutoStartRef.current = true;
-    void (async () => {
-      setImBusy(true);
-      try {
-        const resp = await api.startIMBridge(groupId);
-        if (resp.ok) {
-          await loadIMStatus();
-        }
-      } catch (e) {
-        console.error("Failed to auto-start weixin bridge:", e);
-      } finally {
-        setImBusy(false);
-      }
-    })();
-  }, [groupId, imPlatform, imStatus, loadIMStatus, weixinLoginStatus]);
 
   useEffect(() => {
     if (isOpen && canAccessGlobalSettings === true) loadObservability();
@@ -447,40 +263,6 @@ export function SettingsModal({
     await onUpdateSettings({
       auto_mark_on_delivery: autoMarkOnDelivery,
     });
-  };
-
-  const handleSaveAutomationSettings = async () => {
-    await onUpdateSettings({
-      nudge_after_seconds: nudgeSeconds,
-      reply_required_nudge_after_seconds: replyRequiredNudgeSeconds,
-      attention_ack_nudge_after_seconds: attentionAckNudgeSeconds,
-      unread_nudge_after_seconds: unreadNudgeSeconds,
-      nudge_digest_min_interval_seconds: nudgeDigestMinIntervalSeconds,
-      nudge_max_repeats_per_obligation: nudgeMaxRepeatsPerObligation,
-      nudge_escalate_after_repeats: nudgeEscalateAfterRepeats,
-      actor_idle_timeout_seconds: idleSeconds,
-      keepalive_delay_seconds: keepaliveSeconds,
-      keepalive_max_per_actor: keepaliveMax,
-      silence_timeout_seconds: silenceSeconds,
-      help_nudge_interval_seconds: helpNudgeIntervalSeconds,
-      help_nudge_min_messages: helpNudgeMinMessages,
-    });
-  };
-
-  const handleResetAutomationSettingsDraft = () => {
-    setNudgeSeconds(300);
-    setReplyRequiredNudgeSeconds(300);
-    setAttentionAckNudgeSeconds(600);
-    setUnreadNudgeSeconds(900);
-    setNudgeDigestMinIntervalSeconds(120);
-    setNudgeMaxRepeatsPerObligation(3);
-    setNudgeEscalateAfterRepeats(2);
-    setIdleSeconds(0);
-    setKeepaliveSeconds(120);
-    setKeepaliveMax(3);
-    setSilenceSeconds(0);
-    setHelpNudgeIntervalSeconds(600);
-    setHelpNudgeMinMessages(10);
   };
 
   const handleAutoSave = async (field: string, value: number | boolean) => {
@@ -557,184 +339,6 @@ export function SettingsModal({
       setTailErr(t("automation.failedToClearTranscript"));
     } finally {
       setTailBusy(false);
-    }
-  };
-
-  // Get current IM config as a draft object
-  const getCurrentIMConfigDraft = (): IMConfigDraft => ({
-    botTokenEnv: imBotTokenEnv,
-    appTokenEnv: imAppTokenEnv,
-    feishuDomain: imFeishuDomain,
-    feishuAppId: imFeishuAppId,
-    feishuAppSecret: imFeishuAppSecret,
-    dingtalkAppKey: imDingtalkAppKey,
-    dingtalkAppSecret: imDingtalkAppSecret,
-    dingtalkRobotCode: imDingtalkRobotCode,
-    wecomBotId: imWecomBotId,
-    wecomSecret: imWecomSecret,
-    weixinAccountId: imWeixinAccountId,
-  });
-
-  // Apply a draft to current IM config fields
-  const applyIMConfigDraft = (draft: IMConfigDraft) => {
-    setImBotTokenEnv(draft.botTokenEnv);
-    setImAppTokenEnv(draft.appTokenEnv);
-    setImFeishuDomain(draft.feishuDomain);
-    setImFeishuAppId(draft.feishuAppId);
-    setImFeishuAppSecret(draft.feishuAppSecret);
-    setImDingtalkAppKey(draft.dingtalkAppKey);
-    setImDingtalkAppSecret(draft.dingtalkAppSecret);
-    setImDingtalkRobotCode(draft.dingtalkRobotCode);
-    setImWecomBotId(draft.wecomBotId);
-    setImWecomSecret(draft.wecomSecret);
-    setImWeixinAccountId(draft.weixinAccountId);
-  };
-
-  const getCurrentIMSaveRequest = () => ({
-    groupId: String(groupId || ""),
-    platform: imPlatform,
-    ...getCurrentIMConfigDraft(),
-  });
-
-  // Handle platform change with config caching
-  const handlePlatformChange = (newPlatform: IMPlatform) => {
-    if (newPlatform === imPlatform) return;
-
-    // 1. Save current platform config to drafts
-    setImConfigDrafts((prev) => ({
-      ...prev,
-      [imPlatform]: getCurrentIMConfigDraft(),
-    }));
-
-    // 2. Load new platform's cached draft (if exists)
-    const cachedDraft = imConfigDrafts[newPlatform];
-    if (cachedDraft) {
-      applyIMConfigDraft(cachedDraft);
-    } else {
-      // Reset to empty if no cached draft (new platform)
-      setImBotTokenEnv("");
-      setImAppTokenEnv("");
-      setImFeishuDomain("https://open.feishu.cn");
-      setImFeishuAppId("");
-      setImFeishuAppSecret("");
-      setImDingtalkAppKey("");
-      setImDingtalkAppSecret("");
-      setImDingtalkRobotCode("");
-      setImWecomBotId("");
-      setImWecomSecret("");
-      setImWeixinAccountId("");
-    }
-
-    // 3. Set new platform
-    setImPlatform(newPlatform);
-  };
-
-  const handleSaveIMConfig = async () => {
-    if (!groupId) return;
-    setImBusy(true);
-    try {
-      const resp = await saveIMConfigDraft(getCurrentIMSaveRequest());
-      if (resp.ok) await loadIMStatus();
-    } catch (e) {
-      console.error("Failed to save IM config:", e);
-    } finally {
-      setImBusy(false);
-    }
-  };
-
-  const handleRemoveIMConfig = async () => {
-    if (!groupId) return;
-    setImBusy(true);
-    try {
-      const resp = await api.unsetIMConfig(groupId);
-      if (resp.ok) {
-        setImBotTokenEnv("");
-        setImAppTokenEnv("");
-        setImFeishuDomain("https://open.feishu.cn");
-        setImFeishuAppId("");
-        setImFeishuAppSecret("");
-        setImDingtalkAppKey("");
-        setImDingtalkAppSecret("");
-        setImDingtalkRobotCode("");
-        setImWecomBotId("");
-        setImWecomSecret("");
-        setImWeixinAccountId("");
-        await loadIMStatus();
-      }
-    } catch (e) {
-      console.error("Failed to remove IM config:", e);
-    } finally {
-      setImBusy(false);
-    }
-  };
-
-  const handleStartBridge = async () => {
-    if (!groupId) return;
-    setImBusy(true);
-    try {
-      const resp = await saveAndStartIMBridge(getCurrentIMSaveRequest());
-      if (resp.ok) await loadIMStatus();
-    } catch (e) {
-      console.error("Failed to start bridge:", e);
-    } finally {
-      setImBusy(false);
-    }
-  };
-
-  const handleStopBridge = async () => {
-    if (!groupId) return;
-    setImBusy(true);
-    try {
-      await api.stopIMBridge(groupId);
-      await loadIMStatus();
-    } catch (e) {
-      console.error("Failed to stop bridge:", e);
-    } finally {
-      setImBusy(false);
-    }
-  };
-
-  const handleStartWeixinLogin = async () => {
-    if (!groupId) return;
-    setImBusy(true);
-    try {
-      const saveResp = await saveIMConfigDraft(getCurrentIMSaveRequest());
-      if (!saveResp.ok) {
-        setWeixinLoginStatus(toWeixinErrorStatus(saveResp.error?.message || t("imBridge.weixinStartFailed")));
-        return;
-      }
-      await loadIMStatus();
-      weixinAutoStartRef.current = false;
-      const resp = await api.startWeixinLogin(groupId);
-      if (resp.ok) {
-        setWeixinLoginStatus(resp.result ?? null);
-      } else {
-        setWeixinLoginStatus(toWeixinErrorStatus(resp.error?.message || t("imBridge.weixinStartFailed")));
-      }
-    } catch (e) {
-      setWeixinLoginStatus(toWeixinErrorStatus(t("imBridge.weixinStartFailed")));
-      console.error("Failed to start weixin login:", e);
-    } finally {
-      setImBusy(false);
-    }
-  };
-
-  const handleLogoutWeixin = async () => {
-    if (!groupId) return;
-    setImBusy(true);
-    try {
-      weixinAutoStartRef.current = false;
-      const resp = await api.logoutWeixin(groupId);
-      if (resp.ok) {
-        setWeixinLoginStatus(resp.result ?? null);
-      } else {
-        setWeixinLoginStatus(toWeixinErrorStatus(resp.error?.message || t("imBridge.weixinLogoutFailed")));
-      }
-    } catch (e) {
-      setWeixinLoginStatus(toWeixinErrorStatus(t("imBridge.weixinLogoutFailed")));
-      console.error("Failed to logout weixin:", e);
-    } finally {
-      setImBusy(false);
     }
   };
 
@@ -1057,34 +661,9 @@ export function SettingsModal({
                   groupId={groupId}
                   devActors={devActors}
                   busy={busy}
-                  nudgeSeconds={nudgeSeconds}
-                  setNudgeSeconds={setNudgeSeconds}
-                  replyRequiredNudgeSeconds={replyRequiredNudgeSeconds}
-                  setReplyRequiredNudgeSeconds={setReplyRequiredNudgeSeconds}
-                  attentionAckNudgeSeconds={attentionAckNudgeSeconds}
-                  setAttentionAckNudgeSeconds={setAttentionAckNudgeSeconds}
-                  unreadNudgeSeconds={unreadNudgeSeconds}
-                  setUnreadNudgeSeconds={setUnreadNudgeSeconds}
-                  nudgeDigestMinIntervalSeconds={nudgeDigestMinIntervalSeconds}
-                  setNudgeDigestMinIntervalSeconds={setNudgeDigestMinIntervalSeconds}
-                  nudgeMaxRepeatsPerObligation={nudgeMaxRepeatsPerObligation}
-                  setNudgeMaxRepeatsPerObligation={setNudgeMaxRepeatsPerObligation}
-                  nudgeEscalateAfterRepeats={nudgeEscalateAfterRepeats}
-                  setNudgeEscalateAfterRepeats={setNudgeEscalateAfterRepeats}
-                  idleSeconds={idleSeconds}
-                  setIdleSeconds={setIdleSeconds}
-                  keepaliveSeconds={keepaliveSeconds}
-                  setKeepaliveSeconds={setKeepaliveSeconds}
-                  keepaliveMax={keepaliveMax}
-                  setKeepaliveMax={setKeepaliveMax}
-                  silenceSeconds={silenceSeconds}
-                  setSilenceSeconds={setSilenceSeconds}
-                  helpNudgeIntervalSeconds={helpNudgeIntervalSeconds}
-                  setHelpNudgeIntervalSeconds={setHelpNudgeIntervalSeconds}
-                  helpNudgeMinMessages={helpNudgeMinMessages}
-                  setHelpNudgeMinMessages={setHelpNudgeMinMessages}
-                  onSavePolicies={handleSaveAutomationSettings}
-                  onResetPolicies={handleResetAutomationSettingsDraft}
+                  {...automationPolicyDraft}
+                  onSavePolicies={automationPolicyDraft.savePolicies}
+                  onResetPolicies={automationPolicyDraft.resetPoliciesDraft}
                 />
               )}
 
@@ -1092,39 +671,7 @@ export function SettingsModal({
                 <IMBridgeTab
                   isDark={isDark}
                   groupId={groupId}
-                  imStatus={imStatus}
-                  imPlatform={imPlatform}
-                  onPlatformChange={handlePlatformChange}
-                  imBotTokenEnv={imBotTokenEnv}
-                  setImBotTokenEnv={setImBotTokenEnv}
-                  imAppTokenEnv={imAppTokenEnv}
-                  setImAppTokenEnv={setImAppTokenEnv}
-                  imFeishuAppId={imFeishuAppId}
-                  setImFeishuAppId={setImFeishuAppId}
-                  imFeishuAppSecret={imFeishuAppSecret}
-                  setImFeishuAppSecret={setImFeishuAppSecret}
-                  imFeishuDomain={imFeishuDomain}
-                  setImFeishuDomain={setImFeishuDomain}
-                  imDingtalkAppKey={imDingtalkAppKey}
-                  setImDingtalkAppKey={setImDingtalkAppKey}
-                  imDingtalkAppSecret={imDingtalkAppSecret}
-                  setImDingtalkAppSecret={setImDingtalkAppSecret}
-                  imDingtalkRobotCode={imDingtalkRobotCode}
-                  setImDingtalkRobotCode={setImDingtalkRobotCode}
-                  imWecomBotId={imWecomBotId}
-                  setImWecomBotId={setImWecomBotId}
-                  imWecomSecret={imWecomSecret}
-                  setImWecomSecret={setImWecomSecret}
-                  imWeixinAccountId={imWeixinAccountId}
-                  setImWeixinAccountId={setImWeixinAccountId}
-                  weixinLoginStatus={weixinLoginStatus}
-                  onStartWeixinLogin={handleStartWeixinLogin}
-                  onLogoutWeixin={handleLogoutWeixin}
-                  imBusy={imBusy}
-                  onSaveConfig={handleSaveIMConfig}
-                  onRemoveConfig={handleRemoveIMConfig}
-                  onStartBridge={handleStartBridge}
-                  onStopBridge={handleStopBridge}
+                  {...imBridgeSettings}
                 />
               )}
 

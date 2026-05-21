@@ -132,7 +132,6 @@ export default function App() {
 
   const openModal = useModalStore((s) => s.openModal);
   const openContextTarget = useModalStore((s) => s.openContextTarget);
-  const openSettingsTarget = useModalStore((s) => s.openSettingsTarget);
   const modalFlags = useModalStore((s) => s.modals);
   const editingActor = useModalStore((s) => s.editingActor);
   const peerRuntimeVisibility = useObservabilityStore((state) => state.peerRuntimeVisibility);
@@ -544,6 +543,12 @@ export default function App() {
         onOpenSkillManagement={() => {
           if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
           openContextTarget({ tab: "skills" });
+        }}
+        onOpenScheduledReminder={() => {
+          openModal("scheduledReminder");
+        }}
+        onOpenRemoteLink={() => {
+          openModal("remoteLink");
         }}
         onStartGroup={handleStartGroup}
         onStopGroup={handleStopGroup}

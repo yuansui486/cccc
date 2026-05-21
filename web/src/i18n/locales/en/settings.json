@@ -703,7 +703,9 @@
   },
   "imBridge": {
     "title": "IM Bridge",
-    "description": "Connect this group to Telegram, Slack, Discord, Feishu, DingTalk, or WeCom.",
+    "description": "Connect this group to Feishu, DingTalk, WeCom, or WeChat.",
+    "feishu": "Feishu",
+    "dingtalk": "DingTalk",
     "running": "Running",
     "stopped": "Stopped",
     "platform": "Platform",

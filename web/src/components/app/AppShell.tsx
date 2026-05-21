@@ -69,6 +69,8 @@ type AppShellProps = {
   onOpenContextProject: () => void;
   onOpenContextSummary: () => void;
   onOpenSkillManagement: () => void;
+  onOpenScheduledReminder: () => void;
+  onOpenRemoteLink: () => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
   onSetGroupState: (state: "active" | "idle" | "paused") => void;
@@ -148,6 +150,8 @@ export function AppShell({
   onOpenContextProject,
   onOpenContextSummary,
   onOpenSkillManagement,
+  onOpenScheduledReminder,
+  onOpenRemoteLink,
   onStartGroup,
   onStopGroup,
   onSetGroupState,
@@ -257,6 +261,8 @@ export function AppShell({
         onOpenContextProject={onOpenContextProject}
         onOpenContextSummary={onOpenContextSummary}
         onOpenSkillManagement={onOpenSkillManagement}
+        onOpenScheduledReminder={onOpenScheduledReminder}
+        onOpenRemoteLink={onOpenRemoteLink}
         onOpenSettings={onOpenSettings}
         onOpenDoneHubAuth={onOpenDoneHubAuth}
         onOpenGroupEdit={onOpenGroupEdit}

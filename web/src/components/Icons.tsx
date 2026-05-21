@@ -47,6 +47,7 @@ import {
   Search,
   Send,
   Settings2,
+  Share2,
   Sparkles,
   Square,
   SquareTerminal,
@@ -114,6 +115,7 @@ export const PauseIcon = createControlIcon(Pause);
 export const StopIcon = createControlIcon(Square);
 export const ClockIcon = createIcon(Clock3);
 export const SettingsIcon = createIcon(Settings2);
+export const ShareIcon = createIcon(Share2);
 export const EditIcon = createIcon(Pencil);
 export const MoreIcon = createIcon(EllipsisVertical);
 export const MenuIcon = createIcon(Menu);

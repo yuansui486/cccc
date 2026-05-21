@@ -703,7 +703,9 @@
   },
   "imBridge": {
     "title": "IMブリッジ",
-    "description": "このグループを Telegram、Slack、Discord、Feishu、DingTalk、または WeCom に接続します。",
+    "description": "このグループを Feishu、DingTalk、WeCom、または WeChat に接続します。",
+    "feishu": "Feishu",
+    "dingtalk": "DingTalk",
     "running": "稼働中",
     "stopped": "停止中",
     "platform": "プラットフォーム",

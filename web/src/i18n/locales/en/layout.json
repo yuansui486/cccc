@@ -98,6 +98,8 @@
   "goalManagement": "Goal management",
   "teamGoal": "Set goals",
   "taskExecution": "Split tasks",
+  "scheduledReminder": "Scheduled reminders",
+  "remoteLink": "Remote links",
   "moreActions": "More",
   "forgotTokenCta": "Can't sign in?",
   "hideRecovery": "Hide recovery help",

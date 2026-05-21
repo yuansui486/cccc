@@ -441,7 +441,7 @@
   },
   "automation": {
     "title": "自动化",
-    "description": "配置内建自动化和定时规则。",
+    "description": "配置内置自动化和定时规则。",
     "configPathFallback": "ONECOLLEAGUE_HOME/…/group.yaml",
     "openFromGroup": "请从工作组中打开此标签页。",
     "rulesTitle": "规则与模板",
@@ -543,7 +543,7 @@
     "removeRegistryConfirm": "从注册表中移除 {{count}} 个缺失的工作组条目？"
   },
   "policies": {
-    "title": "内建自动化",
+    "title": "内置自动化",
     "description": "系统托管的跟进与协作健康回路。调整数值后点击保存。",
     "unreadFollowup": "未读跟进（秒）",
     "unreadFollowupHelp": "当未读消息停留过久时提醒成员。",
@@ -585,10 +585,10 @@
     "actorIdleAlertHelp": "当 Actor 空闲超过此时间时通知 Foreman。",
     "groupSilenceCheck": "静默转空闲超时（秒）",
     "groupSilenceCheckHelp": "两段式启发：第一次超时提醒 Foreman 复核；连续第二次超时会自动将工作组置为 idle。设为 0 即关闭。",
-    "savePolicies": "保存内建自动化",
-    "savePoliciesTitle": "保存内建自动化设置",
+    "savePolicies": "保存内置自动化",
+    "savePoliciesTitle": "保存内置自动化设置",
     "resetPolicies": "恢复默认自动化",
-    "resetPoliciesTitle": "将内建自动化设置恢复为默认值",
+    "resetPoliciesTitle": "将内置自动化设置恢复为默认值",
     "keepaliveOff": "关闭保活重试"
   },
   "ruleEditor": {
@@ -703,7 +703,9 @@
   },
   "imBridge": {
     "title": "IM 桥接",
-    "description": "将此工作组连接到 Telegram、Slack、Discord、飞书、钉钉或企业微信。",
+    "description": "将此工作组连接到飞书、钉钉、企业微信或微信。",
+    "feishu": "飞书",
+    "dingtalk": "钉钉",
     "running": "运行中",
     "stopped": "已停止",
     "platform": "平台",

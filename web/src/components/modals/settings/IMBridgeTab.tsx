@@ -27,10 +27,6 @@ interface IMBridgeTabProps {
   imStatus: IMStatus | null;
   imPlatform: IMPlatform;
   onPlatformChange: (v: IMPlatform) => void;
-  imBotTokenEnv: string;
-  setImBotTokenEnv: (v: string) => void;
-  imAppTokenEnv: string;
-  setImAppTokenEnv: (v: string) => void;
   // Feishu fields
   imFeishuDomain: string;
   setImFeishuDomain: (v: string) => void;
@@ -137,10 +133,6 @@ export function IMBridgeTab({
   imStatus,
   imPlatform,
   onPlatformChange,
-  imBotTokenEnv,
-  setImBotTokenEnv,
-  imAppTokenEnv,
-  setImAppTokenEnv,
   imFeishuDomain,
   setImFeishuDomain,
   imFeishuAppId,
@@ -179,23 +171,6 @@ export function IMBridgeTab({
   const weixinLoggedIn = !!weixinLoginStatus?.logged_in;
   const weixinHasQr = !!String(weixinLoginStatus?.qrcode_url || "").trim();
   const weixinHasCustomAdvanced = !!String(imWeixinAccountId || "").trim();
-  const getBotTokenLabel = () => {
-    switch (imPlatform) {
-      case "telegram": return t("imBridge.botTokenTelegram");
-      case "slack": return t("imBridge.botTokenSlack");
-      case "discord": return t("imBridge.botTokenDiscord");
-      default: return t("imBridge.botToken");
-    }
-  };
-
-  const getBotTokenPlaceholder = () => {
-    switch (imPlatform) {
-      case "telegram": return "TELEGRAM_BOT_TOKEN (or 123456:ABC...)";
-      case "slack": return "SLACK_BOT_TOKEN (or xoxb-...)";
-      case "discord": return "DISCORD_BOT_TOKEN (or <token>)";
-      default: return "";
-    }
-  };
 
   const canSaveIM = () => {
     if (imPlatform === "feishu") {
@@ -210,12 +185,8 @@ export function IMBridgeTab({
     if (imPlatform === "weixin") {
       return true;
     }
-    if (!imBotTokenEnv) return false;
-    if (imPlatform === "slack" && !imAppTokenEnv) return false;
-    return true;
+    return false;
   };
-
-  const needsBotToken = imPlatform === "telegram" || imPlatform === "slack" || imPlatform === "discord";
 
   // Authorized chats state
   const [authChats, setAuthChats] = useState<api.IMAuthorizedChat[]>([]);
@@ -475,11 +446,8 @@ export function IMBridgeTab({
           <label className={labelClass()}>{t("imBridge.platform")}</label>
           <SelectCombobox
             items={[
-              { value: "telegram", label: "Telegram" },
-              { value: "slack", label: "Slack" },
-              { value: "discord", label: "Discord" },
-              { value: "feishu", label: "Feishu/Lark" },
-              { value: "dingtalk", label: "DingTalk" },
+              { value: "feishu", label: t("imBridge.feishu") },
+              { value: "dingtalk", label: t("imBridge.dingtalk") },
               { value: "wecom", label: t("imBridge.wecom") },
               { value: "weixin", label: t("imBridge.weixin") },
             ]}
@@ -489,42 +457,6 @@ export function IMBridgeTab({
             className={inputClass()}
           />
         </div>
-
-        {/* Bot Token (Telegram/Slack/Discord) */}
-        {needsBotToken && (
-          <div>
-            <label className={labelClass()}>{getBotTokenLabel()}</label>
-            <input
-              type="text"
-              value={imBotTokenEnv}
-              onChange={(e) => setImBotTokenEnv(e.target.value)}
-              placeholder={getBotTokenPlaceholder()}
-              className={`${inputClass()} placeholder-[var(--color-text-muted)]`}
-            />
-            <p className="text-xs mt-1 text-[var(--color-text-muted)]">
-              {imPlatform === "slack"
-                ? t("imBridge.botTokenHintSlack")
-                : t("imBridge.botTokenHint")}
-            </p>
-          </div>
-        )}
-
-        {/* App Token (Slack only) */}
-        {imPlatform === "slack" && (
-          <div>
-            <label className={labelClass()}>{t("imBridge.appToken")}</label>
-            <input
-              type="text"
-              value={imAppTokenEnv}
-              onChange={(e) => setImAppTokenEnv(e.target.value)}
-              placeholder="SLACK_APP_TOKEN (or xapp-...)"
-              className={`${inputClass()} placeholder-[var(--color-text-muted)]`}
-            />
-            <p className="text-xs mt-1 text-[var(--color-text-muted)]">
-              {t("imBridge.appTokenHint")}
-            </p>
-          </div>
-        )}
 
         {/* Feishu fields */}
         {imPlatform === "feishu" && (

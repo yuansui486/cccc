@@ -18,6 +18,8 @@ import { InboxModal } from "./modals/InboxModal";
 import { PresentationPinModal } from "./presentation/PresentationPinModal";
 import { RelayMessageModal } from "./modals/RelayMessageModal";
 import { RecipientsModal } from "./modals/RecipientsModal";
+import { RemoteLinkModal } from "./modals/RemoteLinkModal";
+import { ScheduledReminderModal } from "./modals/ScheduledReminderModal";
 import {
   openContextModalData,
   syncContextModalData,
@@ -1775,6 +1777,23 @@ export function AppModals({
           />
         </Suspense>
       ) : null}
+
+      <ScheduledReminderModal
+        isOpen={modals.scheduledReminder}
+        onClose={() => closeModal("scheduledReminder")}
+        isDark={isDark}
+        groupId={selectedGroupId}
+        settings={groupSettings}
+        busy={busy.startsWith("settings")}
+        onUpdateSettings={handleUpdateSettings}
+      />
+
+      <RemoteLinkModal
+        isOpen={modals.remoteLink}
+        onClose={() => closeModal("remoteLink")}
+        isDark={isDark}
+        groupId={selectedGroupId}
+      />
 
       <RecipientsModal
         isOpen={!!messageMeta}
