@@ -14,12 +14,7 @@ import { ModalFrame } from "./modals/ModalFrame";
 import { SettingsNavigation } from "./modals/settings/SettingsNavigation";
 import { useModalA11y } from "../hooks/useModalA11y";
 import { copyTextToClipboard } from "../utils/copy";
-import { useAutomationPolicyDraft } from "./modals/settings/useAutomationPolicyDraft";
-import { useIMBridgeSettings } from "./modals/settings/useIMBridgeSettings";
 
-const AutomationTab = lazy(() => import("./modals/settings/AutomationTab").then((module) => ({ default: module.AutomationTab })));
-const IMBridgeTab = lazy(() => import("./modals/settings/IMBridgeTab").then((module) => ({ default: module.IMBridgeTab })));
-const GuidanceTab = lazy(() => import("./modals/settings/GuidanceTab").then((module) => ({ default: module.GuidanceTab })));
 const BlueprintTab = lazy(() => import("./modals/settings/BlueprintTab").then((module) => ({ default: module.BlueprintTab })));
 const CapabilitiesTab = lazy(() => import("./modals/settings/CapabilitiesTab").then((module) => ({ default: module.CapabilitiesTab })));
 const ActorProfilesTab = lazy(() => import("./modals/settings/ActorProfilesTab").then((module) => ({ default: module.ActorProfilesTab })));
@@ -65,7 +60,7 @@ export function SettingsModal({
   const { t } = useTranslation("settings");
   const { modalRef } = useModalA11y(isOpen, onClose);
   const [scope, setScope] = useState<SettingsScope>(groupId ? "group" : "global");
-  const [groupTab, setGroupTab] = useState<GroupTabId>("guidance");
+  const [groupTab, setGroupTab] = useState<GroupTabId>("blueprint");
   const [globalTab, setGlobalTab] = useState<GlobalTabId>("capabilities");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
@@ -81,17 +76,11 @@ export function SettingsModal({
     }
     if (initialTarget.scope === "group") {
       setScope("group");
-      if (initialTarget.tab === "automation" || initialTarget.tab === "delivery" || initialTarget.tab === "guidance" || initialTarget.tab === "assistants" || initialTarget.tab === "space" || initialTarget.tab === "messaging" || initialTarget.tab === "im" || initialTarget.tab === "transcript" || initialTarget.tab === "copyGroups" || initialTarget.tab === "blueprint") {
+      if (initialTarget.tab === "blueprint") {
         setGroupTab(initialTarget.tab);
       }
     }
   }, [initialTarget, isOpen]);
-
-  const automationPolicyDraft = useAutomationPolicyDraft({
-    active: isOpen,
-    settings,
-    onUpdateSettings,
-  });
 
   // Delivery settings state
   const [autoMarkOnDelivery, setAutoMarkOnDelivery] = useState(false);
@@ -115,10 +104,6 @@ export function SettingsModal({
   const [tailBusy, setTailBusy] = useState(false);
   const [tailCopyInfo, setTailCopyInfo] = useState("");
 
-  const imBridgeSettings = useIMBridgeSettings({
-    active: isOpen,
-    groupId,
-  });
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Global observability (developer mode)
@@ -547,11 +532,16 @@ export function SettingsModal({
   }, [globalTab, globalTabs, scope]);
 
   const groupTabs: { id: GroupTabId; label: string }[] = [
-    { id: "guidance", label: t("tabs.guidance") },
-    { id: "automation", label: t("tabs.automation") },
-    { id: "im", label: t("tabs.im") },
     { id: "blueprint", label: t("tabs.blueprint") },
   ];
+
+  useEffect(() => {
+    if (scope !== "group") return;
+    if (!groupTabs.some((tab) => tab.id === groupTab)) {
+      setGroupTab(groupTabs[0].id);
+    }
+  }, [groupTab, groupTabs, scope]);
+
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
   const activeTab = scope === "group" ? groupTab : globalTab;
   const setActiveTab = (tab: GroupTabId | GlobalTabId) => {
@@ -655,28 +645,6 @@ export function SettingsModal({
               </div>
             ) : !tabs.some((tab) => tab.id === activeTab) ? null : (
               <Suspense fallback={<SettingsTabFallback isDark={isDark} />}>
-              {activeTab === "automation" && (
-                <AutomationTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  devActors={devActors}
-                  busy={busy}
-                  {...automationPolicyDraft}
-                  onSavePolicies={automationPolicyDraft.savePolicies}
-                  onResetPolicies={automationPolicyDraft.resetPoliciesDraft}
-                />
-              )}
-
-              {activeTab === "im" && (
-                <IMBridgeTab
-                  isDark={isDark}
-                  groupId={groupId}
-                  {...imBridgeSettings}
-                />
-              )}
-
-              {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
-
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
 
               {activeTab === "capabilities" && (
