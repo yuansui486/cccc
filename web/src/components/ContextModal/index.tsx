@@ -137,6 +137,7 @@ export function ContextModal({
   const [projectText, setProjectText] = useState("");
   const [projectExpanded, setProjectExpanded] = useState(false);
   const [directProjectEditorActive, setDirectProjectEditorActive] = useState(false);
+  const [directProjectSection, setDirectProjectSection] = useState<"teamGoal" | "taskExecution" | "collaboration">("teamGoal");
   const [directSkillsViewActive, setDirectSkillsViewActive] = useState(false);
   const [directTaskExecutionActive, setDirectTaskExecutionActive] = useState(false);
   const [notifyAgents, setNotifyAgents] = useState(false);
@@ -902,6 +903,7 @@ export function ContextModal({
     if (!isOpen || initialTaskId || initialTab !== "project" || initialProjectMode !== "edit") return;
     setActiveView("coordination");
     setDirectProjectEditorActive(true);
+    setDirectProjectSection("teamGoal");
     setProjectExpanded(true);
     void handleEditProject();
     onInitialTaskHandled?.();
@@ -1065,7 +1067,12 @@ export function ContextModal({
       ? "bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]"
       : "text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
   );
-
+  const directSectionTabClass = (active: boolean) => classNames(
+    "rounded-2xl px-4 py-2 text-sm font-semibold transition-colors sm:text-base",
+    active
+      ? "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] shadow-[var(--glass-accent-shadow)]"
+      : "border border-transparent text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]"
+  );
   return (
     <>
       {!directProjectEditorActive && !directSkillsViewActive && !directTaskExecutionActive ? (
@@ -1325,34 +1332,118 @@ export function ContextModal({
                   </button>
                 </div>
                 <div className={settingsDialogBodyClass}>
-                  <ProjectPanel
-                    expanded
-                    cardShell={directProjectEditorActive}
-                    hideExpandToggle={directProjectEditorActive}
-                    isDark={isDark}
-                    tr={tr}
-                    ui={ui}
-                    projectBusy={projectBusy}
-                    projectError={projectError}
-                    notifyError={notifyError}
-                    projectNotice={projectNotice}
-                    projectPathLabel={projectPathLabel}
-                    editingProject={editingProject}
-                    projectMd={projectMd}
-                    projectText={projectText}
-                    notifyAgents={notifyAgents}
-                    onExpand={() => {}}
-                    onCollapse={() => setProjectExpanded(false)}
-                    onCancelEdit={() => {
-                      setEditingProject(false);
-                      setProjectText(String(projectMd?.content || ""));
-                      setNotifyAgents(false);
-                    }}
-                    onEditProject={() => void handleEditProject()}
-                    onProjectTextChange={setProjectText}
-                    onNotifyAgentsChange={setNotifyAgents}
-                    onSaveProject={() => void handleSaveProject()}
-                  />
+                  <div className="space-y-4">
+                    {directProjectEditorActive ? (
+                      <div className="flex flex-wrap gap-2 px-1 pb-1">
+                        <button type="button" className={directSectionTabClass(directProjectSection === "teamGoal")} onClick={() => setDirectProjectSection("teamGoal")}>{tr("context.teamGoal", "团队目标")}</button>
+                        <button type="button" className={directSectionTabClass(directProjectSection === "taskExecution")} onClick={() => setDirectProjectSection("taskExecution")}>{tr("context.taskExecution", "任务执行")}</button>
+                        <button type="button" className={directSectionTabClass(directProjectSection === "collaboration")} onClick={() => setDirectProjectSection("collaboration")}>{tr("context.collaboration", "分工协作")}</button>
+                      </div>
+                    ) : null}
+                    {directProjectEditorActive ? (
+                      <>
+                        {directProjectSection === "teamGoal" ? (
+                          <div className="space-y-4">
+                            <ProjectPanel
+                              expanded
+                              cardShell
+                              hideExpandToggle
+                              isDark={isDark}
+                              tr={tr}
+                              ui={ui}
+                              projectBusy={projectBusy}
+                              projectError={projectError}
+                              notifyError={notifyError}
+                              projectNotice={projectNotice}
+                              projectPathLabel={projectPathLabel}
+                              editingProject={editingProject}
+                              projectMd={projectMd}
+                              projectText={projectText}
+                              notifyAgents={notifyAgents}
+                              onExpand={() => {}}
+                              onCollapse={() => setProjectExpanded(false)}
+                              onCancelEdit={() => {
+                                setEditingProject(false);
+                                setProjectText(String(projectMd?.content || ""));
+                                setNotifyAgents(false);
+                              }}
+                              onEditProject={() => void handleEditProject()}
+                              onProjectTextChange={setProjectText}
+                              onNotifyAgentsChange={setNotifyAgents}
+                              onSaveProject={() => void handleSaveProject()}
+                            />
+                          </div>
+                        ) : null}
+                        {directProjectSection === "taskExecution" ? (
+                          <div className="space-y-4">
+                            {syncError ? <div className={classNames("rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>{syncError}</div> : null}
+                            <SteeringSummaryCard
+                              tr={tr}
+                              ui={ui}
+                              brief={brief}
+                              editingBrief={editingBrief}
+                              briefDraft={briefDraft}
+                              syncBusy={syncBusy}
+                              onStartBriefEdit={startBriefEdit}
+                              onCancelBriefEdit={cancelBriefEdit}
+                              onSaveBrief={() => void handleSaveBrief()}
+                              onBriefDraftChange={(updater) => setBriefDraft((prev) => updater(prev))}
+                            />
+                            {taskBoardPanel}
+                          </div>
+                        ) : null}
+                        {directProjectSection === "collaboration" ? (
+                          <div className="space-y-4">
+                            <SteeringActivityCard
+                              tr={tr}
+                              ui={ui}
+                              activityBusyKind={activityBusyKind}
+                              activityError={activityError}
+                              recentDecisions={recentDecisions}
+                              recentHandoffs={recentHandoffs}
+                              decisionDraft={decisionDraft}
+                              handoffDraft={handoffDraft}
+                              activeTaskOptions={activeTaskOptions}
+                              onDecisionDraftChange={(updater) => setDecisionDraft((prev) => updater(prev))}
+                              onHandoffDraftChange={(updater) => setHandoffDraft((prev) => updater(prev))}
+                              onAddCoordinationNote={(kind) => void handleAddCoordinationNote(kind)}
+                            />
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <section className="scroll-mt-4 space-y-3">
+                        <ProjectPanel
+                          expanded
+                          cardShell={directProjectEditorActive}
+                          hideExpandToggle={directProjectEditorActive}
+                          isDark={isDark}
+                          tr={tr}
+                          ui={ui}
+                          projectBusy={projectBusy}
+                          projectError={projectError}
+                          notifyError={notifyError}
+                          projectNotice={projectNotice}
+                          projectPathLabel={projectPathLabel}
+                          editingProject={editingProject}
+                          projectMd={projectMd}
+                          projectText={projectText}
+                          notifyAgents={notifyAgents}
+                          onExpand={() => {}}
+                          onCollapse={() => setProjectExpanded(false)}
+                          onCancelEdit={() => {
+                            setEditingProject(false);
+                            setProjectText(String(projectMd?.content || ""));
+                            setNotifyAgents(false);
+                          }}
+                          onEditProject={() => void handleEditProject()}
+                          onProjectTextChange={setProjectText}
+                          onNotifyAgentsChange={setNotifyAgents}
+                          onSaveProject={() => void handleSaveProject()}
+                        />
+                      </section>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>,

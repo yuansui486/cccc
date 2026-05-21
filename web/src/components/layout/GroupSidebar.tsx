@@ -40,7 +40,6 @@ import {
   PauseIcon,
   PlayIcon,
   PlusIcon,
-  RocketIcon,
   SendIcon,
   SettingsIcon,
   ShareIcon,
@@ -71,7 +70,6 @@ export interface GroupSidebarProps {
     errorMessage: string;
   };
   groupDoc: GroupDoc | null;
-  activeTaskCount: number;
   selectedGroupRunning: boolean;
   selectedGroupRuntimeStatus: GroupRuntimeStatus | null;
   busy: string;
@@ -96,7 +94,6 @@ export interface GroupSidebarProps {
   onAddAgent?: () => void;
   onOpenContext: () => void;
   onOpenContextProject: () => void;
-  onOpenContextSummary: () => void;
   onOpenSkillManagement: () => void;
   onOpenScheduledReminder: () => void;
   onOpenRemoteLink: () => void;
@@ -118,7 +115,6 @@ export function GroupSidebar({
   textScale,
   doneHub: _doneHub,
   groupDoc,
-  activeTaskCount,
   selectedGroupRunning,
   selectedGroupRuntimeStatus,
   busy,
@@ -143,7 +139,6 @@ export function GroupSidebar({
   onAddAgent,
   onOpenContext,
   onOpenContextProject,
-  onOpenContextSummary,
   onOpenSkillManagement,
   onOpenScheduledReminder,
   onOpenRemoteLink,
@@ -1042,18 +1037,6 @@ export function GroupSidebar({
             </button>
             <button
               type="button"
-              onClick={onOpenContextSummary}
-              disabled={!selectedGroupId}
-              className={navButtonClass(false)}
-            >
-              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
-                <RocketIcon size={24} strokeWidth={1.8} />
-              </span>
-              <span className="min-w-0 flex-1 truncate">{t("taskExecution")}</span>
-              {renderCountBadge(activeTaskCount)}
-            </button>
-            <button
-              type="button"
               onClick={onOpenScheduledReminder}
               disabled={!selectedGroupId}
               className={navButtonClass(false)}
@@ -1082,7 +1065,6 @@ export function GroupSidebar({
     activeTab,
     actors,
     busy,
-    activeTaskCount,
     getActorIndicator,
     groupDoc,
     isCollapsed,
@@ -1094,7 +1076,6 @@ export function GroupSidebar({
     renderInlineGroupSwitcherContent,
     handleTabSelect,
     onOpenContextProject,
-    onOpenContextSummary,
     onOpenSkillManagement,
     onOpenScheduledReminder,
     onOpenRemoteLink,

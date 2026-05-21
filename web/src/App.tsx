@@ -37,22 +37,7 @@ import {
   useDoneHubStore,
 } from "./stores";
 import { useChatOutboxStore } from "./stores/chatOutboxStore";
-import type { CapabilityOverviewItem, CapabilityStateResult, LedgerEvent, Task, TaskBoardEntry } from "./types";
-
-function countTaskBoardEntries(value: number | TaskBoardEntry[] | undefined): number {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
-  return Array.isArray(value) ? value.length : 0;
-}
-
-function countActiveTasksFromTasks(tasks: Task[] | undefined): number {
-  if (!Array.isArray(tasks)) return 0;
-  let count = 0;
-  for (const task of tasks) {
-    if (String(task?.status || "").trim().toLowerCase() === "active") count += 1;
-    count += countActiveTasksFromTasks(task?.children);
-  }
-  return count;
-}
+import type { CapabilityOverviewItem, CapabilityStateResult, LedgerEvent } from "./types";
 
 function cleanCapabilityId(value: unknown): string {
   return String(value || "").trim();
@@ -271,14 +256,6 @@ export default function App() {
   const { handleStartGroup, handleStopGroup, handleSetGroupState } = useGroupActions();
 
   const computedSendGroupId = getEffectiveComposerDestGroupId(destGroupId, activeGroupId, selectedGroupId);
-  const activeTaskCount = useMemo(() => {
-    const summaryActive = groupContext?.tasks_summary?.active;
-    if (typeof summaryActive === "number" && Number.isFinite(summaryActive)) return Math.max(0, summaryActive);
-    const boardActive = countTaskBoardEntries(groupContext?.board?.active);
-    if (boardActive > 0) return boardActive;
-    return countActiveTasksFromTasks(groupContext?.coordination?.tasks);
-  }, [groupContext]);
-
   const refreshEnabledSkillCount = useCallback(async () => {
     const gid = String(selectedGroupId || "").trim();
     if (!gid) {
@@ -486,7 +463,6 @@ export default function App() {
         groupLabelById={groupLabelById}
         chatUnreadCount={chatUnreadCount}
         enabledSkillCount={enabledSkillCount}
-        activeTaskCount={activeTaskCount}
         mentionSelectedIndex={mentionSelectedIndex}
         showMentionMenu={showMentionMenu}
         composerRef={composerRef}
@@ -535,10 +511,6 @@ export default function App() {
         onOpenContextProject={() => {
           if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
           openContextTarget({ tab: "project", projectMode: "edit" });
-        }}
-        onOpenContextSummary={() => {
-          if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);
-          openContextTarget({ tab: "tasks" });
         }}
         onOpenSkillManagement={() => {
           if (selectedGroupId && !groupContext) void fetchContext(selectedGroupId);

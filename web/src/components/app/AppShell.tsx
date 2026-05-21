@@ -43,7 +43,6 @@ type AppShellProps = {
   groupLabelById: Record<string, string>;
   chatUnreadCount: number;
   enabledSkillCount: number;
-  activeTaskCount: number;
   mentionSelectedIndex: number;
   showMentionMenu: boolean;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -67,7 +66,6 @@ type AppShellProps = {
   onOpenSearch: () => void;
   onOpenContext: () => void;
   onOpenContextProject: () => void;
-  onOpenContextSummary: () => void;
   onOpenSkillManagement: () => void;
   onOpenScheduledReminder: () => void;
   onOpenRemoteLink: () => void;
@@ -124,7 +122,6 @@ export function AppShell({
   groupLabelById,
   chatUnreadCount,
   enabledSkillCount,
-  activeTaskCount,
   mentionSelectedIndex,
   showMentionMenu,
   composerRef,
@@ -148,7 +145,6 @@ export function AppShell({
   onOpenSearch,
   onOpenContext,
   onOpenContextProject,
-  onOpenContextSummary,
   onOpenSkillManagement,
   onOpenScheduledReminder,
   onOpenRemoteLink,
@@ -234,7 +230,6 @@ export function AppShell({
         textScale={textScale}
         doneHub={doneHub}
         groupDoc={groupDoc}
-        activeTaskCount={activeTaskCount}
         selectedGroupRunning={selectedGroupRunning}
         selectedGroupRuntimeStatus={selectedGroupRuntimeStatus}
         busy={busy}
@@ -259,7 +254,6 @@ export function AppShell({
         onAddAgent={onAddAgent}
         onOpenContext={onOpenContext}
         onOpenContextProject={onOpenContextProject}
-        onOpenContextSummary={onOpenContextSummary}
         onOpenSkillManagement={onOpenSkillManagement}
         onOpenScheduledReminder={onOpenScheduledReminder}
         onOpenRemoteLink={onOpenRemoteLink}
