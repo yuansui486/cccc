@@ -37,12 +37,12 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   ClockIcon,
-  MoreIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
   RocketIcon,
   SendIcon,
+  SettingsIcon,
   ShareIcon,
   SparklesIcon,
   StopIcon,
@@ -1286,7 +1286,7 @@ export function GroupSidebar({
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-primary)]">
-                    <MoreIcon size={24} strokeWidth={1.8} />
+                    <SettingsIcon size={22} strokeWidth={1.8} />
                   </span>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">{t("workspaceBench")}</div>
