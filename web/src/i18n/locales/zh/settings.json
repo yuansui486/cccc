@@ -454,7 +454,7 @@
     "configPathFallback": "ONECOLLEAGUE_HOME/…/group.yaml",
     "openFromGroup": "请从工作组中打开此标签页。",
     "rulesTitle": "规则与模板",
-    "rulesDescription": "定义定时提醒、操作动作以及可复用的消息模板。",
+    "rulesDescription": "定义定时任务、操作动作以及可复用的消息模板。",
     "newRule": "新建规则",
     "snippets": "消息模板",
     "resetToDefaults": "恢复默认",
