@@ -13,6 +13,7 @@ export type GroupTabId =
   | "copyGroups"
   | "blueprint";
 export type GlobalTabId =
+  | "blueprint"
   | "capabilities"
   | "selfEvolvingSkills"
   | "actorProfiles"

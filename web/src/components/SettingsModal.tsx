@@ -59,9 +59,9 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const { t } = useTranslation("settings");
   const { modalRef } = useModalA11y(isOpen, onClose);
-  const [scope, setScope] = useState<SettingsScope>(groupId ? "group" : "global");
+  const [scope, setScope] = useState<SettingsScope>("global");
   const [groupTab, setGroupTab] = useState<GroupTabId>("blueprint");
-  const [globalTab, setGlobalTab] = useState<GlobalTabId>("capabilities");
+  const [globalTab, setGlobalTab] = useState<GlobalTabId>(groupId ? "blueprint" : "capabilities");
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
 
@@ -69,15 +69,15 @@ export function SettingsModal({
     if (!isOpen || !initialTarget) return;
     if (initialTarget.scope === "global") {
       setScope("global");
-      if (initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
+      if (initialTarget.tab === "blueprint" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
         setGlobalTab(initialTarget.tab);
       }
       return;
     }
     if (initialTarget.scope === "group") {
-      setScope("group");
       if (initialTarget.tab === "blueprint") {
-        setGroupTab(initialTarget.tab);
+        setScope("global");
+        setGlobalTab("blueprint");
       }
     }
   }, [initialTarget, isOpen]);
@@ -150,7 +150,8 @@ export function SettingsModal({
   useEffect(() => {
     if (!isOpen) return;
     if (initialTarget) return;
-    setScope(groupId ? "group" : "global");
+    setScope("global");
+    setGlobalTab(groupId ? "blueprint" : "capabilities");
   }, [initialTarget, isOpen, groupId]);
 
   useEffect(() => {
@@ -510,9 +511,10 @@ export function SettingsModal({
 
   const globalSettingsEnabled = canAccessGlobalSettings === true;
   const currentBrowserSignedIn = Boolean(webAccessSession?.current_browser_signed_in);
-  const globalScopeEnabled = globalSettingsEnabled || currentBrowserSignedIn;
+  const globalScopeEnabled = Boolean(groupId) || globalSettingsEnabled || currentBrowserSignedIn;
 
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
+    ...(groupId ? [{ id: "blueprint" as const, label: t("tabs.currentTeam", { defaultValue: "当前团队" }) }] : []),
     ...(globalSettingsEnabled ? [
       { id: "capabilities" as const, label: t("tabs.capabilities") },
       { id: "selfEvolvingSkills" as const, label: t("tabs.selfEvolvingSkills") },
@@ -521,7 +523,7 @@ export function SettingsModal({
     ] : []),
     // Non-admin signed-in users see My Profiles; admin already has Actor Profiles covering all
     ...(currentBrowserSignedIn && !globalSettingsEnabled ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }] : []),
-  ], [globalSettingsEnabled, currentBrowserSignedIn, t]);
+  ], [globalSettingsEnabled, currentBrowserSignedIn, groupId, t]);
 
   useEffect(() => {
     if (scope !== "global") return;
@@ -531,15 +533,11 @@ export function SettingsModal({
     }
   }, [globalTab, globalTabs, scope]);
 
-  const groupTabs: { id: GroupTabId; label: string }[] = [
-    { id: "blueprint", label: t("tabs.blueprint") },
-  ];
+  const groupTabs: { id: GroupTabId; label: string }[] = [];
 
   useEffect(() => {
     if (scope !== "group") return;
-    if (!groupTabs.some((tab) => tab.id === groupTab)) {
-      setGroupTab(groupTabs[0].id);
-    }
+    setScope("global");
   }, [groupTab, groupTabs, scope]);
 
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
@@ -584,9 +582,11 @@ export function SettingsModal({
             {t("title")}
           </h2>
           <div className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
-            {scope === "group"
+            {activeTab === "blueprint"
               ? t("navigation.groupScopeContent", { scopeRoot: scopeRootUrl || groupId || "—" })
-              : (globalScopeEnabled ? t("navigation.globalScopeContent") : t("navigation.globalLockedContent"))}
+              : scope === "group"
+                ? t("navigation.groupScopeContent", { scopeRoot: scopeRootUrl || groupId || "—" })
+                : (globalScopeEnabled ? t("navigation.globalScopeContent") : t("navigation.globalLockedContent"))}
           </div>
         </div>
       )}
@@ -609,13 +609,8 @@ export function SettingsModal({
       <div className="min-h-0 flex-1 flex flex-col sm:flex-row overflow-hidden">
         <SettingsNavigation
           isDark={isDark}
-          groupId={groupId}
-          scope={scope}
-          scopeRootUrl={scopeRootUrl}
-          globalEnabled={globalScopeEnabled}
           tabs={tabs}
           activeTab={activeTab}
-          onScopeChange={setScope}
           onTabChange={(tab) => setActiveTab(tab as GroupTabId | GlobalTabId)}
         />
 
@@ -629,19 +624,10 @@ export function SettingsModal({
           }`}
         >
           <div className="p-4 pb-6 sm:p-5 lg:p-6 sm:pb-7 space-y-4 lg:space-y-5">
-            {scope === "global" && !globalSettingsEnabled && !currentBrowserSignedIn ? (
+            {scope === "global" && activeTab !== "blueprint" && !globalSettingsEnabled && !currentBrowserSignedIn ? (
               <div className={`rounded-xl border p-6 ${isDark ? "border-amber-700/40 bg-amber-900/10 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
                 <div className="text-sm font-semibold">{t("navigation.globalLockedTitle")}</div>
                 <div className="mt-2 text-sm leading-6">{t("navigation.globalLockedContent")}</div>
-                {groupId ? (
-                  <button
-                    type="button"
-                    onClick={() => setScope("group")}
-                    className={`mt-4 px-3 py-2 rounded-lg text-xs ${isDark ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-blue-600 text-white border border-blue-600 hover:bg-blue-700"}`}
-                  >
-                    {t("navigation.thisGroup")}
-                  </button>
-                ) : null}
               </div>
             ) : !tabs.some((tab) => tab.id === activeTab) ? null : (
               <Suspense fallback={<SettingsTabFallback isDark={isDark} />}>

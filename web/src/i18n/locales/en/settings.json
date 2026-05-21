@@ -12,6 +12,7 @@
     "im": "IM Bridge",
     "transcript": "Transcript",
     "blueprint": "Team Configuration",
+    "currentTeam": "Current Team",
     "actorProfiles": "Actor Profiles",
     "myProfiles": "My Profiles",
     "branding": "Branding",
@@ -20,6 +21,7 @@
   },
   "navigation": {
     "targetScope": "Target Scope",
+    "sections": "Global Configuration",
     "thisGroup": "This group",
     "global": "Global",
     "groupScopeTitle": "Group Scope",

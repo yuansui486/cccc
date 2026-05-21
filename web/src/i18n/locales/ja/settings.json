@@ -12,6 +12,7 @@
     "im": "IMブリッジ",
     "transcript": "ターミナルログ",
     "blueprint": "チーム設定",
+    "currentTeam": "現在のチーム",
     "actorProfiles": "Actor プロファイル",
     "myProfiles": "自分のプロファイル",
     "branding": "ブランド",
@@ -20,6 +21,7 @@
   },
   "navigation": {
     "targetScope": "対象範囲",
+    "sections": "グローバル設定",
     "thisGroup": "この作業グループ",
     "global": "グローバル",
     "groupScopeTitle": "作業グループ範囲",
