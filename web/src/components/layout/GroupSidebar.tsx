@@ -153,7 +153,7 @@ export function GroupSidebar({
   onStopGroup,
   onSetGroupState,
 }: GroupSidebarProps) {
-  const { t } = useTranslation("layout");
+  const { t } = useTranslation(["layout", "actors"]);
   const appBrandName = getAppBrandName();
   const appLogoPath = getAppLogoPath();
   const branding = useBrandingStore((s) => s.branding);
@@ -982,7 +982,14 @@ export function GroupSidebar({
                       )}
                     />
                   </span>
-                  <span className={classNames("min-w-0 flex-1 truncate", indicator.labelClass || "text-[var(--color-text-secondary)]")}>{actor.title || actor.id}</span>
+                  <span className={classNames("min-w-0 flex-1 truncate", indicator.labelClass || "text-[var(--color-text-secondary)]")}>
+                    {actor.title || actor.id}
+                  </span>
+                  {actor.role === "foreman" ? (
+                    <span className="shrink-0 rounded-md border border-amber-400/30 bg-amber-400/12 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:border-amber-300/25 dark:bg-amber-300/12 dark:text-amber-200">
+                      {t("actors:foreman")}
+                    </span>
+                  ) : null}
                   <span className={classNames("shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold", indicator.statusBadgeClass)}>
                     {indicator.statusLabel}
                   </span>
