@@ -1,5 +1,6 @@
 import type { Actor, LedgerEvent } from "../../types";
 import { getRecipientDisplayName } from "../../hooks/useActorDisplayName";
+import { getUserDisplayName } from "../../utils/displayText";
 
 export function buildToLabel({
     hasDestination,
@@ -33,7 +34,8 @@ export function getSenderDisplayName({
     senderTitle?: string;
     displayNameMap: Map<string, string>;
 }): string {
-    if (!senderId || senderId === "user") return senderId;
+    if (!senderId) return senderId;
+    if (senderId === "user") return getUserDisplayName();
     return String(senderTitle || "").trim() || String(senderActor?.title || "").trim() || displayNameMap.get(senderId) || senderId;
 }
 
