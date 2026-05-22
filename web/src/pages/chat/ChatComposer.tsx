@@ -1,38 +1,16 @@
 // ChatComposer renders the chat message composer.
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Actor, LedgerEvent, PresentationMessageRef, ReplyTarget } from "../../types";
+import { Actor, PresentationMessageRef, ReplyTarget } from "../../types";
 import { classNames } from "../../utils/classNames";
-import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, AlertIcon, SparklesIcon } from "../../components/Icons";
+import { AttachmentIcon, SendIcon, ChevronDownIcon, ReplyIcon, CloseIcon, SparklesIcon } from "../../components/Icons";
 import { ScrollFade } from "../../components/ScrollFade";
 import { getPresentationRefChipLabel } from "../../utils/presentationRefs";
 import { useTranslation } from 'react-i18next';
-import { VoiceSecretaryComposerControl, type VoiceSecretaryCaptureMode } from "./VoiceSecretaryComposerControl";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem, type SlashSkillScope } from "../../utils/slashCommands";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
-
-function cleanVoicePromptContextText(value: unknown, maxLen = 240): string {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  if (text.length <= maxLen) return text;
-  return `${text.slice(0, Math.max(1, maxLen - 1)).trimEnd()}…`;
-}
-
-function buildRecentChatExcerptForVoicePrompt(events: LedgerEvent[]): string {
-  const rows: string[] = [];
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (String(event?.kind || "") !== "chat.message") continue;
-    const data = event?.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
-    const text = cleanVoicePromptContextText(data.text, 220);
-    if (!text) continue;
-    const by = cleanVoicePromptContextText(event.by || data.by || "unknown", 40) || "unknown";
-    rows.push(`${by}: ${text}`);
-    if (rows.length >= 4) break;
-  }
-  return rows.reverse().join("\n").slice(0, 1000);
-}
 
 export interface ChatComposerProps {
   isDark: boolean;
@@ -44,7 +22,6 @@ export interface ChatComposerProps {
   destGroupId: string;
   composerGroupSettled: boolean;
   busy: string;
-  recentMessages?: LedgerEvent[];
 
   // Reply
   replyTarget: ReplyTarget;
@@ -100,7 +77,6 @@ export function ChatComposer({
   destGroupId,
   composerGroupSettled,
   busy,
-  recentMessages = [],
   replyTarget,
   onCancelReply,
   quotedPresentationRef,
@@ -136,14 +112,11 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const composerHeightRef = useRef(0);
   const isUserInputRef = useRef(false);
-  const [showModeMenu, setShowModeMenu] = useState(false);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillSearchQuery, setSkillSearchQuery] = useState("");
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [slashVisibleCount, setSlashVisibleCount] = useState(SLASH_COMMAND_PAGE_SIZE);
-  const [voiceCaptureMode, setVoiceCaptureMode] = useState<VoiceSecretaryCaptureMode>("prompt");
-  const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const skillMenuRef = useRef<HTMLDivElement | null>(null);
   const { t } = useTranslation('chat');
 
@@ -205,26 +178,6 @@ export function ChatComposer({
       observer.disconnect();
     };
   }, [composerRef, resizeComposer]);
-
-  useEffect(() => {
-    if (!showModeMenu) return;
-
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      const node = modeMenuRef.current;
-      if (!node) return;
-      const target = event.target;
-      if (target instanceof Node && !node.contains(target)) {
-        setShowModeMenu(false);
-      }
-    };
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("touchstart", onPointerDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("touchstart", onPointerDown);
-    };
-  }, [showModeMenu]);
 
   useEffect(() => {
     if (!showSkillMenu) return;
@@ -512,68 +465,29 @@ export function ChatComposer({
   const isCrossGroup = !!destGroupId && destGroupId !== selectedGroupId;
 
   type MessageMode = "normal" | "attention" | "task";
-  const modeOptions: Array<{ key: MessageMode; label: string; description: string }> = [
-    { key: "normal", label: t('modeNormal'), description: t('modeNormalDesc') },
-    { key: "attention", label: t('modeImportant'), description: t('modeImportantDesc') },
-    { key: "task", label: t('modeNeedReply'), description: t('modeNeedReplyDesc') },
-  ];
-
   const messageMode: MessageMode = replyRequired
     ? "task"
     : isAttention
       ? "attention"
       : "normal";
-  const setMessageMode = (mode: MessageMode) => {
-    if (mode === "normal") {
+  const toggleAttentionMode = () => {
+    if (messageMode === "attention") {
       setPriority("normal");
       setReplyRequired(false);
       return;
     }
-    if (mode === "attention") {
-      setPriority("attention");
+    setPriority("attention");
+    setReplyRequired(false);
+  };
+  const toggleReplyRequiredMode = () => {
+    if (messageMode === "task") {
+      setPriority("normal");
       setReplyRequired(false);
       return;
     }
     setPriority("normal");
     setReplyRequired(true);
   };
-  const activeMode = modeOptions.find((opt) => opt.key === messageMode) || modeOptions[0];
-  const modeNotice = messageMode === "task"
-    ? t('modeNoticeNeedReply')
-    : messageMode === "attention"
-      ? t('modeNoticeImportant')
-      : "";
-
-  const recentChatExcerpt = useMemo(() => buildRecentChatExcerptForVoicePrompt(recentMessages), [recentMessages]);
-
-  const composerAssistantContext = useMemo<Record<string, unknown>>(() => ({
-    recipients: toTokens,
-    message_mode: messageMode,
-    priority,
-    reply_required: replyRequired,
-    reply_target: replyTarget
-      ? `${replyTarget.by || "unknown"}: ${String(replyTarget.text || "").slice(0, 240)}`
-      : "",
-    quoted_reference: quotedPresentationRef ? getPresentationRefChipLabel(quotedPresentationRef) : "",
-    recent_chat_excerpt: recentChatExcerpt,
-  }), [messageMode, priority, quotedPresentationRef, recentChatExcerpt, replyRequired, replyTarget, toTokens]);
-
-  const fillPromptDraftFromSpeech = useCallback((draft: string, opts?: { mode?: "replace" | "append" }) => {
-    const text = String(draft || "").trim();
-    if (!text) return;
-    setComposerText((current) => {
-      const existing = String(current || "");
-      if (opts?.mode === "replace" || !existing.trim()) return text;
-      return `${existing.replace(/\s+$/g, "")}\n\n${text}`;
-    });
-    requestAnimationFrame(() => {
-      const textarea = composerRef.current;
-      if (!textarea) return;
-      textarea.focus();
-      const end = textarea.value.length;
-      textarea.setSelectionRange(end, end);
-    });
-  }, [composerRef, setComposerText]);
 
   const fileDisabledReason = (() => {
     if (!selectedGroupId) return t('selectGroupFirst');
@@ -700,25 +614,6 @@ export function ChatComposer({
             ))}
           </div>
         )}
-
-        {modeNotice ? (
-          <div
-            className={classNames(
-              "mb-3 rounded-lg border px-3 py-1.5 text-[11px] leading-5",
-              messageMode === "task"
-                ? isDark
-                  ? "border-violet-500/30 bg-violet-500/10 text-violet-200"
-                  : "border-violet-200 bg-violet-50 text-violet-700"
-                : isDark
-                  ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                  : "border-amber-200 bg-amber-50 text-amber-700"
-            )}
-            role="status"
-            aria-live="polite"
-          >
-            {modeNotice}
-          </div>
-        ) : null}
 
         <input
           ref={fileInputRef as RefObject<HTMLInputElement>}
@@ -951,6 +846,50 @@ export function ChatComposer({
                   <CloseIcon size={12} />
                 </button>
               )}
+
+              <span className={classNames("ml-2 flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
+                {t("messageModeLabel", { defaultValue: "重要度" })}
+              </span>
+              <button
+                type="button"
+                className={classNames(
+                  "inline-flex h-7 flex-shrink-0 items-center rounded-full border px-2.5 text-[11px] font-semibold transition-all",
+                  messageMode === "attention"
+                    ? isDark
+                      ? "border-amber-400/35 bg-amber-500/14 text-amber-100 shadow-[0_8px_18px_-12px_rgba(251,191,36,0.7)]"
+                      : "border-amber-300 bg-amber-50 text-amber-700 shadow-[0_8px_18px_-14px_rgba(245,158,11,0.45)]"
+                    : isDark
+                      ? "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.07] hover:text-slate-100"
+                      : "border-black/5 bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(238,238,238)] hover:text-gray-900",
+                )}
+                onClick={toggleAttentionMode}
+                disabled={busy === "send" || !selectedGroupId}
+                aria-pressed={messageMode === "attention"}
+                aria-label={t("modeImportant", { defaultValue: "需确认" })}
+                title={t("modeImportantDesc", { defaultValue: "需要收件人确认收到" })}
+              >
+                {t("modeImportant", { defaultValue: "需确认" })}
+              </button>
+              <button
+                type="button"
+                className={classNames(
+                  "inline-flex h-7 flex-shrink-0 items-center rounded-full border px-2.5 text-[11px] font-semibold transition-all",
+                  messageMode === "task"
+                    ? isDark
+                      ? "border-violet-400/35 bg-violet-500/14 text-violet-100 shadow-[0_8px_18px_-12px_rgba(168,85,247,0.7)]"
+                      : "border-violet-300 bg-violet-50 text-violet-700 shadow-[0_8px_18px_-14px_rgba(139,92,246,0.45)]"
+                    : isDark
+                      ? "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.07] hover:text-slate-100"
+                      : "border-black/5 bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(238,238,238)] hover:text-gray-900",
+                )}
+                onClick={toggleReplyRequiredMode}
+                disabled={busy === "send" || !selectedGroupId}
+                aria-pressed={messageMode === "task"}
+                aria-label={t("modeNeedReply", { defaultValue: "需回复" })}
+                title={t("modeNeedReplyDesc", { defaultValue: "需要收件人给出具体回复" })}
+              >
+                {t("modeNeedReply", { defaultValue: "需回复" })}
+              </button>
             </div>
 
             {/* Row 2 — Textarea */}
@@ -1074,172 +1013,43 @@ export function ChatComposer({
                 "grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2 px-2 pb-2 pt-1 sm:flex sm:justify-between",
               )}
             >
-              <div className="contents sm:flex sm:items-center sm:gap-1.5">
-                <button
-                  className={classNames(
-                    "flex h-11 w-11 items-center justify-center rounded-lg border text-[var(--color-text-secondary)] transition-colors disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:opacity-60 sm:h-9 sm:w-9",
-                    isDark ? "border-white/10 bg-white/[0.04]" : "border-black/5 bg-[rgb(245,245,245)]",
-                    busy !== "send" && selectedGroupId && !isCrossGroup
-                      ? isDark ? "hover:bg-white/10 hover:text-[var(--color-text-primary)]" : "hover:bg-[rgb(237,237,237)] hover:text-gray-800"
-                      : "",
-                  )}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={!selectedGroupId || busy === "send" || isCrossGroup}
-                  aria-label={t('attachFile')}
-                  title={fileDisabledReason}
-                >
-                  <AttachmentIcon size={18} />
-                </button>
+              <button
+                className={classNames(
+                  "flex h-11 w-11 items-center justify-center rounded-lg border text-[var(--color-text-secondary)] transition-colors disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:opacity-60 sm:h-9 sm:w-9",
+                  isDark ? "border-white/10 bg-white/[0.04]" : "border-black/5 bg-[rgb(245,245,245)]",
+                  busy !== "send" && selectedGroupId && !isCrossGroup
+                    ? isDark ? "hover:bg-white/10 hover:text-[var(--color-text-primary)]" : "hover:bg-[rgb(237,237,237)] hover:text-gray-800"
+                    : "",
+                )}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!selectedGroupId || busy === "send" || isCrossGroup}
+                aria-label={t('attachFile')}
+                title={fileDisabledReason}
+              >
+                <AttachmentIcon size={18} />
+              </button>
 
-                <div className="min-w-0 sm:min-w-max">
-                <VoiceSecretaryComposerControl
-                  isDark={isDark}
-                  selectedGroupId={selectedGroupId}
-                  busy={busy}
-                  disabled={!selectedGroupId || busy === "send" || !composerGroupSettled}
-                  variant="assistantRow"
-                  captureMode={voiceCaptureMode}
-                  onCaptureModeChange={setVoiceCaptureMode}
-                  composerText={composerText}
-                  composerContext={composerAssistantContext}
-                  onPromptDraft={fillPromptDraftFromSpeech}
-                />
-                </div>
-              </div>
-
-              <div className="contents sm:flex sm:items-center sm:gap-1.5">
-                {!isSmallScreen ? (
-                  <div ref={modeMenuRef} className="relative z-20">
-                    <button
-                      type="button"
-                      className={classNames(
-                        "inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                        busy === "send" || !selectedGroupId
-                          ? isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400"
-                          : messageMode === "task"
-                            ? isDark
-                              ? "bg-violet-500/18 text-violet-200 hover:bg-violet-500/26"
-                              : "bg-violet-100 text-violet-700 hover:bg-violet-200"
-                            : messageMode === "attention"
-                              ? isDark
-                                ? "bg-amber-500/18 text-amber-200 hover:bg-amber-500/26"
-                                : "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                              : isDark
-                                ? "bg-white/[0.04] text-slate-200 hover:bg-white/10"
-                                : "bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(237,237,237)]",
-                      )}
-                      disabled={busy === "send" || !selectedGroupId}
-                      onClick={() => setShowModeMenu((v) => !v)}
-                      aria-label={t('messageType')}
-                      aria-haspopup="menu"
-                      aria-expanded={showModeMenu}
-                      title={t('messageMode', { mode: activeMode.label })}
-                    >
-                      {messageMode === "task" ? (
-                        <ReplyIcon size={13} />
-                      ) : messageMode === "attention" ? (
-                        <AlertIcon size={13} />
-                      ) : (
-                        <span className="text-[11px] font-black italic leading-none">N</span>
-                      )}
-                      <span className="hidden sm:inline">{activeMode.label}</span>
-                      <ChevronDownIcon size={12} className="opacity-70" />
-                    </button>
-
-                    {showModeMenu && (
-                      <div
-                        className={classNames(
-                          "glass-panel absolute bottom-full right-0 mb-2 z-40 w-56 sm:w-64 rounded-2xl border p-1.5 shadow-2xl pointer-events-auto",
-                        )}
-                        role="menu"
-                        aria-label={t('messageTypeOptions')}
-                      >
-                        {modeOptions.map((opt) => {
-                          const active = messageMode === opt.key;
-                          return (
-                            <button
-                              key={opt.key}
-                              type="button"
-                              className={classNames(
-                                "w-full rounded-xl px-3 py-2.5 text-left flex items-center gap-2.5 transition-colors",
-                                active
-                                  ? isDark
-                                    ? "bg-white/10"
-                                    : "bg-[rgb(237,237,237)]"
-                                  : isDark
-                                    ? "hover:bg-white/5"
-                                    : "hover:bg-[rgb(237,237,237)]",
-                              )}
-                              role="menuitemradio"
-                              aria-checked={active}
-                              onClick={() => {
-                                setMessageMode(opt.key);
-                                setShowModeMenu(false);
-                              }}
-                            >
-                              <span
-                                className={classNames(
-                                  "w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0",
-                                  opt.key === "task"
-                                    ? isDark
-                                      ? "bg-violet-500/25 text-violet-200"
-                                      : "bg-violet-100 text-violet-700"
-                                    : opt.key === "attention"
-                                      ? isDark
-                                        ? "bg-amber-500/25 text-amber-200"
-                                        : "bg-amber-100 text-amber-700"
-                                      : isDark
-                                        ? "bg-slate-700 text-slate-200"
-                                        : "bg-gray-100 text-gray-700",
-                                )}
-                              >
-                                {opt.key === "task" ? (
-                                  <ReplyIcon size={13} />
-                                ) : opt.key === "attention" ? (
-                                  <AlertIcon size={13} />
-                                ) : (
-                                  <span className="text-[11px] font-black italic leading-none">N</span>
-                                )}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className={classNames("block text-sm font-semibold", isDark ? "text-slate-100" : "text-gray-900")}>
-                                  {opt.label}
-                                </span>
-                                <span className={classNames("block text-[11px]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-500")}>
-                                  {opt.description}
-                                </span>
-                              </span>
-                              {active && <span className={classNames("text-xs font-semibold", isDark ? "text-emerald-300" : "text-emerald-600")}>✓</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                <button
-                  className={classNames(
-                    "flex h-11 w-11 items-center justify-center rounded-lg font-semibold transition-[background-color,box-shadow,transform] duration-150 disabled:cursor-not-allowed sm:h-9 sm:w-[5.5rem]",
-                    busy === "send" || !canSend
-                      ? isDark ? "bg-white/[0.06] text-[var(--color-text-tertiary)]" : "bg-gray-100 text-gray-400"
-                      : "border border-blue-600 bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:border-blue-700 hover:bg-blue-700 active:scale-[0.97] dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
-                  )}
-                  onClick={onSendMessage}
-                  disabled={busy === "send" || !canSend}
-                  aria-label={t('sendMessage')}
-                  title={sendButtonTitle}
-                >
-                  {busy === "send" ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <SendIcon size={16} className="sm:hidden" />
-                      <span className="hidden sm:inline">{t('send')}</span>
-                    </>
-                  )}
-                </button>
-              </div>
+              <button
+                className={classNames(
+                  "flex h-11 w-11 items-center justify-center rounded-lg font-semibold transition-[background-color,box-shadow,transform] duration-150 disabled:cursor-not-allowed sm:h-9 sm:w-[5.5rem]",
+                  busy === "send" || !canSend
+                    ? isDark ? "bg-white/[0.06] text-[var(--color-text-tertiary)]" : "bg-gray-100 text-gray-400"
+                    : "border border-blue-600 bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:border-blue-700 hover:bg-blue-700 active:scale-[0.97] dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
+                )}
+                onClick={onSendMessage}
+                disabled={busy === "send" || !canSend}
+                aria-label={t('sendMessage')}
+                title={sendButtonTitle}
+              >
+                {busy === "send" ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <SendIcon size={16} className="sm:hidden" />
+                    <span className="hidden sm:inline">{t('send')}</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
 

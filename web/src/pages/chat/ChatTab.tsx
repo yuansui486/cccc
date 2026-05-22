@@ -830,7 +830,6 @@ export function ChatTab({
             recipientActorsBusy={recipientActorsBusy}
             destGroupId={destGroupId}
             busy={busy}
-            recentMessages={chatMessages}
             replyTarget={replyTarget}
             onCancelReply={cancelReply}
             quotedPresentationRef={quotedPresentationRef}
