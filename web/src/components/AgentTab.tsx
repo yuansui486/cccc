@@ -130,6 +130,7 @@ export function AgentTab({
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const pendingTerminalBottomScrollRef = useRef(false);
   const [activated, setActivated] = useState(false);
   // Bumped to trigger a fresh WebSocket connection from the reconnect button
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
@@ -151,6 +152,11 @@ export function AgentTab({
   useEffect(() => {
     if (isVisible) setActivated(true);
   }, [isVisible]);
+
+  useEffect(() => {
+    if (!isVisible || isHeadless || !isRunning) return;
+    pendingTerminalBottomScrollRef.current = true;
+  }, [actor.id, groupId, isHeadless, isRunning, isVisible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -435,6 +441,32 @@ export function AgentTab({
     clearTerminalSignal,
     setReconnectTrigger,
   });
+
+  useEffect(() => {
+    if (!isVisible || !terminalReady || isHeadless || !isRunning) return;
+    if (!pendingTerminalBottomScrollRef.current) return;
+    const term = terminalRef.current;
+    if (!term) return;
+
+    pendingTerminalBottomScrollRef.current = false;
+    const scrollToBottom = () => {
+      try {
+        term.scrollToBottom();
+      } catch {
+        // xterm may be disposed during a fast tab switch.
+      }
+    };
+
+    const rafId = requestAnimationFrame(scrollToBottom);
+    const timers = [
+      window.setTimeout(scrollToBottom, 80),
+      window.setTimeout(scrollToBottom, 240),
+    ];
+    return () => {
+      cancelAnimationFrame(rafId);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [isHeadless, isRunning, isVisible, terminalReady]);
 
   // Fit terminal on visibility change and resize (with debounce to reduce jitter)
   useEffect(() => {
