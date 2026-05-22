@@ -774,6 +774,48 @@ export function ChatComposer({
                 )}
               </div>
 
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                <span className={classNames("text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
+                  {t("messageModeLabel", { defaultValue: "重要度" })}
+                </span>
+                <button
+                  type="button"
+                  className={classNames(
+                    chipBaseClass,
+                    messageMode === "attention"
+                      ? isDark
+                        ? "border-amber-400 bg-amber-500 text-white shadow-[0_6px_16px_-10px_rgba(251,191,36,0.8)]"
+                        : "border-amber-500 bg-amber-500 text-white shadow-[0_6px_16px_-10px_rgba(245,158,11,0.65)]"
+                      : chipInactiveClass,
+                  )}
+                  onClick={toggleAttentionMode}
+                  disabled={busy === "send" || !selectedGroupId}
+                  aria-pressed={messageMode === "attention"}
+                  aria-label={t("modeImportant", { defaultValue: "需确认" })}
+                  title={t("modeImportantDesc", { defaultValue: "需要收件人确认收到" })}
+                >
+                  {t("modeImportant", { defaultValue: "需确认" })}
+                </button>
+                <button
+                  type="button"
+                  className={classNames(
+                    chipBaseClass,
+                    messageMode === "task"
+                      ? isDark
+                        ? "border-violet-400 bg-violet-500 text-white shadow-[0_6px_16px_-10px_rgba(168,85,247,0.8)]"
+                        : "border-violet-500 bg-violet-500 text-white shadow-[0_6px_16px_-10px_rgba(139,92,246,0.65)]"
+                      : chipInactiveClass,
+                  )}
+                  onClick={toggleReplyRequiredMode}
+                  disabled={busy === "send" || !selectedGroupId}
+                  aria-pressed={messageMode === "task"}
+                  aria-label={t("modeNeedReply", { defaultValue: "需回复" })}
+                  title={t("modeNeedReplyDesc", { defaultValue: "需要收件人给出具体回复" })}
+                >
+                  {t("modeNeedReply", { defaultValue: "需回复" })}
+                </button>
+              </div>
+
               <span className={classNames("ml-1 flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
                 {t('to', 'To')}
               </span>
@@ -846,50 +888,6 @@ export function ChatComposer({
                   <CloseIcon size={12} />
                 </button>
               )}
-
-              <span className={classNames("ml-2 flex-shrink-0 text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
-                {t("messageModeLabel", { defaultValue: "重要度" })}
-              </span>
-              <button
-                type="button"
-                className={classNames(
-                  "inline-flex h-7 flex-shrink-0 items-center rounded-full border px-2.5 text-[11px] font-semibold transition-all",
-                  messageMode === "attention"
-                    ? isDark
-                      ? "border-amber-400/35 bg-amber-500/14 text-amber-100 shadow-[0_8px_18px_-12px_rgba(251,191,36,0.7)]"
-                      : "border-amber-300 bg-amber-50 text-amber-700 shadow-[0_8px_18px_-14px_rgba(245,158,11,0.45)]"
-                    : isDark
-                      ? "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.07] hover:text-slate-100"
-                      : "border-black/5 bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(238,238,238)] hover:text-gray-900",
-                )}
-                onClick={toggleAttentionMode}
-                disabled={busy === "send" || !selectedGroupId}
-                aria-pressed={messageMode === "attention"}
-                aria-label={t("modeImportant", { defaultValue: "需确认" })}
-                title={t("modeImportantDesc", { defaultValue: "需要收件人确认收到" })}
-              >
-                {t("modeImportant", { defaultValue: "需确认" })}
-              </button>
-              <button
-                type="button"
-                className={classNames(
-                  "inline-flex h-7 flex-shrink-0 items-center rounded-full border px-2.5 text-[11px] font-semibold transition-all",
-                  messageMode === "task"
-                    ? isDark
-                      ? "border-violet-400/35 bg-violet-500/14 text-violet-100 shadow-[0_8px_18px_-12px_rgba(168,85,247,0.7)]"
-                      : "border-violet-300 bg-violet-50 text-violet-700 shadow-[0_8px_18px_-14px_rgba(139,92,246,0.45)]"
-                    : isDark
-                      ? "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.07] hover:text-slate-100"
-                      : "border-black/5 bg-[rgb(245,245,245)] text-gray-700 hover:bg-[rgb(238,238,238)] hover:text-gray-900",
-                )}
-                onClick={toggleReplyRequiredMode}
-                disabled={busy === "send" || !selectedGroupId}
-                aria-pressed={messageMode === "task"}
-                aria-label={t("modeNeedReply", { defaultValue: "需回复" })}
-                title={t("modeNeedReplyDesc", { defaultValue: "需要收件人给出具体回复" })}
-              >
-                {t("modeNeedReply", { defaultValue: "需回复" })}
-              </button>
             </div>
 
             {/* Row 2 — Textarea */}
