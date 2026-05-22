@@ -4,6 +4,7 @@ import { BUILTIN_SLASH_COMMANDS } from "./builtinSlashCommands";
 export type SlashCommandItem = {
   name: string;
   command: string;
+  displayName?: string;
   description?: string;
   capabilityId: string;
   toolName?: string;
@@ -137,6 +138,7 @@ export function buildSlashCommands(args: {
     commands.push({
       name,
       command: `/${name}`,
+      displayName: String(skill.name || "").trim() || undefined,
       description: String(skill.description_short || skill.capsule_preview || "").trim() || undefined,
       capabilityId,
       sourceType: "capsule_skill",
@@ -175,6 +177,8 @@ export function buildSlashCommands(args: {
 export function buildCapabilityOverviewSkillSlashCommands(args: {
   items?: CapabilityOverviewItem[] | null;
   reservedCommands?: SlashCommandItem[];
+  includeCapabilityIds?: Set<string>;
+  active?: boolean;
 }): SlashCommandItem[] {
   const used = new Set(
     (Array.isArray(args.reservedCommands) ? args.reservedCommands : [])
@@ -189,6 +193,7 @@ export function buildCapabilityOverviewSkillSlashCommands(args: {
     if (String(row.kind || "").trim().toLowerCase() !== "skill") continue;
     const capabilityId = String(row.capability_id || "").trim();
     if (!capabilityId) continue;
+    if (args.includeCapabilityIds && !args.includeCapabilityIds.has(capabilityId)) continue;
     const name = uniqueCommandName([row.name, capabilityIdTail(capabilityId), capabilityId], used);
     if (!name) continue;
     used.add(name);
@@ -198,10 +203,11 @@ export function buildCapabilityOverviewSkillSlashCommands(args: {
     commands.push({
       name,
       command: `/${name}`,
+      displayName: String(row.name || "").trim() || undefined,
       description,
       capabilityId,
       sourceType: "capsule_skill",
-      active: false,
+      active: !!args.active,
     });
   }
   return sortSlashCommands(commands);
@@ -220,15 +226,6 @@ export function filterSlashCommands(commands: SlashCommandItem[], input: string)
         .map((value) => value.toLowerCase());
       return haystacks.some((value) => value.includes(query));
     });
-}
-
-export function filterSlashCommandsBySkillScope(commands: SlashCommandItem[], scope: SlashSkillScope): SlashCommandItem[] {
-  return commands.filter((item) => {
-    if (item.sourceType !== "capsule_skill") return true;
-    const activationSources = Array.isArray(item.activationSources) ? item.activationSources : [];
-    const hasGroupSource = activationSources.some((source) => String(source?.scope || "").trim().toLowerCase() === "group");
-    return scope === "team" ? !hasGroupSource : true;
-  });
 }
 
 export function getVisibleSlashCommandPage(commands: SlashCommandItem[], visibleCount: number): SlashCommandItem[] {

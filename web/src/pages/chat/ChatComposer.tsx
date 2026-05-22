@@ -254,6 +254,9 @@ export function ChatComposer({
   const chipInactiveClass = isDark
     ? "bg-white/[0.06] text-[var(--color-text-secondary)] border-white/[0.08] hover:bg-white/[0.1] hover:border-white/[0.14] hover:text-[var(--color-text-primary)]"
     : "bg-[rgb(245,245,245)] text-[rgb(35,36,37)] border-transparent hover:bg-[rgb(237,237,237)] hover:border-black/5 hover:text-[rgb(20,20,22)]";
+  const skillPickerActiveClass = isDark
+    ? "border-white/[0.16] bg-white/[0.09] text-[var(--color-text-primary)] shadow-[0_6px_16px_-12px_rgba(15,23,42,0.9)] hover:bg-white/[0.12]"
+    : "border-black/[0.08] bg-[rgb(238,240,243)] text-[rgb(20,24,30)] shadow-[0_6px_16px_-14px_rgba(15,23,42,0.35)] hover:bg-[rgb(230,233,238)]";
 
   // Get display name for reply target
   const replyByDisplayName = useMemo(() => {
@@ -291,7 +294,7 @@ export function ChatComposer({
     const query = skillSearchQuery.trim().toLowerCase();
     if (!query) return scopedSkillCommands;
     return scopedSkillCommands.filter((item) => {
-      const haystacks = [item.name, item.command, item.description || "", item.capabilityId]
+      const haystacks = [item.displayName || "", item.name, item.command, item.description || "", item.capabilityId]
         .map((value) => String(value || "").toLowerCase());
       return haystacks.some((value) => value.includes(query));
     });
@@ -752,7 +755,7 @@ export function ChatComposer({
                   className={classNames(
                     chipBaseClass,
                     "gap-1.5 px-2.5",
-                    selectedSkill ? chipActiveClass : chipInactiveClass,
+                    selectedSkill ? skillPickerActiveClass : chipInactiveClass,
                   )}
                   onClick={() => setShowSkillMenu((value) => !value)}
                   disabled={busy === "send"}
@@ -762,7 +765,7 @@ export function ChatComposer({
                 >
                   <SparklesIcon size={12} />
                   <span className="max-w-[9rem] truncate">
-                    {selectedSkill ? `$${selectedSkill.name}` : t("skillPicker", { defaultValue: "技能选择" })}
+                    {selectedSkill ? (selectedSkill.displayName || selectedSkill.name) : t("skillPicker", { defaultValue: "技能选择" })}
                   </span>
                   <ChevronDownIcon size={12} className={classNames("transition-transform", showSkillMenu ? "rotate-180" : "")} />
                 </button>
@@ -857,7 +860,7 @@ export function ChatComposer({
                                 <SparklesIcon size={14} />
                               </span>
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-semibold">{`$${item.name}`}</span>
+                                <span className="block truncate text-sm font-semibold">{item.displayName || item.name}</span>
                                 {item.description ? (
                                   <span className={classNames(
                                     "mt-0.5 line-clamp-2 block text-xs leading-5",
@@ -963,7 +966,7 @@ export function ChatComposer({
                     )}
                   >
                     <SparklesIcon size={11} className="shrink-0" />
-                    <span className="min-w-0 truncate">{`$${selectedSkill.name}`}</span>
+                    <span className="min-w-0 truncate">{selectedSkill.displayName || selectedSkill.name}</span>
                     <button
                       type="button"
                       className="rounded-full p-0.5 text-white/80 transition-colors hover:bg-white/18 hover:text-white"

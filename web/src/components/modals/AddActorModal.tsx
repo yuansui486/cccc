@@ -279,7 +279,7 @@ export function AddActorModal({
 
                   <div className="min-w-0 flex-1">
                     <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                      {t("agentName")} <span className="text-[var(--color-text-muted)]">{t("unicodeSupport")}</span>
+                      {t("agentName")}
                     </label>
                     <Input
                       value={newActorId}

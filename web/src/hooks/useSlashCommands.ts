@@ -4,7 +4,6 @@ import * as api from "../services/api";
 import type { ReplyTarget } from "../types";
 import {
   buildSlashCommandToolArgumentsForItem,
-  filterSlashCommandsBySkillScope,
   parseSlashCommandInput,
   resolveCapsuleSkillSlashCommand,
   resolveSlashCommandGuard,
@@ -71,15 +70,18 @@ export function useSlashCommands(args: {
 }) {
   const { selectedGroupId, clearComposer, restoreComposerText, showError, showNotice, dispatchMessage, onExecuted, skillScope, t } = args;
   const slashInFlightRef = useRef(false);
-  const { slashCommands, globalSkillCommands, refreshSlashCommands } = useSlashCommandState(selectedGroupId);
-  const teamScopedSlashCommands = useMemo(
-    () => filterSlashCommandsBySkillScope(slashCommands, "team"),
+  const { slashCommands, teamSkillCommands, globalSkillCommands, refreshSlashCommands } = useSlashCommandState(selectedGroupId);
+  const nonSkillCommands = useMemo(
+    () => slashCommands.filter((item) => item.sourceType !== "capsule_skill"),
     [slashCommands],
   );
+  const teamScopedSlashCommands = useMemo(
+    () => [...nonSkillCommands, ...teamSkillCommands],
+    [nonSkillCommands, teamSkillCommands],
+  );
   const globalScopedSlashCommands = useMemo(() => {
-    const nonSkillCommands = slashCommands.filter((item) => item.sourceType !== "capsule_skill");
     return [...nonSkillCommands, ...globalSkillCommands];
-  }, [globalSkillCommands, slashCommands]);
+  }, [globalSkillCommands, nonSkillCommands]);
   const scopedSlashCommands = useMemo(
     () => skillScope === "team" ? teamScopedSlashCommands : globalScopedSlashCommands,
     [globalScopedSlashCommands, skillScope, teamScopedSlashCommands],
@@ -188,5 +190,5 @@ export function useSlashCommands(args: {
     }
   }, [clearComposer, dispatchMessage, onExecuted, refreshSlashCommands, restoreComposerText, scopedSlashCommands, selectedGroupId, showError, showNotice, t]);
 
-  return { slashCommands: scopedSlashCommands, allSlashCommands: [...teamScopedSlashCommands, ...globalSkillCommands], refreshSlashCommands, tryExecuteSlashCommand };
+  return { slashCommands: scopedSlashCommands, allSlashCommands: [...teamSkillCommands, ...globalSkillCommands], refreshSlashCommands, tryExecuteSlashCommand };
 }
