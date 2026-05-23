@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -14,6 +16,66 @@ from router.streaming_upload import stream_upload_to_worker
 from router.worker_pool import WorkerError, WorkerOffline, WorkerPool
 
 log = logging.getLogger(__name__)
+
+
+def _first_header_value(request: Request, name: str) -> str | None:
+    value = request.headers.get(name)
+    if not value:
+        return None
+    return value.split(",", 1)[0].strip() or None
+
+
+def _hostname(value: str | None) -> str | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    parts = urlsplit(raw if "://" in raw else f"//{raw}")
+    return parts.hostname
+
+
+def _has_port(host: str) -> bool:
+    try:
+        return urlsplit(f"//{host}").port is not None
+    except ValueError:
+        return False
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower().strip("[]")
+    if normalized in {"localhost", "0.0.0.0"}:
+        return True
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
+
+
+def _host_with_forwarded_port(host: str, scheme: str, port: str | None) -> str:
+    if not port or _has_port(host):
+        return host
+    if (scheme == "https" and port == "443") or (scheme == "http" and port == "80"):
+        return host
+    return f"{host}:{port}"
+
+
+def _public_base_url(request: Request, settings: RouterSettings) -> str:
+    configured = settings.public_base_url.rstrip("/")
+    if not _is_loopback_host(_hostname(configured)):
+        return configured
+
+    forwarded_host = _first_header_value(request, "x-forwarded-host")
+    host = forwarded_host or _first_header_value(request, "host")
+    if host and not _is_loopback_host(_hostname(host)):
+        scheme = _first_header_value(request, "x-forwarded-proto") or request.url.scheme
+        port = _first_header_value(request, "x-forwarded-port")
+        return f"{scheme}://{_host_with_forwarded_port(host, scheme, port)}".rstrip("/")
+
+    return configured
 
 
 def build_api_router(
@@ -97,7 +159,7 @@ def build_api_router(
             await pool.release(worker.worker_id)
 
     @router.get("/predict_talking_video/status/{prompt_id}")
-    async def status(prompt_id: str):
+    async def status(prompt_id: str, request: Request):
         route = await routes.get(prompt_id)
         if route is None:
             raise HTTPException(status_code=404, detail="prompt_id not found")
@@ -126,7 +188,7 @@ def build_api_router(
         payload.setdefault("prompt_id", prompt_id)
         if payload.get("status") == "success":
             payload["video_url"] = (
-                f"{settings.public_base_url.rstrip('/')}/api/v1/predict_talking_video/result/{prompt_id}"
+                f"{_public_base_url(request, settings)}/api/v1/predict_talking_video/result/{prompt_id}"
             )
         return JSONResponse(content=payload)
 

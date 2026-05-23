@@ -9,8 +9,8 @@ API_URL = f"{API_BASE_URL}/api/v1/predict_talking_video"
 STATUS_URL_TEMPLATE = f"{API_BASE_URL}/api/v1/predict_talking_video/status/{{prompt_id}}"
 
 # 测试文件路径
-IMAGE_FILE_PATH = "d389bfdc4302270e9f1542fdf5a7c59d.jpg"
-AUDIO_FILE_PATH = "output.mp3"
+IMAGE_FILE_PATH = "tmp/d389bfdc4302270e9f1542fdf5a7c59d.jpg"
+AUDIO_FILE_PATH = "tmp/output.mp3"
 
 # 配置要测试的宽高参数
 TARGET_WIDTH = 480

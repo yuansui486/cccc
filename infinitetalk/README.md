@@ -87,6 +87,44 @@ python worker_app.py
 
 `WORKER_TOKEN` 必须和 Router 一致。Worker 会主动连接 Router 的 `/ws/workers`，因此 Worker 所在机器不需要暴露公网端口。`ROUTER_WS_URL` 可以直接填写 `https://dongdongkc.shierkeji.com:6205/`，程序会自动转换成 `wss://dongdongkc.shierkeji.com:6205/ws/workers`。
 
+### 3.1 使用 tmux 一键重启 ComfyUI 和 Worker
+
+如果项目已同步到服务器 `/root/infinitetalk`，可以用内置脚本按顺序重启两个 tmux session：
+
+```bash
+cd /root/infinitetalk
+bash scripts/start_tmux.sh
+```
+
+脚本会先停止已存在的 `infinitetalk-worker` 和 `comfyui` session，然后启动：
+
+- `comfyui` session：在 `/root/ComfyUI` 执行 `python main.py --use-sage-attention --port 8080`
+- `infinitetalk-worker` session：在 `/root/infinitetalk` 执行 `python worker_app.py`
+
+常用查看和停止命令：
+
+```bash
+tmux attach -t comfyui
+tmux attach -t infinitetalk-worker
+tmux kill-session -t comfyui
+tmux kill-session -t infinitetalk-worker
+```
+
+脚本支持用环境变量覆盖默认值，例如：
+
+```bash
+COMFYUI_DIR=/root/ComfyUI \
+COMFYUI_PORT=8080 \
+WORKER_TOKEN="change-me" \
+WORKER_ID="gpu-worker-01" \
+ROUTER_WS_URL="https://dongdongkc.shierkeji.com:6205/" \
+COMFYUI_BASE_URL="http://127.0.0.1:8080" \
+WORKFLOW_FILE="./workflows/kijai-wanvideo_I2V_InfiniteTalk_example_01.json" \
+bash scripts/start_tmux.sh
+```
+
+Worker 配置会自动读取 `/root/infinitetalk/.env.worker`；如果要指定其他环境变量文件，可以设置 `WORKER_ENV_FILE=/path/to/.env.worker`。默认会在启动 ComfyUI 后等待 3 秒再启动 Worker，可用 `COMFYUI_STARTUP_WAIT_SECONDS=0` 关闭等待。
+
 ### 4. 检查连接状态
 
 ```bash
