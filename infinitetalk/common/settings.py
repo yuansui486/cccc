@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
+
+
+DEFAULT_PUBLIC_BASE_URL = "https://dongdongkc.shierkeji.com:6205"
 
 
 def _env(key: str, default: str | None = None) -> str | None:
@@ -24,6 +28,25 @@ def _env_float(key: str, default: float) -> float:
     return float(v)
 
 
+def _normalize_router_ws_url(url: str) -> str:
+    raw = url.strip()
+    parts = urlsplit(raw)
+    if parts.scheme == "https":
+        scheme = "wss"
+    elif parts.scheme == "http":
+        scheme = "ws"
+    elif parts.scheme in ("ws", "wss"):
+        scheme = parts.scheme
+    else:
+        return raw
+
+    path = parts.path
+    if path.rstrip("/") in ("", "/ws/workers"):
+        path = "/ws/workers"
+
+    return urlunsplit((scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
 @dataclass(frozen=True)
 class RouterSettings:
     host: str
@@ -41,7 +64,7 @@ class RouterSettings:
         return cls(
             host=_env("ROUTER_HOST", "127.0.0.1"),
             port=_env_int("ROUTER_PORT", 38349),
-            public_base_url=_env("PUBLIC_BASE_URL", "http://127.0.0.1:38349"),
+            public_base_url=_env("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL),
             worker_token=_env("WORKER_TOKEN", "change-me"),
             max_upload_mb=_env_int("MAX_UPLOAD_MB", 200),
             upload_stream_chunk_bytes=_env_int("UPLOAD_STREAM_CHUNK_BYTES", 262144),
@@ -72,7 +95,7 @@ class WorkerSettings:
     @classmethod
     def from_env(cls) -> "WorkerSettings":
         return cls(
-            router_ws_url=_env("ROUTER_WS_URL", "ws://127.0.0.1:38349/ws/workers"),
+            router_ws_url=_normalize_router_ws_url(_env("ROUTER_WS_URL", DEFAULT_PUBLIC_BASE_URL) or DEFAULT_PUBLIC_BASE_URL),
             worker_id=_env("WORKER_ID", "gpu-worker-01"),
             worker_token=_env("WORKER_TOKEN", "change-me"),
             comfyui_base_url=_env("COMFYUI_BASE_URL", "http://127.0.0.1:8080"),

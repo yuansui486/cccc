@@ -38,7 +38,7 @@ pip install -r requirements.txt
 
 ## 快速启动
 
-以下示例适合 Router、Worker、ComfyUI 都在同一台机器上的本地调试。
+以下示例默认使用当前公网 Router：`https://dongdongkc.shierkeji.com:6205`。如果要本地调试 Router，可以把相关 URL 改回 `http://127.0.0.1:38349` 或 `ws://127.0.0.1:38349/ws/workers`。
 
 ### 1. 启动 ComfyUI
 
@@ -56,7 +56,7 @@ curl http://127.0.0.1:8080/system_stats
 export WORKER_TOKEN="change-me"
 export ROUTER_HOST="127.0.0.1"
 export ROUTER_PORT="38349"
-export PUBLIC_BASE_URL="http://127.0.0.1:38349"
+export PUBLIC_BASE_URL="https://dongdongkc.shierkeji.com:6205"
 
 python router_app.py
 ```
@@ -67,7 +67,7 @@ Router 默认监听 `127.0.0.1:38349`。
 
 ```bash
 export ROUTER_HOST="0.0.0.0"
-export PUBLIC_BASE_URL="https://你的公网域名"
+export PUBLIC_BASE_URL="https://dongdongkc.shierkeji.com:6205"
 python router_app.py
 ```
 
@@ -78,20 +78,20 @@ python router_app.py
 ```bash
 export WORKER_TOKEN="change-me"
 export WORKER_ID="gpu-worker-01"
-export ROUTER_WS_URL="ws://127.0.0.1:38349/ws/workers"
+export ROUTER_WS_URL="https://dongdongkc.shierkeji.com:6205/"
 export COMFYUI_BASE_URL="http://127.0.0.1:8080"
 export WORKFLOW_FILE="./workflows/kijai-wanvideo_I2V_InfiniteTalk_example_01.json"
 
 python worker_app.py
 ```
 
-`WORKER_TOKEN` 必须和 Router 一致。Worker 会主动连接 Router 的 `/ws/workers`，因此 Worker 所在机器不需要暴露公网端口。
+`WORKER_TOKEN` 必须和 Router 一致。Worker 会主动连接 Router 的 `/ws/workers`，因此 Worker 所在机器不需要暴露公网端口。`ROUTER_WS_URL` 可以直接填写 `https://dongdongkc.shierkeji.com:6205/`，程序会自动转换成 `wss://dongdongkc.shierkeji.com:6205/ws/workers`。
 
 ### 4. 检查连接状态
 
 ```bash
-curl http://127.0.0.1:38349/healthz
-curl http://127.0.0.1:38349/api/v1/workers
+curl https://dongdongkc.shierkeji.com:6205/healthz
+curl https://dongdongkc.shierkeji.com:6205/api/v1/workers
 ```
 
 正常情况下可以看到已连接的 Worker，例如：
@@ -116,7 +116,7 @@ curl http://127.0.0.1:38349/api/v1/workers
 | --- | --- | --- |
 | `ROUTER_HOST` | `127.0.0.1` | Router 监听地址 |
 | `ROUTER_PORT` | `38349` | Router 监听端口 |
-| `PUBLIC_BASE_URL` | `http://127.0.0.1:38349` | 返回给客户端的视频下载 URL 前缀 |
+| `PUBLIC_BASE_URL` | `https://dongdongkc.shierkeji.com:6205` | 返回给客户端的视频下载 URL 前缀 |
 | `WORKER_TOKEN` | `change-me` | Worker 接入鉴权 token |
 | `MAX_UPLOAD_MB` | `200` | 单次上传最大体积，包含 multipart 请求体 |
 | `UPLOAD_STREAM_CHUNK_BYTES` | `262144` | 上传流分片大小预留配置 |
@@ -128,7 +128,7 @@ curl http://127.0.0.1:38349/api/v1/workers
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `ROUTER_WS_URL` | `ws://127.0.0.1:38349/ws/workers` | Router Worker WebSocket 地址 |
+| `ROUTER_WS_URL` | `https://dongdongkc.shierkeji.com:6205/` | Router Worker WebSocket 地址，会自动转换为 `wss://.../ws/workers` |
 | `WORKER_ID` | `gpu-worker-01` | Worker 唯一标识 |
 | `WORKER_TOKEN` | `change-me` | 必须和 Router 一致 |
 | `COMFYUI_BASE_URL` | `http://127.0.0.1:8080` | Worker 访问 ComfyUI 的地址 |
@@ -149,7 +149,7 @@ curl http://127.0.0.1:38349/api/v1/workers
 ### 提交生成任务
 
 ```bash
-curl -X POST "http://127.0.0.1:38349/api/v1/predict_talking_video" \
+curl -X POST "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video" \
   -F "image=@./input.jpg" \
   -F "audio=@./input.wav" \
   -F "width=480" \
@@ -177,7 +177,7 @@ curl -X POST "http://127.0.0.1:38349/api/v1/predict_talking_video" \
 ### 查询任务状态
 
 ```bash
-curl "http://127.0.0.1:38349/api/v1/predict_talking_video/status/comfy_prompt_id"
+curl "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/status/comfy_prompt_id"
 ```
 
 生成中：
@@ -196,7 +196,7 @@ curl "http://127.0.0.1:38349/api/v1/predict_talking_video/status/comfy_prompt_id
 {
   "status": "success",
   "prompt_id": "comfy_prompt_id",
-  "video_url": "http://127.0.0.1:38349/api/v1/predict_talking_video/result/comfy_prompt_id"
+  "video_url": "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/result/comfy_prompt_id"
 }
 ```
 
@@ -216,7 +216,7 @@ curl "http://127.0.0.1:38349/api/v1/predict_talking_video/status/comfy_prompt_id
 当状态为 `success` 后，使用 `video_url` 下载结果：
 
 ```bash
-curl -L "http://127.0.0.1:38349/api/v1/predict_talking_video/result/comfy_prompt_id" \
+curl -L "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/result/comfy_prompt_id" \
   -o output.mp4
 ```
 
@@ -231,10 +231,10 @@ IMAGE_FILE_PATH = "d389bfdc4302270e9f1542fdf5a7c59d.jpg"
 AUDIO_FILE_PATH = "output.mp3"
 ```
 
-运行本地 Router 时：
+默认会请求公网 Router。如需显式指定：
 
 ```bash
-export INFINITETALK_API_BASE_URL="http://127.0.0.1:38349"
+export INFINITETALK_API_BASE_URL="https://dongdongkc.shierkeji.com:6205"
 python test_client.py
 ```
 
@@ -270,7 +270,7 @@ Client -> Router 公网机器 -> Worker 内网/GPU 机器 -> ComfyUI
 说明 Router 当前没有可用 Worker。检查：
 
 ```bash
-curl http://127.0.0.1:38349/api/v1/workers
+curl https://dongdongkc.shierkeji.com:6205/api/v1/workers
 ```
 
 确认 Worker 是否已经启动、`ROUTER_WS_URL` 是否正确、`WORKER_TOKEN` 是否一致。
