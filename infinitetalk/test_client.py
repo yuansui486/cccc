@@ -1,10 +1,12 @@
 import requests
 import json
+import os
 import time
 
 # API 服务器地址
-API_URL = "http://127.0.0.1:8000/api/v1/predict_talking_video"
-STATUS_URL_TEMPLATE = "http://127.0.0.1:8000/api/v1/predict_talking_video/status/{prompt_id}"
+API_BASE_URL = os.getenv("INFINITETALK_API_BASE_URL", "https://dongdongkc.shierkeji.com:6205")
+API_URL = f"{API_BASE_URL}/api/v1/predict_talking_video"
+STATUS_URL_TEMPLATE = f"{API_BASE_URL}/api/v1/predict_talking_video/status/{{prompt_id}}"
 
 # 测试文件路径
 IMAGE_FILE_PATH = "d389bfdc4302270e9f1542fdf5a7c59d.jpg"
