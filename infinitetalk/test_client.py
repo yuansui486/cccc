@@ -9,7 +9,7 @@ API_URL = f"{API_BASE_URL}/api/v1/predict_talking_video"
 STATUS_URL_TEMPLATE = f"{API_BASE_URL}/api/v1/predict_talking_video/status/{{prompt_id}}"
 
 # 测试文件路径
-IMAGE_FILE_PATH = "tmp/d389bfdc4302270e9f1542fdf5a7c59d.jpg"
+IMAGE_FILE_PATH = "tmp/485695721_17900255607118845_4953498329478192874_n.jpg"
 AUDIO_FILE_PATH = "tmp/output.mp3"
 
 # 配置要测试的宽高参数
@@ -17,6 +17,8 @@ TARGET_WIDTH = 480
 TARGET_HEIGHT = 640
 POLL_INTERVAL = 2
 POLL_TIMEOUT = 600
+STATUS_REQUEST_TIMEOUT = 30
+RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
 def poll_video_status(prompt_id):
@@ -24,17 +26,33 @@ def poll_video_status(prompt_id):
     start_time = time.time()
 
     while time.time() - start_time < POLL_TIMEOUT:
-        response = requests.get(status_url, timeout=30)
+        try:
+            response = requests.get(status_url, timeout=STATUS_REQUEST_TIMEOUT)
+        except requests.exceptions.RequestException as e:
+            print(f"状态查询请求失败，将在 {POLL_INTERVAL} 秒后重试: {e}")
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        if response.status_code != 200:
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                print(f"状态查询暂时失败 (HTTP {response.status_code})，将在 {POLL_INTERVAL} 秒后重试")
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            print(f"状态查询失败 (HTTP {response.status_code})")
+            try:
+                error_data = response.json()
+                print(f"错误详情: {json.dumps(error_data, ensure_ascii=False, indent=2)}")
+            except ValueError:
+                print(f"服务器返回了非 JSON 格式的错误: {response.text}")
+            return None
+
         try:
             result = response.json()
         except ValueError:
-            print(f"服务器返回了非 JSON 格式的状态响应: {response.text}")
-            return None
-
-        if response.status_code != 200:
-            print(f"状态查询失败 (HTTP {response.status_code})")
-            print(f"错误详情: {json.dumps(result, ensure_ascii=False, indent=2)}")
-            return None
+            print(f"服务器返回了非 JSON 格式的状态响应，将在 {POLL_INTERVAL} 秒后重试: {response.text}")
+            time.sleep(POLL_INTERVAL)
+            continue
 
         status = result.get("status")
         if status == "success":
