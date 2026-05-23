@@ -68,3 +68,4 @@ AGENTS.md
 .github/*
 !.github/workflows/
 !.github/workflows/**
+infinitetalk/tmp/

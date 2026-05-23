@@ -1,0 +1,116 @@
+import requests
+import json
+import time
+
+# API 服务器地址
+API_URL = "http://127.0.0.1:8000/api/v1/predict_talking_video"
+STATUS_URL_TEMPLATE = "http://127.0.0.1:8000/api/v1/predict_talking_video/status/{prompt_id}"
+
+# 测试文件路径
+IMAGE_FILE_PATH = "d389bfdc4302270e9f1542fdf5a7c59d.jpg"
+AUDIO_FILE_PATH = "output.mp3"
+
+# 配置要测试的宽高参数
+TARGET_WIDTH = 480
+TARGET_HEIGHT = 640
+POLL_INTERVAL = 2
+POLL_TIMEOUT = 600
+
+
+def poll_video_status(prompt_id):
+    status_url = STATUS_URL_TEMPLATE.format(prompt_id=prompt_id)
+    start_time = time.time()
+
+    while time.time() - start_time < POLL_TIMEOUT:
+        response = requests.get(status_url, timeout=30)
+        try:
+            result = response.json()
+        except ValueError:
+            print(f"服务器返回了非 JSON 格式的状态响应: {response.text}")
+            return None
+
+        if response.status_code != 200:
+            print(f"状态查询失败 (HTTP {response.status_code})")
+            print(f"错误详情: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            return None
+
+        status = result.get("status")
+        if status == "success":
+            return result
+        if status == "error":
+            print("\n❌ ComfyUI 任务失败")
+            print(f"错误详情: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            return None
+
+        message = result.get("message", "任务仍在生成中")
+        # print(f"{message}，{POLL_INTERVAL} 秒后继续查询...")
+        time.sleep(POLL_INTERVAL)
+
+    print(f"\n⏱️ 轮询超时，超过 {POLL_TIMEOUT} 秒仍未生成完成。")
+    return None
+
+
+def test_generate_video():
+    print(f"正在准备向 {API_URL} 发送请求...")
+    
+    try:
+        with open(IMAGE_FILE_PATH, "rb") as img_file, open(AUDIO_FILE_PATH, "rb") as audio_file:
+            
+            # 定义上传的文件
+            files = {
+                "image": (IMAGE_FILE_PATH, img_file, "image/jpeg"),
+                "audio": (AUDIO_FILE_PATH, audio_file, "audio/wav")
+            }
+            
+            # 定义额外传递的表单参数
+            payload_data = {
+                "width": TARGET_WIDTH,
+                "height": TARGET_HEIGHT
+            }
+            
+            print(f"参数配置: 宽 {TARGET_WIDTH}, 高 {TARGET_HEIGHT}")
+            print("文件已加载，正在提交任务...")
+            
+            # 同时发送 files 和 data
+            response = requests.post(API_URL, files=files, data=payload_data, timeout=60)
+            
+            if response.status_code == 200:
+                result = response.json()
+                prompt_id = result.get("prompt_id")
+                print("\n✅ 任务提交成功！")
+                print("-" * 30)
+                print(f"任务 ID (Prompt ID): {prompt_id}")
+                print(f"状态查询地址: {result.get('status_url')}")
+                print("-" * 30)
+
+                if not prompt_id:
+                    print("服务器响应中没有 prompt_id，无法继续查询状态。")
+                    return
+
+                print(f"开始每 {POLL_INTERVAL} 秒查询一次生成状态，请耐心等待...")
+                video_result = poll_video_status(prompt_id)
+                if not video_result:
+                    return
+
+                print("\n✅ 生成成功！")
+                print("-" * 30)
+                print(f"视频下载链接: {video_result.get('video_url')}")
+                print("-" * 30)
+            else:
+                print(f"\n❌ 请求失败 (HTTP {response.status_code})")
+                try:
+                    error_data = response.json()
+                    print(f"错误详情: {json.dumps(error_data, ensure_ascii=False, indent=2)}")
+                except ValueError:
+                    print(f"服务器返回了非 JSON 格式的错误: {response.text}")
+                    
+    except FileNotFoundError as e:
+        print(f"\n⚠️ 找不到测试文件: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"\n网络请求报错: {e}")
+
+if __name__ == "__main__":
+    now = time.time()
+    test_generate_video()
+    elapsed = time.time() - now
+    print(f"\n测试完成，耗时 {elapsed:.2f} 秒。")
