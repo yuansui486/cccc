@@ -21,11 +21,15 @@ STATUS_REQUEST_TIMEOUT = 30
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
+def unix_ms():
+    return time.time_ns() // 1_000_000
+
+
 def poll_video_status(prompt_id):
     status_url = STATUS_URL_TEMPLATE.format(prompt_id=prompt_id)
-    start_time = time.time()
+    start_time = unix_ms()
 
-    while time.time() - start_time < POLL_TIMEOUT:
+    while unix_ms() - start_time < POLL_TIMEOUT * 1000:
         try:
             response = requests.get(status_url, timeout=STATUS_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as e:
@@ -137,7 +141,7 @@ def test_generate_video():
         print(f"\n网络请求报错: {e}")
 
 if __name__ == "__main__":
-    now = time.time()
+    now = unix_ms()
     test_generate_video()
-    elapsed = time.time() - now
+    elapsed = (unix_ms() - now) / 1000
     print(f"\n测试完成，耗时 {elapsed:.2f} 秒。")

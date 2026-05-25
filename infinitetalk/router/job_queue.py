@@ -7,7 +7,6 @@ import hashlib
 import logging
 import os
 import shutil
-import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +18,7 @@ from streaming_form_data.targets import BaseTarget, ValueTarget
 
 from common import protocol as P
 from common.settings import RouterSettings
+from router.database import RouterDatabase, decode_json_object, encode_json, seconds_to_ms, unix_ms
 from router.prompt_routes import PromptRouteStore
 from router.worker_pool import WorkerConnection, WorkerError, WorkerOffline, WorkerPool
 
@@ -59,18 +59,18 @@ class StoredResult:
 class QueuedJob:
     task_id: str
     dir: Path
-    created_at: float
-    updated_at: float
+    created_at: int
+    updated_at: int
     status: str = RECEIVING
     params: dict[str, Any] = field(default_factory=dict)
     files: dict[str, QueuedFile] = field(default_factory=dict)
     attempts: int = 0
-    next_attempt_at: float = 0.0
+    next_attempt_at: int = 0
     last_error: Optional[str] = None
     worker_id: Optional[str] = None
     prompt_id: Optional[str] = None
     result: Optional[StoredResult] = None
-    finished_at: Optional[float] = None
+    finished_at: Optional[int] = None
 
 
 class _FileTarget(BaseTarget):
@@ -141,16 +141,24 @@ class RouterJobStore:
         result_dir: str,
         max_jobs: int,
         finished_ttl_seconds: float,
+        database: RouterDatabase | None = None,
     ) -> None:
         self._queue_dir = Path(queue_dir)
         self._queue_dir.mkdir(parents=True, exist_ok=True)
         self.result_dir = Path(result_dir)
         self.result_dir.mkdir(parents=True, exist_ok=True)
         self._max_jobs = max_jobs
-        self._finished_ttl_seconds = finished_ttl_seconds
+        self._finished_ttl_ms = seconds_to_ms(finished_ttl_seconds)
+        self._database = database
         self._jobs: dict[str, QueuedJob] = {}
         self._prompt_to_task: dict[str, str] = {}
         self._lock = asyncio.Lock()
+
+    async def prepare(self) -> None:
+        if self._database is None:
+            return
+        await self._recover_db_jobs()
+        await self._gc_db(unix_ms())
 
     async def enqueue_from_request(self, request: Request, max_upload_bytes: int) -> QueuedJob:
         content_type = request.headers.get("content-type", "")
@@ -158,9 +166,12 @@ class RouterJobStore:
             raise HTTPException(status_code=400, detail="expected multipart/form-data")
 
         async with self._lock:
-            if self._active_count_locked() >= self._max_jobs:
-                raise HTTPException(status_code=503, detail="router queue is full")
-            job = self._new_job_locked()
+            if self._database is not None:
+                job = await self._new_job_db()
+            else:
+                if self._active_count_locked() >= self._max_jobs:
+                    raise HTTPException(status_code=503, detail="router queue is full")
+                job = self._new_job_locked()
 
         image_target = _FileTarget(P.FILE_ID_IMAGE, job.dir)
         audio_target = _FileTarget(P.FILE_ID_AUDIO, job.dir)
@@ -214,16 +225,45 @@ class RouterJobStore:
         params: dict[str, Any],
         files: dict[str, QueuedFile],
     ) -> None:
+        if self._database is not None:
+            await self._mark_received_db(task_id, params, files)
+            return
         async with self._lock:
             job = self._jobs[task_id]
             job.params = params
             job.files = files
             job.status = QUEUED
-            job.updated_at = time.time()
-            job.next_attempt_at = 0.0
+            job.updated_at = unix_ms()
+            job.next_attempt_at = 0
 
     async def acquire_ready(self) -> QueuedJob | None:
-        now = time.time()
+        now = unix_ms()
+        if self._database is not None:
+            await self._gc_db(now)
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                async with connection.transaction():
+                    record = await connection.fetchrow(
+                        f"""
+                        UPDATE {jobs_table}
+                        SET status = $1, updated_at = $2
+                        WHERE task_id = (
+                            SELECT task_id
+                            FROM {jobs_table}
+                            WHERE status = $3 AND next_attempt_at <= $2
+                            ORDER BY created_at
+                            FOR UPDATE SKIP LOCKED
+                            LIMIT 1
+                        )
+                        RETURNING *
+                        """,
+                        SUBMITTING,
+                        now,
+                        QUEUED,
+                    )
+                    if record is None:
+                        return None
+                    return await self._job_from_record(connection, record)
         async with self._lock:
             self._gc_locked(now)
             for job in self._jobs.values():
@@ -234,6 +274,9 @@ class RouterJobStore:
         return None
 
     async def defer(self, task_id: str, delay_seconds: float, reason: str | None = None) -> None:
+        if self._database is not None:
+            await self._defer_db(task_id, delay_seconds, reason)
+            return
         async with self._lock:
             job = self._jobs.get(task_id)
             if job is None or job.status in TERMINAL_STATUSES:
@@ -243,12 +286,30 @@ class RouterJobStore:
                 job.prompt_id = None
             job.status = QUEUED
             job.worker_id = None
-            job.updated_at = time.time()
-            job.next_attempt_at = job.updated_at + delay_seconds
+            job.updated_at = unix_ms()
+            job.next_attempt_at = job.updated_at + seconds_to_ms(delay_seconds)
             if reason:
                 job.last_error = reason
 
     async def mark_attempt(self, task_id: str, worker_id: str) -> None:
+        if self._database is not None:
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET status = $2,
+                        worker_id = $3,
+                        attempts = attempts + 1,
+                        updated_at = $4
+                    WHERE task_id = $1
+                    """,
+                    task_id,
+                    SUBMITTING,
+                    worker_id,
+                    unix_ms(),
+                )
+            return
         async with self._lock:
             job = self._jobs.get(task_id)
             if job is None:
@@ -256,9 +317,12 @@ class RouterJobStore:
             job.status = SUBMITTING
             job.worker_id = worker_id
             job.attempts += 1
-            job.updated_at = time.time()
+            job.updated_at = unix_ms()
 
     async def mark_processing(self, task_id: str, prompt_id: str, worker_id: str) -> None:
+        if self._database is not None:
+            await self._mark_processing_db(task_id, prompt_id, worker_id)
+            return
         async with self._lock:
             job = self._jobs.get(task_id)
             if job is None:
@@ -269,18 +333,37 @@ class RouterJobStore:
             job.prompt_id = prompt_id
             job.worker_id = worker_id
             job.last_error = None
-            job.updated_at = time.time()
+            job.updated_at = unix_ms()
             self._prompt_to_task[prompt_id] = task_id
 
     async def mark_fetching_result(self, task_id: str) -> None:
+        if self._database is not None:
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET status = $2, updated_at = $3
+                    WHERE task_id = $1 AND status <> ALL($4::text[])
+                    """,
+                    task_id,
+                    FETCHING_RESULT,
+                    unix_ms(),
+                    list(TERMINAL_STATUSES),
+                )
+            return
         async with self._lock:
             job = self._jobs.get(task_id)
             if job is None or job.status in TERMINAL_STATUSES:
                 return
             job.status = FETCHING_RESULT
-            job.updated_at = time.time()
+            job.updated_at = unix_ms()
 
     async def mark_success(self, task_id: str, result: StoredResult) -> None:
+        if self._database is not None:
+            await self._mark_success_db(task_id, result)
+            await self._remove_files(task_id)
+            return
         async with self._lock:
             job = self._jobs.get(task_id)
             if job is None:
@@ -288,11 +371,32 @@ class RouterJobStore:
             job.status = SUCCESS
             job.result = result
             job.last_error = None
-            job.updated_at = time.time()
+            job.updated_at = unix_ms()
             job.finished_at = job.updated_at
         await self._remove_files(task_id)
 
     async def mark_error(self, task_id: str, message: str) -> None:
+        if self._database is not None:
+            jobs_table = self._database.table("router_jobs")
+            now = unix_ms()
+            async with self._database.pool.acquire() as connection:
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET status = $2,
+                        last_error = $3,
+                        worker_id = NULL,
+                        updated_at = $4,
+                        finished_at = $4
+                    WHERE task_id = $1
+                    """,
+                    task_id,
+                    ERROR,
+                    message,
+                    now,
+                )
+            await self._remove_files(task_id)
+            return
         async with self._lock:
             job = self._jobs.get(task_id)
             if job is None:
@@ -300,24 +404,49 @@ class RouterJobStore:
             job.status = ERROR
             job.last_error = message
             job.worker_id = None
-            job.updated_at = time.time()
+            job.updated_at = unix_ms()
             job.finished_at = job.updated_at
         await self._remove_files(task_id)
 
     async def get(self, task_id: str) -> QueuedJob | None:
+        if self._database is not None:
+            await self._gc_db(unix_ms())
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                record = await connection.fetchrow(f"SELECT * FROM {jobs_table} WHERE task_id = $1", task_id)
+                if record is None:
+                    return None
+                return await self._job_from_record(connection, record)
         async with self._lock:
-            self._gc_locked(time.time())
+            self._gc_locked(unix_ms())
             return self._jobs.get(task_id)
 
     async def get_by_prompt(self, prompt_id: str) -> QueuedJob | None:
+        if self._database is not None:
+            await self._gc_db(unix_ms())
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                record = await connection.fetchrow(f"SELECT * FROM {jobs_table} WHERE prompt_id = $1", prompt_id)
+                if record is None:
+                    return None
+                return await self._job_from_record(connection, record)
         async with self._lock:
-            self._gc_locked(time.time())
+            self._gc_locked(unix_ms())
             task_id = self._prompt_to_task.get(prompt_id)
             if task_id is None:
                 return None
             return self._jobs.get(task_id)
 
     async def discard(self, task_id: str) -> None:
+        if self._database is not None:
+            job = await self.get(task_id)
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                await connection.execute(f"DELETE FROM {jobs_table} WHERE task_id = $1", task_id)
+            await self._remove_files(task_id)
+            if job and job.result:
+                await self._remove_result_file(job.result)
+            return
         async with self._lock:
             job = self._jobs.pop(task_id, None)
             if job and job.prompt_id:
@@ -327,20 +456,37 @@ class RouterJobStore:
             await self._remove_result_file(job.result)
 
     async def snapshot(self) -> list[dict[str, Any]]:
+        if self._database is not None:
+            await self._gc_db(unix_ms())
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                records = await connection.fetch(f"SELECT * FROM {jobs_table} ORDER BY created_at")
+            return [job_to_payload(self._job_from_record_sync(record)) for record in records]
         async with self._lock:
-            self._gc_locked(time.time())
+            self._gc_locked(unix_ms())
             return [job_to_payload(job) for job in self._jobs.values()]
 
     async def summary(self) -> dict[str, Any]:
+        if self._database is not None:
+            await self._gc_db(unix_ms())
+            jobs_table = self._database.table("router_jobs")
+            async with self._database.pool.acquire() as connection:
+                records = await connection.fetch(
+                    f"SELECT status, COUNT(*) AS count FROM {jobs_table} GROUP BY status"
+                )
+            return {
+                "counts": {record["status"]: record["count"] for record in records},
+                "max_jobs": self._max_jobs,
+            }
         async with self._lock:
-            self._gc_locked(time.time())
+            self._gc_locked(unix_ms())
             counts: dict[str, int] = {}
             for job in self._jobs.values():
                 counts[job.status] = counts.get(job.status, 0) + 1
             return {"counts": counts, "max_jobs": self._max_jobs}
 
     def _new_job_locked(self) -> QueuedJob:
-        now = time.time()
+        now = unix_ms()
         task_id = "task_" + uuid.uuid4().hex[:16]
         job_dir = self._queue_dir / task_id
         job_dir.mkdir(parents=True, exist_ok=False)
@@ -348,14 +494,349 @@ class RouterJobStore:
         self._jobs[task_id] = job
         return job
 
+    async def _new_job_db(self) -> QueuedJob:
+        database = self._database
+        if database is None:
+            raise RuntimeError("router database is not configured")
+        now = unix_ms()
+        task_id = "task_" + uuid.uuid4().hex[:16]
+        job_dir = self._queue_dir / task_id
+        jobs_table = database.table("router_jobs")
+        job_dir_created = False
+        try:
+            async with database.pool.acquire() as connection:
+                async with connection.transaction():
+                    active_count = await connection.fetchval(
+                        f"SELECT COUNT(*) FROM {jobs_table} WHERE status = ANY($1::text[])",
+                        list(ACTIVE_STATUSES),
+                    )
+                    if int(active_count or 0) >= self._max_jobs:
+                        raise HTTPException(status_code=503, detail="router queue is full")
+                    job_dir.mkdir(parents=True, exist_ok=False)
+                    job_dir_created = True
+                    await connection.execute(
+                        f"""
+                        INSERT INTO {jobs_table}
+                            (task_id, dir_path, status, params, attempts, next_attempt_at, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4::jsonb, 0, 0, $5, $5)
+                        """,
+                        task_id,
+                        str(job_dir),
+                        RECEIVING,
+                        encode_json({}),
+                        now,
+                    )
+        except Exception:
+            if job_dir_created:
+                await asyncio.to_thread(shutil.rmtree, job_dir, True)
+            raise
+        return QueuedJob(task_id=task_id, dir=job_dir, created_at=now, updated_at=now)
+
+    async def _mark_received_db(
+        self,
+        task_id: str,
+        params: dict[str, Any],
+        files: dict[str, QueuedFile],
+    ) -> None:
+        database = self._database
+        if database is None:
+            raise RuntimeError("router database is not configured")
+        now = unix_ms()
+        jobs_table = database.table("router_jobs")
+        job_files_table = database.table("router_job_files")
+        file_rows = [
+            (
+                task_id,
+                queued_file.file_id,
+                str(queued_file.path),
+                queued_file.filename,
+                queued_file.content_type,
+                queued_file.size,
+                queued_file.sha256,
+            )
+            for queued_file in files.values()
+        ]
+        async with database.pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET params = $2::jsonb,
+                        status = $3,
+                        updated_at = $4,
+                        next_attempt_at = 0
+                    WHERE task_id = $1
+                    """,
+                    task_id,
+                    encode_json(params),
+                    QUEUED,
+                    now,
+                )
+                await connection.executemany(
+                    f"""
+                    INSERT INTO {job_files_table}
+                        (task_id, file_id, path, filename, content_type, size, sha256)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (task_id, file_id) DO UPDATE SET
+                        path = EXCLUDED.path,
+                        filename = EXCLUDED.filename,
+                        content_type = EXCLUDED.content_type,
+                        size = EXCLUDED.size,
+                        sha256 = EXCLUDED.sha256
+                    """,
+                    file_rows,
+                )
+
+    async def _defer_db(self, task_id: str, delay_seconds: float, reason: str | None) -> None:
+        database = self._database
+        if database is None:
+            raise RuntimeError("router database is not configured")
+        now = unix_ms()
+        jobs_table = database.table("router_jobs")
+        routes_table = database.table("prompt_routes")
+        async with database.pool.acquire() as connection:
+            async with connection.transaction():
+                record = await connection.fetchrow(
+                    f"SELECT status, prompt_id FROM {jobs_table} WHERE task_id = $1 FOR UPDATE",
+                    task_id,
+                )
+                if record is None or record["status"] in TERMINAL_STATUSES:
+                    return
+                if record["prompt_id"]:
+                    await connection.execute(
+                        f"DELETE FROM {routes_table} WHERE prompt_id = $1",
+                        record["prompt_id"],
+                    )
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET status = $2,
+                        prompt_id = NULL,
+                        worker_id = NULL,
+                        updated_at = $3,
+                        next_attempt_at = $4,
+                        last_error = CASE WHEN $5::text IS NULL THEN last_error ELSE $5 END
+                    WHERE task_id = $1
+                    """,
+                    task_id,
+                    QUEUED,
+                    now,
+                    now + seconds_to_ms(delay_seconds),
+                    reason,
+                )
+
+    async def _mark_processing_db(self, task_id: str, prompt_id: str, worker_id: str) -> None:
+        database = self._database
+        if database is None:
+            raise RuntimeError("router database is not configured")
+        now = unix_ms()
+        jobs_table = database.table("router_jobs")
+        routes_table = database.table("prompt_routes")
+        async with database.pool.acquire() as connection:
+            async with connection.transaction():
+                old_prompt_id = await connection.fetchval(
+                    f"SELECT prompt_id FROM {jobs_table} WHERE task_id = $1 FOR UPDATE",
+                    task_id,
+                )
+                if old_prompt_id and old_prompt_id != prompt_id:
+                    await connection.execute(
+                        f"DELETE FROM {routes_table} WHERE prompt_id = $1",
+                        old_prompt_id,
+                    )
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET status = $2,
+                        prompt_id = $3,
+                        worker_id = $4,
+                        last_error = NULL,
+                        updated_at = $5
+                    WHERE task_id = $1
+                    """,
+                    task_id,
+                    PROCESSING,
+                    prompt_id,
+                    worker_id,
+                    now,
+                )
+
+    async def _mark_success_db(self, task_id: str, result: StoredResult) -> None:
+        database = self._database
+        if database is None:
+            raise RuntimeError("router database is not configured")
+        now = unix_ms()
+        jobs_table = database.table("router_jobs")
+        async with database.pool.acquire() as connection:
+            await connection.execute(
+                f"""
+                UPDATE {jobs_table}
+                SET status = $2,
+                    result_path = $3,
+                    result_filename = $4,
+                    result_content_type = $5,
+                    result_size = $6,
+                    last_error = NULL,
+                    updated_at = $7,
+                    finished_at = $7
+                WHERE task_id = $1
+                """,
+                task_id,
+                SUCCESS,
+                str(result.path),
+                result.filename,
+                result.content_type,
+                result.size,
+                now,
+            )
+
+    async def _recover_db_jobs(self) -> None:
+        database = self._database
+        if database is None:
+            return
+        now = unix_ms()
+        jobs_table = database.table("router_jobs")
+        routes_table = database.table("prompt_routes")
+        interrupted_statuses = [SUBMITTING, PROCESSING, FETCHING_RESULT]
+        async with database.pool.acquire() as connection:
+            async with connection.transaction():
+                receiving_records = await connection.fetch(
+                    f"SELECT task_id FROM {jobs_table} WHERE status = $1",
+                    RECEIVING,
+                )
+                interrupted_records = await connection.fetch(
+                    f"SELECT task_id FROM {jobs_table} WHERE status = ANY($1::text[])",
+                    interrupted_statuses,
+                )
+                await connection.execute(
+                    f"""
+                    UPDATE {jobs_table}
+                    SET status = $2,
+                        last_error = $3,
+                        updated_at = $4,
+                        finished_at = $4
+                    WHERE status = $1
+                    """,
+                    RECEIVING,
+                    ERROR,
+                    "Router restarted while receiving upload",
+                    now,
+                )
+                if interrupted_records:
+                    interrupted_task_ids = [record["task_id"] for record in interrupted_records]
+                    await connection.execute(
+                        f"DELETE FROM {routes_table} WHERE task_id = ANY($1::text[])",
+                        interrupted_task_ids,
+                    )
+                    await connection.execute(
+                        f"""
+                        UPDATE {jobs_table}
+                        SET status = $2,
+                            prompt_id = NULL,
+                            worker_id = NULL,
+                            next_attempt_at = 0,
+                            updated_at = $3,
+                            last_error = $4
+                        WHERE task_id = ANY($1::text[])
+                        """,
+                        interrupted_task_ids,
+                        QUEUED,
+                        now,
+                        "Router restarted; task was requeued",
+                    )
+        for record in receiving_records:
+            await self._remove_files(record["task_id"])
+
+    async def _gc_db(self, now: int) -> None:
+        database = self._database
+        if database is None:
+            return
+        jobs_table = database.table("router_jobs")
+        async with database.pool.acquire() as connection:
+            records = await connection.fetch(
+                f"""
+                SELECT * FROM {jobs_table}
+                WHERE status = ANY($1::text[])
+                  AND finished_at IS NOT NULL
+                  AND finished_at < $2
+                """,
+                list(TERMINAL_STATUSES),
+                now - self._finished_ttl_ms,
+            )
+            if not records:
+                return
+            task_ids = [record["task_id"] for record in records]
+            await connection.execute(
+                f"DELETE FROM {jobs_table} WHERE task_id = ANY($1::text[])",
+                task_ids,
+            )
+        for record in records:
+            await self._remove_files(record["task_id"])
+            result = self._result_from_record(record)
+            if result is not None:
+                await self._remove_result_file(result)
+
+    async def _job_from_record(self, connection, record) -> QueuedJob:
+        job = self._job_from_record_sync(record)
+        if self._database is None:
+            return job
+        job_files_table = self._database.table("router_job_files")
+        file_records = await connection.fetch(
+            f"""
+            SELECT file_id, path, filename, content_type, size, sha256
+            FROM {job_files_table}
+            WHERE task_id = $1
+            """,
+            job.task_id,
+        )
+        job.files = {
+            file_record["file_id"]: QueuedFile(
+                file_id=file_record["file_id"],
+                path=Path(file_record["path"]),
+                filename=file_record["filename"],
+                content_type=file_record["content_type"],
+                size=file_record["size"],
+                sha256=file_record["sha256"],
+            )
+            for file_record in file_records
+        }
+        return job
+
+    def _job_from_record_sync(self, record) -> QueuedJob:
+        return QueuedJob(
+            task_id=record["task_id"],
+            dir=Path(record["dir_path"]),
+            created_at=record["created_at"],
+            updated_at=record["updated_at"],
+            status=record["status"],
+            params=decode_json_object(record["params"]),
+            attempts=record["attempts"],
+            next_attempt_at=record["next_attempt_at"],
+            last_error=record["last_error"],
+            worker_id=record["worker_id"],
+            prompt_id=record["prompt_id"],
+            result=self._result_from_record(record),
+            finished_at=record["finished_at"],
+        )
+
+    @staticmethod
+    def _result_from_record(record) -> StoredResult | None:
+        if not record["result_path"] or not record["result_filename"]:
+            return None
+        return StoredResult(
+            path=Path(record["result_path"]),
+            filename=record["result_filename"],
+            content_type=record["result_content_type"] or "application/octet-stream",
+            size=record["result_size"] or 0,
+        )
+
     def _active_count_locked(self) -> int:
         return sum(1 for job in self._jobs.values() if job.status in ACTIVE_STATUSES)
 
-    def _gc_locked(self, now: float) -> None:
+    def _gc_locked(self, now: int) -> None:
         for task_id, job in list(self._jobs.items()):
             if job.status not in TERMINAL_STATUSES or job.finished_at is None:
                 continue
-            if now - job.finished_at > self._finished_ttl_seconds:
+            if now - job.finished_at > self._finished_ttl_ms:
                 if job.prompt_id:
                     self._prompt_to_task.pop(job.prompt_id, None)
                 if job.result:
@@ -450,7 +931,7 @@ class RouterJobDispatcher:
                     "Worker did not return prompt_id; retrying",
                 )
                 return
-            await self._routes.put(prompt_id, worker.worker_id)
+            await self._routes.put(prompt_id, worker.worker_id, task_id=job.task_id)
             await self._jobs.mark_processing(job.task_id, prompt_id, worker.worker_id)
             log.info("queued task %s submitted as prompt %s", job.task_id, prompt_id)
             await self._wait_for_result(job.task_id, prompt_id, worker)

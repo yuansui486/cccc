@@ -52,6 +52,8 @@ class RouterSettings:
     host: str
     port: int
     public_base_url: str
+    database_url: str | None
+    database_table_prefix: str
     worker_token: str
     max_upload_mb: int
     upload_stream_chunk_bytes: int
@@ -70,6 +72,8 @@ class RouterSettings:
             host=_env("ROUTER_HOST", "127.0.0.1"),
             port=_env_int("ROUTER_PORT", 38349),
             public_base_url=_env("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL),
+            database_url=_env("DATABASE_URL"),
+            database_table_prefix=_env("ROUTER_DB_TABLE_PREFIX", "itd_"),
             worker_token=_env("WORKER_TOKEN", "change-me"),
             max_upload_mb=_env_int("MAX_UPLOAD_MB", 200),
             upload_stream_chunk_bytes=_env_int("UPLOAD_STREAM_CHUNK_BYTES", 262144),

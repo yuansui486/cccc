@@ -57,17 +57,23 @@ export WORKER_TOKEN="change-me"
 export ROUTER_HOST="127.0.0.1"
 export ROUTER_PORT="38349"
 export PUBLIC_BASE_URL="https://dongdongkc.shierkeji.com:6205"
+export DATABASE_URL="postgresql+asyncpg://user:password@host:5432/database"
+export ROUTER_DB_TABLE_PREFIX="itd_"
 
 python router_app.py
 ```
 
 Router 默认监听 `127.0.0.1:38349`。
 
+首次部署可以先执行 [scripts/create_router_tables.sql](scripts/create_router_tables.sql) 创建表；Router 启动时也会按 `ROUTER_DB_TABLE_PREFIX` 自动执行 `CREATE TABLE IF NOT EXISTS`。配置 `DATABASE_URL` 后，Router 会把任务队列、prompt 路由和 Worker 状态快照维护到 PostgreSQL，所有 `created_at`、`updated_at`、`finished_at`、`next_attempt_at`、`last_accessed_at`、`connected_at`、`disconnected_at` 均使用 Unix 毫秒时间戳。
+
 生产或公网部署时通常需要改成：
 
 ```bash
 export ROUTER_HOST="0.0.0.0"
 export PUBLIC_BASE_URL="https://dongdongkc.shierkeji.com:6205"
+export DATABASE_URL="postgresql+asyncpg://user:password@host:5432/database"
+export ROUTER_DB_TABLE_PREFIX="itd_"
 python router_app.py
 ```
 
@@ -162,6 +168,8 @@ curl https://dongdongkc.shierkeji.com:6205/api/v1/workers
 | `ROUTER_HOST` | `127.0.0.1` | Router 监听地址 |
 | `ROUTER_PORT` | `38349` | Router 监听端口 |
 | `PUBLIC_BASE_URL` | `https://dongdongkc.shierkeji.com:6205` | 返回给客户端的视频下载 URL 前缀 |
+| `DATABASE_URL` | 空 | Router 状态库连接串，支持 `postgresql+asyncpg://...` |
+| `ROUTER_DB_TABLE_PREFIX` | `itd_` | Router 状态表名前缀 |
 | `WORKER_TOKEN` | `change-me` | Worker 接入鉴权 token |
 | `MAX_UPLOAD_MB` | `200` | 单次上传最大体积，包含 multipart 请求体 |
 | `UPLOAD_STREAM_CHUNK_BYTES` | `262144` | 上传流分片大小预留配置 |
@@ -381,7 +389,7 @@ curl https://dongdongkc.shierkeji.com:6205/api/v1/queue
 
 说明 Router 中没有这个 `task_id` 或 `prompt_id` 的记录。常见原因：
 
-- Router 重启过。
+- 未配置 `DATABASE_URL` 时，Router 重启过；配置数据库后任务状态会从 PostgreSQL 恢复。
 - `PROMPT_ROUTE_TTL_HOURS` 已过期。
 - 查询的 ID 不是当前 Router 提交返回的 `task_id`，也不是已提交成功后的 `prompt_id`。
 

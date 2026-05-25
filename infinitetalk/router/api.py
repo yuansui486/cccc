@@ -141,7 +141,7 @@ def build_api_router(
 
     @router.get("/workers")
     async def workers():
-        return {"workers": pool.snapshot(), "queue": await jobs.summary()}
+        return {"workers": await pool.snapshot(), "queue": await jobs.summary()}
 
     @router.get("/queue")
     async def queue():

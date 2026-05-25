@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from fastapi import WebSocket
 
 from common import protocol as P
+from router.database import RouterDatabase, decode_json_object, encode_json, unix_ms
 
 log = logging.getLogger(__name__)
 
@@ -200,24 +201,32 @@ class WorkerConnection:
 
 
 class WorkerPool:
-    def __init__(self) -> None:
+    def __init__(self, database: RouterDatabase | None = None) -> None:
+        self._database = database
         self._workers: Dict[str, WorkerConnection] = {}
         self._lock = asyncio.Lock()
 
     async def add(self, worker: WorkerConnection) -> None:
+        now = unix_ms()
         async with self._lock:
             # If an old connection with the same id exists, evict it.
             old = self._workers.get(worker.worker_id)
             if old is not None and old is not worker:
                 old.mark_offline()
             self._workers[worker.worker_id] = worker
+            worker.status = "idle"
+        await self._upsert_worker(worker, "idle", now, disconnected_at=None)
 
     async def remove(self, worker_id: str, conn: WorkerConnection) -> None:
+        removed = False
         async with self._lock:
             current = self._workers.get(worker_id)
             if current is conn:
                 self._workers.pop(worker_id, None)
+                removed = True
         conn.mark_offline()
+        if removed:
+            await self._mark_worker_status(worker_id, "offline", disconnected_at=unix_ms())
 
     def get(self, worker_id: str) -> Optional[WorkerConnection]:
         return self._workers.get(worker_id)
@@ -228,6 +237,7 @@ class WorkerPool:
             for w in self._workers.values():
                 if w.status == "idle":
                     w.status = "busy"
+                    await self._mark_worker_status(w.worker_id, "busy")
                     return w
             return None
 
@@ -236,9 +246,97 @@ class WorkerPool:
             w = self._workers.get(worker_id)
             if w and w.status != "offline":
                 w.status = "idle"
+                await self._mark_worker_status(worker_id, "idle")
 
-    def snapshot(self) -> list[dict]:
+    async def snapshot(self) -> list[dict]:
+        if self._database is not None:
+            workers_table = self._database.table("router_workers")
+            async with self._database.pool.acquire() as connection:
+                records = await connection.fetch(
+                    f"SELECT worker_id, status, capabilities FROM {workers_table} ORDER BY worker_id"
+                )
+            return [
+                {
+                    "worker_id": record["worker_id"],
+                    "status": record["status"],
+                    "capabilities": decode_json_object(record["capabilities"]),
+                }
+                for record in records
+            ]
         return [
             {"worker_id": w.worker_id, "status": w.status, "capabilities": w.capabilities}
             for w in self._workers.values()
         ]
+
+    async def mark_all_offline(self) -> None:
+        for worker in self._workers.values():
+            worker.mark_offline()
+        self._workers.clear()
+        if self._database is None:
+            return
+        workers_table = self._database.table("router_workers")
+        now = unix_ms()
+        async with self._database.pool.acquire() as connection:
+            await connection.execute(
+                f"""
+                UPDATE {workers_table}
+                SET status = 'offline', updated_at = $1, disconnected_at = COALESCE(disconnected_at, $1)
+                WHERE status <> 'offline'
+                """,
+                now,
+            )
+
+    async def _upsert_worker(
+        self,
+        worker: WorkerConnection,
+        status: str,
+        now: int,
+        disconnected_at: int | None,
+    ) -> None:
+        if self._database is None:
+            return
+        workers_table = self._database.table("router_workers")
+        async with self._database.pool.acquire() as connection:
+            await connection.execute(
+                f"""
+                INSERT INTO {workers_table}
+                    (worker_id, status, capabilities, connected_at, updated_at, disconnected_at)
+                VALUES ($1, $2, $3::jsonb, $4, $4, $5)
+                ON CONFLICT (worker_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    capabilities = EXCLUDED.capabilities,
+                    connected_at = EXCLUDED.connected_at,
+                    updated_at = EXCLUDED.updated_at,
+                    disconnected_at = EXCLUDED.disconnected_at
+                """,
+                worker.worker_id,
+                status,
+                encode_json(worker.capabilities),
+                now,
+                disconnected_at,
+            )
+
+    async def _mark_worker_status(
+        self,
+        worker_id: str,
+        status: str,
+        disconnected_at: int | None = None,
+    ) -> None:
+        if self._database is None:
+            return
+        workers_table = self._database.table("router_workers")
+        now = unix_ms()
+        async with self._database.pool.acquire() as connection:
+            await connection.execute(
+                f"""
+                UPDATE {workers_table}
+                SET status = $2,
+                    updated_at = $3,
+                    disconnected_at = $4
+                WHERE worker_id = $1
+                """,
+                worker_id,
+                status,
+                now,
+                disconnected_at,
+            )
