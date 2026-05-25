@@ -96,7 +96,14 @@ cd /root/infinitetalk
 bash scripts/start_tmux.sh
 ```
 
-脚本会先停止已存在的 `infinitetalk-worker` 和 `comfyui` session，然后启动：
+脚本会先执行模型下载命令：
+
+```bash
+bash /root/shells/download_model.sh umt5
+bash /root/shells/download_model.sh wan2.1-i2v-480p
+```
+
+模型下载成功后，脚本会停止已存在的 `infinitetalk-worker` 和 `comfyui` session，然后启动：
 
 - `comfyui` session：在 `/root/ComfyUI` 执行 `python main.py --use-sage-attention --port 8080`
 - `infinitetalk-worker` session：在 `/root/infinitetalk` 执行 `python worker_app.py`

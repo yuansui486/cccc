@@ -11,6 +11,8 @@ COMFYUI_EXTRA_ARGS="${COMFYUI_EXTRA_ARGS:-}"
 PROJECT_DIR="${PROJECT_DIR:-/root/infinitetalk}"
 ENV_FILE="${WORKER_ENV_FILE:-}"
 COMFYUI_STARTUP_WAIT_SECONDS="${COMFYUI_STARTUP_WAIT_SECONDS:-3}"
+DOWNLOAD_MODEL_SCRIPT="${DOWNLOAD_MODEL_SCRIPT:-/root/shells/download_model.sh}"
+DOWNLOAD_MODELS=("umt5" "wan2.1-i2v-480p")
 
 shell_quote() {
   local value=${1//\'/\'\\\'\'}
@@ -24,6 +26,20 @@ stop_session_if_exists() {
     echo "Stopping existing tmux session: $session_name"
     tmux kill-session -t "$session_name"
   fi
+}
+
+download_models() {
+  local model_name
+
+  if [[ ! -f "$DOWNLOAD_MODEL_SCRIPT" ]]; then
+    echo "Model download script not found: $DOWNLOAD_MODEL_SCRIPT"
+    exit 1
+  fi
+
+  for model_name in "${DOWNLOAD_MODELS[@]}"; do
+    echo "Downloading model: $model_name"
+    bash "$DOWNLOAD_MODEL_SCRIPT" "$model_name"
+  done
 }
 
 start_comfyui() {
@@ -125,6 +141,8 @@ start_worker() {
   tmux new-session -d -s "$WORKER_SESSION" -c "$PROJECT_DIR" "$run_script"
   echo "Started InfiniteTalk Worker in tmux session: $WORKER_SESSION"
 }
+
+download_models
 
 if ! command -v tmux >/dev/null 2>&1; then
   echo "tmux is not installed. Please install tmux first."
