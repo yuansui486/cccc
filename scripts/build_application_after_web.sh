@@ -9,7 +9,6 @@ APP_RESOURCES_DIR="$APP_ROOT/src-tauri/resources"
 APP_DATA_DIR="$HOME/Library/Application Support/onecolleague"
 BIZ_VENV_PYTHON="$APP_DATA_DIR/runtime/biz-venv/bin/python"
 
-TARGET_WORKSPACE="${1:-$APP_ROOT}"
 BUILD_TMP_ROOT=""
 
 cleanup() {
@@ -26,11 +25,6 @@ fi
 
 if [[ ! -d "$APP_ROOT" ]]; then
   echo "ERROR: application directory not found: $APP_ROOT" >&2
-  exit 1
-fi
-
-if [[ ! -d "$TARGET_WORKSPACE" ]]; then
-  echo "ERROR: target workspace not found: $TARGET_WORKSPACE" >&2
   exit 1
 fi
 
@@ -111,10 +105,6 @@ cat > "$APP_RESOURCES_DIR/biz-manifest.json" <<EOF
 }
 EOF
 
-echo "==> Prepare launcher workspace update package"
-find "$TARGET_WORKSPACE" -maxdepth 1 -type f -name 'no1-*.whl' ! -name "$WHL_BASENAME" -delete
-cp "$LATEST_WHL" "$TARGET_WORKSPACE/$WHL_BASENAME"
-
 echo "==> Update installed application business package"
 if [[ -x "$BIZ_VENV_PYTHON" ]]; then
   "$BIZ_VENV_PYTHON" -m pip install --force-reinstall --no-deps "$LATEST_WHL"
@@ -137,11 +127,11 @@ print(f"no1={pathlib.Path(no1.__file__).resolve()}")
 print(f"web_dist_index={dist}")
 PY
 else
-  echo "WARN: application business venv not found; prepared wheel for launcher update: $BIZ_VENV_PYTHON" >&2
+  echo "WARN: application business venv not found; bundled wheel refreshed only: $BIZ_VENV_PYTHON" >&2
 fi
 
-echo "OK: prepared launcher update package"
+echo "OK: web + application business package updated"
 echo "  wheel: $WHL_BASENAME"
 echo "  version: $BIZ_VERSION"
-echo "  workspace: $TARGET_WORKSPACE"
+echo "  resources: $APP_RESOURCES_DIR/$WHL_BASENAME"
 echo "  installed: $BIZ_VENV_PYTHON"
