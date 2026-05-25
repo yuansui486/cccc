@@ -23,13 +23,13 @@ export type RuntimePreset = {
 export const RUNTIME_PRESETS: RuntimePreset[] = [
   {
     id: "default:claude",
-    label: "Claude（CLI 默认配置）",
+    label: "claude",
     runtime: "claude",
     description: "不指定模型，使用 Claude CLI 本机默认配置。",
   },
   {
     id: "model:deepseek-v4-pro-claude",
-    label: "DeepSeek-V4-Pro（Claude）",
+    label: "deepseek-v4",
     runtime: "claude",
     model: "deepseek-v4-pro[1m]",
     envPrivate: {
@@ -45,7 +45,7 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
   },
   {
     id: "model:qwen3.6-max-claude",
-    label: "Qwen3.6-Max（Claude）",
+    label: "Qwen3.6（阿里千问）",
     runtime: "claude",
     model: "qwen3.6-max-preview",
     envPrivate: {
@@ -61,7 +61,7 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
   },
   {
     id: "model:doubao-code-claude",
-    label: "Doubao-Code（Claude）",
+    label: "豆包（字节跳动）",
     runtime: "claude",
     model: "doubao-seed-2-0-pro-260215",
     envPrivate: {
@@ -71,25 +71,25 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
   },
   {
     id: "default:codex",
-    label: "Codex（CLI 默认配置）",
+    label: "codex",
     runtime: "codex",
     description: "不指定模型，使用 Codex CLI 本机默认配置。",
   },
   {
     id: "model:gpt-5.4-codex",
-    label: "GPT-5.4（Codex）",
+    label: "gpt5.4",
     runtime: "codex",
     model: "gpt-5.4",
   },
   {
     id: "model:gpt-5.5-codex",
-    label: "GPT-5.5（Codex）",
+    label: "gpt5.5",
     runtime: "codex",
     model: "gpt-5.5",
   },
   {
     id: "model:kimi-k2.6-kimi",
-    label: "kimi-k2.6（kimi）",
+    label: "kimi（月之暗面）",
     runtime: "kimi",
     model: "kimi-k2.6",
     envPrivate: {

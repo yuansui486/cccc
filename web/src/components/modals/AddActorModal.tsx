@@ -8,7 +8,6 @@ import {
 } from "../../types";
 import { useTranslation } from "react-i18next";
 import { BASIC_MCP_CONFIG_SNIPPET } from "../../utils/mcpConfigSnippets";
-import { classNames } from "../../utils/classNames";
 import { useModalA11y } from "../../hooks/useModalA11y";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
@@ -255,8 +254,14 @@ export function AddActorModal({
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
           <div className="mx-auto max-w-2xl space-y-4">
             <Surface className={sectionCardClass}>
-              <div className={sectionTitleClass}>{t("sectionBasics")}</div>
-              <div className={sectionHintClass}>{t("addSectionBasicsHint")}</div>
+              <div className={sectionTitleClass}>
+                {newActorRole === "foreman" ? t("addForemanRole") : t("addPeerRole")}
+              </div>
+              <div className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                {hasForeman ? t("foremanLeads") : t("firstAgentForeman")}
+                <span className="mx-1.5 text-[var(--color-text-tertiary)]">·</span>
+                {t("addSectionBasicsCompactHint")}
+              </div>
 
               <div className="mt-4 space-y-4">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
@@ -292,49 +297,6 @@ export function AddActorModal({
                         {suggestedActorId}
                       </code>
                     </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("role")}</label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <Button
-                      type="button"
-                      className={classNames(
-                        "h-auto justify-start whitespace-normal border text-sm font-medium transition-all",
-                        newActorRole === "foreman"
-                          ? "bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-300"
-                          : hasForeman
-                            ? "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)] cursor-not-allowed"
-                            : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                      )}
-                      onClick={() => {
-                        if (!hasForeman) setNewActorRole("foreman");
-                      }}
-                      disabled={hasForeman}
-                    >
-                      {t("foremanRole")} {hasForeman && t("foremanExists")}
-                    </Button>
-                    <Button
-                      type="button"
-                      className={classNames(
-                        "h-auto justify-start whitespace-normal border text-sm font-medium transition-all",
-                        newActorRole === "peer"
-                          ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white"
-                          : !hasForeman
-                            ? "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)] cursor-not-allowed"
-                            : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]"
-                      )}
-                      onClick={() => {
-                        if (hasForeman) setNewActorRole("peer");
-                      }}
-                      disabled={!hasForeman}
-                    >
-                      {t("peerRole")} {!hasForeman && t("needForemanFirst")}
-                    </Button>
-                  </div>
-                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                    {hasForeman ? t("foremanLeads") : t("firstAgentForeman")}
                   </div>
                 </div>
 
