@@ -58,6 +58,11 @@ class RouterSettings:
     worker_assign_timeout_seconds: float
     worker_rpc_timeout_seconds: float
     prompt_route_ttl_hours: float
+    router_queue_dir: str
+    router_result_dir: str
+    router_queue_max_jobs: int
+    router_submit_retry_seconds: float
+    router_status_poll_seconds: float
 
     @classmethod
     def from_env(cls) -> "RouterSettings":
@@ -71,6 +76,11 @@ class RouterSettings:
             worker_assign_timeout_seconds=_env_float("WORKER_ASSIGN_TIMEOUT_SECONDS", 10.0),
             worker_rpc_timeout_seconds=_env_float("WORKER_RPC_TIMEOUT_SECONDS", 30.0),
             prompt_route_ttl_hours=_env_float("PROMPT_ROUTE_TTL_HOURS", 24.0),
+            router_queue_dir=_env("ROUTER_QUEUE_DIR", "./router_data/queued_jobs"),
+            router_result_dir=_env("ROUTER_RESULT_DIR", "./router_data/results"),
+            router_queue_max_jobs=_env_int("ROUTER_QUEUE_MAX_JOBS", 128),
+            router_submit_retry_seconds=_env_float("ROUTER_SUBMIT_RETRY_SECONDS", 5.0),
+            router_status_poll_seconds=_env_float("ROUTER_STATUS_POLL_SECONDS", 2.0),
         )
 
 

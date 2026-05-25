@@ -103,10 +103,10 @@ class WorkerApp:
             hb_task = asyncio.create_task(self._heartbeat_loop())
             try:
                 async for raw in ws:
-                    if isinstance(raw, bytes):
-                        await self._on_binary(raw)
-                    else:
+                    if isinstance(raw, str):
                         await self._on_text(raw)
+                    else:
+                        await self._on_binary(bytes(raw))
             except ConnectionClosed:
                 pass
             finally:
@@ -204,6 +204,8 @@ class WorkerApp:
         if self._upload is None:
             return
         file_id = msg.get("file_id")
+        if not isinstance(file_id, str):
+            return
         filename = msg.get("filename") or f"{file_id}.bin"
         content_type = msg.get("content_type") or "application/octet-stream"
         safe_name = self._safe_filename(filename, fallback=f"{file_id}.bin")
@@ -221,6 +223,8 @@ class WorkerApp:
         if self._upload is None:
             return
         file_id = msg.get("file_id")
+        if not isinstance(file_id, str):
+            return
         entry = self._upload.files.get(file_id)
         if entry and entry.get("fh"):
             entry["fh"].close()
@@ -292,7 +296,7 @@ class WorkerApp:
             log.exception("status query failed")
             payload = {
                 "status": "error",
-                "message": f"无法查询 ComfyUI 任务状态: {exc}",
+                "message": f"Failed to query ComfyUI task status: {exc}",
             }
         payload["type"] = P.STATUS_RESULT
         payload["rpc_id"] = rpc_id
@@ -304,7 +308,7 @@ class WorkerApp:
         if prompt_id not in history:
             return {
                 "status": "processing",
-                "message": "任务仍在队列或生成中",
+                "message": "Task is still queued or processing",
             }
         task_result = history[prompt_id]
         outputs = task_result.get("outputs", {})
@@ -321,12 +325,12 @@ class WorkerApp:
         if status_text and status_text != "success":
             return {
                 "status": "error",
-                "message": f"ComfyUI 任务状态异常: {status_text}",
+                "message": f"Unexpected ComfyUI task status: {status_text}",
                 "detail": task_status,
             }
         return {
             "status": "error",
-            "message": "任务已完成，但未在视频合并节点中找到输出文件。",
+            "message": "Task completed but no output file was found in the video node.",
         }
 
     # ------------- result download ------------------------------------

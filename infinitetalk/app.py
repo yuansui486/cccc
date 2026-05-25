@@ -30,9 +30,9 @@ def upload_to_comfyui(file_bytes: bytes, filename: str) -> str:
         if response.status_code == 200:
             return response.json().get("name")
         else:
-            raise exception(f"comfyui 拒绝文件上传: {response.text}")
+            raise exception(f"ComfyUI rejected file upload: {response.text}")
     except exception as e:
-        raise exception(f"连接 comfyui 上传失败: {str(e)}")
+        raise exception(f"ComfyUI upload connection failed: {str(e)}")
 
 
 def queue_prompt(prompt_json: dict) -> str:
@@ -44,12 +44,12 @@ def queue_prompt(prompt_json: dict) -> str:
         if response.status_code == 200:
             prompt_id = response.json().get("prompt_id")
             if not prompt_id:
-                raise exception("comfyui 返回结果中没有 prompt_id")
+                raise exception("ComfyUI response did not include prompt_id")
             return prompt_id
         else:
-            raise exception(f"comfyui 拒绝提交任务: {response.text}")
+            raise exception(f"ComfyUI rejected prompt submission: {response.text}")
     except exception as e:
-        raise exception(f"无法提交任务到 comfyui: {str(e)}")
+        raise exception(f"Failed to submit task to ComfyUI: {str(e)}")
 
 
 def build_video_url(video_info: dict) -> str:
@@ -74,14 +74,14 @@ def get_video_status(prompt_id: str) -> dict:
     try:
         response = requests.get(url, timeout=10)
         if response.status_code != 200:
-            raise exception(f"comfyui 状态查询失败: {response.text}")
+            raise exception(f"ComfyUI status query failed: {response.text}")
 
         history = response.json()
         if prompt_id not in history:
             return {
                 "status": "processing",
                 "prompt_id": prompt_id,
-                "message": "任务仍在队列或生成中",
+                "message": "Task is still queued or processing",
             }
 
         task_result = history[prompt_id]
@@ -99,20 +99,11 @@ def get_video_status(prompt_id: str) -> dict:
         task_status = task_result.get("status", {})
         status_text = task_status.get("status_str")
         if status_text and status_text != "success":
-            return {
-                "status": "error",
-                "prompt_id": prompt_id,
-                "message": f"comfyui 任务状态异常: {status_text}",
-                "detail": task_status,
-            }
+            raise exception(f"Unexpected ComfyUI task status: {status_text}")
 
-        return {
-            "status": "error",
-            "prompt_id": prompt_id,
-            "message": "任务已完成，但未在视频合并节点中找到输出文件。",
-        }
+        raise exception("Task completed but no output file was found in the video node.")
     except exception as e:
-        raise exception(f"无法查询 comfyui 任务状态: {str(e)}")
+        raise exception(f"Failed to query ComfyUI task status: {str(e)}")
 
 
 @app.post("/api/v1/predict_talking_video")
@@ -139,7 +130,7 @@ async def generate_talking_video(
             with open(workflow_file, "r", encoding="utf-8") as f:
                 prompt_json = json.load(f)
         except filenotfounderror:
-            return jsonresponse(status_code=500, content={"status": "error", "message": "未找到 workflow_api.json"})
+            return jsonresponse(status_code=500, content={"message": "workflow_api.json was not found"})
 
         # 4. 注入动态参数 (图片、音频、宽、高)
         try:
@@ -148,7 +139,7 @@ async def generate_talking_video(
             prompt_json[width_node_id]["inputs"]["value"] = width
             prompt_json[height_node_id]["inputs"]["value"] = height
         except keyerror as e:
-            return jsonresponse(status_code=500, content={"status": "error", "message": f"json 工作流节点缺失: {e}"})
+            return jsonresponse(status_code=500, content={"message": f"Workflow JSON node missing: {e}"})
 
         # 5. 提交任务，立即返回 prompt_id
         prompt_id = queue_prompt(prompt_json)
@@ -156,14 +147,15 @@ async def generate_talking_video(
         return jsonresponse(
             status_code=200,
             content={
-                "status": "submitted",
+                "status": "processing",
                 "prompt_id": prompt_id,
                 "status_url": f"/api/v1/predict_talking_video/status/{prompt_id}",
+                "message": "Processing",
             },
         )
 
     except exception as e:
-        return jsonresponse(status_code=500, content={"status": "error", "message": str(e)})
+        return jsonresponse(status_code=500, content={"message": str(e)})
 
 
 @app.get("/api/v1/predict_talking_video/status/{prompt_id}")
@@ -174,7 +166,7 @@ async def get_talking_video_status(prompt_id: str):
     try:
         return jsonresponse(status_code=200, content=get_video_status(prompt_id))
     except exception as e:
-        return jsonresponse(status_code=500, content={"status": "error", "message": str(e)})
+        return jsonresponse(status_code=500, content={"message": str(e)})
 
 
 if __name__ == "__main__":

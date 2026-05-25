@@ -9,7 +9,7 @@ API_URL = f"{API_BASE_URL}/api/v1/predict_talking_video"
 STATUS_URL_TEMPLATE = f"{API_BASE_URL}/api/v1/predict_talking_video/status/{{prompt_id}}"
 
 # 测试文件路径
-IMAGE_FILE_PATH = "tmp/485695721_17900255607118845_4953498329478192874_n.jpg"
+IMAGE_FILE_PATH = "tmp/485628773_17900255610118845_6330545389050674094_n.jpg"
 AUDIO_FILE_PATH = "tmp/output.mp3"
 
 # 配置要测试的宽高参数
@@ -94,26 +94,33 @@ def test_generate_video():
             # 同时发送 files 和 data
             response = requests.post(API_URL, files=files, data=payload_data, timeout=60)
             
-            if response.status_code == 200:
+            if response.status_code in (200, 202):
                 result = response.json()
                 prompt_id = result.get("prompt_id")
-                print("\n✅ 任务提交成功！")
+                task_id = result.get("task_id")
+                poll_id = task_id or prompt_id
+                print("\n✅ 任务已被 Router 接收！")
                 print("-" * 30)
-                print(f"任务 ID (Prompt ID): {prompt_id}")
+                if task_id:
+                    print(f"Router 任务 ID: {task_id}")
+                if prompt_id:
+                    print(f"ComfyUI Prompt ID: {prompt_id}")
                 print(f"状态查询地址: {result.get('status_url')}")
                 print("-" * 30)
 
-                if not prompt_id:
-                    print("服务器响应中没有 prompt_id，无法继续查询状态。")
+                if not poll_id:
+                    print("服务器响应中没有 task_id 或 prompt_id，无法继续查询状态。")
                     return
 
                 print(f"开始每 {POLL_INTERVAL} 秒查询一次生成状态，请耐心等待...")
-                video_result = poll_video_status(prompt_id)
+                video_result = poll_video_status(poll_id)
                 if not video_result:
                     return
 
                 print("\n✅ 生成成功！")
                 print("-" * 30)
+                if video_result.get("prompt_id"):
+                    print(f"ComfyUI Prompt ID: {video_result.get('prompt_id')}")
                 print(f"视频下载链接: {video_result.get('video_url')}")
                 print("-" * 30)
             else:

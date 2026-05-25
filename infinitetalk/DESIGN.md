@@ -6,17 +6,17 @@
 
 | 程序 | 暂定名称 | 部署位置 | 是否暴露公网 | 核心职责 |
 | --- | --- | --- | --- | --- |
-| 程序 1 | Router / Gateway | 公网机器 | 是 | 对外提供 REST API；接收客户端上传流；通过 WebSocket 直接转发给 Worker；记录 `prompt_id -> worker` 映射；把状态查询路由到对应 Worker |
+| 程序 1 | Router / Gateway | 公网机器 | 是 | 对外提供 REST API；接收客户端上传到本地队列；后台持续寻找可用 Worker 执行；把结果文件保存到 Router；对客户端交付状态和结果 |
 | 程序 2 | ComfyUI Worker | 内网或 GPU 机器 | 否 | 主动连接 Router；接收上传流；调用 ComfyUI；拿到 `prompt_id` 后回传；后续按 `prompt_id` 查询 ComfyUI 状态和结果 |
 
 核心原则：
 
-- 程序 1 只是轻量路由层，不是任务系统。
-- 程序 1 不生成自己的任务 ID。
-- 程序 1 不保存上传文件，不完整缓存上传文件。
-- 程序 1 不维护复杂任务状态机。
-- 程序 1 唯一业务状态是 `prompt_id -> worker` 映射关系。
-- 客户端最终拿到和查询的唯一任务标识就是 ComfyUI 返回的 `prompt_id`。
+- 程序 1 对公网请求要优先“可靠接收”，Worker 短暂离线或忙碌时不直接拒绝上传。
+- 程序 1 生成 Router 侧 `task_id`，用于排队、重试和提交前状态查询。
+- 程序 1 暂存待提交输入文件，并在生成成功后保存结果文件；任务完成或失败后清理输入文件。
+- 程序 1 维护任务状态：receiving / queued / submitting / processing / fetching_result / success / error。
+- 程序 1 在 Worker 返回 `prompt_id` 后继续轮询结果，成功后把结果拉回 `ROUTER_RESULT_DIR`。
+- 客户端使用 `task_id` 查询和下载；任务提交到 ComfyUI 后，状态响应会同时包含真实 `prompt_id`。
 - 程序 2 主动连接程序 1，程序 1 不需要访问程序 2 的公网地址。
 - ComfyUI 只需要被程序 2 访问，不对公网开放。
 
@@ -29,8 +29,8 @@ Client
   v
 Program 1: Router / Gateway
   |  - POST /api/v1/predict_talking_video
-  |  - GET  /api/v1/predict_talking_video/status/{prompt_id}
-  |  - GET  /api/v1/predict_talking_video/result/{prompt_id}
+  |  - GET  /api/v1/predict_talking_video/status/{task_id_or_prompt_id}
+  |  - GET  /api/v1/predict_talking_video/result/{task_id_or_prompt_id}
   |  - WS   /ws/workers
   |
   | WebSocket stream, worker 主动连接
@@ -42,14 +42,16 @@ Program 2: ComfyUI Worker
 ComfyUI
 ```
 
-程序 1 只做四件事：
+程序 1 只做六件事：
 
 1. 接收客户端请求。
-2. 找一个当前可用的 Worker。
-3. 把请求流和后续查询转发给这个 Worker。
-4. 在 Worker 返回 `prompt_id` 后，记录 `prompt_id -> worker`。
+2. 把待提交输入暂存到本地队列，并立即返回 `task_id`。
+3. 后台调度器持续寻找当前可用的 Worker。
+4. 把队列中的输入提交给 Worker，并在连接中断时重新排队重试。
+5. 在 Worker 返回 `prompt_id` 后，继续通过 Worker 查询 ComfyUI 进度。
+6. 成功后把结果文件从 Worker 拉回 Router 本地保存，并由 Router 对客户端交付下载。
 
-除此之外，程序 1 不关心 ComfyUI 内部进度，不保存输入文件，不保存业务任务详情。
+除此之外，程序 1 不复制 ComfyUI history，不要求客户端在下载时依赖 Worker 在线。
 
 ## 3. 对外 REST API
 
@@ -70,73 +72,86 @@ ComfyUI
 
 处理方式：
 
-1. Router 在读取请求体前检查是否有空闲 Worker。
-2. 如果没有空闲 Worker，直接返回 `503 Service Unavailable` 或 `429 Too Many Requests`，不接收上传文件。
-3. 如果有空闲 Worker，Router 临时占用该 Worker。
-4. Router 使用流式 multipart 解析客户端请求体。
-5. Router 解析到图片、音频 chunk 时，立即通过 WebSocket 发给 Worker。
-6. Worker 在本机写入临时文件，并在收齐输入后调用 ComfyUI。
-7. Worker 调用 ComfyUI `/prompt` 成功后，把 ComfyUI 返回的 `prompt_id` 发回 Router。
-8. Router 记录 `prompt_id -> worker` 映射，然后把 `prompt_id` 返回给客户端。
+1. Router 检查本地队列是否还有容量。
+2. Router 使用流式 multipart 解析客户端请求体，并把图片、音频写入 `ROUTER_QUEUE_DIR`。
+3. Router 创建 `task_id`，记录任务为 `queued`，并向客户端返回排队响应。
+4. 后台 dispatcher 持续查找 `idle` Worker。
+5. 找到 Worker 后，Router 临时占用该 Worker，并把队列文件通过 WebSocket 分片发给 Worker。
+6. 如果发送过程中 Worker 断开、无可用 Worker 或等待响应超时，Router 把任务重新置为 `queued`，稍后重试。
+7. Worker 在本机写入临时文件，并在收齐输入后调用 ComfyUI。
+8. Worker 调用 ComfyUI `/prompt` 成功后，把 ComfyUI 返回的 `prompt_id` 发回 Router。
+9. Router 记录 `task_id -> prompt_id`，并保持该 Worker busy，持续查询任务状态。
+10. ComfyUI 生成成功后，Router 请求 Worker 打开结果流，把视频保存到 `ROUTER_RESULT_DIR`。
+11. Router 标记任务为 `success`，清理 Router 本地输入文件，后续由 Router 本地文件系统交付下载。
 
 成功响应：
 
 ```json
 {
-  "status": "submitted",
-  "prompt_id": "comfy_prompt_id",
-  "status_url": "/api/v1/predict_talking_video/status/comfy_prompt_id"
+  "status": "queued",
+  "task_id": "task_router_id",
+  "status_url": "/api/v1/predict_talking_video/status/task_router_id",
+  "message": "Queued"
 }
 ```
 
-无可用 Worker：
+队列已满：
 
 ```json
 {
-  "status": "error",
-  "message": "当前没有可用执行端，请稍后重试"
-}
-```
-
-提交失败：
-
-```json
-{
-  "status": "error",
-  "message": "提交到执行端或 ComfyUI 失败",
-  "detail": {
-    "stage": "queue_prompt",
-    "reason": "..."
-  }
+  "detail": "router queue is full"
 }
 ```
 
 说明：
 
-- 提交接口不是“接收后立即返回”的异步网关，而是等 Worker 已经拿到 ComfyUI `prompt_id` 后再响应。
-- 如果客户端上传中断、Worker 断开、ComfyUI 提交失败，本次请求直接失败，不产生可查询的任务标识。
-- Router 不需要保存 width、height、文件名、文件 hash 等业务状态；这些只在当前请求转发过程中临时存在。
+- 提交接口是“接收后立即排队”的异步网关，响应中先返回 `task_id`。
+- 如果客户端上传中断，本次请求失败，不产生可查询任务。
+- 如果 Worker 断开，任务保持可查询，并由 Router 后台继续重试提交。
+- 如果 Worker 或 ComfyUI 暂时失败，Router 重新排队并继续重试，不向调用方返回失败状态。
+- Worker 在任务完成并且结果保存到 Router 前保持 busy，避免一个 Worker 同时承担多个生成任务。
 
 ### 3.2 查询状态
 
-`GET /api/v1/predict_talking_video/status/{prompt_id}`
+`GET /api/v1/predict_talking_video/status/{task_id_or_prompt_id}`
 
 处理方式：
 
-1. Router 根据 `prompt_id` 查找对应 Worker。
-2. 如果映射不存在，返回 `404`。
-3. 如果 Worker 已断开，返回 `503` 或 `502`。
-4. 如果 Worker 在线，Router 通过 WebSocket 向该 Worker 发起状态查询。
-5. Worker 查询 ComfyUI `/history/{prompt_id}`，把结果返回给 Router。
-6. Router 原样转成 REST 响应给客户端。
+1. Router 根据 `task_id` 查找本地任务；也可以通过已知 `prompt_id` 反查任务。
+2. Router 把内部状态映射为三个对外状态：`queued`、`processing`、`success`。
+3. 如果任务已 success，Router 返回本地结果元信息和 `video_url`。
+4. 如果映射不存在，返回 `404`。
+
+排队中响应：
+
+```json
+{
+  "status": "queued",
+  "task_id": "task_router_id",
+  "attempts": 0,
+  "message": "Queued"
+}
+```
 
 处理中响应：
 
 ```json
 {
   "status": "processing",
+  "task_id": "task_router_id",
   "prompt_id": "comfy_prompt_id",
-  "message": "任务仍在队列或生成中"
+  "message": "Processing"
+}
+```
+
+保存结果中响应：
+
+```json
+{
+  "status": "processing",
+  "task_id": "task_router_id",
+  "prompt_id": "comfy_prompt_id",
+  "message": "Processing"
 }
 ```
 
@@ -145,42 +160,72 @@ ComfyUI
 ```json
 {
   "status": "success",
+  "task_id": "task_router_id",
   "prompt_id": "comfy_prompt_id",
-  "video_url": "https://api.example.com/api/v1/predict_talking_video/result/comfy_prompt_id"
+  "result": {
+    "filename": "output.mp4",
+    "content_type": "video/mp4",
+    "size": 12345678
+  },
+  "message": "Completed",
+  "video_url": "https://api.example.com/api/v1/predict_talking_video/result/task_router_id"
 }
 ```
 
-失败响应：
-
-```json
-{
-  "status": "error",
-  "prompt_id": "comfy_prompt_id",
-  "message": "ComfyUI 任务失败",
-  "detail": {
-    "status_str": "error"
-  }
-}
-```
+调用方不会看到 `error` 或内部状态名。Router 会把可重试失败保持为 `queued` 或 `processing`，继续后台重试。
 
 ### 3.3 下载结果
 
-`GET /api/v1/predict_talking_video/result/{prompt_id}`
+`GET /api/v1/predict_talking_video/result/{task_id_or_prompt_id}`
 
 推荐实现：
 
-1. Router 根据 `prompt_id` 找到 Worker。
-2. Router 通过 WebSocket 请求 Worker 读取或下载 ComfyUI 结果文件。
-3. Worker 把视频内容通过 WebSocket 分片发回 Router。
-4. Router 直接把分片流式写入 HTTP 响应。
+1. Router 根据 `task_id` 查找本地任务，也可以通过该任务的 `prompt_id` 反查。
+2. 如果任务不是 `success`，返回 `409 result not ready`。
+3. 如果任务是 `success`，Router 读取 `ROUTER_RESULT_DIR` 中的本地结果文件并返回 HTTP 响应。
 
-这样程序 1 不需要本地保存结果文件，也不需要对象存储。
+这样下载不依赖 Worker 在线，Router 是对外结果交付方。
 
-如果后续需要支持断点下载、长期保存或 Worker 离线后仍可下载，再引入对象存储。但第一版按轻量路由层设计，不引入持久化结果存储。
+如果后续需要支持长期保存、多 Router 实例或断点下载，可以把 `ROUTER_RESULT_DIR` 替换成对象存储，并把任务索引放到 Redis 或数据库。
 
 ## 4. Router 状态设计
 
-程序 1 的业务状态只有一张映射表：
+程序 1 的业务状态有两部分：
+
+```text
+task_id -> queued task state / prompt_id
+prompt_id -> worker_id / worker_connection
+```
+
+待提交任务结构：
+
+| 字段 | 说明 |
+| --- | --- |
+| task_id | Router 生成的任务 ID |
+| status | receiving / queued / submitting / processing / fetching_result / success / error |
+| params | width、height 等表单参数 |
+| files | Router 本地待提交输入文件路径和元信息 |
+| attempts | 已尝试提交次数 |
+| last_error | 最近一次可见错误 |
+| prompt_id | ComfyUI 返回的任务 ID，提交成功后写入 |
+| worker_id | 最近一次提交使用的 Worker |
+| result | Router 本地结果文件路径、文件名、类型和大小 |
+
+状态取值：
+
+| 状态 | 说明 |
+| --- | --- |
+| receiving | Router 正在接收上传 |
+| queued | 等待空闲 Worker |
+| submitting | 正在把输入提交给 Worker |
+| processing | Worker/ComfyUI 正在生成 |
+| fetching_result | Router 正在从 Worker 拉取并保存结果 |
+| success | 结果已保存在 Router |
+| error | 任务失败 |
+
+任务成功或失败后，Router 删除本地输入文件；成功任务会保留结果文件和轻量 task 状态到 TTL。
+
+Prompt 路由表：
 
 ```text
 prompt_id -> worker_id / worker_connection
@@ -199,18 +244,15 @@ prompt_id -> worker_id / worker_connection
 
 - `worker_connection` 可以通过 `worker_id` 从在线连接表中找到。
 - 在线连接表是 WebSocket 连接管理所需的运行时信息，不是业务任务状态。
-- `prompt_id` 映射可以先放内存；如果 Router 多实例部署，再放 Redis。
+- `prompt_id` 反查映射可以先放内存；如果 Router 多实例部署，再放 Redis 或数据库。
 - 映射应设置 TTL，例如 24 小时或 48 小时。
 - TTL 到期后，状态查询返回 `404`，客户端需要重新提交或使用其他业务侧记录。
 
 Router 不维护以下内容：
 
-- 不维护自定义任务 ID。
-- 不维护 queued / running / success 等本地状态机。
-- 不保存上传文件路径。
-- 不保存结果文件路径。
 - 不保存 ComfyUI history 内容。
-- 不做任务重试。
+- 不长期保存已提交输入文件。
+- 不对 ComfyUI 业务错误做无限重试。
 
 ## 5. Worker 连接管理
 
@@ -228,8 +270,8 @@ Router 仍然需要维护 Worker 在线连接表，用来选择可用 Worker 和
 
 第一版调度策略：
 
-- 如果有 `idle` Worker，提交请求开始前临时占用它。
-- 如果没有 `idle` Worker，直接拒绝客户端请求。
+- 如果有 `idle` Worker，dispatcher 提交队列任务前临时占用它。
+- 如果没有 `idle` Worker，任务保持 `queued`，稍后继续尝试。
 - 一个 Worker 同一时间只处理一个提交请求，避免上传流交叉。
 - 拿到 `prompt_id` 后，Worker 可以恢复 `idle`，因为后续 ComfyUI 任务已经提交；状态查询和结果下载按 `prompt_id` 路由回这个 Worker。
 - 如果 Worker 在 ComfyUI 生成期间不能并发处理新任务，可以让 Worker 自己保持 `busy`，直到 ComfyUI 完成。
@@ -402,14 +444,14 @@ Worker 收齐输入、提交 ComfyUI 成功后回复：
 }
 ```
 
-Router 收到 `prompt_id` 后记录映射，并返回 REST 响应给客户端。
+Router 收到 `prompt_id` 后把任务标记为 `processing`，后续继续在后台查询和拉取结果。客户端已经在提交阶段拿到 `task_id`，不需要等待这个 WebSocket 往返完成。
 
 提交失败时 Worker 回复：
 
 ```json
 {
   "type": "submit.error",
-  "message": "无法提交到 ComfyUI",
+  "message": "Failed to submit to ComfyUI",
   "detail": {
     "stage": "queue_prompt",
     "reason": "..."
@@ -419,7 +461,7 @@ Router 收到 `prompt_id` 后记录映射，并返回 REST 响应给客户端。
 
 ### 7.4 状态查询流程
 
-Router 收到 `GET /status/{prompt_id}` 后，根据映射找到 Worker，并发送：
+Router 后台 dispatcher 在任务进入 `processing` 后，向当前 Worker 发送：
 
 ```json
 {
@@ -437,15 +479,15 @@ Worker 查询 ComfyUI 后回复：
   "rpc_id": "rpc_001",
   "prompt_id": "comfy_prompt_id",
   "status": "processing",
-  "message": "任务仍在队列或生成中"
+  "message": "Task is still queued or processing"
 }
 ```
 
-`rpc_id` 只用于一次 WebSocket 往返匹配，不对外暴露，不入库，不作为业务状态。
+Router 用返回值更新本地 `task_id` 状态。外部 `GET /status/{task_id_or_prompt_id}` 只读取 Router 本地任务状态，不在 HTTP 请求内临时访问 Worker。`rpc_id` 只用于一次 WebSocket 往返匹配，不对外暴露，不入库，不作为业务状态。
 
-### 7.5 结果下载流程
+### 7.5 结果保存流程
 
-Router 收到 `GET /result/{prompt_id}` 后，根据映射找到 Worker，并发送：
+Router 后台确认 ComfyUI 成功后，向当前 Worker 发送：
 
 ```json
 {
@@ -469,7 +511,7 @@ Worker 找到结果后发送：
 }
 ```
 
-随后 Worker 发送 `result.chunk` 元数据和 binary frame。Router 直接把 binary frame 写入 HTTP streaming response。
+随后 Worker 发送 `result.chunk` 元数据和 binary frame。Router 把 binary frame 写入 `ROUTER_RESULT_DIR` 下的临时文件，收到 `result.end` 后原子替换成最终结果文件，并把任务标记为 `success`。
 
 完成后 Worker 发送：
 
@@ -483,7 +525,7 @@ Worker 找到结果后发送：
 
 ## 8. FastAPI 实现注意事项
 
-要满足“Router 不本地暂存上传文件”，上传接口不能继续写成：
+Router 需要自己控制上传落盘位置和队列容量，上传接口不能继续写成：
 
 ```python
 async def generate_talking_video(
@@ -495,17 +537,18 @@ async def generate_talking_video(
     ...
 ```
 
-原因是 `UploadFile` / `File(...)` / `request.form()` 可能把大文件写入 `SpooledTemporaryFile` 或系统临时目录。
+原因是 `UploadFile` / `File(...)` / `request.form()` 可能把大文件写入 `SpooledTemporaryFile` 或系统临时目录，绕过 `ROUTER_QUEUE_DIR` 的容量管理和清理策略。
 
 建议实现方式：
 
 - 路由接收 `Request` 对象。
-- 在读取 `request.stream()` 之前先选择空闲 Worker。
+- 在读取 `request.stream()` 之前先检查 Router 队列容量。
 - 使用 `async for chunk in request.stream()` 读取原始请求体。
 - 使用支持流式回调的 multipart parser，例如 `streaming-form-data`，或基于 `python-multipart` 的低层流式解析能力。
-- parser 每解析到文件数据 chunk，就立即通过 WebSocket 发给 Worker。
-- 对 `width`、`height` 这种小字段可以保存在当前请求的局部变量中。
-- 通过反向代理时也要关闭请求体缓冲，例如 Nginx 需要配置 `proxy_request_buffering off;`，否则文件可能先被 Nginx 暂存。
+- parser 每解析到文件数据 chunk，就写入 Router 队列目录下的当前 task 文件。
+- 对 `width`、`height` 这种小字段保存在 task 元信息中。
+- 结果流也写入 Router 管理的 `ROUTER_RESULT_DIR`，并使用 `.part` 临时文件避免半成品被下载。
+- 通过反向代理时建议关闭请求体缓冲，例如 Nginx 配置 `proxy_request_buffering off;`，减少额外落盘和延迟。
 
 ## 9. 安全与限制
 
@@ -515,8 +558,8 @@ async def generate_talking_video(
 - REST API 建议加入调用方鉴权，例如 API Key、JWT 或内部业务 token。
 - 上传文件限制大小和类型，例如图片只允许 jpeg/png/webp，音频只允许 wav/mp3/m4a。
 - 对 `width`、`height` 做范围限制，防止异常参数拖垮 GPU。
-- Router 要在流式读取过程中累计大小，超过限制立即中止 HTTP 请求和 Worker 提交流程。
-- 所有临时文件路径都由 Worker 服务端生成，不信任客户端文件名。
+- Router 要在流式读取过程中累计大小，超过限制立即中止 HTTP 请求并清理当前 task 目录。
+- Router 和 Worker 的临时文件路径都由各自服务端生成，不信任客户端文件名。
 
 ### 9.2 Worker WebSocket
 
@@ -524,7 +567,7 @@ async def generate_talking_video(
 - Worker 使用固定 token 或 mTLS 认证。
 - Router 只接受白名单 Worker ID。
 - 心跳超时后关闭连接，并移除该 Worker 的在线连接。
-- Worker 断开后，指向该 Worker 的 `prompt_id` 映射可以保留到 TTL，但查询时应返回 Worker 不可用。
+- Worker 断开后，如果任务还没有保存结果，Router 可以把任务重新排队并稍后重试；如果结果已保存，下载不再依赖 Worker 在线。
 
 ### 9.3 ComfyUI
 
@@ -536,14 +579,17 @@ async def generate_talking_video(
 
 | 场景 | 处理方式 |
 | --- | --- |
-| 没有空闲 Worker | Router 不读取上传体，直接返回 `503` 或 `429` |
-| 客户端上传中断 | Router 通知 Worker 取消当前提交；不产生 `prompt_id` |
-| Worker 接收上传时断开 | Router 中止请求；不产生 `prompt_id` |
-| Worker 提交 ComfyUI 失败 | Router 返回提交失败；不记录映射 |
-| Worker 返回 `prompt_id` 后断开 | 状态/结果查询根据映射找到 Worker，但连接不可用，返回 `503` 或 `502` |
-| 映射不存在 | 返回 `404` |
-| ComfyUI 任务失败 | Worker 查询 history 后把失败信息返回，Router 透传给客户端 |
-| 结果流中断 | Router 中断 HTTP 下载响应；客户端可重试下载 |
+| 没有空闲 Worker | Router 先接收上传并返回 `task_id`，任务保持 `queued`，后台持续重试 |
+| Router 队列已满 | 返回 `503`，客户端稍后重试提交 |
+| 客户端上传中断 | Router 清理当前接收目录；不产生 `task_id` |
+| Worker 接收上传时断开 | Router 把任务重新置为 `queued`，稍后重试提交 |
+| Worker 提交 ComfyUI 失败 | Router 将任务重新置为 `queued`，稍后继续重试；调用方仍看到 `queued` 或 `processing` |
+| Worker 返回 `prompt_id` 后断开但结果未保存 | Router 把任务重新置为 `queued`，稍后重新调用 Worker 完成任务 |
+| Worker 返回 `prompt_id` 后断开且结果已保存 | 下载继续从 Router 本地结果文件返回 |
+| `task_id` 或 `prompt_id` 映射不存在 | 返回 `404` |
+| ComfyUI 任务失败 | Router 将任务重新置为 `queued`，稍后继续重试；调用方不会看到 `error` |
+| Router 拉取结果流中断 | 任务重新排队，稍后重试执行或拉取结果 |
+| 客户端下载中断 | Router 本地结果文件保留，客户端可重试下载 |
 
 ## 11. 建议代码拆分
 
@@ -556,7 +602,8 @@ infinitetalk/
     settings.py              # 环境变量配置
   router/
     api.py                   # REST routes
-    streaming_upload.py      # HTTP multipart 流式解析与 WS 转发
+    job_queue.py             # Router 任务队列、Worker 调度、结果落盘
+    streaming_upload.py      # 旧版 HTTP multipart 流式解析与 WS 转发
     ws.py                    # Worker WebSocket endpoint
     worker_pool.py           # Worker 连接池
     prompt_routes.py         # prompt_id -> worker 映射
@@ -599,7 +646,7 @@ https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video
 客户端状态查询地址模板：
 
 ```text
-https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/status/{prompt_id}
+https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/status/{task_id_or_prompt_id}
 ```
 
 当前 [test_client.py](test_client.py) 建议使用环境变量覆盖 API 地址：
@@ -628,6 +675,11 @@ UPLOAD_STREAM_CHUNK_BYTES=262144
 WORKER_ASSIGN_TIMEOUT_SECONDS=10
 WORKER_RPC_TIMEOUT_SECONDS=30
 PROMPT_ROUTE_TTL_HOURS=24
+ROUTER_QUEUE_DIR=./router_data/queued_jobs
+ROUTER_RESULT_DIR=./router_data/results
+ROUTER_QUEUE_MAX_JOBS=128
+ROUTER_SUBMIT_RETRY_SECONDS=5
+ROUTER_STATUS_POLL_SECONDS=2
 ```
 
 ### Worker `.env`
@@ -650,7 +702,7 @@ WORKER_TMP_DIR=./worker_data/inflight
 
 ### Nginx 配置示例
 
-这个配置保留你现有的证书路径和 `6205` 端口，把请求代理到本机 Router。关键点是 `proxy_request_buffering off;`，否则 Nginx 可能先把客户端上传体缓存到磁盘，这会破坏“程序 1 不暂存上传文件”的设计目标。
+这个配置保留你现有的证书路径和 `6205` 端口，把请求代理到本机 Router。建议保留 `proxy_request_buffering off;`，让 Router 尽早开始接收并写入自己的队列目录，减少代理层额外缓存和长上传超时风险。
 
 下面给出只需要放入 `server` 块的写法；这里直接代理到本机 Router，不再单独定义 `map` 和 `upstream`。
 
@@ -701,7 +753,7 @@ server {
 }
 ```
 
-如果这个 `server` 位于某个统一认证网关后面，还需要确认统一认证层也没有对大文件请求体做完整缓存；否则即使 Router 和 Nginx 配置正确，上传文件仍可能先被前置层落盘。
+如果这个 `server` 位于某个统一认证网关后面，还需要确认统一认证层的大文件限制和超时设置合理。当前 Router 会把待提交输入落到 `ROUTER_QUEUE_DIR`，因此不再要求反向代理完全不落盘，但仍建议关闭不必要的上游缓冲以降低公网请求的端到端延迟。
 
 ## 13. 第一版实现范围
 
@@ -709,13 +761,14 @@ server {
 
 - 一个 Router。
 - 一个或多个 Worker 主动连接 Router。
-- Router 提交请求时只选择当前空闲 Worker，没有就拒绝。
-- Router 不生成业务任务 ID。
-- Router 不保存输入文件、不保存结果文件、不维护任务状态机。
-- Router 等 Worker 成功提交 ComfyUI 并返回 `prompt_id` 后，再响应客户端。
-- Router 唯一业务状态是 `prompt_id -> worker` 映射。
-- 状态查询和结果下载都通过 `prompt_id` 路由到对应 Worker。
+- Router 提交请求时先接收上传并返回 `task_id`。
+- Router 本地维护轻量队列状态，并把待提交输入暂存在 `ROUTER_QUEUE_DIR`。
+- Router 后台 dispatcher 持续选择当前空闲 Worker，没有就等待重试。
+- Router 在 Worker 成功提交 ComfyUI 并返回 `prompt_id` 后继续等待结果。
+- Router 把成功结果保存到 `ROUTER_RESULT_DIR` 后，清理本地输入文件。
+- Router 维护 `task_id -> prompt_id` 映射和结果文件元信息。
+- 状态查询可以通过 `task_id` 或 `prompt_id`；结果下载从 Router 本地结果目录返回。
 - Worker 负责所有 ComfyUI 交互。
 - 客户端仍使用当前提交接口和状态查询接口，只是状态路径里的值变成真实 ComfyUI `prompt_id`。
 
-后续如果需要 Worker 离线后仍可查询/下载，或需要长时间排队，再单独引入 Redis、对象存储或任务队列。第一版不要把这些能力塞进 Router。
+后续如果需要 Router 重启后恢复未提交任务、多实例调度或长期结果保存，再单独引入 Redis、数据库、对象存储或专用任务队列。第一版只做单 Router 的本地可靠排队和本地结果交付。

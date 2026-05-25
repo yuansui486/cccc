@@ -1,19 +1,26 @@
 """REST endpoints for the Router."""
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import logging
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from common import protocol as P
 from common.settings import RouterSettings
+from router.job_queue import (
+    ERROR,
+    FETCHING_RESULT,
+    PROCESSING,
+    QUEUED,
+    RECEIVING,
+    SUCCESS,
+    SUBMITTING,
+    RouterJobStore,
+)
 from router.prompt_routes import PromptRouteStore
-from router.streaming_upload import stream_upload_to_worker
-from router.worker_pool import WorkerError, WorkerOffline, WorkerPool
+from router.worker_pool import WorkerPool
 
 log = logging.getLogger(__name__)
 
@@ -82,173 +89,93 @@ def build_api_router(
     pool: WorkerPool,
     routes: PromptRouteStore,
     settings: RouterSettings,
+    jobs: RouterJobStore,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
+    async def get_job_or_404(task_or_prompt_id: str):
+        job = await jobs.get(task_or_prompt_id)
+        if job is not None:
+            return job
+        job = await jobs.get_by_prompt(task_or_prompt_id)
+        if job is not None:
+            return job
+        raise HTTPException(status_code=404, detail="task_id or prompt_id not found")
+
     @router.post("/predict_talking_video")
     async def submit(request: Request):
-        worker = await pool.reserve_idle()
-        if worker is None:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "error", "message": "当前没有可用执行端，请稍后重试"},
-            )
-
         max_bytes = settings.max_upload_mb * 1024 * 1024
-        submit_session = worker.begin_submit()
-        try:
-            try:
-                await stream_upload_to_worker(request, worker, max_bytes)
-            except HTTPException:
-                worker.end_submit()
-                await pool.release(worker.worker_id)
-                raise
+        job = await jobs.enqueue_from_request(request, max_bytes)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "queued",
+                "task_id": job.task_id,
+                "status_url": f"/api/v1/predict_talking_video/status/{job.task_id}",
+                "message": "Queued",
+            },
+        )
 
-            # Wait for the worker to finish ComfyUI submission.
-            try:
-                msg = await asyncio.wait_for(
-                    submit_session.result,
-                    timeout=settings.worker_rpc_timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                return JSONResponse(
-                    status_code=504,
-                    content={
-                        "status": "error",
-                        "message": "执行端响应超时",
-                    },
-                )
-            except WorkerOffline:
-                return JSONResponse(
-                    status_code=503,
-                    content={"status": "error", "message": "执行端已断开"},
-                )
-            except WorkerError as exc:
-                payload = getattr(exc, "payload", None) or {}
-                return JSONResponse(
-                    status_code=502,
-                    content={
-                        "status": "error",
-                        "message": "提交到执行端或 ComfyUI 失败",
-                        "detail": payload.get("detail")
-                        or {"reason": str(exc)},
-                    },
-                )
-
-            prompt_id = msg.get("prompt_id")
-            if not prompt_id:
-                return JSONResponse(
-                    status_code=502,
-                    content={
-                        "status": "error",
-                        "message": "执行端未返回 prompt_id",
-                    },
-                )
-
-            await routes.put(prompt_id, worker.worker_id)
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "status": "submitted",
-                    "prompt_id": prompt_id,
-                    "status_url": f"/api/v1/predict_talking_video/status/{prompt_id}",
-                },
-            )
-        finally:
-            worker.end_submit()
-            await pool.release(worker.worker_id)
-
-    @router.get("/predict_talking_video/status/{prompt_id}")
-    async def status(prompt_id: str, request: Request):
-        route = await routes.get(prompt_id)
-        if route is None:
-            raise HTTPException(status_code=404, detail="prompt_id not found")
-        worker = pool.get(route.worker_id)
-        if worker is None or worker.status == "offline":
-            raise HTTPException(status_code=503, detail="worker offline")
-
-        rpc_id, fut = worker.new_rpc_future()
-        try:
-            await worker.send_json({
-                "type": P.STATUS_QUERY,
-                "rpc_id": rpc_id,
-                "prompt_id": prompt_id,
-            })
-            try:
-                msg = await asyncio.wait_for(fut, timeout=settings.worker_rpc_timeout_seconds)
-            except asyncio.TimeoutError:
-                raise HTTPException(status_code=504, detail="worker rpc timeout")
-            except WorkerOffline:
-                raise HTTPException(status_code=503, detail="worker offline")
-        finally:
-            worker.drop_rpc(rpc_id)
-
-        # Strip rpc fields before returning to the client.
-        payload = {k: v for k, v in msg.items() if k not in ("type", "rpc_id")}
-        payload.setdefault("prompt_id", prompt_id)
-        if payload.get("status") == "success":
+    @router.get("/predict_talking_video/status/{task_or_prompt_id}")
+    async def status(task_or_prompt_id: str, request: Request):
+        job = await get_job_or_404(task_or_prompt_id)
+        payload = _public_status_payload(job)
+        if job.status == SUCCESS and job.result:
             payload["video_url"] = (
-                f"{_public_base_url(request, settings)}/api/v1/predict_talking_video/result/{prompt_id}"
+                f"{_public_base_url(request, settings)}/api/v1/predict_talking_video/result/{job.task_id}"
             )
         return JSONResponse(content=payload)
 
-    @router.get("/predict_talking_video/result/{prompt_id}")
-    async def result(prompt_id: str):
-        route = await routes.get(prompt_id)
-        if route is None:
-            raise HTTPException(status_code=404, detail="prompt_id not found")
-        worker = pool.get(route.worker_id)
-        if worker is None or worker.status == "offline":
-            raise HTTPException(status_code=503, detail="worker offline")
-
-        rpc_id, stream = worker.new_result_stream()
-        try:
-            await worker.send_json({
-                "type": P.RESULT_OPEN,
-                "rpc_id": rpc_id,
-                "prompt_id": prompt_id,
-            })
-            try:
-                meta = await asyncio.wait_for(
-                    stream.meta_future, timeout=settings.worker_rpc_timeout_seconds
-                )
-            except asyncio.TimeoutError:
-                worker.drop_result_stream(rpc_id)
-                raise HTTPException(status_code=504, detail="worker rpc timeout")
-            except WorkerError as exc:
-                worker.drop_result_stream(rpc_id)
-                raise HTTPException(status_code=502, detail=str(exc))
-        except HTTPException:
-            raise
-        except Exception as exc:
-            worker.drop_result_stream(rpc_id)
-            raise HTTPException(status_code=502, detail=str(exc))
-
-        filename = meta.get("filename") or f"{prompt_id}.mp4"
-        content_type = meta.get("content_type") or "application/octet-stream"
-        size = meta.get("size")
-
-        async def body_iter():
-            try:
-                while True:
-                    kind, data = await stream.queue.get()
-                    if kind == "chunk":
-                        yield data
-                    elif kind == "end":
-                        return
-                    elif kind == "error":
-                        log.warning("result stream error %s: %s", prompt_id, data)
-                        return
-            finally:
-                worker.drop_result_stream(rpc_id)
-
-        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-        if size is not None:
-            headers["Content-Length"] = str(size)
-        return StreamingResponse(body_iter(), media_type=content_type, headers=headers)
+    @router.get("/predict_talking_video/result/{task_or_prompt_id}")
+    async def result(task_or_prompt_id: str):
+        job = await get_job_or_404(task_or_prompt_id)
+        if job.status != SUCCESS or job.result is None:
+            raise HTTPException(status_code=409, detail="result not ready")
+        if not job.result.path.exists():
+            raise HTTPException(status_code=404, detail="result file not found")
+        return FileResponse(
+            job.result.path,
+            media_type=job.result.content_type,
+            filename=job.result.filename,
+        )
 
     @router.get("/workers")
     async def workers():
-        return {"workers": pool.snapshot()}
+        return {"workers": pool.snapshot(), "queue": await jobs.summary()}
+
+    @router.get("/queue")
+    async def queue():
+        return {"tasks": await jobs.snapshot()}
 
     return router
+
+
+def _public_status_payload(job) -> dict:
+    public_status, message = _public_status(job.status)
+    payload = {
+        "status": public_status,
+        "task_id": job.task_id,
+        "attempts": job.attempts,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "message": message,
+    }
+    if job.prompt_id:
+        payload["prompt_id"] = job.prompt_id
+    if public_status == "success" and job.result:
+        payload["result"] = {
+            "filename": job.result.filename,
+            "content_type": job.result.content_type,
+            "size": job.result.size,
+        }
+    return payload
+
+
+def _public_status(internal_status: str) -> tuple[str, str]:
+    if internal_status == SUCCESS:
+        return "success", "Completed"
+    if internal_status in (SUBMITTING, PROCESSING, FETCHING_RESULT):
+        return "processing", "Processing"
+    if internal_status in (RECEIVING, QUEUED, ERROR):
+        return "queued", "Queued"
+    return "processing", "Processing"

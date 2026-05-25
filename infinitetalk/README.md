@@ -2,10 +2,10 @@
 
 这是一个面向 InfiniteTalk / ComfyUI 工作流的轻量 API 网关项目。项目将公网入口和 GPU 执行端拆成两个程序：
 
-- `router_app.py`：Router / Gateway，对外提供 REST API，接收客户端上传，并把上传流转发给 Worker。
+- `router_app.py`：Router / Gateway，对外提供 REST API，先接收客户端上传到本地队列，再由后台调度器调用空闲 Worker，并把结果文件保存到 Router。
 - `worker_app.py`：ComfyUI Worker，主动连接 Router，接收图片和音频，调用本机或内网 ComfyUI。
 
-Router 不保存上传文件和结果文件，只维护 `prompt_id -> worker_id` 的临时路由关系。客户端拿到的任务 ID 就是 ComfyUI 返回的 `prompt_id`。
+Router 会把待提交请求暂存在本地队列中，避免 Worker 短暂断线时直接拒绝公网请求。客户端提交后先拿到 Router 生成的 `task_id`，Router 后台调用空闲 Worker 完成任务，并在生成成功后把结果视频拉回 Router 本地保存。客户端查询和下载都从 Router 交付；Worker 不需要对公网提供结果下载能力。
 
 ## 目录结构
 
@@ -15,7 +15,7 @@ Router 不保存上传文件和结果文件，只维护 `prompt_id -> worker_id`
 ├── worker_app.py              # Worker 启动入口
 ├── test_client.py             # 简单接口测试客户端
 ├── common/                    # Router 和 Worker 共用协议、配置
-├── router/                    # REST API、WebSocket、Worker 池、上传流转发
+├── router/                    # REST API、WebSocket、Worker 池、任务队列和结果交付
 ├── worker/                    # Worker WebSocket 客户端、ComfyUI 调用、workflow 注入
 ├── workflows/                 # ComfyUI API workflow JSON
 └── DESIGN.md                  # 架构设计说明
@@ -167,7 +167,12 @@ curl https://dongdongkc.shierkeji.com:6205/api/v1/workers
 | `UPLOAD_STREAM_CHUNK_BYTES` | `262144` | 上传流分片大小预留配置 |
 | `WORKER_ASSIGN_TIMEOUT_SECONDS` | `10.0` | Worker 分配超时预留配置 |
 | `WORKER_RPC_TIMEOUT_SECONDS` | `30.0` | Router 等待 Worker RPC 响应超时 |
-| `PROMPT_ROUTE_TTL_HOURS` | `24.0` | `prompt_id -> worker_id` 路由映射保留时间 |
+| `PROMPT_ROUTE_TTL_HOURS` | `24.0` | 任务记录、结果文件和 prompt 路由的保留时间 |
+| `ROUTER_QUEUE_DIR` | `./router_data/queued_jobs` | Router 待提交任务的临时上传目录 |
+| `ROUTER_RESULT_DIR` | `./router_data/results` | Router 保存结果视频的目录 |
+| `ROUTER_QUEUE_MAX_JOBS` | `128` | Router 同时接收和等待提交的最大任务数 |
+| `ROUTER_SUBMIT_RETRY_SECONDS` | `5.0` | 没有可用 Worker 或连接中断后的重试间隔 |
+| `ROUTER_STATUS_POLL_SECONDS` | `2.0` | Router 调用 Worker 后轮询 ComfyUI 状态的间隔 |
 
 ### Worker 环境变量
 
@@ -201,13 +206,14 @@ curl -X POST "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video
   -F "height=640"
 ```
 
-成功响应：
+成功接收响应：
 
 ```json
 {
-  "status": "submitted",
-  "prompt_id": "comfy_prompt_id",
-  "status_url": "/api/v1/predict_talking_video/status/comfy_prompt_id"
+  "status": "queued",
+  "task_id": "task_router_id",
+  "status_url": "/api/v1/predict_talking_video/status/task_router_id",
+  "message": "Queued"
 }
 ```
 
@@ -216,22 +222,60 @@ curl -X POST "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video
 - 请求类型必须是 `multipart/form-data`。
 - `image` 和 `audio` 必填。
 - `width` 默认 `480`，`height` 默认 `640`。
-- Router 会等待 Worker 成功提交到 ComfyUI 并拿到 `prompt_id` 后再响应。
-- 如果当前没有空闲 Worker，会返回 `503`。
+- Router 会先完整接收上传并返回 `task_id`，后台不断寻找可用 Worker 提交任务。
+- 如果 Worker 暂时全部离线或忙碌，任务会保持 `queued`，不会因为当前没有 Worker 直接失败。
+- 如果 Router 队列已满，会返回 `503`。
 
 ### 查询任务状态
 
 ```bash
-curl "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/status/comfy_prompt_id"
+curl "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/status/task_router_id"
 ```
 
-生成中：
+状态路径可以传 `task_id`，也兼容已提交后的 ComfyUI `prompt_id`。
+
+Queued:
+
+```json
+{
+  "status": "queued",
+  "task_id": "task_router_id",
+  "attempts": 0,
+  "message": "Queued"
+}
+```
+
+Processing:
 
 ```json
 {
   "status": "processing",
+  "task_id": "task_router_id",
+  "attempts": 1,
+  "worker_id": "gpu-worker-01",
+  "message": "Processing"
+}
+```
+
+Processing after ComfyUI submission:
+
+```json
+{
+  "status": "processing",
+  "task_id": "task_router_id",
   "prompt_id": "comfy_prompt_id",
-  "message": "任务仍在队列或生成中"
+  "message": "Processing"
+}
+```
+
+Saving result is also reported as processing:
+
+```json
+{
+  "status": "processing",
+  "task_id": "task_router_id",
+  "prompt_id": "comfy_prompt_id",
+  "message": "Processing"
 }
 ```
 
@@ -240,32 +284,30 @@ curl "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/status/
 ```json
 {
   "status": "success",
+  "task_id": "task_router_id",
   "prompt_id": "comfy_prompt_id",
-  "video_url": "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/result/comfy_prompt_id"
+  "result": {
+    "filename": "output.mp4",
+    "content_type": "video/mp4",
+    "size": 12345678
+  },
+  "message": "Completed",
+  "video_url": "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/result/task_router_id"
 }
 ```
 
-生成失败：
-
-```json
-{
-  "status": "error",
-  "prompt_id": "comfy_prompt_id",
-  "message": "ComfyUI 任务状态异常: error",
-  "detail": {}
-}
-```
+For callers, the status API only returns `queued`, `processing`, or `success`. Worker connection failures and temporary ComfyUI failures stay internal and are retried by Router.
 
 ### 下载结果视频
 
 当状态为 `success` 后，使用 `video_url` 下载结果：
 
 ```bash
-curl -L "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/result/comfy_prompt_id" \
+curl -L "https://dongdongkc.shierkeji.com:6205/api/v1/predict_talking_video/result/task_router_id" \
   -o output.mp4
 ```
 
-Router 会向对应 Worker 请求结果文件，并将视频内容流式返回给客户端。
+结果路径可以传 `task_id`，也兼容该任务对应的 `prompt_id`。Router 会直接读取 `ROUTER_RESULT_DIR` 中已保存的视频返回给客户端，不再要求下载时 Worker 在线。
 
 ## 使用测试客户端
 
@@ -306,31 +348,46 @@ Client -> Router 公网机器 -> Worker 内网/GPU 机器 -> ComfyUI
 - Worker 主动连 Router，不需要公网入站端口。
 - ComfyUI 只需要 Worker 能访问，不建议直接暴露公网。
 - 多个 Worker 可以使用不同的 `WORKER_ID` 同时连接同一个 Router。
-- 当前 Router 的 `prompt_id -> worker_id` 映射保存在内存中；如果 Router 重启，旧 `prompt_id` 将无法继续路由查询和下载。
+- Router 队列目录和结果目录都需要有足够磁盘空间，建议把 `ROUTER_QUEUE_DIR` 和 `ROUTER_RESULT_DIR` 放在可监控、可清理的本地数据盘。
+- 当前 Router 的任务队列和结果索引保存在内存中；如果 Router 重启，未提交的 `task_id` 会丢失，已落盘结果也暂时没有索引恢复能力。队列目录和结果目录可能留下孤儿文件，需要运维清理或后续接入持久化任务索引。
 
 ## 常见问题
 
 ### 提交任务返回 503
 
-说明 Router 当前没有可用 Worker。检查：
+说明 Router 本地队列已满。可以先检查队列和 Worker 状态：
 
 ```bash
 curl https://dongdongkc.shierkeji.com:6205/api/v1/workers
+curl https://dongdongkc.shierkeji.com:6205/api/v1/queue
 ```
 
-确认 Worker 是否已经启动、`ROUTER_WS_URL` 是否正确、`WORKER_TOKEN` 是否一致。
+如果任务长时间堆积，确认 Worker 是否已经启动、`ROUTER_WS_URL` 是否正确、`WORKER_TOKEN` 是否一致。
+
+### 任务一直 queued
+
+说明 Router 已经接收上传，但还没有可用 Worker 成功接收提交。重点检查：
+
+- `/api/v1/workers` 是否能看到在线 Worker。
+- Worker 是否处于 `idle`。
+- Worker 端日志是否有 WebSocket 断开、ComfyUI 不可达或 workflow 错误。
+- `ROUTER_SUBMIT_RETRY_SECONDS` 是否设置得过大。
+
+### 任务一直 processing 或 fetching_result
+
+`processing` 表示 Worker 已经提交到 ComfyUI，Router 正在等待生成完成。`fetching_result` 表示 ComfyUI 已完成，Router 正在把视频从 Worker 拉回 `ROUTER_RESULT_DIR`。如果长时间不变，重点检查 Worker 到 ComfyUI 的连接、ComfyUI 生成日志、Router 到 Worker 的 WebSocket 稳定性，以及 Router 结果目录磁盘空间。
 
 ### 查询状态返回 404
 
-说明 Router 中没有这个 `prompt_id` 的路由记录。常见原因：
+说明 Router 中没有这个 `task_id` 或 `prompt_id` 的记录。常见原因：
 
 - Router 重启过。
 - `PROMPT_ROUTE_TTL_HOURS` 已过期。
-- 查询的 `prompt_id` 不是当前 Router 提交返回的 ID。
+- 查询的 ID 不是当前 Router 提交返回的 `task_id`，也不是已提交成功后的 `prompt_id`。
 
-### 查询或下载返回 worker offline
+### 下载返回 result not ready
 
-说明负责该 `prompt_id` 的 Worker 已断开。需要恢复同一个 `WORKER_ID` 的 Worker 连接后再试。
+说明任务还没有进入 `success`，或者 Router 还在保存结果文件。继续轮询状态接口，等响应中出现 `video_url` 后再下载。
 
 ### Worker 启动失败，提示 workflow file not found
 
