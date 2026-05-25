@@ -17,6 +17,7 @@ export async function sendSlashSkillMessageRequest(args: {
   toTokens: string[];
   priority: "normal" | "attention";
   replyRequired: boolean;
+  collaborationRequired: boolean;
   localId: string;
   replyTarget: ReplyTarget;
 }) {
@@ -29,6 +30,7 @@ export async function sendSlashSkillMessageRequest(args: {
       undefined,
       args.priority,
       args.replyRequired,
+      args.collaborationRequired,
       args.localId,
       [],
     );
@@ -41,6 +43,7 @@ export async function sendSlashSkillMessageRequest(args: {
     undefined,
     args.priority,
     args.replyRequired,
+    args.collaborationRequired,
     args.localId,
     [],
   );
@@ -51,6 +54,7 @@ export function useSlashSkillDispatch(args: {
   toTokens: string[];
   priority: "normal" | "attention" | string;
   replyRequired: boolean;
+  collaborationRequired: boolean;
   groupSendBlockedReason: GroupSendBlockedReason | null;
   clearDraft: (groupId: string) => void;
   setToText: (text: string) => void;
@@ -68,6 +72,7 @@ export function useSlashSkillDispatch(args: {
     toTokens,
     priority,
     replyRequired,
+    collaborationRequired,
     groupSendBlockedReason,
     clearDraft,
     setToText,
@@ -103,6 +108,7 @@ export function useSlashSkillDispatch(args: {
         to: toTokens,
         priority: prio,
         reply_required: replyRequired,
+        collaboration_required: collaborationRequired,
         client_id: localId,
         reply_to: replyTarget?.eventId || null,
         quote_text: replyTarget?.text || undefined,
@@ -120,6 +126,7 @@ export function useSlashSkillDispatch(args: {
       toTokens,
       priority: prio as "normal" | "attention",
       replyRequired,
+      collaborationRequired,
       localId,
       replyTarget,
     });
@@ -147,6 +154,7 @@ export function useSlashSkillDispatch(args: {
     groupSendBlockedReason,
     onMessageSent,
     priority,
+    collaborationRequired,
     removeOutbox,
     replyRequired,
     selectedGroupId,

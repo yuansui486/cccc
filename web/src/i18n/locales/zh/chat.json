@@ -82,6 +82,8 @@
   "modeImportantDesc": "需要收件人确认收到",
   "modeNeedReply": "需回复",
   "modeNeedReplyDesc": "需要收件人给出具体回复",
+  "modeNeedCollaboration": "需协作",
+  "modeNeedCollaborationDesc": "要求负责人按协作流程拆分、验收并持续推进",
   "modeNoticeNeedReply": "需回复：收件人需要发送具体回复。",
   "modeNoticeImportant": "需确认：收件人需要确认已收到这条消息。",
   "messageType": "消息模式",

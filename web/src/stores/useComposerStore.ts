@@ -41,6 +41,7 @@ interface GroupDraft {
   quotedPresentationRef: PresentationMessageRef | null;
   priority: "normal" | "attention";
   replyRequired: boolean;
+  collaborationRequired: boolean;
 }
 
 interface ComposerState {
@@ -54,6 +55,7 @@ interface ComposerState {
   quotedPresentationRef: PresentationMessageRef | null;
   priority: "normal" | "attention";
   replyRequired: boolean;
+  collaborationRequired: boolean;
   destGroupId: string;
 
   // Drafts per group (memory only)
@@ -71,6 +73,7 @@ interface ComposerState {
   setQuotedPresentationRef: (ref: PresentationMessageRef | null) => void;
   setPriority: (priority: "normal" | "attention") => void;
   setReplyRequired: (value: boolean) => void;
+  setCollaborationRequired: (value: boolean) => void;
   setDestGroupId: (groupId: string) => void;
   clearComposer: () => void;
 
@@ -94,6 +97,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   quotedPresentationRef: null,
   priority: "normal",
   replyRequired: false,
+  collaborationRequired: false,
   destGroupId: "",
   drafts: {},
   normalToTextByGroup: {},
@@ -164,6 +168,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   setQuotedPresentationRef: (ref) => set({ quotedPresentationRef: ref }),
   setPriority: (priority) => set({ priority }),
   setReplyRequired: (value) => set({ replyRequired: !!value }),
+  setCollaborationRequired: (value) => set({ collaborationRequired: !!value }),
   setDestGroupId: (groupId) => set({ destGroupId: String(groupId || "").trim() }),
 
   clearComposer: () =>
@@ -180,6 +185,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
         quotedPresentationRef: null,
         priority: "normal",
         replyRequired: false,
+        collaborationRequired: false,
         normalToTextByGroup: activeGroupId
           ? {
               ...state.normalToTextByGroup,
@@ -218,6 +224,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
           quotedPresentationRef: state.quotedPresentationRef,
           priority: state.priority,
           replyRequired: state.replyRequired,
+          collaborationRequired: state.collaborationRequired,
         };
       } else {
         delete newDrafts[normalizedFromGroupId];
@@ -242,6 +249,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       quotedPresentationRef: draft?.quotedPresentationRef || null,
       priority: draft?.priority || "normal",
       replyRequired: draft?.replyRequired || false,
+      collaborationRequired: draft?.collaborationRequired || false,
       // After switching groups, return delivery to the current group. Cross-group
       // sends must be selected explicitly so restored drafts do not trigger remote fetches.
       destGroupId: normalizedDestGroupId,

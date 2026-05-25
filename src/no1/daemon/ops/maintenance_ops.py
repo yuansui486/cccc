@@ -90,6 +90,7 @@ def handle_send_cross_group(
     by = str(args.get("by") or "user").strip() or "user"
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"), default=False)
+    collaboration_required = coerce_bool(args.get("collaboration_required"), default=False)
     to_raw = args.get("to")
     dst_to_tokens: list[str] = []
     if isinstance(to_raw, list):
@@ -133,6 +134,7 @@ def handle_send_cross_group(
             "to": ["user"],
             "priority": priority,
             "reply_required": reply_required,
+            "collaboration_required": collaboration_required,
             "dst_group_id": dst_group_id,
             "dst_to": dst_to_canon,
         },
@@ -154,6 +156,7 @@ def handle_send_cross_group(
             "to": dst_to_canon,
             "priority": priority,
             "reply_required": reply_required,
+            "collaboration_required": collaboration_required,
             "src_group_id": src_group_id,
             "src_event_id": src_event_id,
         },

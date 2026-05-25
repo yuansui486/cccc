@@ -14,6 +14,19 @@ from typing import Any, Dict, Iterable, List
 from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
 
 
+COLLABORATION_REQUIRED_INSTRUCTIONS = (
+    "[onecolleague] 需协作：这条消息必须协作完成，不允许自己独立完成任务。所有过程输出和最终回复都必须使用中文。\n"
+    "- 负责人首先拆分任务，定好任务拆分标准，并明确告诉执行成员必须按照该标准完成拆分。\n"
+    "- 拆分任务时，必须告知所有必要前提条件和上下文，不能因为任务被简化而造成上下文不统一。\n"
+    "- 执行标准必须包含硬性的结果标准，并且必须可量化。\n"
+    "- 负责人必须制定任务验收规则，验收规则必须细化硬性标准和规范，禁止空泛验收。\n"
+    "- 如果验收不通过，必须给出具体修改建议并反馈给负责人。\n"
+    "- 成员回复交付后，第一件事是检查执行中和规划中的任务是否都已经完成。\n"
+    "- 如果执行中和规划中的任务都完成了，但最终用户目标还没有完成，必须继续拆分后续任务。\n"
+    "- 不允许出现最终目标未完成但成员空等待的情况。"
+)
+
+
 def compact_delivery_text(value: Any, *, limit: int) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     if not text:
@@ -144,6 +157,7 @@ def build_actor_delivery_text(
     event_id: str,
     refs: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
+    collaboration_required: bool = False,
     src_group_id: str = "",
     src_event_id: str = "",
 ) -> str:
@@ -153,6 +167,8 @@ def build_actor_delivery_text(
         prefix_lines.append(f"[onecolleague] IMPORTANT (event_id={event_id}):")
     if reply_required and event_id:
         prefix_lines.append(f"[onecolleague] REPLY REQUIRED (event_id={event_id}): reply via onecolleague_message_reply.")
+    if collaboration_required:
+        prefix_lines.append(COLLABORATION_REQUIRED_INSTRUCTIONS)
     if src_group_id and src_event_id:
         prefix_lines.append(f"[onecolleague] RELAYED FROM (group_id={src_group_id}, event_id={src_event_id}):")
     if prefix_lines:
@@ -222,6 +238,7 @@ def render_actor_event_for_delivery(event: Dict[str, Any], *, actor_id: str = ""
             text=str(data.get("text") or ""),
             priority=str(data.get("priority") or "normal"),
             reply_required=bool(data.get("reply_required")),
+            collaboration_required=bool(data.get("collaboration_required")),
             event_id=event_id,
             refs=[item for item in data.get("refs", []) if isinstance(item, dict)]
             if isinstance(data.get("refs"), list)

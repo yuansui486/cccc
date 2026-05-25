@@ -660,6 +660,7 @@ export type FailedSendComposerSnapshot = {
   quotedPresentationRef: PresentationMessageRef | null;
   priority: "normal" | "attention";
   replyRequired: boolean;
+  collaborationRequired: boolean;
 };
 
 type FailedSendComposerRestoreActions = Pick<
@@ -672,6 +673,7 @@ type FailedSendComposerRestoreActions = Pick<
   | "setQuotedPresentationRef"
   | "setPriority"
   | "setReplyRequired"
+  | "setCollaborationRequired"
   | "upsertDraft"
 >;
 
@@ -696,6 +698,7 @@ export function restoreFailedSendComposerState(
     restoreActions.setQuotedPresentationRef(snapshot.quotedPresentationRef);
     restoreActions.setPriority(snapshot.priority);
     restoreActions.setReplyRequired(snapshot.replyRequired);
+    restoreActions.setCollaborationRequired(snapshot.collaborationRequired);
     restoreActions.setToText(snapshot.toText);
     return;
   }
@@ -709,6 +712,7 @@ export function restoreFailedSendComposerState(
     quotedPresentationRef: snapshot.quotedPresentationRef,
     priority: snapshot.priority,
     replyRequired: snapshot.replyRequired,
+    collaborationRequired: snapshot.collaborationRequired,
   }));
 }
 
@@ -817,6 +821,7 @@ export function useChatTab({
     quotedPresentationRef,
     priority,
     replyRequired,
+    collaborationRequired,
     destGroupId,
     setComposerText,
     setComposerFiles,
@@ -827,6 +832,7 @@ export function useChatTab({
     setQuotedPresentationRef,
     setPriority,
     setReplyRequired,
+    setCollaborationRequired,
     setDestGroupId,
     upsertDraft,
     clearDraft,
@@ -958,6 +964,7 @@ export function useChatTab({
     toTokens,
     priority,
     replyRequired,
+    collaborationRequired,
     groupSendBlockedReason,
     clearDraft,
     setToText,
@@ -1251,6 +1258,7 @@ export function useChatTab({
     const refsSnapshot: MessageRef[] = quotedPresentationRefSnapshot ? [quotedPresentationRefSnapshot] : [];
     const prioritySnapshot = composerStateSnapshot.priority;
     const replyRequiredSnapshot = composerStateSnapshot.replyRequired;
+    const collaborationRequiredSnapshot = composerStateSnapshot.collaborationRequired;
     const toTextSnapshot = composerStateSnapshot.toText;
     const toTokensSnapshot = parseComposerRecipientTokens(toTextSnapshot, validRecipientSet);
     const prio = replyRequiredSnapshot ? "attention" : (prioritySnapshot || "normal");
@@ -1309,6 +1317,7 @@ export function useChatTab({
           quotedPresentationRef: quotedPresentationRefSnapshot,
           priority: prioritySnapshot,
           replyRequired: replyRequiredSnapshot,
+          collaborationRequired: collaborationRequiredSnapshot,
         },
         {
           setComposerText,
@@ -1318,6 +1327,7 @@ export function useChatTab({
           setQuotedPresentationRef,
           setPriority,
           setReplyRequired,
+          setCollaborationRequired,
           setToText,
           upsertDraft,
         },
@@ -1374,6 +1384,7 @@ export function useChatTab({
           to: toTokensSnapshot,
           priority: prio,
           reply_required: replyRequiredSnapshot,
+          collaboration_required: collaborationRequiredSnapshot,
           client_id: localId,
           reply_to: replyTargetSnapshot?.eventId || null,
           quote_text: replyTargetSnapshot?.text || undefined,
@@ -1401,12 +1412,13 @@ export function useChatTab({
           composerFilesSnapshot.length > 0 ? composerFilesSnapshot : undefined,
           prio,
           replyRequiredSnapshot,
+          collaborationRequiredSnapshot,
           localId,
           refsSnapshot,
         );
       } else {
         if (isCrossGroup) {
-          resp = await api.sendCrossGroupMessage(selectedGroupId, dstGroup, txt, to, prio, replyRequiredSnapshot);
+          resp = await api.sendCrossGroupMessage(selectedGroupId, dstGroup, txt, to, prio, replyRequiredSnapshot, collaborationRequiredSnapshot);
         } else {
           resp = await api.sendMessage(
             selectedGroupId,
@@ -1415,6 +1427,7 @@ export function useChatTab({
             composerFilesSnapshot.length > 0 ? composerFilesSnapshot : undefined,
             prio,
             replyRequiredSnapshot,
+            collaborationRequiredSnapshot,
             localId,
             refsSnapshot,
           );
@@ -1504,6 +1517,7 @@ export function useChatTab({
     setQuotedPresentationRef,
     setPriority,
     setReplyRequired,
+    setCollaborationRequired,
     setToText,
     setDestGroupId,
     upsertDraft,
@@ -1720,8 +1734,10 @@ export function useChatTab({
     appendRecipientToken,
     priority,
     replyRequired,
+    collaborationRequired,
     setPriority,
     setReplyRequired,
+    setCollaborationRequired,
     destGroupId: sendGroupId,
     setDestGroupId,
     composerGroupSettled,

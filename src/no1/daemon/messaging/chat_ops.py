@@ -323,6 +323,7 @@ def handle_send(
     by = str(args.get("by") or "user").strip()
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"))
+    collaboration_required = coerce_bool(args.get("collaboration_required"))
     quote_text = str(args.get("quote_text") or "").strip()
     src_group_id = str(args.get("src_group_id") or "").strip()
     src_event_id = str(args.get("src_event_id") or "").strip()
@@ -476,6 +477,7 @@ def handle_send(
             format="plain",
             priority=priority,
             reply_required=reply_required,
+            collaboration_required=collaboration_required,
             quote_text=quote_text or None,
             to=to,
             refs=refs,
@@ -499,6 +501,7 @@ def handle_send(
         text=delivery_body_text,
         priority=priority,
         reply_required=reply_required,
+        collaboration_required=collaboration_required,
         event_id=event_id,
         refs=refs,
         attachments=attachments,
@@ -568,6 +571,7 @@ def handle_send(
                 source_platform=source_platform or None,
                 source_user_name=source_user_name or None,
                 source_user_id=source_user_id or None,
+                collaboration_required=collaboration_required,
                 ts=event_ts,
             )
             request_flush_pending_messages(group, actor_id=actor_id)
@@ -861,6 +865,7 @@ def handle_reply(
     reply_to = str(args.get("reply_to") or "").strip()
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"))
+    collaboration_required = coerce_bool(args.get("collaboration_required"))
     client_id = str(args.get("client_id") or "").strip()
     to_raw = args.get("to")
     to_tokens: list[str] = []
@@ -953,6 +958,7 @@ def handle_reply(
             format="plain",
             priority=priority,
             reply_required=reply_required,
+            collaboration_required=collaboration_required,
             to=to,
             reply_to=target_event_id or reply_to,
             quote_text=quote_text,
@@ -996,6 +1002,7 @@ def handle_reply(
         text=text,
         priority=priority,
         reply_required=reply_required,
+        collaboration_required=collaboration_required,
         event_id=event_id,
         refs=refs,
         attachments=attachments,
@@ -1059,6 +1066,7 @@ def handle_reply(
                 text=delivery_text,
                 reply_to=target_event_id or reply_to,
                 quote_text=quote_text,
+                collaboration_required=collaboration_required,
                 ts=event_ts,
             )
             request_flush_pending_messages(group, actor_id=actor_id)

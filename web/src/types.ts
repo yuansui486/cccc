@@ -147,6 +147,7 @@ export type ChatMessageData = {
   to?: string[];
   priority?: "normal" | "attention";
   reply_required?: boolean;
+  collaboration_required?: boolean;
   sender_title?: string;
   sender_runtime?: string;
   sender_avatar_path?: string;

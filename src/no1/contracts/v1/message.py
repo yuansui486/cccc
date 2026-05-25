@@ -41,6 +41,7 @@ class ChatMessageData(BaseModel):
     # Priority / workflow semantics
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
+    collaboration_required: bool = False
 
     # IM semantics
     to: List[str] = Field(default_factory=list)  # @mentions (empty = broadcast)

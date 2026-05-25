@@ -585,6 +585,7 @@ export async function sendMessage(
   files?: File[],
   priority: "normal" | "attention" = "normal",
   replyRequired = false,
+  collaborationRequired = false,
   clientId = "",
   refs?: MessageRef[],
 ) {
@@ -596,6 +597,7 @@ export async function sendMessage(
     form.append("path", "");
     form.append("priority", priority);
     form.append("reply_required", replyRequired ? "true" : "false");
+    form.append("collaboration_required", collaborationRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
     for (const file of files) form.append("files", file, file.name);
@@ -610,6 +612,7 @@ export async function sendMessage(
       path: "",
       priority,
       reply_required: replyRequired,
+      collaboration_required: collaborationRequired,
       client_id: clientId,
       refs: refs || [],
     }),
@@ -662,6 +665,7 @@ export async function replyMessage(
   files?: File[],
   priority: "normal" | "attention" = "normal",
   replyRequired = false,
+  collaborationRequired = false,
   clientId = "",
   refs?: MessageRef[],
 ) {
@@ -673,6 +677,7 @@ export async function replyMessage(
     form.append("reply_to", replyTo);
     form.append("priority", priority);
     form.append("reply_required", replyRequired ? "true" : "false");
+    form.append("collaboration_required", collaborationRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
     for (const file of files) form.append("files", file, file.name);
@@ -687,6 +692,7 @@ export async function replyMessage(
       reply_to: replyTo,
       priority,
       reply_required: replyRequired,
+      collaboration_required: collaborationRequired,
       client_id: clientId,
       refs: refs || [],
     }),
@@ -722,6 +728,7 @@ export async function sendCrossGroupMessage(
   to: string[],
   priority: "normal" | "attention" = "normal",
   replyRequired = false,
+  collaborationRequired = false,
 ) {
   return apiJson(`/api/v1/groups/${encodeURIComponent(srcGroupId)}/send_cross_group`, {
     method: "POST",
@@ -732,6 +739,7 @@ export async function sendCrossGroupMessage(
       to,
       priority,
       reply_required: replyRequired,
+      collaboration_required: collaborationRequired,
     }),
   });
 }

@@ -151,8 +151,10 @@ export function ChatTab({
     appendRecipientToken,
     priority,
     replyRequired,
+    collaborationRequired,
     setPriority,
     setReplyRequired,
+    setCollaborationRequired,
     destGroupId,
     composerGroupSettled,
     mentionSuggestions,
@@ -853,8 +855,10 @@ export function ChatTab({
             setSlashSkillScope={setSlashSkillScope}
             priority={priority}
             replyRequired={replyRequired}
+            collaborationRequired={collaborationRequired}
             setPriority={setPriority}
             setReplyRequired={setReplyRequired}
+            setCollaborationRequired={setCollaborationRequired}
             onSendMessage={sendMessage}
             showMentionMenu={showMentionMenu}
             setShowMentionMenu={setShowMentionMenu}

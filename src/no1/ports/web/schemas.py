@@ -39,6 +39,7 @@ class SendRequest(BaseModel):
     quote_text: str = Field(default="")
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
+    collaboration_required: bool = False
     src_group_id: str = Field(default="")
     src_event_id: str = Field(default="")
     client_id: str = Field(default="")
@@ -52,6 +53,7 @@ class SendCrossGroupRequest(BaseModel):
     to: list[str] = Field(default_factory=list)
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
+    collaboration_required: bool = False
 
 
 class TrackedSendRequest(BaseModel):
@@ -78,6 +80,7 @@ class ReplyRequest(BaseModel):
     reply_to: str
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
+    collaboration_required: bool = False
     client_id: str = Field(default="")
     refs: list[dict[str, Any]] = Field(default_factory=list)
 

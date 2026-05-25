@@ -48,8 +48,10 @@ export interface ChatComposerProps {
   setSelectedSkillCommand: (command: string) => void;
   priority: "normal" | "attention";
   replyRequired: boolean;
+  collaborationRequired: boolean;
   setPriority: (priority: "normal" | "attention") => void;
   setReplyRequired: (value: boolean) => void;
+  setCollaborationRequired: (value: boolean) => void;
   onSendMessage: () => void;
 
   // Mention menu
@@ -95,8 +97,10 @@ export function ChatComposer({
   setSelectedSkillCommand,
   priority,
   replyRequired,
+  collaborationRequired,
   setPriority,
   setReplyRequired,
+  setCollaborationRequired,
   onSendMessage,
   showMentionMenu,
   setShowMentionMenu,
@@ -464,29 +468,46 @@ export function ChatComposer({
   const isAttention = priority === "attention";
   const isCrossGroup = !!destGroupId && destGroupId !== selectedGroupId;
 
-  type MessageMode = "normal" | "attention" | "task";
+  type MessageMode = "normal" | "attention" | "task" | "collaboration";
   const messageMode: MessageMode = replyRequired
     ? "task"
-    : isAttention
-      ? "attention"
-      : "normal";
+    : collaborationRequired
+      ? "collaboration"
+      : isAttention
+        ? "attention"
+        : "normal";
   const toggleAttentionMode = () => {
     if (messageMode === "attention") {
       setPriority("normal");
       setReplyRequired(false);
+      setCollaborationRequired(false);
       return;
     }
     setPriority("attention");
     setReplyRequired(false);
+    setCollaborationRequired(false);
   };
   const toggleReplyRequiredMode = () => {
     if (messageMode === "task") {
       setPriority("normal");
       setReplyRequired(false);
+      setCollaborationRequired(false);
       return;
     }
     setPriority("normal");
     setReplyRequired(true);
+    setCollaborationRequired(false);
+  };
+  const toggleCollaborationRequiredMode = () => {
+    if (messageMode === "collaboration") {
+      setPriority("normal");
+      setReplyRequired(false);
+      setCollaborationRequired(false);
+      return;
+    }
+    setPriority("normal");
+    setReplyRequired(false);
+    setCollaborationRequired(true);
   };
 
   const fileDisabledReason = (() => {
@@ -813,6 +834,24 @@ export function ChatComposer({
                   title={t("modeNeedReplyDesc", { defaultValue: "需要收件人给出具体回复" })}
                 >
                   {t("modeNeedReply", { defaultValue: "需回复" })}
+                </button>
+                <button
+                  type="button"
+                  className={classNames(
+                    chipBaseClass,
+                    messageMode === "collaboration"
+                      ? isDark
+                        ? "border-sky-400 bg-sky-500 text-white shadow-[0_6px_16px_-10px_rgba(56,189,248,0.8)]"
+                        : "border-sky-500 bg-sky-500 text-white shadow-[0_6px_16px_-10px_rgba(14,165,233,0.65)]"
+                      : chipInactiveClass,
+                  )}
+                  onClick={toggleCollaborationRequiredMode}
+                  disabled={busy === "send" || !selectedGroupId}
+                  aria-pressed={messageMode === "collaboration"}
+                  aria-label={t("modeNeedCollaboration", { defaultValue: "需协作" })}
+                  title={t("modeNeedCollaborationDesc", { defaultValue: "要求负责人按协作流程拆分、验收并持续推进" })}
+                >
+                  {t("modeNeedCollaboration", { defaultValue: "需协作" })}
                 </button>
               </div>
 

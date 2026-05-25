@@ -251,6 +251,7 @@ class PendingMessage:
     notify_kind: str = ""  # For system.notify: nudge, keepalive, etc.
     notify_title: str = ""
     notify_message: str = ""
+    collaboration_required: bool = False
 
 
 @dataclass
@@ -304,6 +305,7 @@ class DeliveryThrottle:
         notify_kind: str = "",
         notify_title: str = "",
         notify_message: str = "",
+        collaboration_required: bool = False,
     ) -> None:
         """Queue a message for delivery."""
         with self._lock:
@@ -324,6 +326,7 @@ class DeliveryThrottle:
                 notify_kind=notify_kind,
                 notify_title=notify_title,
                 notify_message=notify_message,
+                collaboration_required=collaboration_required,
             ))
     
     def should_deliver(self, group_id: str, actor_id: str, min_interval_seconds: int) -> bool:
@@ -553,12 +556,26 @@ def append_mcp_reply_reminder(text: str) -> str:
     return f"{out}\n\n{reminder}"
 
 
+def append_collaboration_required_instructions(text: str) -> str:
+    from .actor_turn_rendering import COLLABORATION_REQUIRED_INSTRUCTIONS
+
+    instructions = str(COLLABORATION_REQUIRED_INSTRUCTIONS or "").strip()
+    out = str(text or "").rstrip("\n")
+    if not instructions:
+        return out
+    if instructions in out:
+        return out
+    if not out:
+        return instructions
+    return f"{out}\n\n{instructions}"
+
+
 def render_single_message(msg: PendingMessage) -> str:
     """Render a single message for PTY delivery."""
     if msg.kind == "system.notify":
         # System notification format
         return f"[onecolleague] SYSTEM ({msg.notify_kind}): {msg.notify_title}\n{msg.notify_message}".strip()
-    return render_actor_inbound_message(
+    rendered = render_actor_inbound_message(
         ActorInboundEnvelope(
             event_id=str(msg.event_id or ""),
             kind=str(msg.kind or "chat.message"),
@@ -572,6 +589,9 @@ def render_single_message(msg: PendingMessage) -> str:
             source_user_id=str(msg.source_user_id or ""),
         )
     )
+    if msg.collaboration_required:
+        rendered = append_collaboration_required_instructions(rendered)
+    return rendered
 
 
 def _render_system_notify_message_for_delivery(*, notify: SystemNotifyData, group: Optional[Group] = None) -> str:
@@ -862,6 +882,7 @@ def queue_chat_message(
     source_platform: Optional[str] = None,
     source_user_name: Optional[str] = None,
     source_user_id: Optional[str] = None,
+    collaboration_required: bool = False,
     ts: str = "",
 ) -> None:
     """Queue a chat message for throttled delivery."""
@@ -877,6 +898,7 @@ def queue_chat_message(
         source_platform=source_platform,
         source_user_name=source_user_name,
         source_user_id=source_user_id,
+        collaboration_required=collaboration_required,
         ts=ts,
         kind="chat.message",
     )

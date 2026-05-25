@@ -82,6 +82,8 @@
   "modeImportantDesc": "Needs acknowledgement",
   "modeNeedReply": "Need Reply",
   "modeNeedReplyDesc": "Needs concrete response",
+  "modeNeedCollaboration": "Need Collaboration",
+  "modeNeedCollaborationDesc": "Require the foreman to split, verify, and keep coordinated work moving",
   "modeNoticeNeedReply": "Need Reply: recipients are expected to send a concrete reply.",
   "modeNoticeImportant": "Needs Ack: recipients are expected to acknowledge this message.",
   "messageType": "Message mode",
