@@ -1362,6 +1362,14 @@ export function useChatTab({
       return;
     }
 
+    if (inChatWindow) {
+      closeChatWindow(selectedGroupId);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("event");
+      url.searchParams.delete("tab");
+      window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
+    }
+
     // Optimistic: enqueue to outbox immediately for same-group sends.
     // If the request fails, we remove the pending entry and restore the composer.
     if (!isCrossGroup) {
@@ -1476,13 +1484,6 @@ export function useChatTab({
       clearDraft(selectedGroupId);
       setToText("");
       if (fileInputRef?.current) fileInputRef.current.value = "";
-      if (inChatWindow) {
-        closeChatWindow();
-        const url = new URL(window.location.href);
-        url.searchParams.delete("event");
-        url.searchParams.delete("tab");
-        window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
-      }
       if (selectedGroupId) {
         setChatUnreadCount(selectedGroupId, 0);
         setChatFilter(selectedGroupId, "all");
