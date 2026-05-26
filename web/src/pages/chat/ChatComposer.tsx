@@ -841,8 +841,8 @@ export function ChatComposer({
                     chipBaseClass,
                     messageMode === "collaboration"
                       ? isDark
-                        ? "border-sky-400 bg-sky-500 text-white shadow-[0_6px_16px_-10px_rgba(56,189,248,0.8)]"
-                        : "border-sky-500 bg-sky-500 text-white shadow-[0_6px_16px_-10px_rgba(14,165,233,0.65)]"
+                        ? "border-blue-400 bg-[linear-gradient(180deg,rgba(59,130,246,0.96),rgba(37,99,235,0.90))] text-white shadow-[0_6px_14px_rgba(37,99,235,0.16),0_1px_0_rgba(255,255,255,0.14)]"
+                        : "border-blue-500 bg-[linear-gradient(180deg,rgba(59,130,246,0.98),rgba(37,99,235,0.92))] text-white shadow-[0_6px_14px_rgba(37,99,235,0.16),0_1px_0_rgba(255,255,255,0.14)]"
                       : chipInactiveClass,
                   )}
                   onClick={toggleCollaborationRequiredMode}
