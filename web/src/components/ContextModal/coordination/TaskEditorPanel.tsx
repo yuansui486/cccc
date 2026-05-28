@@ -24,6 +24,7 @@ interface TaskEditorPanelProps {
   selectedTask: Task | null;
   selectedTaskDeleteInfo: TaskDeleteInfo;
   selectedTaskDeleteHint: string;
+  syncError?: string;
   taskWorkflowCoverage: TaskWorkflowCoverage;
   taskTypeId: TaskTypeId;
   selectedTaskType: TaskTypeDefinition;
@@ -35,6 +36,35 @@ interface TaskEditorPanelProps {
   onSaveTask: () => void;
 }
 
+const formatWorkflowMissingItems = (items: string[], tr: ContextTranslator) => {
+  const labelMap: Record<string, [string, string]> = {
+    "Outcome summary": ["context.outcomeSummary", "结果摘要"],
+    "Closeout verdict": ["context.closeoutVerdict", "收口结论"],
+    "Verification summary": ["context.verificationSummary", "验证摘要"],
+    "Attempt decision": ["context.attemptDecision", "尝试决策"],
+    Goal: ["context.goal", "目标"],
+    "Success criteria": ["context.successCriteria", "成功标准"],
+    "Required evidence": ["context.requiredEvidence", "必要证据"],
+    Owner: ["context.owner", "负责人"],
+    Baseline: ["context.baseline", "基线"],
+    "Primary metric": ["context.primaryMetric", "主指标"],
+    "Verifier boundary": ["context.verifierBoundary", "验证边界"],
+  };
+  return items.map((item) => {
+    const label = labelMap[item];
+    return label ? tr(label[0], label[1]) : item;
+  }).join("、");
+};
+
+const appendNotesSection = (notes: string, heading: string) => {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sectionPattern = new RegExp(`(^|\\n)\\s*${escapedHeading}\\s*:`, "i");
+  if (sectionPattern.test(notes)) return notes;
+  const prefix = notes.trimEnd();
+  const section = `${heading}:\n- `;
+  return prefix ? `${prefix}\n\n${section}` : section;
+};
+
 export function TaskEditorPanel({
   tr,
   ui,
@@ -45,6 +75,7 @@ export function TaskEditorPanel({
   selectedTask,
   selectedTaskDeleteInfo,
   selectedTaskDeleteHint,
+  syncError = "",
   taskWorkflowCoverage,
   taskTypeId,
   selectedTaskType,
@@ -76,17 +107,35 @@ export function TaskEditorPanel({
       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
       : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
   );
+  const insertNotesSection = (heading: string) => {
+    setTaskDraft((prev) => prev ? { ...prev, notes: appendNotesSection(prev.notes, heading) } : prev);
+  };
+  const renderWorkflowTag = (ok: boolean, label: string, heading?: string) => {
+    if (!heading) {
+      return <span className={workflowToneClass(ok)}>{label}</span>;
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => insertNotesSection(heading)}
+        className={classNames(workflowToneClass(ok), "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm")}
+        title={tr("context.insertNotesSection", "点击插入 Notes 段落：{{section}}", { section: `${heading}:` })}
+      >
+        {label}
+      </button>
+    );
+  };
   const workflowSummary = taskWorkflowCoverage.needsCloseout
     ? tr(
       "context.taskWorkflowNeedsCloseout",
-      "Closeout is still missing {{items}}.",
-      { items: taskWorkflowCoverage.missingCloseout.join(", ") }
+      "收口信息还缺少：{{items}}。",
+      { items: formatWorkflowMissingItems(taskWorkflowCoverage.missingCloseout, tr) }
     )
     : taskWorkflowCoverage.needsContract
       ? tr(
         "context.taskWorkflowNeedsContract",
-        "This task type is still missing {{items}}.",
-        { items: taskWorkflowCoverage.missingSetup.join(", ") }
+        "这个任务类型还缺少：{{items}}。",
+        { items: formatWorkflowMissingItems(taskWorkflowCoverage.missingSetup, tr) }
         )
       : taskWorkflowCoverage.isOptimization
         ? (taskWorkflowCoverage.hasCurrentBest && taskWorkflowCoverage.hasFrontierNext
@@ -106,6 +155,18 @@ export function TaskEditorPanel({
         : taskWorkflowCoverage.taskTypeFamily === "standard"
           ? tr("context.taskWorkflowStandardReady", "This standard task has the required goal / evidence structure.")
           : tr("context.taskWorkflowFreeReady", "Keep this task lightweight unless more structure would improve control.");
+  const closeoutBlockReason = taskWorkflowCoverage.needsCloseout
+    ? tr(
+      "context.taskDoneGuard",
+      "标记任务完成前需要补齐收口信息：{{items}}。",
+      { items: formatWorkflowMissingItems(taskWorkflowCoverage.missingCloseout, tr) }
+    )
+    : "";
+  const saveBlockReason = !taskDraft.title.trim()
+    ? tr("context.taskTitleRequired", "任务标题不能为空。")
+    : closeoutBlockReason;
+  const saveDisabled = syncBusy || Boolean(saveBlockReason);
+  const visibleSyncError = syncError || closeoutBlockReason;
   const latestAttemptLabel = taskWorkflowCoverage.latestAttemptVerdict === "keep"
     ? tr("context.latestAttemptKeep", "Latest keep")
     : taskWorkflowCoverage.latestAttemptVerdict === "discard"
@@ -159,6 +220,12 @@ export function TaskEditorPanel({
         </div>
       </div>
 
+      {visibleSyncError ? (
+        <div className={classNames("mt-3 rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>
+          {visibleSyncError}
+        </div>
+      ) : null}
+
       <div className="mt-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div className={classNames("text-xs", ui.mutedTextClass)}>
@@ -210,30 +277,30 @@ export function TaskEditorPanel({
             </span>
             {taskWorkflowCoverage.taskTypeFamily === "standard" || taskWorkflowCoverage.isOptimization ? (
               <>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasGoal)}>{tr("context.goal", "Goal")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasSuccessCriteria)}>{tr("context.successCriteria", "Success criteria")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasRequiredEvidence)}>{tr("context.requiredEvidence", "Required evidence")}</span>
+                {renderWorkflowTag(taskWorkflowCoverage.hasGoal, tr("context.goal", "Goal"), "Goal")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasSuccessCriteria, tr("context.successCriteria", "Success criteria"), "Success Criteria")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasRequiredEvidence, tr("context.requiredEvidence", "Required evidence"), "Required Evidence")}
               </>
             ) : null}
             {taskWorkflowCoverage.taskTypeFamily === "standard" ? (
-              <span className={workflowToneClass(taskWorkflowCoverage.hasOwner)}>{tr("context.owner", "Owner")}</span>
+              renderWorkflowTag(taskWorkflowCoverage.hasOwner, tr("context.owner", "Owner"), "Owner")
             ) : null}
             {taskWorkflowCoverage.isOptimization ? (
               <>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasBaseline)}>{tr("context.baseline", "Baseline")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasPrimaryMetric)}>{tr("context.primaryMetric", "Primary metric")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasVerifierBoundary)}>{tr("context.verifierBoundary", "Verifier boundary")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasCurrentBest)}>{tr("context.currentBest", "Current best")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasFrontierNext)}>{tr("context.frontierNext", "Frontier next")}</span>
+                {renderWorkflowTag(taskWorkflowCoverage.hasBaseline, tr("context.baseline", "Baseline"), "Baseline")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasPrimaryMetric, tr("context.primaryMetric", "Primary metric"), "Primary Metric")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasVerifierBoundary, tr("context.verifierBoundary", "Verifier boundary"), "Verifier Boundary")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasCurrentBest, tr("context.currentBest", "Current best"), "Current Best")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasFrontierNext, tr("context.frontierNext", "Frontier next"), "Frontier Next")}
               </>
             ) : null}
             {String(taskDraft.status || "").toLowerCase() === "done" ? (
               <>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasOutcomeSummary)}>{tr("context.outcomeSummary", "Outcome summary")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasCloseoutVerdict)}>{tr("context.closeoutVerdict", "Closeout verdict")}</span>
-                <span className={workflowToneClass(taskWorkflowCoverage.hasVerificationSummary)}>{tr("context.verificationSummary", "Verification summary")}</span>
+                {renderWorkflowTag(taskWorkflowCoverage.hasOutcomeSummary, tr("context.outcomeSummary", "Outcome summary"), "Outcome Summary")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasCloseoutVerdict, tr("context.closeoutVerdict", "Closeout verdict"), "Closeout Verdict")}
+                {renderWorkflowTag(taskWorkflowCoverage.hasVerificationSummary, tr("context.verificationSummary", "Verification summary"), "Verification Summary")}
                 {taskWorkflowCoverage.isOptimization ? (
-                  <span className={workflowToneClass(taskWorkflowCoverage.hasAttemptDecision)}>{tr("context.attemptDecision", "Attempt decision")}</span>
+                  renderWorkflowTag(taskWorkflowCoverage.hasAttemptDecision, tr("context.attemptDecision", "Attempt decision"), "Attempt Decision")
                 ) : null}
               </>
             ) : null}
@@ -395,7 +462,9 @@ export function TaskEditorPanel({
               {tr("context.deleteTask", "Delete")}
             </button>
           ) : null}
-          <button type="button" onClick={onSaveTask} disabled={syncBusy} className={ui.buttonPrimaryClass}>{syncBusy ? tr("context.saving", "Saving…") : (isCreate ? tr("context.createTask", "Create task") : tr("context.saveTask", "Save task"))}</button>
+          <span title={saveBlockReason || undefined}>
+            <button type="button" onClick={onSaveTask} disabled={saveDisabled} className={ui.buttonPrimaryClass}>{syncBusy ? tr("context.saving", "Saving…") : (isCreate ? tr("context.createTask", "Create task") : tr("context.saveTask", "Save task"))}</button>
+          </span>
         </div>
         {!isCreate && selectedTaskDeleteHint ? (
           <div className={classNames("text-xs", ui.mutedTextClass)}>{selectedTaskDeleteHint}</div>

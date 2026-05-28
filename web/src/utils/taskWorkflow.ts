@@ -69,7 +69,9 @@ const ROOT_SECTION_ORDER = [
   "Goal",
   "Success Criteria",
   "Required Evidence",
+  "Owner",
   "Next Control Move If Unmet",
+  "Outcome Summary",
   "Closeout Verdict",
   "Verification Summary",
   "Open Concerns",
@@ -103,8 +105,14 @@ const ROOT_NOTES_TEMPLATE = [
   "Required Evidence:",
   "- [name the proof, checks, or artifacts required]",
   "",
+  "Owner:",
+  "- [name the directly responsible owner]",
+  "",
   "Next Control Move If Unmet:",
   "- [continue / request evidence / handoff / blocked / needs context]",
+  "",
+  "Outcome Summary:",
+  "- [summarize the actual result]",
   "",
   "Closeout Verdict:",
   "- [DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT]",
@@ -419,8 +427,8 @@ export function evaluateTaskWorkflow(fields: TaskWorkflowFields): TaskWorkflowCo
   const hasGoal = hasMeaningfulText(goalSummary);
   const hasSuccessCriteria = hasMeaningfulText(extractSectionValue(fields.notes, "Success Criteria"));
   const hasRequiredEvidence = hasMeaningfulText(extractSectionValue(fields.notes, "Required Evidence"));
-  const hasOwner = hasMeaningfulText(fields.assignee);
-  const hasOutcomeSummary = hasMeaningfulText(fields.outcome);
+  const hasOwner = hasMeaningfulText(fields.assignee) || hasMeaningfulText(extractSectionValue(fields.notes, "Owner"));
+  const hasOutcomeSummary = hasMeaningfulText(fields.outcome) || hasMeaningfulText(extractSectionValue(fields.notes, "Outcome Summary"));
   const hasCloseoutVerdict = hasMeaningfulText(extractSectionValue(fields.notes, "Closeout Verdict"));
   const hasVerificationSummary = hasMeaningfulText(extractSectionValue(fields.notes, "Verification Summary"));
   const hasBaseline = hasMeaningfulText(extractSectionValue(fields.notes, "Baseline"));

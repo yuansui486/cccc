@@ -75,6 +75,26 @@ import { createContextModalUi } from "./ui";
 
 type ContextInitialTab = SteeringTab | ContextModalView;
 
+const formatWorkflowMissingItems = (items: string[], tr: (key: string, fallback: string) => string) => {
+  const labelMap: Record<string, [string, string]> = {
+    "Outcome summary": ["context.outcomeSummary", "结果摘要"],
+    "Closeout verdict": ["context.closeoutVerdict", "收口结论"],
+    "Verification summary": ["context.verificationSummary", "验证摘要"],
+    "Attempt decision": ["context.attemptDecision", "尝试决策"],
+    Goal: ["context.goal", "目标"],
+    "Success criteria": ["context.successCriteria", "成功标准"],
+    "Required evidence": ["context.requiredEvidence", "必要证据"],
+    Owner: ["context.owner", "负责人"],
+    Baseline: ["context.baseline", "基线"],
+    "Primary metric": ["context.primaryMetric", "主指标"],
+    "Verifier boundary": ["context.verifierBoundary", "验证边界"],
+  };
+  return items.map((item) => {
+    const label = labelMap[item];
+    return label ? tr(label[0], label[1]) : item;
+  }).join("、");
+};
+
 interface ContextModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -511,8 +531,8 @@ export function ContextModal({
   const formatDoneTransitionGuardMessage = useCallback(
     (missing: string[]) => tr(
       "context.taskDoneGuard",
-      "Complete closeout before marking this task done: {{items}}.",
-      { items: missing.join(", ") }
+      "标记任务完成前需要补齐收口信息：{{items}}。",
+      { items: formatWorkflowMissingItems(missing, tr) }
     ),
     [tr]
   );
@@ -1264,15 +1284,21 @@ export function ContextModal({
       {taskEditorVisible && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-0 z-[65] animate-fade-in"
+              className="fixed inset-0 z-[80] animate-fade-in"
               role="dialog"
               aria-modal="true"
               aria-labelledby="context-task-drawer-title"
             >
               <div className="absolute inset-0 glass-overlay" onPointerDown={closeTaskEditor} />
-              <div className="absolute inset-y-0 right-0 flex w-full justify-end">
-                <div className="h-full w-full sm:w-[min(860px,calc(100vw-1.5rem))]">
-                  <div className="h-full overflow-y-auto border-l border-[var(--glass-border-subtle)] shadow-2xl glass-modal">
+              <div
+                className="absolute inset-0 flex items-center justify-center p-3 sm:p-6"
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) closeTaskEditor();
+                }}
+              >
+                <div className="h-[min(92dvh,900px)] w-full sm:w-[min(900px,calc(100vw-2rem))]">
+                  <div className="h-full overflow-hidden rounded-2xl border border-[var(--glass-border-subtle)] shadow-2xl glass-modal">
+                    <div className="h-full overflow-y-auto overscroll-contain scrollbar-subtle [scrollbar-gutter:stable]">
                     <div className="sr-only" id="context-task-drawer-title">
                       {taskEditorMode === "create" ? tr("context.newTask", "New task") : tr("context.taskDetails", "Task editor")}
                     </div>
@@ -1286,6 +1312,7 @@ export function ContextModal({
                       selectedTask={selectedTask}
                       selectedTaskDeleteInfo={selectedTaskDeleteInfo}
                       selectedTaskDeleteHint={selectedTaskDeleteHint}
+                      syncError={syncError}
                       taskWorkflowCoverage={taskWorkflowCoverage}
                       taskTypeId={taskDraft?.taskType || "standard"}
                       selectedTaskType={selectedTaskType}
@@ -1301,6 +1328,7 @@ export function ContextModal({
                       }}
                       onSaveTask={() => void handleSaveTask()}
                     />
+                    </div>
                   </div>
                 </div>
               </div>

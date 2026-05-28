@@ -155,6 +155,7 @@ export function GroupSidebar({
   const refreshGroups = useGroupStore((s) => s.refreshGroups);
   const setGroups = useGroupStore((s) => s.setGroups);
   const setGroupDoc = useGroupStore((s) => s.setGroupDoc);
+  const groupContext = useGroupStore((s) => s.groupContext);
   const terminalSignals = useTerminalSignalsStore((state) => state.signals);
   const brandName = String(branding.product_name || "").trim() || appBrandName;
   const logoPath = String(branding.logo_icon_url || "").trim() || appLogoPath;
@@ -228,6 +229,12 @@ export function GroupSidebar({
     : launchMode === "activate"
       ? t("resumeDelivery")
       : t("launchAllAgents");
+  const activeTaskCount = useMemo(() => {
+    const summaryActive = Number(groupContext?.tasks_summary?.active);
+    if (Number.isFinite(summaryActive)) return Math.max(0, Math.floor(summaryActive));
+    const tasks = Array.isArray(groupContext?.coordination?.tasks) ? groupContext.coordination.tasks : [];
+    return tasks.filter((task) => String(task?.status || "").trim().toLowerCase() === "active").length;
+  }, [groupContext]);
 
   useEffect(() => {
     if (!isRenamingGroupTitle) return;
@@ -1023,6 +1030,7 @@ export function GroupSidebar({
                 <ClipboardIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("teamGoal")}</span>
+              {renderCountBadge(activeTaskCount)}
             </button>
             <button
               type="button"
@@ -1063,6 +1071,7 @@ export function GroupSidebar({
     );
   }, [
     activeTab,
+    activeTaskCount,
     actors,
     busy,
     getActorIndicator,
