@@ -113,11 +113,12 @@ async function request<T>(path: string, body: Record<string, unknown>): Promise<
 export async function loginDoneHub(
   username: string,
   password: string,
+  tenantCode = "",
 ): Promise<DoneHubApiResponse<DoneHubSessionResult>> {
   const normalizedBaseUrl = getFixedDoneHubBaseUrl();
   if (!normalizedBaseUrl) return makeError("invalid_base_url", DONE_HUB_BASE_URL_ERROR);
-  return request<DoneHubSessionResult>("/api/v1/done_hub/login", {
-    base_url: normalizedBaseUrl,
+  return request<DoneHubSessionResult>("/api/v1/account/login", {
+    tenant_code: String(tenantCode || "").trim(),
     username: String(username || "").trim(),
     password: String(password || ""),
   });
@@ -128,8 +129,7 @@ export async function refreshDoneHubSession(
 ): Promise<DoneHubApiResponse<DoneHubSessionResult>> {
   const normalizedBaseUrl = getFixedDoneHubBaseUrl();
   if (!normalizedBaseUrl) return makeError("invalid_base_url", DONE_HUB_BASE_URL_ERROR);
-  return request<DoneHubSessionResult>("/api/v1/done_hub/self", {
-    base_url: normalizedBaseUrl,
+  return request<DoneHubSessionResult>("/api/v1/account/self", {
     access_token: String(accessToken || "").trim(),
   });
 }

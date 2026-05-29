@@ -18,11 +18,13 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
   const clearError = useDoneHubStore((state) => state.clearError);
 
   const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
+  const [tenantCodeDraft, setTenantCodeDraft] = useState<string | null>(null);
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
   const [rememberPasswordDraft, setRememberPasswordDraft] = useState<boolean | null>(null);
   const appBrandName = getAppBrandName();
   const appLogoPath = getAppLogoPath();
   const username = usernameDraft ?? savedLogin.username ?? "";
+  const tenantCode = tenantCodeDraft ?? savedLogin.tenant_code ?? "";
   const password = passwordDraft ?? savedLogin.password ?? "";
   const rememberPassword = rememberPasswordDraft ?? (savedLogin.remember_password || Boolean(savedLogin.password));
 
@@ -72,9 +74,22 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
                 className={classNames("space-y-4", errorMessage ? "mt-4" : "")}
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void connect(username, password, rememberPassword);
+                  void connect(username, password, rememberPassword, tenantCode);
                 }}
               >
+                <div>
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+                    租户
+                  </label>
+                  <input
+                    value={tenantCode}
+                    onChange={(event) => setTenantCodeDraft(event.target.value)}
+                    placeholder="请输入租户编码"
+                    className="glass-input w-full px-4 py-3 text-sm text-[var(--color-text-primary)]"
+                    autoComplete="organization"
+                  />
+                </div>
+
                 <div>
                   <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
                     {t("doneHub.username")}

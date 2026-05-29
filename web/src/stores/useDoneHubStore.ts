@@ -16,6 +16,7 @@ const LEGACY_DONE_HUB_LOGIN_KEY = "cccc_done_hub_login";
 
 const EMPTY_SAVED_LOGIN: DoneHubSavedLogin = {
   base_url: DONE_HUB_BASE_URL,
+  tenant_code: "",
   username: "",
   password: "",
   remember_password: false,
@@ -47,6 +48,7 @@ type DoneHubState = {
     username: string,
     password: string,
     rememberPassword?: boolean,
+    tenantCode?: string,
   ) => Promise<boolean>;
   refresh: () => Promise<boolean>;
   disconnect: () => void;
@@ -106,10 +108,12 @@ function loadSavedLogin(): DoneHubSavedLogin {
     const record = parsed as Record<string, unknown>;
     const normalizedBaseUrl = normalizeDoneHubBaseUrl(String(record.base_url || "")) || DONE_HUB_BASE_URL;
     const username = String(record.username || "").trim();
+    const tenantCode = String(record.tenant_code || "").trim();
     const rememberPassword = Boolean(record.remember_password);
     const password = rememberPassword ? String(record.password || "") : "";
     return {
       base_url: normalizedBaseUrl,
+      tenant_code: tenantCode,
       username,
       password,
       remember_password: rememberPassword,
@@ -137,16 +141,18 @@ function persistSavedLogin(savedLogin: DoneHubSavedLogin): void {
   if (typeof window === "undefined") return;
   const normalizedBaseUrl = normalizeDoneHubBaseUrl(savedLogin.base_url);
   const username = String(savedLogin.username || "").trim();
+  const tenantCode = String(savedLogin.tenant_code || "").trim();
   const rememberPassword = Boolean(savedLogin.remember_password);
   const password = rememberPassword ? String(savedLogin.password || "") : "";
   const nextValue: DoneHubSavedLogin = {
     base_url: normalizedBaseUrl,
+    tenant_code: tenantCode,
     username,
     password,
     remember_password: rememberPassword,
   };
   try {
-    if (!nextValue.username && !nextValue.password && !nextValue.remember_password) {
+    if (!nextValue.tenant_code && !nextValue.username && !nextValue.password && !nextValue.remember_password) {
       localStorage.removeItem(DONE_HUB_LOGIN_KEY);
       localStorage.removeItem(LEGACY_DONE_HUB_LOGIN_KEY);
       return;
@@ -205,6 +211,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
           savedLogin.username,
           savedLogin.password,
           true,
+          savedLogin.tenant_code || "",
         );
         if (connected) return;
       }
@@ -222,10 +229,11 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
     return initializePromise;
   },
 
-  connect: async (username: string, password: string, rememberPassword = false) => {
+  connect: async (username: string, password: string, rememberPassword = false, tenantCode = "") => {
     const normalizedBaseUrl = normalizeDoneHubBaseUrl(DONE_HUB_BASE_URL);
     const savedLogin: DoneHubSavedLogin = {
       base_url: normalizedBaseUrl,
+      tenant_code: String(tenantCode || "").trim(),
       username: String(username || "").trim(),
       password: rememberPassword ? String(password || "") : "",
       remember_password: rememberPassword,
@@ -238,7 +246,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       }));
     }
     set({ status: "authenticating", errorMessage: "" });
-    const resp = await loginDoneHub(username, password);
+    const resp = await loginDoneHub(username, password, tenantCode);
     const session = extractDoneHubSession(resp);
     if (!resp.ok || !session) {
       persistSession(null);

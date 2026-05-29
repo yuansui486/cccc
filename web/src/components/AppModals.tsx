@@ -162,6 +162,14 @@ export function AppModals({
   const doneHubStatus = useDoneHubStore((state) => state.status);
   const doneHubSession = useDoneHubStore((state) => state.session);
   const doneHubErrorMessage = useDoneHubStore((state) => state.errorMessage);
+  const stopAllGroupsForLogout = useCallback(async () => {
+    const groupIds = groups
+      .map((group) => String(group.group_id || "").trim())
+      .filter(Boolean);
+    if (!groupIds.length) return;
+    await Promise.allSettled(groupIds.map((groupId) => api.stopGroup(groupId)));
+    await refreshGroups();
+  }, [groups, refreshGroups]);
 
   const {
     modals,
@@ -1638,6 +1646,7 @@ export function AppModals({
       <DoneHubAuthModal
         isOpen={modals.doneHubAuth}
         isDark={isDark}
+        onBeforeDisconnect={stopAllGroupsForLogout}
         onClose={() => closeModal("doneHubAuth")}
       />
 

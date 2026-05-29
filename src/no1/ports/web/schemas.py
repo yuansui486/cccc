@@ -398,6 +398,16 @@ class DoneHubSelfRequest(BaseModel):
     access_token: str = Field(default="")
 
 
+class AccountLoginRequest(BaseModel):
+    tenant_code: str = Field(default="")
+    username: str = Field(default="")
+    password: str = Field(default="")
+
+
+class AccountSelfRequest(BaseModel):
+    access_token: str = Field(default="")
+
+
 class DoneHubTeamPresetRequest(BaseModel):
     base_url: str = Field(default="")
     access_token: str = Field(default="")

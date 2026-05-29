@@ -1122,6 +1122,7 @@ export type DoneHubSession = {
 
 export type DoneHubSavedLogin = {
   base_url: string;
+  tenant_code?: string;
   username: string;
   password: string;
   remember_password: boolean;

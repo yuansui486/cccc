@@ -9,9 +9,10 @@ interface DoneHubAuthModalProps {
   isOpen: boolean;
   isDark: boolean;
   onClose: () => void;
+  onBeforeDisconnect?: () => Promise<void>;
 }
 
-export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAuthModalProps) {
+export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose, onBeforeDisconnect }: DoneHubAuthModalProps) {
   const { t } = useTranslation(["modals", "common"]);
   const { modalRef } = useModalA11y(isOpen, onClose);
   const status = useDoneHubStore((state) => state.status);
@@ -26,6 +27,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
   const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
   const [rememberPasswordDraft, setRememberPasswordDraft] = useState<boolean | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
   const username = usernameDraft ?? session?.username ?? savedLogin.username ?? "";
   const password = passwordDraft ?? savedLogin.password ?? "";
   const rememberPassword = rememberPasswordDraft ?? (savedLogin.remember_password || Boolean(savedLogin.password));
@@ -44,7 +46,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
 
   const hasSession = !!session;
   const showConnectedView = hasSession;
-  const busy = status === "authenticating" || status === "refreshing";
+  const busy = status === "authenticating" || status === "refreshing" || disconnecting;
   const submitDisabled = busy || !username.trim() || !password;
   const title = showConnectedView ? t("modals:doneHub.connectedTitle") : t("modals:doneHub.connectTitle");
   const quotaValue = useMemo(() => formatDoneHubQuota(session?.quota), [session?.quota]);
@@ -203,9 +205,19 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose }: DoneHubAu
               <button
                 type="button"
                 onClick={() => {
-                  disconnect();
-                  handleClose();
+                  if (disconnecting) return;
+                  setDisconnecting(true);
+                  void (async () => {
+                    try {
+                      await onBeforeDisconnect?.();
+                    } finally {
+                      disconnect();
+                      setDisconnecting(false);
+                      handleClose();
+                    }
+                  })();
                 }}
+                disabled={disconnecting}
                 className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-600 transition-colors hover:bg-rose-500/15 dark:text-rose-300"
               >
                 {t("modals:doneHub.disconnectAction")}
