@@ -248,6 +248,10 @@ export function parseSlashCommandInput(text: string, commands: SlashCommandItem[
   return { item, commandText: normalized, argsText };
 }
 
+export function capsuleSkillDisplayLabel(item: SlashCommandItem): string {
+  return String(item.displayName || item.name || item.command || "").trim();
+}
+
 export function resolveSlashCommandGuard(
   input: SlashCommandGuardInput,
   messages: Partial<SlashCommandGuardMessages> = {},
@@ -274,9 +278,17 @@ export function buildCapsuleSkillDispatchText(item: SlashCommandItem, argsText: 
   if (item.sourceType !== "capsule_skill") return "";
   const text = String(argsText || "").trim();
   if (!text) return "";
-  const skillLabel = String(item.command || item.name || "").trim();
+  const skillLabel = capsuleSkillDisplayLabel(item);
   const activePrefix = item.active === false ? "" : "已激活的 ";
   return `请使用${activePrefix}${skillLabel} skill 完成以下任务：\n\n${text}`;
+}
+
+export function buildCapsuleSkillAttachmentDispatchText(item: SlashCommandItem): string {
+  if (item.sourceType !== "capsule_skill") return "";
+  const skillLabel = capsuleSkillDisplayLabel(item);
+  if (!skillLabel) return "";
+  const activePrefix = item.active === false ? "" : "已激活的 ";
+  return `请使用${activePrefix}${skillLabel} skill 处理附件。`;
 }
 
 export function resolveCapsuleSkillSlashCommand(
@@ -287,7 +299,7 @@ export function resolveCapsuleSkillSlashCommand(
   if (item.sourceType !== "capsule_skill") return { kind: "not_capsule_skill" };
   const dispatchText = buildCapsuleSkillDispatchText(item, argsText);
   if (dispatchText) return { kind: "dispatch", dispatchText };
-  const skillLabel = String(item.command || item.name || "the skill").trim();
+  const skillLabel = capsuleSkillDisplayLabel(item) || "the skill";
   return {
     kind: "missing_args",
     message: messages.missingArgs ? messages.missingArgs(skillLabel) : `Enter a task after ${skillLabel}.`,

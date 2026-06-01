@@ -36,7 +36,12 @@ import {
 import { copyTextToClipboard } from "../utils/copy";
 import { hasRenderableChatMessageContent } from "../utils/ledgerEventHandlers";
 import { useSlashCommands } from "./useSlashCommands";
-import type { SlashSkillScope } from "../utils/slashCommands";
+import {
+  buildCapsuleSkillAttachmentDispatchText,
+  buildCapsuleSkillDispatchText,
+  parseSlashCommandInput,
+  type SlashSkillScope,
+} from "../utils/slashCommands";
 import { useSlashSkillDispatch } from "./useSlashSkillDispatch";
 
 export const CHAT_SCROLL_SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
@@ -1229,15 +1234,33 @@ export function useChatTab({
 
     const txt = String(composerStateSnapshot.composerText || "").trim();
     const selectedSkillCommandSnapshot = String(composerStateSnapshot.selectedSkillCommand || "").trim();
-    const sendText = selectedSkillCommandSnapshot && txt
-      ? `${selectedSkillCommandSnapshot} ${txt}`
-      : txt;
     const composerFilesSnapshot = composerStateSnapshot.composerFiles.slice();
+    const selectedSkillCandidates = [...allSlashCommands, ...slashCommands];
+    const selectedSkillItem = selectedSkillCommandSnapshot
+      ? selectedSkillCandidates.find((item) => item.capabilityId === selectedSkillCommandSnapshot)
+        || selectedSkillCandidates.find((item) => item.command === selectedSkillCommandSnapshot)
+        || null
+      : null;
+    const explicitSlashText = selectedSkillCommandSnapshot.startsWith("/")
+      ? `${selectedSkillCommandSnapshot} ${txt}`.trim()
+      : txt;
+    const typedSkillCommand = selectedSkillItem ? null : parseSlashCommandInput(explicitSlashText, slashCommands);
+    const typedSkillItem = typedSkillCommand?.item.sourceType === "capsule_skill" ? typedSkillCommand.item : null;
+    const skillDispatchItem = selectedSkillItem || typedSkillItem;
+    const skillDispatchArgsText = selectedSkillItem ? txt : (typedSkillCommand?.argsText || "");
+    const skillDispatchText = skillDispatchItem
+      ? buildCapsuleSkillDispatchText(skillDispatchItem, skillDispatchArgsText)
+        || (composerFilesSnapshot.length > 0 ? buildCapsuleSkillAttachmentDispatchText(skillDispatchItem) : "")
+      : "";
+    const messageTextSnapshot = skillDispatchText || txt;
+    const sendText = !skillDispatchText && selectedSkillCommandSnapshot.startsWith("/") && txt
+      ? explicitSlashText
+      : messageTextSnapshot;
     if (!txt && composerFilesSnapshot.length === 0) return;
 
     const dstGroup = routingSnapshot.destGroupId;
     const isCrossGroup = routingSnapshot.isCrossGroup;
-    if (await tryExecuteSlashCommand({
+    if (!skillDispatchText && await tryExecuteSlashCommand({
       text: sendText,
       composerFilesCount: composerFilesSnapshot.length,
       hasReplyTarget: !!composerStateSnapshot.replyTarget,
@@ -1388,7 +1411,7 @@ export function useChatTab({
         by: "user",
         group_id: selectedGroupId,
         data: {
-          text: txt,
+          text: messageTextSnapshot,
           to: toTokensSnapshot,
           priority: prio,
           reply_required: replyRequiredSnapshot,
@@ -1414,7 +1437,7 @@ export function useChatTab({
       if (replyTargetSnapshot) {
         resp = await api.replyMessage(
           selectedGroupId,
-          txt,
+          messageTextSnapshot,
           to,
           replyTargetSnapshot.eventId,
           composerFilesSnapshot.length > 0 ? composerFilesSnapshot : undefined,
@@ -1426,11 +1449,11 @@ export function useChatTab({
         );
       } else {
         if (isCrossGroup) {
-          resp = await api.sendCrossGroupMessage(selectedGroupId, dstGroup, txt, to, prio, replyRequiredSnapshot, collaborationRequiredSnapshot);
+          resp = await api.sendCrossGroupMessage(selectedGroupId, dstGroup, messageTextSnapshot, to, prio, replyRequiredSnapshot, collaborationRequiredSnapshot);
         } else {
           resp = await api.sendMessage(
             selectedGroupId,
-            txt,
+            messageTextSnapshot,
             to,
             composerFilesSnapshot.length > 0 ? composerFilesSnapshot : undefined,
             prio,
@@ -1503,6 +1526,8 @@ export function useChatTab({
   }, [
     selectedGroupId,
     groupSendBlockedReason,
+    allSlashCommands,
+    slashCommands,
     tryExecuteSlashCommand,
     validRecipientSet,
     inChatWindow,

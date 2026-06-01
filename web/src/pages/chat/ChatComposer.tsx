@@ -257,14 +257,16 @@ export function ChatComposer({
     });
   }, [scopedSkillCommands, skillSearchQuery]);
   const selectedSkill = useMemo(
-    () => scopedSkillCommands.find((item) => item.command === selectedSkillCommand)
+    () => scopedSkillCommands.find((item) => item.capabilityId === selectedSkillCommand)
+      || skillCommands.find((item) => item.capabilityId === selectedSkillCommand)
+      || scopedSkillCommands.find((item) => item.command === selectedSkillCommand)
       || skillCommands.find((item) => item.command === selectedSkillCommand)
       || null,
     [scopedSkillCommands, selectedSkillCommand, skillCommands],
   );
   useEffect(() => {
     if (!selectedSkillCommand) return;
-    if (scopedSkillCommands.some((item) => item.command === selectedSkillCommand)) return;
+    if (scopedSkillCommands.some((item) => item.capabilityId === selectedSkillCommand || item.command === selectedSkillCommand)) return;
     setSelectedSkillCommand("");
   }, [scopedSkillCommands, selectedSkillCommand, setSelectedSkillCommand]);
   const slashSuggestions = useMemo(() => filterSlashCommands(slashCommands, composerText), [composerText, slashCommands]);
@@ -746,7 +748,7 @@ export function ChatComposer({
                         </div>
                       ) : (
                         visibleSkillCommands.map((item) => {
-                          const active = selectedSkillCommand === item.command;
+                          const active = selectedSkillCommand === item.capabilityId || selectedSkillCommand === item.command;
                           return (
                             <button
                               key={`${item.capabilityId}:${item.name}`}
@@ -760,7 +762,7 @@ export function ChatComposer({
                                     : "text-gray-800 hover:bg-gray-50",
                               )}
                               onClick={() => {
-                                setSelectedSkillCommand(item.command);
+                                setSelectedSkillCommand(item.capabilityId);
                                 setShowSkillMenu(false);
                                 requestAnimationFrame(() => composerRef.current?.focus());
                               }}
