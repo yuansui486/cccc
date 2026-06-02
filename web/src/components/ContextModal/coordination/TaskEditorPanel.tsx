@@ -25,6 +25,7 @@ interface TaskEditorPanelProps {
   selectedTaskDeleteInfo: TaskDeleteInfo;
   selectedTaskDeleteHint: string;
   syncError?: string;
+  taskCloseConfirmOpen: boolean;
   taskWorkflowCoverage: TaskWorkflowCoverage;
   taskTypeId: TaskTypeId;
   selectedTaskType: TaskTypeDefinition;
@@ -32,6 +33,8 @@ interface TaskEditorPanelProps {
   onTaskTypeChange: (value: TaskTypeId) => void;
   onResetTask: () => void;
   onClose: () => void;
+  onCancelClose: () => void;
+  onConfirmClose: () => void;
   onDeleteSelectedTask: () => void;
   onSaveTask: () => void;
 }
@@ -76,6 +79,7 @@ export function TaskEditorPanel({
   selectedTaskDeleteInfo,
   selectedTaskDeleteHint,
   syncError = "",
+  taskCloseConfirmOpen,
   taskWorkflowCoverage,
   taskTypeId,
   selectedTaskType,
@@ -83,6 +87,8 @@ export function TaskEditorPanel({
   onTaskTypeChange,
   onResetTask,
   onClose,
+  onCancelClose,
+  onConfirmClose,
   onDeleteSelectedTask,
   onSaveTask,
 }: TaskEditorPanelProps) {
@@ -219,6 +225,25 @@ export function TaskEditorPanel({
           <button type="button" onClick={onClose} className={ui.buttonSecondaryClass}>{tr("context.close", "Close")}</button>
         </div>
       </div>
+
+      {taskCloseConfirmOpen ? (
+        <div className={classNames("mt-3 rounded-xl border px-3 py-3", "border-amber-500/30 bg-amber-500/15")}>
+          <div className="text-sm font-medium text-amber-700 dark:text-amber-300">
+            {tr("context.unsavedTaskCloseTitle", "Discard unsaved task edits?")}
+          </div>
+          <div className={classNames("mt-1 text-xs", ui.mutedTextClass)}>
+            {tr("context.unsavedTaskCloseHint", "Closing now will discard the edits in this task editor.")}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={onCancelClose} className={ui.buttonSecondaryClass}>
+              {tr("context.keepEditing", "Keep editing")}
+            </button>
+            <button type="button" onClick={onConfirmClose} className={ui.buttonDangerClass}>
+              {tr("context.discardAndClose", "Discard and close")}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {visibleSyncError ? (
         <div className={classNames("mt-3 rounded-xl border px-3 py-2 text-sm", "border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400")}>

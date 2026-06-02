@@ -144,6 +144,7 @@ export function ContextModal({
   const [taskEditorMode, setTaskEditorMode] = useState<"none" | "create" | "edit">("none");
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
+  const [taskCloseConfirmOpen, setTaskCloseConfirmOpen] = useState(false);
   const [pendingTaskReadback, setPendingTaskReadback] = useState<{ taskId: string; previousUpdatedAt: string } | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncError, setSyncError] = useState("");
@@ -549,6 +550,15 @@ export function ContextModal({
     return window.confirm(tr("context.unsavedTaskConfirm", "You have unsaved task edits. Discard them and continue?"));
   }, [hasTaskUnsaved, tr]);
 
+  const dismissTaskEditor = useCallback(() => {
+    setTaskCloseConfirmOpen(false);
+    setPendingTaskReadback(null);
+    setTaskEditorMode("none");
+    setSelectedTaskId("");
+    setTaskDraft(null);
+    setSyncError("");
+  }, []);
+
   const openTaskEditorForTask = useCallback((task: Task, options?: { draft?: TaskDraft; error?: string }): boolean => {
     const sameTask = selectedTaskId === task.id && taskEditorMode === "edit";
     if (!sameTask && !confirmDiscardTaskChanges()) return false;
@@ -556,6 +566,7 @@ export function ContextModal({
     if (!sameTask) {
       setPendingTaskReadback(null);
     }
+    setTaskCloseConfirmOpen(false);
     setSelectedTaskId(task.id);
     setTaskDraft(nextDraft);
     setTaskEditorMode("edit");
@@ -639,6 +650,7 @@ export function ContextModal({
     if (selectedTaskId === task.id && taskEditorMode === "edit") return;
     if (!confirmDiscardTaskChanges()) return;
     const nextDraft = taskToDraft(task);
+    setTaskCloseConfirmOpen(false);
     setPendingTaskReadback(null);
     setSelectedTaskId(task.id);
     setTaskDraft(nextDraft);
@@ -648,16 +660,16 @@ export function ContextModal({
   }, [confirmDiscardTaskChanges, selectedTaskId, taskEditorMode]);
 
   const closeTaskEditor = useCallback(() => {
-    if (!confirmDiscardTaskChanges()) return;
-    setPendingTaskReadback(null);
-    setTaskEditorMode("none");
-    setSelectedTaskId("");
-    setTaskDraft(null);
-    setSyncError("");
-  }, [confirmDiscardTaskChanges]);
+    if (hasTaskUnsaved) {
+      setTaskCloseConfirmOpen(true);
+      return;
+    }
+    dismissTaskEditor();
+  }, [dismissTaskEditor, hasTaskUnsaved]);
 
   const openSteeringTab = useCallback((tab: SteeringTab) => {
     if (!confirmDiscardTaskChanges()) return;
+    setTaskCloseConfirmOpen(false);
     setPendingTaskReadback(null);
     setTaskEditorMode("none");
     setActiveView("coordination");
@@ -677,6 +689,7 @@ export function ContextModal({
   const handleSwitchActiveView = useCallback((next: ContextModalView) => {
     if (next !== "coordination") {
       if (!confirmDiscardTaskChanges()) return;
+      setTaskCloseConfirmOpen(false);
       setPendingTaskReadback(null);
       setTaskEditorMode("none");
       setSelectedTaskId("");
@@ -772,6 +785,7 @@ export function ContextModal({
 
   const handleSaveTask = useCallback(async () => {
     if (!groupId || !taskDraft) return;
+    setTaskCloseConfirmOpen(false);
     const title = taskDraft.title.trim();
     if (!title) {
       setSyncError(tr("context.taskTitleRequired", "Task title is required."));
@@ -816,6 +830,7 @@ export function ContextModal({
           setSyncError(nextResp.error?.message || resp.error?.message || tr("context.failedToApplyChanges", "Failed to apply changes"));
           return;
         }
+        setTaskCloseConfirmOpen(false);
         setTaskEditorMode("none");
         setSelectedTaskId("");
         setTaskDraft(null);
@@ -881,6 +896,7 @@ export function ContextModal({
         return;
       }
       if (selectedTaskId === task.id) {
+        setTaskCloseConfirmOpen(false);
         setTaskEditorMode("none");
         setSelectedTaskId("");
         setTaskDraft(null);
@@ -891,6 +907,7 @@ export function ContextModal({
   }, [applyContextWriteback, confirmDiscardTaskChanges, groupId, selectedTaskId, tasks, tr]);
 
   const handleResetTask = useCallback(() => {
+    setTaskCloseConfirmOpen(false);
     if (taskEditorMode === "create") {
       setTaskDraft(emptyTaskDraft("planned"));
       setSyncError("");
@@ -904,6 +921,7 @@ export function ContextModal({
 
   const handleOpenCreate = useCallback((status: BoardStatus = "planned") => {
     if (!confirmDiscardTaskChanges()) return;
+    setTaskCloseConfirmOpen(false);
     setPendingTaskReadback(null);
     setTaskEditorMode("create");
     setSelectedTaskId("");
@@ -1313,6 +1331,7 @@ export function ContextModal({
                       selectedTaskDeleteInfo={selectedTaskDeleteInfo}
                       selectedTaskDeleteHint={selectedTaskDeleteHint}
                       syncError={syncError}
+                      taskCloseConfirmOpen={taskCloseConfirmOpen}
                       taskWorkflowCoverage={taskWorkflowCoverage}
                       taskTypeId={taskDraft?.taskType || "standard"}
                       selectedTaskType={selectedTaskType}
@@ -1323,6 +1342,8 @@ export function ContextModal({
                       } : prev))}
                       onResetTask={handleResetTask}
                       onClose={closeTaskEditor}
+                      onCancelClose={() => setTaskCloseConfirmOpen(false)}
+                      onConfirmClose={dismissTaskEditor}
                       onDeleteSelectedTask={() => {
                         if (selectedTask) void handleDeleteTask(selectedTask);
                       }}
