@@ -22,6 +22,7 @@
   "navigation": {
     "targetScope": "Target Scope",
     "sections": "Global Configuration",
+    "hiddenSections": "Hidden Menu",
     "thisGroup": "This group",
     "global": "Global",
     "groupScopeTitle": "Group Scope",
@@ -845,7 +846,7 @@
   },
   "guidance": {
     "openFromGroup": "Open this tab from a group.",
-    "overridesHint": "Guidance overrides are stored under <0>ONECOLLEAGUE_HOME</0> (per-group).",
+    "overridesHint": "Guidance overrides are stored per team under <0>ONECOLLEAGUE_HOME</0>.",
     "preambleTitle": "Bootstrap (Preamble)",
     "preambleHint": "Injected automatically before the first delivery after start/restart.",
     "helpTitle": "Help (Reference)",

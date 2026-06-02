@@ -18,6 +18,7 @@ import { useModalA11y } from "../hooks/useModalA11y";
 import { copyTextToClipboard } from "../utils/copy";
 
 const BlueprintTab = lazy(() => import("./modals/settings/BlueprintTab").then((module) => ({ default: module.BlueprintTab })));
+const GuidanceTab = lazy(() => import("./modals/settings/GuidanceTab").then((module) => ({ default: module.GuidanceTab })));
 const CapabilitiesTab = lazy(() => import("./modals/settings/CapabilitiesTab").then((module) => ({ default: module.CapabilitiesTab })));
 const ActorProfilesTab = lazy(() => import("./modals/settings/ActorProfilesTab").then((module) => ({ default: module.ActorProfilesTab })));
 const DeveloperTab = lazy(() => import("./modals/settings/DeveloperTab").then((module) => ({ default: module.DeveloperTab })));
@@ -66,6 +67,7 @@ export function SettingsModal({
   const [scope, setScope] = useState<SettingsScope>("global");
   const [groupTab, setGroupTab] = useState<GroupTabId>("blueprint");
   const [globalTab, setGlobalTab] = useState<GlobalTabId>(groupId ? "blueprint" : "capabilities");
+  const [hiddenMenuUnlocked, setHiddenMenuUnlocked] = useState(false);
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
   const [webAccessSession, setWebAccessSession] = useState<WebAccessSession | null>(null);
   const doneHubStatus = useDoneHubStore((state) => state.status);
@@ -75,7 +77,7 @@ export function SettingsModal({
     if (!isOpen || !initialTarget) return;
     if (initialTarget.scope === "global") {
       setScope("global");
-      if (initialTarget.tab === "blueprint" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
+      if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
         setGlobalTab(initialTarget.tab);
       }
       return;
@@ -140,6 +142,7 @@ export function SettingsModal({
   const [registryBusy, setRegistryBusy] = useState(false);
   const [registryErr, setRegistryErr] = useState("");
   const [registryResult, setRegistryResult] = useState<api.RegistryReconcileResult | null>(null);
+  const developerClickWindowRef = useRef({ count: 0, firstClickAt: 0 });
 
   // ============ Effects ============
 
@@ -531,13 +534,19 @@ export function SettingsModal({
     ...(currentBrowserSignedIn && !globalSettingsEnabled ? [{ id: "myProfiles" as const, label: t("tabs.myProfiles") }] : []),
   ], [globalSettingsEnabled, currentBrowserSignedIn, groupId, t]);
 
+  const hiddenTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => {
+    if (!hiddenMenuUnlocked || !groupId) return [];
+    return [{ id: "guidance" as const, label: t("tabs.guidance") }];
+  }, [groupId, hiddenMenuUnlocked, t]);
+
   useEffect(() => {
     if (scope !== "global") return;
-    if (!globalTabs.length) return;
-    if (!globalTabs.some((tab) => tab.id === globalTab)) {
+    const availableTabs = [...globalTabs, ...hiddenTabs];
+    if (!availableTabs.length) return;
+    if (!availableTabs.some((tab) => tab.id === globalTab)) {
       setGlobalTab(globalTabs[0].id);
     }
-  }, [globalTab, globalTabs, scope]);
+  }, [globalTab, globalTabs, hiddenTabs, scope]);
 
   const groupTabs: { id: GroupTabId; label: string }[] = [];
 
@@ -547,6 +556,8 @@ export function SettingsModal({
   }, [groupTab, groupTabs, scope]);
 
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
+  const visibleHiddenTabs = scope === "group" ? [] : (globalScopeEnabled ? hiddenTabs : []);
+  const availableTabs = [...tabs, ...visibleHiddenTabs];
   const activeTab = scope === "group" ? groupTab : globalTab;
   const doneHubConnected = doneHubStatus === "connected" || doneHubStatus === "refreshing";
   const doneHubIsPro = String(doneHubSession?.group || "").trim().toLowerCase() === "pro";
@@ -563,6 +574,25 @@ export function SettingsModal({
     onClick: onOpenDoneHubAuth,
   } : undefined;
   const setActiveTab = (tab: GroupTabId | GlobalTabId) => {
+    if (scope === "global") {
+      if (tab === "developer") {
+        const now = Date.now();
+        const windowState = developerClickWindowRef.current;
+        if (!windowState.firstClickAt || now - windowState.firstClickAt > 3000) {
+          windowState.firstClickAt = now;
+          windowState.count = 1;
+        } else {
+          windowState.count += 1;
+        }
+        if (windowState.count >= 6) {
+          setHiddenMenuUnlocked(true);
+          windowState.firstClickAt = 0;
+          windowState.count = 0;
+        }
+      } else {
+        developerClickWindowRef.current = { count: 0, firstClickAt: 0 };
+      }
+    }
     if (scope === "group") setGroupTab(tab as GroupTabId);
     else setGlobalTab(tab as GlobalTabId);
   };
@@ -630,6 +660,7 @@ export function SettingsModal({
         <SettingsNavigation
           isDark={isDark}
           tabs={tabs}
+          hiddenTabs={visibleHiddenTabs}
           activeTab={activeTab}
           onTabChange={(tab) => setActiveTab(tab as GroupTabId | GlobalTabId)}
           account={doneHubAccount}
@@ -650,9 +681,11 @@ export function SettingsModal({
                 <div className="text-sm font-semibold">{t("navigation.globalLockedTitle")}</div>
                 <div className="mt-2 text-sm leading-6">{t("navigation.globalLockedContent")}</div>
               </div>
-            ) : !tabs.some((tab) => tab.id === activeTab) ? null : (
+            ) : !availableTabs.some((tab) => tab.id === activeTab) ? null : (
               <Suspense fallback={<SettingsTabFallback isDark={isDark} />}>
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
+
+              {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
 
               {activeTab === "capabilities" && (
                 <CapabilitiesTab

@@ -13,6 +13,7 @@ interface SettingsTabOption {
 interface SettingsNavigationProps {
   isDark: boolean;
   tabs: SettingsTabOption[];
+  hiddenTabs?: SettingsTabOption[];
   activeTab: string;
   onTabChange: (tabId: string) => void;
   account?: {
@@ -27,6 +28,7 @@ interface SettingsNavigationProps {
 export function SettingsNavigation({
   isDark,
   tabs,
+  hiddenTabs = [],
   activeTab,
   onTabChange,
   account,
@@ -63,6 +65,24 @@ export function SettingsNavigation({
               </button>
             ))}
           </div>
+          {hiddenTabs.length ? (
+            <div className="mt-5 border-t border-[var(--glass-border-subtle)] pt-4">
+              <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                {t("navigation.hiddenSections", { defaultValue: "Hidden" })}
+              </div>
+              <div className="space-y-1">
+                {hiddenTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => onTabChange(tab.id)}
+                    className={tabButtonClass(activeTab === tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </nav>
         {account ? (
           <div className="border-t border-[var(--glass-border-subtle)] px-4 py-4">
@@ -100,6 +120,19 @@ export function SettingsNavigation({
           fadeWidth={20}
         >
           {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              className={`${settingsWorkspaceSoftPanelClass(isDark)} flex-shrink-0 px-4 py-2.5 text-xs font-medium whitespace-nowrap ${
+                activeTab === tab.id
+                  ? "!border-[var(--glass-border-subtle)] !bg-[var(--glass-tab-bg-active)] text-[var(--color-text-primary)]"
+                  : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          {hiddenTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import * as api from "../../../services/api";
 import type { Actor } from "../../../types";
 import { buildHelpMarkdown, parseHelpMarkdown, type HelpChangedBlock, type ParsedHelpMarkdown } from "../../../utils/helpMarkdown";
@@ -22,7 +22,7 @@ import {
 type PromptKind = "preamble" | "help";
 type PromptInfo = api.GroupPromptInfo;
 type HelpViewMode = "structured" | "raw";
-type HelpScopeId = "role:foreman" | "role:peer" | `actor:${string}`;
+type HelpScopeId = "common" | "role:foreman" | "role:peer" | `actor:${string}`;
 
 const EMPTY_HELP: ParsedHelpMarkdown = {
   common: "",
@@ -60,12 +60,13 @@ export function GuidanceTab({ isDark, groupId }: {
   const [err, setErr] = useState("");
   const [prompts, setPrompts] = useState<Record<PromptKind, PromptInfo> | null>(null);
   const [actors, setActors] = useState<Actor[]>([]);
+  const [preambleExpanded, setPreambleExpanded] = useState(false);
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [helpViewMode, setHelpViewMode] = useState<HelpViewMode>("structured");
   const [helpStructured, setHelpStructured] = useState<ParsedHelpMarkdown>(EMPTY_HELP);
   const [helpTouchedRaw, setHelpTouchedRaw] = useState(false);
   const [helpChangedBlocks, setHelpChangedBlocks] = useState<HelpChangedBlock[]>([]);
-  const [selectedHelpScope, setSelectedHelpScope] = useState<HelpScopeId>("role:foreman");
+  const [selectedHelpScope, setSelectedHelpScope] = useState<HelpScopeId>("common");
 
   const actorIds = useMemo(
     () => actors.map((actor) => String(actor.id || "").trim()).filter(Boolean),
@@ -111,7 +112,7 @@ export function GuidanceTab({ isDark, groupId }: {
       setHelpTouchedRaw(false);
       setHelpChangedBlocks([]);
       setHelpViewMode("structured");
-      setSelectedHelpScope("role:foreman");
+      setSelectedHelpScope("common");
     } catch {
       setErr(t("guidance.failedToLoad"));
       setPrompts(null);
@@ -158,6 +159,10 @@ export function GuidanceTab({ isDark, groupId }: {
     setHelpChangedBlocks((current) => uniqueChangedBlocks([...current, changed]));
   };
 
+  const updateCommon = (value: string) => {
+    applyStructuredHelp({ ...helpStructured, common: value }, "common");
+  };
+
   const updateRole = (role: "foreman" | "peer", value: string) => {
     if (role === "foreman") {
       applyStructuredHelp({ ...helpStructured, foreman: value }, "role:foreman");
@@ -197,6 +202,24 @@ export function GuidanceTab({ isDark, groupId }: {
     }
   };
 
+  const savePreamble = async () => {
+    if (!groupId || !prompts) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const resp = await api.updateGroupPrompt(groupId, "preamble", prompts.preamble.content || "");
+      if (!resp.ok) {
+        setErr(resp.error?.message || t("guidance.failedToSave", { kind: "preamble" }));
+        return;
+      }
+      await load();
+    } catch {
+      setErr(t("guidance.failedToSave", { kind: "preamble" }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const resetPrompt = async (kind: PromptKind) => {
     if (!groupId || !prompts) return;
     const filename = prompts[kind]?.filename || kind;
@@ -226,10 +249,12 @@ export function GuidanceTab({ isDark, groupId }: {
     );
   }
 
+  const preamble = prompts?.preamble;
   const help = prompts?.help;
+  const preambleSource = preamble?.source || "builtin";
   const helpSource = help?.source || "builtin";
-  const helpBadge =
-    helpSource === "home"
+  const sourceBadgeClass = (source: PromptInfo["source"] | undefined) =>
+    source === "home"
       ? "border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)]"
       : "border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]";
 
@@ -246,10 +271,44 @@ export function GuidanceTab({ isDark, groupId }: {
   const workspacePanelClass = settingsWorkspacePanelClass(isDark);
   const navSectionTitleClass = "mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]";
 
-  const renderSourceBadge = () => {
+  const renderSourceBadge = (source: PromptInfo["source"] | undefined) => {
     return (
-      <div className={`inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium ${helpBadge}`}>
-        {helpSource === "home" ? t("guidance.overrideBadge") : t("guidance.builtinBadge")}
+      <div className={`inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium ${sourceBadgeClass(source)}`}>
+        {source === "home" ? t("guidance.overrideBadge") : t("guidance.builtinBadge")}
+      </div>
+    );
+  };
+
+  const renderPreambleActions = (expanded = false) => {
+    return (
+      <div
+        className={
+          expanded
+            ? "mt-4 flex flex-wrap items-center gap-2"
+            : settingsWorkspaceActionBarClass(isDark)
+        }
+      >
+        <button className={primaryButtonClass(busy)} onClick={() => void savePreamble()} disabled={busy}>
+          {t("common:save")}
+        </button>
+        <button
+          type="button"
+          className={secondaryButtonClass()}
+          onClick={() => void resetPrompt("preamble")}
+          disabled={busy || preambleSource !== "home"}
+          title={preambleSource === "home" ? t("guidance.resetHint") : t("guidance.noOverride")}
+        >
+          {t("common:reset")}
+        </button>
+        <button
+          type="button"
+          className={`${secondaryButtonClass()} ml-auto`}
+          onClick={() => void load()}
+          disabled={busy}
+          title={t("guidance.discardChanges")}
+        >
+          {t("guidance.discardChanges")}
+        </button>
       </div>
     );
   };
@@ -286,6 +345,16 @@ export function GuidanceTab({ isDark, groupId }: {
         </button>
       </div>
     );
+  };
+
+  const commonScope = {
+    id: "common" as HelpScopeId,
+    title: t("guidance.commonNotesTitle", "Common Notes"),
+    hint: t("guidance.commonNotesHint", "Untagged help content shared by all actors."),
+    placeholder: t("guidance.commonNotesPlaceholder", "Keep shared guidance, workflow details, and appendices here..."),
+    value: helpStructured.common,
+    roleLabel: undefined as string | undefined,
+    isOrphan: false,
   };
 
   const foremanScope = {
@@ -336,11 +405,15 @@ export function GuidanceTab({ isDark, groupId }: {
     };
   });
 
-  const selectedHelpScopeItem = [foremanScope, peerScope, ...actorScopes, ...orphanActorScopes].find(
+  const selectedHelpScopeItem = [commonScope, foremanScope, peerScope, ...actorScopes, ...orphanActorScopes].find(
     (item) => item.id === selectedHelpScope
-  ) || foremanScope;
+  ) || commonScope;
 
   const updateSelectedHelpScopeValue = (value: string) => {
+    if (selectedHelpScopeItem.id === "common") {
+      updateCommon(value);
+      return;
+    }
     if (selectedHelpScopeItem.id === "role:foreman") {
       updateRole("foreman", value);
       return;
@@ -399,7 +472,7 @@ export function GuidanceTab({ isDark, groupId }: {
               {t("guidance.expand")}
             </button>
           ) : null}
-          {renderSourceBadge()}
+          {renderSourceBadge(helpSource)}
         </div>
       </div>
 
@@ -449,6 +522,7 @@ export function GuidanceTab({ isDark, groupId }: {
                 <div className={expanded ? `min-h-0 flex-1 space-y-4 ${settingsScrollAreaClass}` : "space-y-4"}>
                   <div className="space-y-2.5">
                     <div className={navSectionTitleClass}>{t("guidance.commonAndRolesTitle")}</div>
+                    {renderHelpScopeButton(commonScope)}
                     {renderHelpScopeButton(foremanScope)}
                     {renderHelpScopeButton(peerScope)}
                   </div>
@@ -537,11 +611,99 @@ export function GuidanceTab({ isDark, groupId }: {
     </div>
   );
 
+  const renderPreambleCard = (expanded = false) => (
+    <div className={expanded ? "flex h-full min-h-0 flex-col" : promptShellClass}>
+      <div className={expanded ? "flex items-start justify-between gap-3" : promptHeaderClass}>
+        <div className="min-w-0">
+          <div className={`text-sm font-semibold ${promptHeaderTextClass}`}>{t("guidance.preambleTitle")}</div>
+          <div className="mt-1 text-xs text-[var(--color-text-muted)]">{t("guidance.preambleHint")}</div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!expanded ? (
+            <button
+              type="button"
+              className={secondaryButtonClass("sm")}
+              onClick={() => setPreambleExpanded(true)}
+              disabled={busy}
+              title={t("guidance.expandTitle")}
+            >
+              {t("guidance.expand")}
+            </button>
+          ) : null}
+          {renderSourceBadge(preambleSource)}
+        </div>
+      </div>
+
+      <div className={expanded ? "mt-3 min-h-0 flex flex-1 flex-col" : promptBodyClass(expanded)}>
+        {preamble?.path || preamble?.filename ? (
+          <div className="mb-4 inline-flex max-w-full rounded-full border border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+            <span className="truncate">{preamble.path || preamble.filename}</span>
+          </div>
+        ) : null}
+        <div className={`${editorSurfaceSoftClass} ${expanded ? "min-h-0 flex flex-1 flex-col" : ""}`}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <label className={labelClass(isDark)}>{t("guidance.markdown")}</label>
+            <div className={editorMetaBadgeClass}>{t("guidance.markdown")}</div>
+          </div>
+          <textarea
+            className={`${editorTextareaClass} font-mono text-[12px] ${expanded ? "min-h-[440px] flex-1" : ""}`}
+            style={expanded ? undefined : { minHeight: 320, maxHeight: "44vh" }}
+            value={preamble?.content || ""}
+            onChange={(e) => setPromptContent("preamble", e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      </div>
+
+      {renderPreambleActions(expanded)}
+    </div>
+  );
+
   return (
     <div className="space-y-3">
       {err ? <div className={`text-sm ${isDark ? "text-rose-300" : "text-red-600"}`}>{err}</div> : null}
 
+      <div className={settingsWorkspaceSoftPanelClass(isDark)}>
+        <div className="text-xs text-[var(--color-text-secondary)]">
+          <Trans
+            i18nKey="guidance.overridesHint"
+            ns="settings"
+            components={[
+              <span className="font-semibold text-[var(--color-text-primary)]" />,
+            ]}
+          />
+        </div>
+      </div>
+
+      {renderPreambleCard()}
       {renderHelpCard()}
+
+      {preambleExpanded
+        ? (
+          <BodyPortal>
+            <div
+              className="fixed inset-0 z-[1000] animate-fade-in"
+              role="dialog"
+              aria-modal="true"
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) setPreambleExpanded(false);
+              }}
+            >
+              <div className="absolute inset-0 glass-overlay" onPointerDown={() => setPreambleExpanded(false)} />
+              <div className={settingsDialogPanelClass("xl")}>
+                <div className="flex shrink-0 justify-end border-b border-[var(--glass-border-subtle)] px-3 py-2 sm:px-4 sm:py-3">
+                  <button type="button" className={secondaryButtonClass("sm")} onClick={() => setPreambleExpanded(false)}>
+                    {t("common:close")}
+                  </button>
+                </div>
+                <div className={settingsDialogBodyClass}>
+                  {renderPreambleCard(true)}
+                </div>
+              </div>
+            </div>
+          </BodyPortal>
+          )
+        : null}
 
       {helpExpanded
         ? (

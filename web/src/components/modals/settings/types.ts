@@ -14,6 +14,7 @@ export type GroupTabId =
   | "blueprint";
 export type GlobalTabId =
   | "blueprint"
+  | "guidance"
   | "capabilities"
   | "selfEvolvingSkills"
   | "actorProfiles"

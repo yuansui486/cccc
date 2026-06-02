@@ -22,6 +22,7 @@
   "navigation": {
     "targetScope": "目标范围",
     "sections": "全局配置",
+    "hiddenSections": "隐藏菜单",
     "thisGroup": "当前工作组",
     "global": "全局",
     "groupScopeTitle": "工作组范围",
@@ -845,7 +846,7 @@
   },
   "guidance": {
     "openFromGroup": "请从工作组中打开此标签页。",
-    "overridesHint": "引导覆盖保存在 <0>ONECOLLEAGUE_HOME</0>（按工作组）。",
+    "overridesHint": "引导覆盖会按团队保存到 <0>ONECOLLEAGUE_HOME</0>。",
     "preambleTitle": "启动引导（Preamble）",
     "preambleHint": "启动或重启后的第一次投递前会自动注入。",
     "helpTitle": "帮助（参考）",

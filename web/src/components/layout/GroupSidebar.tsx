@@ -137,7 +137,6 @@ export function GroupSidebar({
   onRestoreGroup,
   onTabChange,
   onAddAgent,
-  onOpenContext,
   onOpenContextProject,
   onOpenSkillManagement,
   onOpenScheduledReminder,
@@ -1008,16 +1007,6 @@ export function GroupSidebar({
             <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
               {t("goalManagement")}
             </div>
-            <button
-              type="button"
-              onClick={onOpenContext}
-              disabled={!selectedGroupId}
-              className="rounded px-1 text-[13px] font-semibold text-transparent outline-none transition-colors focus-visible:text-[var(--color-text-tertiary)] disabled:pointer-events-none"
-              aria-label={t("projectContext")}
-              title={t("projectContext")}
-            >
-              上下文
-            </button>
           </div>
           <div className="space-y-1">
             <button
@@ -1080,7 +1069,6 @@ export function GroupSidebar({
     navButtonClass,
     onAddAgent,
     onCreateGroup,
-    onOpenContext,
     orderedGroups.length,
     renderInlineGroupSwitcherContent,
     handleTabSelect,
