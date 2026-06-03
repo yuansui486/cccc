@@ -1216,6 +1216,34 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             },
         }
 
+    @global_router.put("/video-editor/spec")
+    async def video_editor_spec_save(spec: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            abs_path = _resolve_video_editor_spec_path(spec)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "video_editor_spec_not_found", "message": f"video editor spec not found: {spec}"},
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_spec", "message": str(exc)}) from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_spec", "message": "spec must be a JSON object"})
+        text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        if len(text.encode("utf-8")) > REMOTION_MAX_SPEC_BYTES:
+            raise HTTPException(status_code=413, detail={"code": "video_editor_spec_too_large", "message": "video editor spec is too large"})
+        try:
+            atomic_write_text(abs_path, text)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail={"code": "video_editor_spec_write_failed", "message": str(exc)}) from exc
+        return {
+            "ok": True,
+            "result": {
+                "path": str(abs_path),
+                "bytes": len(text.encode("utf-8")),
+            },
+        }
+
     @global_router.get("/video-editor/assets")
     async def video_editor_asset(spec: str, path: str) -> FileResponse:
         try:

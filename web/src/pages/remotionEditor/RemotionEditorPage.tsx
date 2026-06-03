@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
 import { classNames } from "../../utils/classNames";
-import { CheckIcon, CopyIcon, MutedIcon, PauseIcon, PlayIcon, RestoreIcon, VolumeIcon } from "../../components/Icons";
+import { CloseIcon, MutedIcon, PauseIcon, PlayIcon, VolumeIcon } from "../../components/Icons";
 import { apiJson, withAuthToken } from "../../services/api";
 import { VideoEditorRuntime, ensureVideoEditorHost, type ComponentRegistry } from "./VideoEditorRuntime";
 
@@ -39,8 +39,10 @@ type RemotionTimelineSpec = {
 
 type BatchScope = "component" | "track" | "selection";
 type NumericKey = "x" | "y" | "size" | "width" | "height";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const TRANSFORM_KEYS: NumericKey[] = ["x", "y", "size", "width", "height"];
+const DEFAULT_COMPONENT_REGISTRY_FILE = "video-editor-components.js";
 const emptySpec: RemotionTimelineSpec = {
   composition: {
     id: "RemotionWorkspace",
@@ -92,10 +94,15 @@ function cloneSpec(spec: RemotionTimelineSpec): RemotionTimelineSpec {
   return JSON.parse(JSON.stringify(spec)) as RemotionTimelineSpec;
 }
 
+function formatSpecJson(spec: RemotionTimelineSpec): string {
+  return JSON.stringify(spec, null, 2);
+}
+
 function normalizeSpec(raw: unknown): RemotionTimelineSpec {
   const source = (raw && typeof raw === "object" ? raw : {}) as Partial<RemotionTimelineSpec>;
   const composition = (source.composition && typeof source.composition === "object" ? source.composition : {}) as Partial<RemotionTimelineSpec["composition"]>;
   return {
+    ...source,
     composition: {
       id: String(composition.id || "RemotionWorkspace"),
       fps: Number.isFinite(Number(composition.fps)) ? Number(composition.fps) : 30,
@@ -113,6 +120,12 @@ function normalizeSpec(raw: unknown): RemotionTimelineSpec {
 function buildAssetBaseUrl(specPath: string): string {
   const base = withAuthToken(`/api/v1/video-editor/assets?spec=${encodeURIComponent(specPath)}`);
   return `${base}${base.includes("?") ? "&" : "?"}path=`;
+}
+
+function buildBundledAssetUrl(path: string): string {
+  const base = String(import.meta.env.BASE_URL || "/");
+  const cleanBase = base.endsWith("/") ? base : `${base}/`;
+  return `${cleanBase}${path.replace(/^\/+/, "")}`;
 }
 
 function getUrlRegistryRef(): string {
@@ -139,7 +152,7 @@ function buildRegistryUrl(specPath: string, assetBaseUrl: string, spec: Remotion
   const specRegistryRef = registryRefFromSpec(spec);
   const path = urlRegistryRef || specRegistryRef.path;
   const name = urlRegistryRef ? "default" : specRegistryRef.name;
-  if (!path) return { url: "", name };
+  if (!path) return { url: buildBundledAssetUrl(DEFAULT_COMPONENT_REGISTRY_FILE), name };
   if (/^(?:https?:|blob:|data:|\/api\/)/i.test(path)) return { url: path, name };
   if (path.startsWith("/")) {
     return {
@@ -222,10 +235,11 @@ export function RemotionEditorPage({
   specPath: string;
   headerExtra?: ReactNode;
 }) {
-  const [baseSpec, setBaseSpec] = useState<RemotionTimelineSpec | null>(null);
   const [spec, setSpec] = useState<RemotionTimelineSpec>(() => cloneSpec(emptySpec));
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState("");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState("");
   const [scope, setScope] = useState<BatchScope>("component");
   const [selectedComponent, setSelectedComponent] = useState("");
   const [selectedTrackId, setSelectedTrackId] = useState("");
@@ -235,8 +249,10 @@ export function RemotionEditorPage({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [batchValues, setBatchValues] = useState<Record<NumericKey, string>>({ x: "", y: "", size: "", width: "", height: "" });
-  const [copied, setCopied] = useState(false);
   const [externalComponents, setExternalComponents] = useState<ComponentRegistry>({});
+  const lastSavedSpecJsonRef = useRef("");
+  const saveTimerRef = useRef<number | null>(null);
+  const saveSeqRef = useRef(0);
 
   const composition = spec.composition;
   const normalizedSpecPath = String(specPath || "").trim();
@@ -268,20 +284,24 @@ export function RemotionEditorPage({
     const loadSpec = async () => {
       const targetSpecPath = String(specPath || "").trim();
       if (!targetSpecPath) {
-        setBaseSpec(null);
+        lastSavedSpecJsonRef.current = "";
         setSpec(cloneSpec(emptySpec));
         setExternalComponents({});
         setLoadStatus("error");
         setLoadError("URL 缺少 spec 参数");
+        setSaveStatus("idle");
+        setSaveError("");
         return;
       }
       setLoadStatus("loading");
       setLoadError("");
+      setSaveStatus("idle");
+      setSaveError("");
       const requestUrl = remotionSpecUrl(targetSpecPath);
       const response = await apiJson<RemotionTimelineSpec>(requestUrl);
       if (cancelled) return;
       if (!response.ok) {
-        setBaseSpec(null);
+        lastSavedSpecJsonRef.current = "";
         setSpec(cloneSpec(emptySpec));
         setSelectedClipIds([]);
         setExternalComponents({});
@@ -299,7 +319,7 @@ export function RemotionEditorPage({
           await loadComponentRegistryScript(registryRef.url);
         } catch (error) {
           if (cancelled) return;
-          setBaseSpec(null);
+          lastSavedSpecJsonRef.current = "";
           setSpec(cloneSpec(emptySpec));
           setSelectedClipIds([]);
           setExternalComponents({});
@@ -310,7 +330,7 @@ export function RemotionEditorPage({
         if (cancelled) return;
         nextExternalComponents = window.__OC_VIDEO_EDITOR_COMPONENTS__?.[registryRef.name] || window.__OC_VIDEO_EDITOR_COMPONENTS__?.default || {};
         if (Object.keys(nextExternalComponents).length === 0) {
-          setBaseSpec(null);
+          lastSavedSpecJsonRef.current = "";
           setSpec(cloneSpec(emptySpec));
           setSelectedClipIds([]);
           setExternalComponents({});
@@ -320,13 +340,15 @@ export function RemotionEditorPage({
         }
       }
       const firstComponent = nextBase.clips[0]?.component || "";
-      setBaseSpec(cloneSpec(nextBase));
+      lastSavedSpecJsonRef.current = formatSpecJson(nextBase);
       setSpec(cloneSpec(nextBase));
       setExternalComponents(nextExternalComponents);
       setSelectedComponent(firstComponent);
       setSelectedTrackId(nextBase.tracks[0]?.id || "");
       setSelectedClipIds(firstComponent ? nextBase.clips.filter((clip) => clip.component === firstComponent).slice(0, 1).map((clip) => clip.id) : []);
       setFrame(0);
+      setSaveStatus("saved");
+      setSaveError("");
       setLoadStatus("ready");
     };
 
@@ -335,6 +357,43 @@ export function RemotionEditorPage({
       cancelled = true;
     };
   }, [specPath]);
+
+  useEffect(() => {
+    if (loadStatus !== "ready" || !normalizedSpecPath) return undefined;
+    const nextJson = formatSpecJson(spec);
+    if (nextJson === lastSavedSpecJsonRef.current) return undefined;
+
+    setSaveStatus("saving");
+    setSaveError("");
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+    const seq = saveSeqRef.current + 1;
+    saveSeqRef.current = seq;
+    saveTimerRef.current = window.setTimeout(async () => {
+      saveTimerRef.current = null;
+      const response = await apiJson<{ path: string; bytes: number }>(remotionSpecUrl(normalizedSpecPath), {
+        method: "PUT",
+        body: nextJson,
+      });
+      if (seq !== saveSeqRef.current) return;
+      if (response.ok) {
+        lastSavedSpecJsonRef.current = nextJson;
+        setSaveStatus("saved");
+        setSaveError("");
+        return;
+      }
+      setSaveStatus("error");
+      setSaveError(response.error.message || "保存失败");
+    }, 250);
+
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [loadStatus, normalizedSpecPath, spec]);
 
   useEffect(() => {
     if (componentCounts.length === 0) return;
@@ -450,19 +509,6 @@ export function RemotionEditorPage({
     selectFirstClipInRange(spec.clips.filter((clip) => clip.trackId === trackId));
   };
 
-  const resetSpec = () => {
-    if (!baseSpec) return;
-    setSpec(cloneSpec(baseSpec));
-    setSelectedClipIds(baseSpec.clips.filter((clip) => clip.component === selectedComponent).slice(0, 1).map((clip) => clip.id));
-    setBatchValues({ x: "", y: "", size: "", width: "", height: "" });
-  };
-
-  const copyJson = async () => {
-    await navigator.clipboard?.writeText(JSON.stringify(spec, null, 2));
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
-  };
-
   return (
     <div className={classNames("flex h-full min-h-0 flex-col overflow-hidden", isDark ? "bg-[#101113]" : "bg-[#f5f6f8]")}>
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--glass-border-subtle)] bg-[var(--glass-bg)] px-4">
@@ -474,14 +520,17 @@ export function RemotionEditorPage({
         </div>
         <div className="flex items-center gap-2">
           {headerExtra}
-          <button type="button" onClick={copyJson} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--glass-border-subtle)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.07]">
-            {copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
-            {copied ? "已复制" : "复制 JSON"}
-          </button>
-          <button type="button" onClick={resetSpec} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--glass-border-subtle)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.07]">
-            <RestoreIcon size={15} />
-            重置
-          </button>
+          <span
+            className={classNames(
+              "inline-flex h-8 items-center rounded-lg border px-3 text-xs font-medium",
+              saveStatus === "error"
+                ? "border-red-400/40 bg-red-500/10 text-red-500 dark:text-red-300"
+                : "border-[var(--glass-border-subtle)] text-[var(--color-text-muted)]"
+            )}
+            title={saveStatus === "error" ? saveError : normalizedSpecPath}
+          >
+            {saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : loadStatus === "ready" ? "已写入源文件" : "未保存"}
+          </span>
         </div>
       </div>
 
@@ -689,7 +738,16 @@ export function RemotionEditorPage({
               {selectedClips.length === 0 ? (
                 <div className="rounded-lg border border-[var(--glass-border-subtle)] px-3 py-4 text-sm text-[var(--color-text-muted)]">从左侧或时间线选中 clip。</div>
               ) : selectedClips.map((clip) => (
-                <div key={clip.id} className="rounded-lg border border-[var(--glass-border-subtle)] bg-black/[0.025] p-3 dark:bg-white/[0.035]">
+                <div key={clip.id} className="relative rounded-lg border border-[var(--glass-border-subtle)] bg-black/[0.025] p-3 pr-10 dark:bg-white/[0.035]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClipIds((prev) => prev.filter((id) => id !== clip.id))}
+                    className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-muted)] transition hover:bg-black/[0.06] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
+                    aria-label={`取消选中 ${clip.id}`}
+                    title="取消选中"
+                  >
+                    <CloseIcon size={13} />
+                  </button>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{clip.id}</div>
                     <div className="truncate text-xs text-[var(--color-text-muted)]">{clip.component} · {clip.from}-{clip.from + clip.durationInFrames}</div>
