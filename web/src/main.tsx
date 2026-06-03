@@ -1,14 +1,20 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { AuthGate } from "./components/AuthGate";
-import App from "./App";
-import { CapabilityCenterStandaloneApp } from "./components/capabilities/CapabilityCenterStandaloneApp";
 import { isCapabilityCenterPath } from "./components/capabilities/capabilityCenterRoute";
 import "./i18n";
 import "./index.css";
 import { useBrandingStore } from "./stores";
 import { applyBrandingToDocument, DEFAULT_WEB_BRANDING } from "./utils/branding";
 import { applyTextScale, getStoredTextScale } from "./utils/textScale";
+
+const App = lazy(() => import("./App"));
+const CapabilityCenterStandaloneApp = lazy(() =>
+  import("./components/capabilities/CapabilityCenterStandaloneApp").then((module) => ({ default: module.CapabilityCenterStandaloneApp }))
+);
+const VideoEditorStandaloneApp = lazy(() =>
+  import("./pages/remotionEditor/VideoEditorStandaloneApp").then((module) => ({ default: module.VideoEditorStandaloneApp }))
+);
 
 // v0.4: We intentionally do NOT use Service Workers.
 // Reason: SW caching frequently causes "stale UI" bugs in an ops/admin console.
@@ -35,9 +41,12 @@ applyBrandingToDocument(DEFAULT_WEB_BRANDING);
 applyTextScale(getStoredTextScale());
 void useBrandingStore.getState().refreshBranding();
 const isCapabilityCenterPage = isCapabilityCenterPath(window.location.pathname);
+const isVideoEditorPage = window.location.pathname === "/video-editor" || window.location.pathname.startsWith("/video-editor/");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AuthGate>
-    {isCapabilityCenterPage ? <CapabilityCenterStandaloneApp /> : <App />}
+    <Suspense fallback={null}>
+      {isVideoEditorPage ? <VideoEditorStandaloneApp /> : isCapabilityCenterPage ? <CapabilityCenterStandaloneApp /> : <App />}
+    </Suspense>
   </AuthGate>,
 );

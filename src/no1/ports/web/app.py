@@ -122,7 +122,12 @@ _PUBLIC_API_PATHS = frozenset({"/api/v1/health", "/api/v1/branding"})
 
 def _is_public_ui_path(request: Request) -> bool:
     path = str(request.url.path or "")
-    return path.startswith("/ui/") or path == "/ui"
+    return (
+        path.startswith("/ui/")
+        or path == "/ui"
+        or path.startswith("/video-editor/")
+        or path == "/video-editor"
+    )
 
 
 def _is_public_path(request: Request) -> bool:
@@ -401,8 +406,16 @@ def create_app() -> FastAPI:
         async def _capability_center_page() -> FileResponse:
             return FileResponse(str(dist_dir / "index.html"))
 
+        @app.get("/video-editor/", include_in_schema=False)
+        @app.get("/video-editor", include_in_schema=False)
+        async def _video_editor_page() -> FileResponse:
+            return FileResponse(str(dist_dir / "index.html"))
+
         app.router.routes.append(
             HttpOnlyMount("/ui", app=StaticFiles(directory=str(dist_dir), html=True), name="ui")
+        )
+        app.router.routes.append(
+            HttpOnlyMount("/video-editor", app=StaticFiles(directory=str(dist_dir), html=True), name="video-editor")
         )
 
     cors = str(os.environ.get("CCCC_WEB_CORS_ORIGINS") or "").strip()

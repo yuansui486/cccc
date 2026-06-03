@@ -7,7 +7,7 @@ import json
 import logging
 import mimetypes
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -137,6 +137,7 @@ _VOICE_DIARIZATION_MIN_AUDIO_MS = 10_000
 _VOICE_DIARIZATION_ENABLE_PROVISIONAL = True
 _VOICE_PCM16_BYTES_PER_SAMPLE = 2
 WEB_MAX_GROUP_COPY_PACKAGE_BYTES = 100 * 1024 * 1024
+REMOTION_MAX_SPEC_BYTES = 5 * 1024 * 1024
 
 
 def _response_to_dict(resp: Any) -> Dict[str, Any]:
@@ -157,6 +158,45 @@ def _safe_voice_session_id(value: Any) -> str:
     raw = str(value or "").strip() or "session"
     safe = "".join(ch if ch.isalnum() or ch in "_.-" else "-" for ch in raw).strip(".-")[:96]
     return safe or "session"
+
+
+def _resolve_video_editor_spec_path(raw_spec: Any) -> Path:
+    spec = str(raw_spec or "").strip()
+    if not spec:
+        raise ValueError("missing spec")
+    if "://" in spec:
+        raise ValueError("spec must be a local JSON file path")
+    if not spec.lower().endswith(".json"):
+        raise ValueError("spec must be a JSON file")
+    path = Path(spec).expanduser()
+    if not path.is_absolute():
+        raise ValueError("spec must be an absolute path")
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError:
+        raise FileNotFoundError(spec)
+    if not resolved.is_file():
+        raise FileNotFoundError(spec)
+    return resolved
+
+
+def _resolve_video_editor_asset_path(raw_spec: Any, raw_path: Any) -> Path:
+    spec_path = _resolve_video_editor_spec_path(raw_spec)
+    raw = str(raw_path or "").strip().replace("\\", "/")
+    if not raw:
+        raise ValueError("missing asset path")
+    rel = PurePosixPath(raw)
+    if rel.is_absolute() or ".." in rel.parts:
+        raise ValueError("asset path must be relative to the spec file")
+    root = spec_path.parent.resolve(strict=True)
+    asset = (root / Path(*rel.parts)).resolve(strict=True)
+    try:
+        asset.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("asset path must stay under the spec file directory") from exc
+    if not asset.is_file():
+        raise FileNotFoundError(raw)
+    return asset
 
 
 def _voice_speaker_transcript_artifact_path(group_id: str, session_id: str) -> Path:
@@ -1147,6 +1187,50 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             out["groups"] = filter_groups_for_principal(request, groups_list)
             resp["result"] = out
         return resp
+
+    @global_router.get("/video-editor/spec")
+    async def video_editor_spec(spec: str) -> Dict[str, Any]:
+        try:
+            abs_path = _resolve_video_editor_spec_path(spec)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "video_editor_spec_not_found", "message": f"video editor spec not found: {spec}"},
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_spec", "message": str(exc)}) from exc
+        if abs_path.stat().st_size > REMOTION_MAX_SPEC_BYTES:
+            raise HTTPException(status_code=413, detail={"code": "video_editor_spec_too_large", "message": "video editor spec is too large"})
+        try:
+            payload = json.loads(abs_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_spec", "message": f"invalid spec JSON: {exc.msg}"}) from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_spec", "message": "spec must be a JSON object"})
+        return {
+            "ok": True,
+            "result": payload,
+            "meta": {
+                "path": str(abs_path),
+                "asset_root": str(abs_path.parent),
+            },
+        }
+
+    @global_router.get("/video-editor/assets")
+    async def video_editor_asset(spec: str, path: str) -> FileResponse:
+        try:
+            abs_path = _resolve_video_editor_asset_path(spec, path)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "video_editor_asset_not_found", "message": f"video editor asset not found: {path}"},
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_asset", "message": str(exc)}) from exc
+        media_type = str(mimetypes.guess_type(abs_path.name)[0] or "application/octet-stream")
+        response = FileResponse(path=abs_path, media_type=media_type, filename=abs_path.name, content_disposition_type="inline")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @global_router.post("/groups", dependencies=[Depends(require_admin)])
     async def group_create(req: CreateGroupRequest) -> Dict[str, Any]:

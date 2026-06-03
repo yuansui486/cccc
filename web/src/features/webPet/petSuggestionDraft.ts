@@ -118,11 +118,13 @@ export function stagePetReminderDraft(reminder: PetReminder): boolean {
       const currentDraft = draft || {
         composerText: "",
         composerFiles: [],
+        selectedSkillCommand: "",
         toText: "",
         replyTarget: null,
         quotedPresentationRef: null,
         priority: "normal" as const,
         replyRequired: false,
+        collaborationRequired: false,
       };
       return {
         ...currentDraft,

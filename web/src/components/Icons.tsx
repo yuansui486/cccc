@@ -55,6 +55,8 @@ import {
   TextCursorInput,
   Trash2,
   UsersRound,
+  Volume2,
+  VolumeX,
   Download,
   X,
 } from "lucide-react";
@@ -113,6 +115,8 @@ export const RestoreIcon = createIcon(RotateCcw);
 export const PlayIcon = createControlIcon(Play);
 export const PauseIcon = createControlIcon(Pause);
 export const StopIcon = createControlIcon(Square);
+export const VolumeIcon = createControlIcon(Volume2);
+export const MutedIcon = createControlIcon(VolumeX);
 export const ClockIcon = createIcon(Clock3);
 export const SettingsIcon = createIcon(Settings2);
 export const ShareIcon = createIcon(Share2);

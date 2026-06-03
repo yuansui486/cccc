@@ -437,7 +437,6 @@ export function ChatComposer({
     } else if (e.key === "Escape") {
       setShowMentionMenu(false);
       setShowSlashMenu(false);
-      setShowModeMenu(false);
       setShowSkillMenu(false);
       onCancelReply();
     }

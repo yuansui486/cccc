@@ -406,7 +406,6 @@ export function GroupSidebar({
   useEffect(() => {
     if (!isOpen) {
       setSwitcherOpen(false);
-      setMoreOpen(false);
     }
   }, [isOpen]);
 
