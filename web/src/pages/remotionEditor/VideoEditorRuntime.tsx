@@ -50,6 +50,10 @@ type VideoEditorComponentProps = {
 };
 
 export type ComponentRegistry = Record<string, React.ComponentType<VideoEditorComponentProps>>;
+export type ComponentRegistryMetadata = {
+  rootClassName?: string;
+  styles?: string;
+};
 
 const emptyTimelineSpec: TimelineSpec = {
   clips: [],
@@ -174,11 +178,15 @@ export const VideoEditorRuntime: React.FC<{
   spec?: TimelineSpec;
   assetBaseUrl?: string;
   externalComponents?: ComponentRegistry;
-}> = ({ spec = emptyTimelineSpec, assetBaseUrl, externalComponents }) => {
+  componentMetadata?: ComponentRegistryMetadata;
+}> = ({ spec = emptyTimelineSpec, assetBaseUrl, externalComponents, componentMetadata }) => {
   ensureVideoEditorHost(assetBaseUrl);
+  const rootClassName = typeof componentMetadata?.rootClassName === "string" ? componentMetadata.rootClassName : undefined;
+  const styles = typeof componentMetadata?.styles === "string" ? componentMetadata.styles : "";
   return (
-    <AbsoluteFill style={{ background: "#050505", color: "#fff", overflow: "hidden" }}>
+    <AbsoluteFill className={rootClassName} style={{ background: "#050505", color: "#fff", overflow: "hidden" }}>
       <TimelineRenderer spec={spec} components={externalComponents} assetBaseUrl={assetBaseUrl} />
+      {styles ? <style>{styles}</style> : null}
     </AbsoluteFill>
   );
 };

@@ -15,11 +15,6 @@ export function VideoEditorStandaloneApp() {
   useViewportHeight();
 
   const specPath = useMemo(() => getUrlSpecPath(), []);
-  const headerExtra = specPath ? (
-    <span className="max-w-[320px] truncate rounded-lg border border-[var(--glass-border-subtle)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-muted)]" title={specPath}>
-      {specPath}
-    </span>
-  ) : null;
 
   return (
     <div
@@ -29,7 +24,7 @@ export function VideoEditorStandaloneApp() {
       )}
       style={{ height: "calc(100% - var(--vk-offset, 0px))" }}
     >
-      <RemotionEditorPage isDark={isDark} specPath={specPath} headerExtra={headerExtra} />
+      <RemotionEditorPage isDark={isDark} specPath={specPath} />
     </div>
   );
 }

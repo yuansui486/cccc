@@ -17305,7 +17305,7 @@ Note: state patches appear right after the elements that use them, so the UI fil
     OfficeFirework,
     OfficePageFlipTransition
   };
-  var styles = `
+  var officeLinkStyles = `
 * { box-sizing: border-box; }
 .canvas {
   --office-ui-font: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif;
@@ -18935,11 +18935,17 @@ Note: state patches appear right after the elements that use them, so the UI fil
   // src/effects/videoEditorComponentsEntry.ts
   window.__OC_VIDEO_EDITOR_COMPONENTS__ = window.__OC_VIDEO_EDITOR_COMPONENTS__ || {};
   window.__OC_VIDEO_EDITOR_COMPONENTS__.default = effectComponents;
+  window.__OC_VIDEO_EDITOR_COMPONENT_METADATA__ = window.__OC_VIDEO_EDITOR_COMPONENT_METADATA__ || {};
+  window.__OC_VIDEO_EDITOR_COMPONENT_METADATA__.default = {
+    rootClassName: "canvas",
+    styles: officeLinkStyles
+  };
   window.dispatchEvent(
     new CustomEvent("oc-video-editor-components-ready", {
       detail: {
         name: "default",
-        components: Object.keys(effectComponents)
+        components: Object.keys(effectComponents),
+        metadata: window.__OC_VIDEO_EDITOR_COMPONENT_METADATA__.default
       }
     })
   );

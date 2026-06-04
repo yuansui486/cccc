@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
 import { classNames } from "../../utils/classNames";
 import { CloseIcon, MutedIcon, PauseIcon, PlayIcon, VolumeIcon } from "../../components/Icons";
 import { apiJson, withAuthToken } from "../../services/api";
-import { VideoEditorRuntime, ensureVideoEditorHost, type ComponentRegistry } from "./VideoEditorRuntime";
+import { VideoEditorRuntime, ensureVideoEditorHost, type ComponentRegistry, type ComponentRegistryMetadata } from "./VideoEditorRuntime";
 
 type ClipProps = Record<string, unknown>;
 
@@ -38,10 +38,9 @@ type RemotionTimelineSpec = {
 };
 
 type BatchScope = "component" | "track" | "selection";
-type NumericKey = "x" | "y" | "size" | "width" | "height";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
-const TRANSFORM_KEYS: NumericKey[] = ["x", "y", "size", "width", "height"];
+const PROP_KEY_ORDER = ["x", "y", "width", "height", "size", "fontSize", "scale", "opacity", "radius"];
 const DEFAULT_COMPONENT_REGISTRY_FILE = "video-editor-components.js";
 const emptySpec: RemotionTimelineSpec = {
   composition: {
@@ -60,6 +59,7 @@ const componentScriptLoads = new Map<string, Promise<void>>();
 declare global {
   interface Window {
     __OC_VIDEO_EDITOR_COMPONENTS__?: Record<string, ComponentRegistry>;
+    __OC_VIDEO_EDITOR_COMPONENT_METADATA__?: Record<string, ComponentRegistryMetadata>;
   }
 }
 
@@ -68,18 +68,84 @@ function asNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(numberValue) ? numberValue : fallback;
 }
 
-function getClipDefaults(clip: RemotionClip): Partial<Record<NumericKey, number>> {
-  const props = clip.props || {};
-  const defaults: Partial<Record<NumericKey, number>> = {};
-  for (const key of TRANSFORM_KEYS) {
-    if (Number.isFinite(Number(props[key]))) defaults[key] = Number(props[key]);
-  }
-  return defaults;
+function wheelNumberValue(event: WheelEvent<HTMLInputElement>, rawValue: string): string | null {
+  const current = Number(String(rawValue || "").trim() || "0");
+  if (!Number.isFinite(current)) return null;
+  const step = event.shiftKey ? 10 : event.altKey ? 0.1 : 1;
+  const direction = event.deltaY < 0 ? 1 : -1;
+  const next = current + direction * step;
+  return Number(next.toFixed(3)).toString();
 }
 
-function getClipNumber(clip: RemotionClip, key: NumericKey): number {
+function sortPropKeys(keys: string[]): string[] {
+  const order = new Map(PROP_KEY_ORDER.map((key, index) => [key, index]));
+  return Array.from(new Set(keys))
+    .filter((key) => key.trim() !== "")
+    .sort((a, b) => {
+      const ai = order.get(a);
+      const bi = order.get(b);
+      if (ai !== undefined || bi !== undefined) return (ai ?? 999) - (bi ?? 999);
+      return a.localeCompare(b);
+    });
+}
+
+function getClipNumber(clip: RemotionClip, key: string): number {
   const props = clip.props || {};
-  return asNumber(props[key], getClipDefaults(clip)[key] ?? 0);
+  return asNumber(props[key], 0);
+}
+
+function formatPropValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function parsePropValue(rawValue: string, sampleValue: unknown): unknown {
+  const raw = rawValue.trim();
+  if (typeof sampleValue === "number") {
+    const numberValue = Number(raw);
+    return Number.isFinite(numberValue) ? numberValue : sampleValue;
+  }
+  if (typeof sampleValue === "boolean") {
+    if (/^true$/i.test(raw)) return true;
+    if (/^false$/i.test(raw)) return false;
+    return sampleValue;
+  }
+  if (Array.isArray(sampleValue) || (sampleValue && typeof sampleValue === "object")) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return sampleValue;
+    }
+  }
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (raw !== "" && Number.isFinite(Number(raw))) return Number(raw);
+  if ((raw.startsWith("[") && raw.endsWith("]")) || (raw.startsWith("{") && raw.endsWith("}"))) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return rawValue;
+    }
+  }
+  return rawValue;
+}
+
+function findSamplePropValue(clips: RemotionClip[], key: string): unknown {
+  return clips.find((clip) => Object.prototype.hasOwnProperty.call(clip.props || {}, key))?.props?.[key];
+}
+
+function isBatchEditablePropKey(clips: RemotionClip[], key: string): boolean {
+  const values = clips
+    .filter((clip) => Object.prototype.hasOwnProperty.call(clip.props || {}, key))
+    .map((clip) => clip.props?.[key]);
+  if (values.length === 0) return false;
+  return values.every((value) => !Array.isArray(value) && (value === null || typeof value !== "object"));
 }
 
 function frameToTime(frame: number, fps: number): string {
@@ -240,7 +306,7 @@ export function RemotionEditorPage({
   const [loadError, setLoadError] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
-  const [scope, setScope] = useState<BatchScope>("component");
+  const [scope, setScope] = useState<BatchScope>("selection");
   const [selectedComponent, setSelectedComponent] = useState("");
   const [selectedTrackId, setSelectedTrackId] = useState("");
   const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
@@ -248,8 +314,9 @@ export function RemotionEditorPage({
   const [player, setPlayer] = useState<PlayerRef | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
-  const [batchValues, setBatchValues] = useState<Record<NumericKey, string>>({ x: "", y: "", size: "", width: "", height: "" });
+  const [batchValues, setBatchValues] = useState<Record<string, string>>({});
   const [externalComponents, setExternalComponents] = useState<ComponentRegistry>({});
+  const [componentMetadata, setComponentMetadata] = useState<ComponentRegistryMetadata>({});
   const lastSavedSpecJsonRef = useRef("");
   const saveTimerRef = useRef<number | null>(null);
   const saveSeqRef = useRef(0);
@@ -265,6 +332,10 @@ export function RemotionEditorPage({
 
   const clipById = useMemo(() => new Map(spec.clips.map((clip) => [clip.id, clip])), [spec.clips]);
   const selectedClips = useMemo(() => selectedClipIds.map((id) => clipById.get(id)).filter(Boolean) as RemotionClip[], [clipById, selectedClipIds]);
+  const selectedPropKeys = useMemo(
+    () => sortPropKeys(selectedClips.flatMap((clip) => Object.keys(clip.props || {}))).filter((key) => isBatchEditablePropKey(selectedClips, key)),
+    [selectedClips],
+  );
   const targetClips = useMemo(() => {
     if (scope === "component") return spec.clips.filter((clip) => clip.component === selectedComponent);
     if (scope === "track") return spec.clips.filter((clip) => clip.trackId === selectedTrackId);
@@ -287,6 +358,7 @@ export function RemotionEditorPage({
         lastSavedSpecJsonRef.current = "";
         setSpec(cloneSpec(emptySpec));
         setExternalComponents({});
+        setComponentMetadata({});
         setLoadStatus("error");
         setLoadError("URL 缺少 spec 参数");
         setSaveStatus("idle");
@@ -305,6 +377,7 @@ export function RemotionEditorPage({
         setSpec(cloneSpec(emptySpec));
         setSelectedClipIds([]);
         setExternalComponents({});
+        setComponentMetadata({});
         setLoadStatus("error");
         setLoadError(formatLoadError(response.error.code, response.error.message, requestUrl));
         return;
@@ -314,6 +387,7 @@ export function RemotionEditorPage({
       ensureVideoEditorHost(nextAssetBaseUrl);
       const registryRef = buildRegistryUrl(targetSpecPath, nextAssetBaseUrl, nextBase);
       let nextExternalComponents: ComponentRegistry = {};
+      let nextComponentMetadata: ComponentRegistryMetadata = {};
       if (registryRef.url) {
         try {
           await loadComponentRegistryScript(registryRef.url);
@@ -323,29 +397,33 @@ export function RemotionEditorPage({
           setSpec(cloneSpec(emptySpec));
           setSelectedClipIds([]);
           setExternalComponents({});
+          setComponentMetadata({});
           setLoadStatus("error");
           setLoadError(error instanceof Error ? error.message : `无法加载 Remotion 组件包：${registryRef.url}`);
           return;
         }
         if (cancelled) return;
         nextExternalComponents = window.__OC_VIDEO_EDITOR_COMPONENTS__?.[registryRef.name] || window.__OC_VIDEO_EDITOR_COMPONENTS__?.default || {};
+        nextComponentMetadata = window.__OC_VIDEO_EDITOR_COMPONENT_METADATA__?.[registryRef.name] || window.__OC_VIDEO_EDITOR_COMPONENT_METADATA__?.default || {};
         if (Object.keys(nextExternalComponents).length === 0) {
           lastSavedSpecJsonRef.current = "";
           setSpec(cloneSpec(emptySpec));
           setSelectedClipIds([]);
           setExternalComponents({});
+          setComponentMetadata({});
           setLoadStatus("error");
           setLoadError(`Remotion 组件包没有注册组件：${registryRef.url}`);
           return;
         }
       }
-      const firstComponent = nextBase.clips[0]?.component || "";
       lastSavedSpecJsonRef.current = formatSpecJson(nextBase);
       setSpec(cloneSpec(nextBase));
       setExternalComponents(nextExternalComponents);
-      setSelectedComponent(firstComponent);
-      setSelectedTrackId(nextBase.tracks[0]?.id || "");
-      setSelectedClipIds(firstComponent ? nextBase.clips.filter((clip) => clip.component === firstComponent).slice(0, 1).map((clip) => clip.id) : []);
+      setComponentMetadata(nextComponentMetadata);
+      setScope("selection");
+      setSelectedComponent("");
+      setSelectedTrackId("");
+      setSelectedClipIds([]);
       setFrame(0);
       setSaveStatus("saved");
       setSaveError("");
@@ -396,16 +474,18 @@ export function RemotionEditorPage({
   }, [loadStatus, normalizedSpecPath, spec]);
 
   useEffect(() => {
+    if (scope !== "component") return;
     if (componentCounts.length === 0) return;
     if (componentCounts.some(([component]) => component === selectedComponent)) return;
     setSelectedComponent(componentCounts[0][0]);
-  }, [componentCounts, selectedComponent]);
+  }, [componentCounts, scope, selectedComponent]);
 
   useEffect(() => {
+    if (scope !== "track") return;
     if (spec.tracks.length === 0) return;
     if (spec.tracks.some((track) => track.id === selectedTrackId)) return;
     setSelectedTrackId(spec.tracks[0].id);
-  }, [selectedTrackId, spec.tracks]);
+  }, [scope, selectedTrackId, spec.tracks]);
 
   useEffect(() => {
     if (!player) return undefined;
@@ -466,31 +546,61 @@ export function RemotionEditorPage({
   };
 
   const applyBatch = (mode: "relative" | "absolute") => {
-    if (targetIds.size === 0) return;
-    const parsed = TRANSFORM_KEYS
-      .map((key) => [key, batchValues[key].trim()] as const)
+    const ids = new Set(selectedClips.map((clip) => clip.id));
+    if (ids.size === 0) return;
+    const parsed = selectedPropKeys
+      .map((key) => [key, String(batchValues[key] || "").trim()] as const)
       .filter(([, value]) => value !== "")
-      .map(([key, value]) => [key, Number(value)] as const)
-      .filter(([, value]) => Number.isFinite(value));
     if (parsed.length === 0) return;
 
-    updateClipProps(targetIds, (clip, props) => {
+    updateClipProps(ids, (clip, props) => {
       const next = { ...props };
       for (const [key, value] of parsed) {
-        next[key] = mode === "relative" ? getClipNumber(clip, key) + value : value;
+        if (mode === "relative") {
+          const delta = Number(value);
+          if (!Number.isFinite(delta)) continue;
+          next[key] = getClipNumber(clip, key) + delta;
+        } else {
+          next[key] = parsePropValue(value, findSamplePropValue(selectedClips, key));
+        }
       }
       return next;
     });
   };
 
-  const setFocusedClipValue = (clipId: string, key: NumericKey, value: string) => {
-    const numberValue = Number(value);
-    if (!Number.isFinite(numberValue)) return;
-    updateClipProps(new Set([clipId]), (_clip, props) => ({ ...props, [key]: numberValue }));
+  const setFocusedClipValue = (clipId: string, key: string, value: string) => {
+    updateClipProps(new Set([clipId]), (_clip, props) => ({ ...props, [key]: parsePropValue(value, props[key]) }));
+  };
+
+  const setFocusedClipArrayItem = (clipId: string, key: string, index: number, value: string) => {
+    updateClipProps(new Set([clipId]), (_clip, props) => {
+      const current = Array.isArray(props[key]) ? props[key] : [];
+      const next = [...current];
+      next[index] = parsePropValue(value, current[index]);
+      return { ...props, [key]: next };
+    });
+  };
+
+  const addFocusedClipArrayItem = (clipId: string, key: string) => {
+    updateClipProps(new Set([clipId]), (_clip, props) => {
+      const current = Array.isArray(props[key]) ? props[key] : [];
+      return { ...props, [key]: [...current, ""] };
+    });
+  };
+
+  const removeFocusedClipArrayItem = (clipId: string, key: string, index: number) => {
+    updateClipProps(new Set([clipId]), (_clip, props) => {
+      const current = Array.isArray(props[key]) ? props[key] : [];
+      return { ...props, [key]: current.filter((_, itemIndex) => itemIndex !== index) };
+    });
   };
 
   const toggleClip = (clipId: string) => {
     setSelectedClipIds((prev) => prev.includes(clipId) ? prev.filter((id) => id !== clipId) : [...prev, clipId]);
+  };
+
+  const selectClip = (clipId: string) => {
+    setSelectedClipIds([clipId]);
   };
 
   const selectFirstClipInRange = (clips: RemotionClip[]) => {
@@ -614,7 +724,7 @@ export function RemotionEditorPage({
               <Player
                 ref={setPlayer}
                 component={VideoEditorRuntime}
-                inputProps={{ spec, assetBaseUrl, externalComponents }}
+                inputProps={{ spec, assetBaseUrl, externalComponents, componentMetadata }}
                 durationInFrames={composition.durationInFrames}
                 compositionWidth={composition.width}
                 compositionHeight={composition.height}
@@ -680,7 +790,7 @@ export function RemotionEditorPage({
                           key={clip.id}
                           type="button"
                           onClick={() => {
-                            setSelectedClipIds([clip.id]);
+                            selectClip(clip.id);
                             seekToFrame(clip.from);
                           }}
                           className={classNames(
@@ -706,24 +816,36 @@ export function RemotionEditorPage({
           <div className="border-b border-[var(--glass-border-subtle)] px-3 py-3">
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">批量参数</div>
             <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-              当前目标：{targetClips.length} 个 clip
+              当前目标：选中 · {selectedClips.length} 个 clip
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-3">
-            <div className="grid grid-cols-2 gap-2">
-              {TRANSFORM_KEYS.map((key) => (
-                <label key={key} className="text-xs font-medium uppercase text-[var(--color-text-muted)]">
-                  {key}
-                  <input
-                    value={batchValues[key]}
-                    onChange={(event) => setBatchValues((prev) => ({ ...prev, [key]: event.target.value }))}
-                    inputMode="decimal"
-                    placeholder={key === "size" ? "字号" : key}
-                    className={classNames(numberInputClass(), "mt-1")}
-                  />
-                </label>
-              ))}
-            </div>
+            {selectedPropKeys.length === 0 ? (
+              <div className="rounded-lg border border-[var(--glass-border-subtle)] px-3 py-4 text-sm text-[var(--color-text-muted)]">
+                选中的 clip 没有可编辑 props。
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {selectedPropKeys.map((key) => (
+                  <label key={key} className="text-xs font-medium text-[var(--color-text-muted)]">
+                    <span className="block truncate" title={key}>{key}</span>
+                    <input
+                      value={batchValues[key] || ""}
+                      onChange={(event) => setBatchValues((prev) => ({ ...prev, [key]: event.target.value }))}
+                      onWheel={(event) => {
+                        const next = wheelNumberValue(event, event.currentTarget.value);
+                        if (next === null) return;
+                        event.preventDefault();
+                        setBatchValues((prev) => ({ ...prev, [key]: next }));
+                      }}
+                      inputMode="decimal"
+                      placeholder={formatPropValue(findSamplePropValue(selectedClips, key)) || key}
+                      className={classNames(numberInputClass(), "mt-1")}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button type="button" onClick={() => applyBatch("relative")} className="h-10 rounded-lg bg-sky-500 px-3 text-sm font-semibold text-white transition hover:bg-sky-600">
                 相对调整
@@ -753,16 +875,72 @@ export function RemotionEditorPage({
                     <div className="truncate text-xs text-[var(--color-text-muted)]">{clip.component} · {clip.from}-{clip.from + clip.durationInFrames}</div>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    {TRANSFORM_KEYS.map((key) => (
-                      <label key={key} className="text-[10px] font-medium uppercase text-[var(--color-text-muted)]">
-                        {key}
-                        <input
-                          value={String(getClipNumber(clip, key))}
-                          onChange={(event) => setFocusedClipValue(clip.id, key, event.target.value)}
-                          className={classNames(numberInputClass(), "mt-1 h-8")}
-                        />
-                      </label>
-                    ))}
+                    {sortPropKeys(Object.keys(clip.props || {})).map((key) => {
+                      const value = clip.props?.[key];
+                      if (Array.isArray(value)) {
+                        return (
+                          <div key={key} className="col-span-2 text-[10px] font-medium text-[var(--color-text-muted)]">
+                            <span className="block truncate" title={key}>{key}</span>
+                            <div className="mt-1 space-y-1.5 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] p-2">
+                              {value.length === 0 ? (
+                                <div className="rounded-md border border-dashed border-[var(--glass-border-subtle)] px-2 py-2 text-xs text-[var(--color-text-muted)]">
+                                  当前没有内容
+                                </div>
+                              ) : value.map((item, index) => (
+                                <div key={`${key}-${index}`} className="flex items-center gap-1.5">
+                                  <span className="inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md bg-sky-500/10 px-1.5 text-[10px] font-semibold text-sky-600 dark:text-sky-300">
+                                    {index + 1}
+                                  </span>
+                                  <input
+                                    value={formatPropValue(item)}
+                                    onChange={(event) => setFocusedClipArrayItem(clip.id, key, index, event.target.value)}
+                                    onWheel={(event) => {
+                                      const next = wheelNumberValue(event, event.currentTarget.value);
+                                      if (next === null) return;
+                                      event.preventDefault();
+                                      setFocusedClipArrayItem(clip.id, key, index, next);
+                                    }}
+                                    className={classNames(numberInputClass(), "h-8 min-w-0 flex-1")}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFocusedClipArrayItem(clip.id, key, index)}
+                                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-300"
+                                    aria-label={`删除 ${key} 第 ${index + 1} 项`}
+                                    title="删除这一项"
+                                  >
+                                    <CloseIcon size={12} />
+                                  </button>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => addFocusedClipArrayItem(clip.id, key)}
+                                className="h-8 w-full rounded-md border border-dashed border-sky-400/45 text-xs font-semibold text-sky-600 transition hover:border-sky-400 hover:bg-sky-500/10 dark:text-sky-300"
+                              >
+                                添加一项
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <label key={key} className="text-[10px] font-medium text-[var(--color-text-muted)]">
+                          <span className="block truncate" title={key}>{key}</span>
+                          <input
+                            value={formatPropValue(value)}
+                            onChange={(event) => setFocusedClipValue(clip.id, key, event.target.value)}
+                            onWheel={(event) => {
+                              const next = wheelNumberValue(event, event.currentTarget.value);
+                              if (next === null) return;
+                              event.preventDefault();
+                              setFocusedClipValue(clip.id, key, next);
+                            }}
+                            className={classNames(numberInputClass(), "mt-1 h-8")}
+                          />
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -774,7 +952,7 @@ export function RemotionEditorPage({
                 <button
                   key={clip.id}
                   type="button"
-                  onClick={() => setSelectedClipIds([clip.id])}
+                  onClick={() => selectClip(clip.id)}
                   className={classNames("rounded-full px-2 py-1 text-[10px] font-semibold text-white", componentTone(clip.component))}
                 >
                   {clip.id}
