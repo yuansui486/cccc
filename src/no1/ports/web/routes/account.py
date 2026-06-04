@@ -94,10 +94,11 @@ async def _json_request(
     *,
     stage: str,
     json: Dict[str, Any] | None = None,
+    params: Dict[str, Any] | None = None,
     access_token: str = "",
 ) -> Dict[str, Any]:
     headers = {"Authorization": f"Bearer {access_token}"} if access_token else None
-    resp = await client.request(method, url, json=json, headers=headers)
+    resp = await client.request(method, url, json=json, params=params, headers=headers)
     try:
         payload = resp.json()
     except Exception:
@@ -142,6 +143,8 @@ def _normalize_session(*, access_token: str, ua2_me: Dict[str, Any], ocs_account
         "used_quota": int(ocs_account.get("used_quota") or 0),
         "role": 0,
         "status": 1 if str(ua2_me.get("status") or "").strip().lower() in {"enabled", "normal", "1"} else 0,
+        "allow_multi_client_login": bool(ocs_account.get("allow_multi_client_login", True)),
+        "onecolleague_session_version": int(ocs_account.get("onecolleague_session_version") or 0),
         "ua2_actor_type": str(ua2_me.get("actor_type") or "").strip(),
         "ua2_user_id": str(ua2_me.get("id") or "").strip(),
         "ua2_tenant_id": str(ua2_me.get("tenant_id") or "").strip(),
@@ -149,21 +152,49 @@ def _normalize_session(*, access_token: str, ua2_me: Dict[str, Any], ocs_account
     }
 
 
-async def _fetch_account_session(access_token: str) -> Dict[str, Any]:
+async def _fetch_account_session(
+    access_token: str,
+    *,
+    start_onecolleague_session: bool = False,
+    onecolleague_session_version: int | None = None,
+) -> Dict[str, Any]:
     token = str(access_token or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail={"code": "missing_access_token", "message": "missing access_token"})
     try:
         async with httpx.AsyncClient(timeout=_ACCOUNT_TIMEOUT, follow_redirects=True) as client:
             ua2_me = await _json_request(client, "GET", f"{_ua2_base_url()}/auth/me", stage="ua2_self", access_token=token)
-            ocs_payload = await _json_request(client, "GET", f"{_ocs_base_url()}/donehub/me", stage="ocs_donehub_me", access_token=token)
+            if start_onecolleague_session:
+                ocs_payload = await _json_request(
+                    client,
+                    "POST",
+                    f"{_ocs_base_url()}/donehub/ensure",
+                    stage="ocs_donehub_ensure",
+                    json={"start_onecolleague_session": True},
+                    access_token=token,
+                )
+            else:
+                params = None
+                if onecolleague_session_version is not None:
+                    params = {"onecolleague_session_version": int(onecolleague_session_version)}
+                ocs_payload = await _json_request(
+                    client,
+                    "GET",
+                    f"{_ocs_base_url()}/donehub/me",
+                    stage="ocs_donehub_me",
+                    params=params,
+                    access_token=token,
+                )
             ocs_account = _unwrap_ocs_result(ocs_payload)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
+        error_code = str(detail.get("code") or "account_upstream_error")
+        if int(exc.status_code or 0) in {401, 403}:
+            error_code = "session_expired"
         return {
             "ok": False,
             "error": {
-                "code": str(detail.get("code") or "account_upstream_error"),
+                "code": error_code,
                 "message": str(detail.get("message") or "account upstream request failed"),
                 "details": {
                     "stage": str(detail.get("stage") or ""),
@@ -219,10 +250,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         access_token = str(login_payload.get("access_token") or "").strip()
         if not access_token:
             return {"ok": False, "error": {"code": "ua2_missing_access_token", "message": "UA2 login response did not include access_token"}}
-        return await _fetch_account_session(access_token)
+        return await _fetch_account_session(access_token, start_onecolleague_session=True)
 
     @router.post("/self")
     async def account_self(req: AccountSelfRequest) -> Dict[str, Any]:
-        return await _fetch_account_session(req.access_token)
+        return await _fetch_account_session(
+            req.access_token,
+            onecolleague_session_version=req.onecolleague_session_version,
+        )
 
     return [router]

@@ -80,6 +80,8 @@ function normalizeSession(value: unknown): DoneHubSession | null {
     used_quota: Number(record.used_quota || 0),
     role: Number(record.role || 0),
     status: Number(record.status || 0),
+    allow_multi_client_login: Boolean(record.allow_multi_client_login ?? true),
+    onecolleague_session_version: Number(record.onecolleague_session_version || 0),
   };
 }
 
@@ -126,11 +128,13 @@ export async function loginDoneHub(
 
 export async function refreshDoneHubSession(
   accessToken: string,
+  onecolleagueSessionVersion?: number,
 ): Promise<DoneHubApiResponse<DoneHubSessionResult>> {
   const normalizedBaseUrl = getFixedDoneHubBaseUrl();
   if (!normalizedBaseUrl) return makeError("invalid_base_url", DONE_HUB_BASE_URL_ERROR);
   return request<DoneHubSessionResult>("/api/v1/account/self", {
     access_token: String(accessToken || "").trim(),
+    onecolleague_session_version: Number(onecolleagueSessionVersion || 0),
   });
 }
 

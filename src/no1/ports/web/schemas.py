@@ -406,6 +406,7 @@ class AccountLoginRequest(BaseModel):
 
 class AccountSelfRequest(BaseModel):
     access_token: str = Field(default="")
+    onecolleague_session_version: Optional[int] = None
 
 
 class DoneHubTeamPresetRequest(BaseModel):

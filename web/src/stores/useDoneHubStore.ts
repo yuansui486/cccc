@@ -89,6 +89,8 @@ function loadStoredSession(): DoneHubSession | null {
       used_quota: Number(record.used_quota || 0),
       role: Number(record.role || 0),
       status: Number(record.status || 0),
+      allow_multi_client_login: Boolean(record.allow_multi_client_login ?? true),
+      onecolleague_session_version: Number(record.onecolleague_session_version || 0),
     };
   } catch {
     return null;
@@ -280,7 +282,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       status: "refreshing",
       errorMessage: "",
     }));
-    const resp = await refreshDoneHubSession(session.access_token);
+    const resp = await refreshDoneHubSession(session.access_token, session.onecolleague_session_version);
     const nextSession = extractDoneHubSession(resp);
     const latestSession = get().session;
     if (!latestSession || latestSession.access_token !== session.access_token) {

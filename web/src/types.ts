@@ -1118,6 +1118,8 @@ export type DoneHubSession = {
   used_quota: number;
   role: number;
   status: number;
+  allow_multi_client_login?: boolean;
+  onecolleague_session_version?: number;
 };
 
 export type DoneHubSavedLogin = {
