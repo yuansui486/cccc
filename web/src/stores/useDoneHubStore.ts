@@ -42,6 +42,7 @@ type DoneHubState = {
   session: DoneHubSession | null;
   savedLogin: DoneHubSavedLogin;
   errorMessage: string;
+  authNotice: "single_client_login" | null;
   initialized: boolean;
   initialize: () => Promise<void>;
   connect: (
@@ -53,6 +54,7 @@ type DoneHubState = {
   refresh: () => Promise<boolean>;
   disconnect: () => void;
   clearError: () => void;
+  clearAuthNotice: () => void;
 };
 
 export function getCurrentDoneHubAccessToken(): string {
@@ -170,6 +172,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
   session: null,
   savedLogin: EMPTY_SAVED_LOGIN,
   errorMessage: "",
+  authNotice: null,
   initialized: false,
 
   initialize: async () => {
@@ -198,6 +201,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       }
 
       if (
+        !get().authNotice &&
         savedLogin.remember_password &&
         savedLogin.username &&
         savedLogin.password
@@ -247,7 +251,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
         savedLogin,
       }));
     }
-    set({ status: "authenticating", errorMessage: "" });
+    set({ status: "authenticating", errorMessage: "", authNotice: null });
     const resp = await loginDoneHub(username, password, tenantCode);
     const session = extractDoneHubSession(resp);
     if (!resp.ok || !session) {
@@ -267,6 +271,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       savedLogin,
       initialized: true,
       errorMessage: "",
+      authNotice: null,
     });
     return true;
   },
@@ -292,13 +297,27 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       const hardFailure = !resp.ok && isDoneHubHardAuthFailure(resp.error.code, resp.error.message);
       const errorMessage = sanitizeDoneHubErrorMessage(resp.ok ? "missing session" : resp.error.message);
       if (hardFailure) {
+        const errorDetails = !resp.ok && resp.error.details && typeof resp.error.details === "object"
+          ? resp.error.details as Record<string, unknown>
+          : {};
+        const errorStage = String(errorDetails.stage || "").trim();
+        const rawErrorMessage = !resp.ok ? String(resp.error.message || "") : "";
+        const singleClientLoginExpired =
+          !resp.ok &&
+          latestSession.allow_multi_client_login === false &&
+          String(resp.error.code || "").trim().toLowerCase() === "session_expired" &&
+          (
+            errorStage === "ocs_donehub_me" ||
+            /onecolleague[_ -]?session[_ -]?expired|onecolleague session has expired/i.test(rawErrorMessage)
+          );
         persistSession(null);
         set((state) => ({
           ...state,
           status: "error",
           session: null,
           initialized: true,
-          errorMessage,
+          errorMessage: singleClientLoginExpired ? "" : errorMessage,
+          authNotice: singleClientLoginExpired ? "single_client_login" : state.authNotice,
         }));
         return false;
       }
@@ -321,6 +340,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       status: "connected",
       session: mergedSession,
       errorMessage: "",
+      authNotice: null,
     });
     return true;
   },
@@ -334,8 +354,10 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       savedLogin: EMPTY_SAVED_LOGIN,
       initialized: true,
       errorMessage: "",
+      authNotice: null,
     });
   },
 
   clearError: () => set({ errorMessage: "" }),
+  clearAuthNotice: () => set({ authNotice: null }),
 }));

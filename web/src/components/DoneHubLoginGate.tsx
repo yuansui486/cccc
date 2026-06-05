@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalFrame } from "./modals/ModalFrame";
 import { useDoneHubStore } from "../stores";
 import { classNames } from "../utils/classNames";
 import { getAppBrandName, getAppLogoPath } from "../utils/displayText";
@@ -14,8 +16,10 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
   const status = useDoneHubStore((state) => state.status);
   const savedLogin = useDoneHubStore((state) => state.savedLogin);
   const errorMessage = useDoneHubStore((state) => state.errorMessage);
+  const authNotice = useDoneHubStore((state) => state.authNotice);
   const connect = useDoneHubStore((state) => state.connect);
   const clearError = useDoneHubStore((state) => state.clearError);
+  const clearAuthNotice = useDoneHubStore((state) => state.clearAuthNotice);
 
   const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
   const [tenantCodeDraft, setTenantCodeDraft] = useState<string | null>(null);
@@ -140,6 +144,51 @@ export function DoneHubLoginGate({ isDark }: DoneHubLoginGateProps) {
           </div>
         </div>
       </div>
+
+      <ModalFrame
+        isOpen={authNotice === "single_client_login"}
+        isDark={isDark}
+        onClose={clearAuthNotice}
+        titleId="single-client-login-title"
+        title={
+          <div>
+            <div className="text-lg font-semibold text-[var(--color-text-primary)]">
+              登录已在当前客户端退出
+            </div>
+            <div className="mt-1 text-sm font-normal text-[var(--color-text-secondary)]">
+              当前用户不允许同时在多个客户端登录。
+            </div>
+          </div>
+        }
+        closeAriaLabel="关闭"
+        panelClassName="w-full sm:max-w-md max-h-[min(88dvh,520px)]"
+        rootClassName="z-[90]"
+      >
+        <div className="flex-1 px-5 py-5">
+          <div className="flex gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-500/25 bg-amber-500/15 text-amber-600 dark:text-amber-300">
+              <AlertTriangle size={20} aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                已检测到同一账号在其他客户端或网页登录。
+              </div>
+              <div className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+                如需继续使用当前客户端，请重新登录；重新登录后，其他已登录客户端会被退出。
+              </div>
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end">
+            <button
+              type="button"
+              onClick={clearAuthNotice}
+              className="glass-btn-accent rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--color-accent-primary)]"
+            >
+              我知道了
+            </button>
+          </div>
+        </div>
+      </ModalFrame>
     </div>
   );
 }

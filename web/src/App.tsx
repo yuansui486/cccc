@@ -405,11 +405,21 @@ export default function App() {
   React.useEffect(() => {
     if (!doneHubInitialized) return;
     if (!(doneHubConnected || doneHubHasSession)) return;
+    void refreshDoneHub();
     const timer = window.setInterval(() => {
+      void refreshDoneHub();
+    }, 15_000);
+    const refreshOnVisible = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       void refreshDoneHub();
-    }, 60_000);
-    return () => window.clearInterval(timer);
+    };
+    window.addEventListener("focus", refreshOnVisible);
+    document.addEventListener("visibilitychange", refreshOnVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshOnVisible);
+      document.removeEventListener("visibilitychange", refreshOnVisible);
+    };
   }, [doneHubConnected, doneHubHasSession, doneHubInitialized, refreshDoneHub]);
 
   const doneHub = useMemo(() => ({
