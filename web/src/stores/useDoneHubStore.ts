@@ -1,12 +1,14 @@
 import { create } from "zustand";
 import type { DoneHubSavedLogin, DoneHubSession, DoneHubStatus } from "../types";
 import {
+  clearCurrentAccountToken,
   DONE_HUB_BASE_URL,
   extractDoneHubSession,
   loginDoneHub,
   normalizeDoneHubBaseUrl,
   refreshDoneHubSession,
   sanitizeDoneHubErrorMessage,
+  syncCurrentAccountToken,
 } from "../services/doneHub";
 
 const DONE_HUB_STORAGE_KEY = "onecolleague_done_hub_session";
@@ -167,6 +169,18 @@ function persistSavedLogin(savedLogin: DoneHubSavedLogin): void {
   }
 }
 
+async function syncSessionToken(session: DoneHubSession | null, tenantCode = ""): Promise<void> {
+  try {
+    if (session) {
+      await syncCurrentAccountToken(session, tenantCode);
+    } else {
+      await clearCurrentAccountToken();
+    }
+  } catch {
+    void 0;
+  }
+}
+
 export const useDoneHubStore = create<DoneHubState>((set, get) => ({
   status: "idle",
   session: null,
@@ -256,6 +270,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
     const session = extractDoneHubSession(resp);
     if (!resp.ok || !session) {
       persistSession(null);
+      void syncSessionToken(null);
       set({
         status: "error",
         session: null,
@@ -265,6 +280,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       return false;
     }
     persistSession(session);
+    void syncSessionToken(session, savedLogin.tenant_code);
     set({
       status: "connected",
       session,
@@ -279,6 +295,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
   refresh: async () => {
     const session = get().session;
     if (!session) {
+      void syncSessionToken(null);
       set({ status: "idle", errorMessage: "" });
       return false;
     }
@@ -311,6 +328,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
             /onecolleague[_ -]?session[_ -]?expired|onecolleague session has expired/i.test(rawErrorMessage)
           );
         persistSession(null);
+        void syncSessionToken(null);
         set((state) => ({
           ...state,
           status: "error",
@@ -336,6 +354,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       codex_model: nextSession.codex_model || latestSession.codex_model,
     };
     persistSession(mergedSession);
+    void syncSessionToken(mergedSession, get().savedLogin.tenant_code);
     set({
       status: "connected",
       session: mergedSession,
@@ -346,8 +365,10 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
   },
 
   disconnect: () => {
+    const accessToken = get().session?.access_token || "";
     persistSession(null);
     persistSavedLogin(EMPTY_SAVED_LOGIN);
+    void clearCurrentAccountToken(accessToken);
     set({
       status: "idle",
       session: null,

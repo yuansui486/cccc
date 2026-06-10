@@ -50,9 +50,27 @@ type VideoEditorComponentProps = {
 };
 
 export type ComponentRegistry = Record<string, React.ComponentType<VideoEditorComponentProps>>;
+export type ComponentPropDefinition = {
+  key: string;
+  type: "string" | "number" | "boolean" | "stringArray" | "color" | "select" | "objectArray";
+  label?: string;
+  description?: string;
+  required?: boolean;
+  options?: string[];
+};
+export type ComponentManifestItem = {
+  name: string;
+  label?: string;
+  description?: string;
+  defaultProps?: Record<string, unknown>;
+  props?: ComponentPropDefinition[];
+  tags?: string[];
+};
 export type ComponentRegistryMetadata = {
   rootClassName?: string;
   styles?: string;
+  manifest?: ComponentManifestItem[];
+  componentFiles?: string[];
 };
 
 const emptyTimelineSpec: TimelineSpec = {

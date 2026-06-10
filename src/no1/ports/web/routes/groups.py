@@ -6,6 +6,8 @@ import contextlib
 import json
 import logging
 import mimetypes
+import os
+import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 import time
@@ -13,7 +15,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from ....contracts.v1.automation import AutomationRuleSet
@@ -138,6 +140,7 @@ _VOICE_DIARIZATION_ENABLE_PROVISIONAL = True
 _VOICE_PCM16_BYTES_PER_SAMPLE = 2
 WEB_MAX_GROUP_COPY_PACKAGE_BYTES = 100 * 1024 * 1024
 REMOTION_MAX_SPEC_BYTES = 5 * 1024 * 1024
+REMOTION_MAX_COMPONENT_BUNDLE_BYTES = 2 * 1024 * 1024
 
 
 def _response_to_dict(resp: Any) -> Dict[str, Any]:
@@ -197,6 +200,60 @@ def _resolve_video_editor_asset_path(raw_spec: Any, raw_path: Any) -> Path:
     if not asset.is_file():
         raise FileNotFoundError(raw)
     return asset
+
+
+def _video_editor_web_root() -> Path:
+    return Path(__file__).resolve().parents[5] / "web"
+
+
+def _resolve_video_editor_components_dir(raw_spec: Any) -> Path:
+    spec_path = _resolve_video_editor_spec_path(raw_spec)
+    components_dir = (spec_path.parent / "components").resolve(strict=True)
+    try:
+        components_dir.relative_to(spec_path.parent.resolve(strict=True))
+    except ValueError as exc:
+        raise ValueError("components directory must stay under the spec file directory") from exc
+    if not components_dir.is_dir():
+        raise FileNotFoundError("components")
+    return components_dir
+
+
+def _build_video_editor_component_bundle(raw_spec: Any) -> Path:
+    spec_path = _resolve_video_editor_spec_path(raw_spec)
+    _resolve_video_editor_components_dir(spec_path)
+    web_root = _video_editor_web_root()
+    script = web_root / "scripts" / "build-video-editor-component-bundle.mjs"
+    if not script.is_file():
+        raise FileNotFoundError(str(script))
+    with tempfile.TemporaryDirectory(prefix="oc-video-components-") as tmp:
+        out_path = Path(tmp) / "components.js"
+        env = dict(os.environ)
+        env["PATH"] = f"{web_root / 'node_modules' / '.bin'}{os.pathsep}{env.get('PATH', '')}"
+        try:
+            proc = subprocess.run(
+                ["node", str(script), str(spec_path), str(out_path)],
+                cwd=str(web_root),
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("component bundle build timed out") from exc
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(detail or "component bundle build failed")
+        if not out_path.is_file():
+            raise RuntimeError("component bundle build did not produce output")
+        if out_path.stat().st_size > REMOTION_MAX_COMPONENT_BUNDLE_BYTES:
+            raise RuntimeError("component bundle is too large")
+        fd, persisted_name = tempfile.mkstemp(prefix="oc-video-components-", suffix=".js")
+        os.close(fd)
+        persisted = Path(persisted_name)
+        persisted.write_bytes(out_path.read_bytes())
+        return persisted
 
 
 def _voice_speaker_transcript_artifact_path(group_id: str, session_id: str) -> Path:
@@ -1257,6 +1314,28 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_asset", "message": str(exc)}) from exc
         media_type = str(mimetypes.guess_type(abs_path.name)[0] or "application/octet-stream")
         response = FileResponse(path=abs_path, media_type=media_type, filename=abs_path.name, content_disposition_type="inline")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @global_router.get("/video-editor/component-bundle")
+    async def video_editor_component_bundle(spec: str) -> Response:
+        try:
+            bundle_path = await run_in_threadpool(_build_video_editor_component_bundle, spec)
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "video_editor_components_not_found", "message": f"video editor components not found: {exc}"},
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"code": "invalid_video_editor_components", "message": str(exc)}) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail={"code": "video_editor_component_bundle_failed", "message": str(exc)}) from exc
+        try:
+            body = bundle_path.read_bytes()
+        finally:
+            with contextlib.suppress(OSError):
+                bundle_path.unlink()
+        response = Response(content=body, media_type="application/javascript")
         response.headers["Cache-Control"] = "no-store"
         return response
 
