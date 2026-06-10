@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActorProfile,
   RuntimeInfo,
@@ -108,7 +108,7 @@ function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
     return 'ANTHROPIC_AUTH_TOKEN="..."\nANTHROPIC_BASE_URL="..."';
   }
   if (runtime === "codex") {
-    return "# Configure OpenAI-compatible Codex providers with Codex config or command -c overrides.";
+    return 'ONECOLLEAGUE_API_KEY="..."';
   }
   if (runtime === "gemini") {
     return 'GOOGLE_API_KEY="..."';
@@ -164,6 +164,7 @@ export function AddActorModal({
   const { t } = useTranslation("actors");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
+  const primedRuntimePresetRef = useRef("");
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
   useEffect(() => {
@@ -179,8 +180,6 @@ export function AddActorModal({
   };
 
   const { modalRef } = useModalA11y(isOpen, handleClose);
-
-  if (!isOpen) return null;
 
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
   const runtimeAvailable = runtimeInfo?.available ?? false;
@@ -201,6 +200,33 @@ export function AddActorModal({
   const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
   const customRunnerLockedToPty = !newActorUseProfile && !supportsStandardWebHeadlessRuntime(newActorRuntime);
+
+  useEffect(() => {
+    if (!isOpen) {
+      primedRuntimePresetRef.current = "";
+      return;
+    }
+    if (newActorUseProfile || !selectedRuntimePreset) return;
+    if (primedRuntimePresetRef.current === selectedRuntimePreset.id) return;
+    primedRuntimePresetRef.current = selectedRuntimePreset.id;
+    const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
+    const nextSecrets = mergePresetSecrets(newActorSecretsSetText, selectedRuntimePreset, doneHubCodexApiKey);
+    if (nextSecrets !== newActorSecretsSetText) {
+      setNewActorSecretsSetText(nextSecrets);
+    }
+    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && doneHubCodexApiKey)) {
+      setShowAdvancedActor(true);
+    }
+  }, [
+    isOpen,
+    newActorUseProfile,
+    selectedRuntimePreset,
+    newActorSecretsSetText,
+    setNewActorSecretsSetText,
+    setShowAdvancedActor,
+  ]);
+
+  if (!isOpen) return null;
 
   const sectionCardClass = "rounded-2xl p-4 sm:p-5 glass-panel";
   const sectionTitleClass = "text-sm font-semibold text-[var(--color-text-primary)]";
@@ -394,12 +420,13 @@ export function AddActorModal({
                           setNewActorUseDefaultCommand(Boolean(preset && !preset.model) || (!preset && next !== "custom"));
                           setSelectedRuntimePresetId(preset?.id || "");
                           if (preset) {
+                            const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
                             setNewActorSecretsSetText(
-                              mergePresetSecrets(newActorSecretsSetText, preset, getCurrentDoneHubCodexApiKey())
+                              mergePresetSecrets(newActorSecretsSetText, preset, doneHubCodexApiKey)
                             );
-                          }
-                          if (preset?.envPrivate) {
-                            setShowAdvancedActor(true);
+                            if (preset.envPrivate || (preset.runtime === "codex" && doneHubCodexApiKey)) {
+                              setShowAdvancedActor(true);
+                            }
                           }
                         }}
                       >

@@ -5,6 +5,7 @@ import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 from fastapi.testclient import TestClient
@@ -105,6 +106,58 @@ class TestWebActorRoutesCache(unittest.TestCase):
             }
         )
         self.assertTrue(bool(created.get("ok")), created)
+
+    def test_actor_create_does_not_write_codex_config_for_codex_runtime(self) -> None:
+        home, cleanup = self._with_home()
+        try:
+            home_path = Path(home)
+            group_id = self._create_group()
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+                with self._client() as client:
+                    resp = client.post(
+                        f"/api/v1/groups/{group_id}/actors",
+                        json={
+                            "actor_id": "peer-1",
+                            "runtime": "codex",
+                            "runner": "pty",
+                            "command": ["codex", "-c", "shell_environment_policy.inherit=all", "--search", "-m", "gpt-5.4"],
+                            "env": {},
+                            "by": "user",
+                        },
+                    )
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(bool(body.get("ok")), body)
+            self.assertFalse((home_path / ".codex" / "config.toml").exists())
+        finally:
+            cleanup()
+
+    def test_actor_create_does_not_write_codex_config_for_non_codex_runtime(self) -> None:
+        home, cleanup = self._with_home()
+        try:
+            home_path = Path(home)
+            group_id = self._create_group()
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+                with self._client() as client:
+                    resp = client.post(
+                        f"/api/v1/groups/{group_id}/actors",
+                        json={
+                            "actor_id": "peer-1",
+                            "runtime": "claude",
+                            "runner": "pty",
+                            "command": ["claude", "--model", "sonnet"],
+                            "env": {},
+                            "by": "user",
+                        },
+                    )
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(bool(body.get("ok")), body)
+            self.assertFalse((home_path / ".codex" / "config.toml").exists())
+        finally:
+            cleanup()
 
     def test_pid_matches_actor_context_requires_exact_proc_environ_match(self) -> None:
         from no1.ports.web.routes.actors import _pid_matches_actor_context

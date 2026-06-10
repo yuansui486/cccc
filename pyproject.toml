@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "no1"
-version = "0.4.19"
+version = "0.4.21"
 description = "Global multi-agent delivery kernel with working groups, scopes, and an append-only collaboration ledger"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
@@ -26,6 +26,7 @@ dependencies = [
   "uvicorn[standard]>=0.27,<1.0",
   "wechatbot-sdk>=0.2.0",
   "websocket-client>=1.8,<2.0",
+  "tzdata>=2026.2",
 ]
 classifiers = [
   "Development Status :: 5 - Production/Stable",

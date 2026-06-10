@@ -94,8 +94,8 @@ const SECRETS_PLACEHOLDER: Record<string, { set: string; unset: string }> = {
     unset: "ANTHROPIC_AUTH_TOKEN\nANTHROPIC_BASE_URL",
   },
   codex: {
-    set: "# Configure OpenAI-compatible Codex providers with Codex config or command -c overrides.",
-    unset: "",
+    set: 'ONECOLLEAGUE_API_KEY="..."',
+    unset: "ONECOLLEAGUE_API_KEY",
   },
   gemini: {
     set: 'GOOGLE_API_KEY="..."',
@@ -189,6 +189,7 @@ export function EditActorModal({
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const secretFetchSeqRef = useRef(0);
+  const presetSecretsPrimedRef = useRef("");
   const modalStateRef = useRef<{
     groupId: string;
     actorId: string;
@@ -350,6 +351,7 @@ export function EditActorModal({
     setSecretKeys([]);
     setSecretSource("none");
     setSelectedRuntimePresetId("");
+    presetSecretsPrimedRef.current = "";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, actorId, isOpen, linkedProfileId, linkedProfileOwner, linkedProfileScope]);
 
@@ -372,8 +374,6 @@ export function EditActorModal({
     setCapabilitiesPrimed(false);
   }, [isOpen, groupId, actorId]);
 
-  if (!isOpen) return null;
-
   const rtInfo = runtimes.find((r) => r.name === runtime);
   const available = rtInfo?.available ?? false;
   const defaultCommand = rtInfo?.recommended_command || "";
@@ -382,7 +382,32 @@ export function EditActorModal({
     selectedRuntimePresetId && runtimePresetById(selectedRuntimePresetId)?.runtime === runtime
       ? selectedRuntimePresetId
       : derivedRuntimePresetId;
+  const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
+
+  useEffect(() => {
+    if (!isOpen) {
+      presetSecretsPrimedRef.current = "";
+      return;
+    }
+    if (editMode !== "custom" || effectiveLinked || !selectedRuntimePreset) return;
+    if (presetSecretsPrimedRef.current === selectedRuntimePreset.id) return;
+    presetSecretsPrimedRef.current = selectedRuntimePreset.id;
+    const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
+    setSecretsSetText((current) => {
+      const next = mergePresetSecrets(current, selectedRuntimePreset, doneHubCodexApiKey);
+      return next === current ? current : next;
+    });
+    setSecretsUnsetText((current) => {
+      const next = mergePresetUnsetKeys(current, selectedRuntimePreset);
+      return next === current ? current : next;
+    });
+    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && doneHubCodexApiKey)) {
+      setSecretsPrimed(true);
+    }
+  }, [isOpen, editMode, effectiveLinked, selectedRuntimePreset]);
+
+  if (!isOpen) return null;
 
   const convertToCustomDraft = () => {
     if (!linked || busy === "actor-update") return;
@@ -735,11 +760,12 @@ export function EditActorModal({
                           onChangeCommand(preset ? commandForRuntimePreset(preset, nextInfo) : nextDefault);
                           setSelectedRuntimePresetId(preset?.id || "");
                           if (preset) {
-                            setSecretsSetText((current) => mergePresetSecrets(current, preset, getCurrentDoneHubCodexApiKey()));
+                            const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
+                            setSecretsSetText((current) => mergePresetSecrets(current, preset, doneHubCodexApiKey));
                             setSecretsUnsetText((current) => mergePresetUnsetKeys(current, preset));
-                          }
-                          if (preset?.envPrivate) {
-                            setSecretsPrimed(true);
+                            if (preset.envPrivate || (preset.runtime === "codex" && doneHubCodexApiKey)) {
+                              setSecretsPrimed(true);
+                            }
                           }
                         }}
                       >

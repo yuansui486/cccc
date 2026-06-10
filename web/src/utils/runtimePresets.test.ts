@@ -21,6 +21,54 @@ describe("runtime presets", () => {
     ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5");
   });
 
+  it("adds only the API key env for the default Codex preset", () => {
+    const preset = runtimePresetById("default:codex");
+    expect(preset).toBeTruthy();
+    const secrets = mergePresetSecrets("", preset!, "done-hub-key");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
+    expect(secrets).not.toContain("OPENAI_BASE_URL");
+    expect(secrets).not.toContain("OPENAI_MODEL");
+  });
+
+  it("does not add an empty API key env for Codex presets without a login key", () => {
+    const preset = runtimePresetById("default:codex");
+    expect(preset).toBeTruthy();
+    const secrets = mergePresetSecrets("", preset!, "");
+
+    expect(secrets).toBe("");
+    expect(secrets).not.toContain('ONECOLLEAGUE_API_KEY=""');
+  });
+
+  it("adds only the API key env for Codex model presets", () => {
+    const preset = runtimePresetById("model:gpt-5.4-codex");
+    expect(preset).toBeTruthy();
+    const secrets = mergePresetSecrets("", preset!, "done-hub-key");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
+    expect(secrets).not.toContain("OPENAI_BASE_URL");
+    expect(secrets).not.toContain("OPENAI_MODEL");
+  });
+
+  it("preserves an existing Codex API key when no DoneHub token is available", () => {
+    const preset = runtimePresetById("model:gpt-5.5-codex");
+    expect(preset).toBeTruthy();
+    const secrets = mergePresetSecrets('ONECOLLEAGUE_API_KEY="manual-key"', preset!, "");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="manual-key"');
+    expect(secrets).not.toContain("OPENAI_BASE_URL");
+    expect(secrets).not.toContain("OPENAI_MODEL");
+  });
+
+  it("replaces stale OpenAI Codex key with OneColleague key when available", () => {
+    const preset = runtimePresetById("model:gpt-5.5-codex");
+    expect(preset).toBeTruthy();
+    const secrets = mergePresetSecrets('OPENAI_API_KEY="old-key"', preset!, "done-hub-key");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
+    expect(secrets).not.toContain("OPENAI_API_KEY");
+  });
+
   it("builds Claude model commands from the runtime default", () => {
     const preset = runtimePresetById("model:deepseek-v4-pro-claude");
     expect(preset).toBeTruthy();
@@ -31,7 +79,7 @@ describe("runtime presets", () => {
         available: true,
         recommended_command: "claude --dangerously-skip-permissions",
       })
-    ).toBe("claude --dangerously-skip-permissions --model deepseek-v4-pro[1m]");
+    ).toBe("claude --dangerously-skip-permissions --model DeepSeek-V4-Pro");
   });
 
   it("adds the Qwen Claude preset with fixed DashScope environment", () => {
@@ -61,17 +109,30 @@ describe("runtime presets", () => {
   it("uses the fixed DeepSeek Claude provider environment", () => {
     const preset = runtimePresetById("model:deepseek-v4-pro-claude");
     expect(preset).toBeTruthy();
-    const secrets = mergePresetSecrets("", preset!, "ignored-token");
+    const secrets = mergePresetSecrets("", preset!, "done-hub-key");
 
-    expect(secrets).toContain('ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"');
-    expect(secrets).toContain('ANTHROPIC_AUTH_TOKEN="sk-7f21d214c2dc4947b06a7289c357f558"');
-    expect(secrets).toContain('ANTHROPIC_MODEL="deepseek-v4-pro[1m]"');
-    expect(secrets).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"');
-    expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"');
-    expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"');
-    expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"');
+    expect(secrets).toContain('ANTHROPIC_BASE_URL="https://peer.shierkeji.com/claude"');
+    expect(secrets).toContain('ANTHROPIC_AUTH_TOKEN="done-hub-key"');
+    expect(secrets).toContain('ANTHROPIC_MODEL="DeepSeek-V4-Pro"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_OPUS_MODEL="DeepSeek-V4-Pro"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek-V4-Pro"');
+    expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek-V4-Pro"');
+    expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="DeepSeek-V4-Pro"');
     expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
-    expect(secrets).not.toContain("ignored-token");
+    expect(secrets).not.toContain("api.deepseek.com");
+  });
+
+  it("clears stale DeepSeek keys when switching to a Codex preset", () => {
+    const deepseek = runtimePresetById("model:deepseek-v4-pro-claude");
+    const codex = runtimePresetById("model:gpt-5.4-codex");
+    expect(deepseek).toBeTruthy();
+    expect(codex).toBeTruthy();
+    const current = `${mergePresetSecrets("", deepseek!, "done-hub-key")}\nCUSTOM_FLAG="keep"`;
+    const next = mergePresetSecrets(current, codex!, "done-hub-key");
+
+    expect(next).toBe('CUSTOM_FLAG="keep"\nONECOLLEAGUE_API_KEY="done-hub-key"');
+    expect(next).not.toContain("ANTHROPIC_");
+    expect(next).not.toContain("CLAUDE_CODE_");
   });
 
   it("replaces stale Claude model command flags", () => {

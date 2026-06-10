@@ -183,6 +183,67 @@ class TestAutomationRulesConstraints(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_cron_rule_accepts_asia_shanghai_timezone(self) -> None:
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.daemon.automation import AutomationManager
+        from no1.kernel.group import load_group
+        from no1.util.fs import read_json
+        from zoneinfo import ZoneInfo
+
+        _, cleanup = self._with_home()
+        try:
+            self.assertEqual(str(ZoneInfo("Asia/Shanghai")), "Asia/Shanghai")
+            gid = self._create_group_id()
+
+            set_rule_resp, _ = handle_request(
+                DaemonRequest.model_validate(
+                    {
+                        "op": "group_automation_update",
+                        "args": {
+                            "group_id": gid,
+                            "by": "user",
+                            "ruleset": {
+                                "rules": [
+                                    {
+                                        "id": "shanghai_daily",
+                                        "enabled": True,
+                                        "scope": "group",
+                                        "to": ["@foreman"],
+                                        "trigger": {"kind": "cron", "cron": "0 9 * * *", "timezone": "Asia/Shanghai"},
+                                        "action": {
+                                            "kind": "notify",
+                                            "message": "Shanghai morning",
+                                            "priority": "normal",
+                                            "requires_ack": False,
+                                        },
+                                    }
+                                ],
+                                "snippets": {},
+                            },
+                        },
+                    }
+                )
+            )
+            self.assertTrue(set_rule_resp.ok, getattr(set_rule_resp, "error", None))
+            status = ((set_rule_resp.result or {}).get("status") or {}).get("shanghai_daily") or {}
+            self.assertTrue(str(status.get("next_fire_at") or "").endswith("Z"), status)
+
+            group = load_group(gid)
+            self.assertIsNotNone(group)
+            assert group is not None
+
+            AutomationManager()._check_rules(group, datetime(2026, 6, 9, 1, 1, tzinfo=timezone.utc))
+            state = read_json(group.path / "state" / "automation.json")
+            self.assertIsInstance(state, dict)
+            assert isinstance(state, dict)
+            rule_state = (state.get("rules") or {}).get("shanghai_daily") if isinstance(state.get("rules"), dict) else {}
+            self.assertIsInstance(rule_state, dict)
+            assert isinstance(rule_state, dict)
+            self.assertNotIn("invalid cron trigger", str(rule_state.get("last_error") or ""))
+        finally:
+            cleanup()
+
     def test_one_time_rule_auto_disables_after_successful_delivery(self) -> None:
         from no1.contracts.v1 import DaemonRequest
         from no1.daemon.server import handle_request

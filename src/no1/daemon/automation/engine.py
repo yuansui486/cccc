@@ -358,6 +358,10 @@ def _compile_cron(expr: str) -> _CronSpec:
     )
 
 
+def _load_timezone(tz_name: str) -> ZoneInfo:
+    return ZoneInfo(str(tz_name or "UTC").strip() or "UTC")
+
+
 def _cron_matches(spec: _CronSpec, local_dt: datetime) -> bool:
     if local_dt.minute not in spec.minutes:
         return False
@@ -381,7 +385,7 @@ def _cron_matches(spec: _CronSpec, local_dt: datetime) -> bool:
 
 def _cron_next_fire_utc(*, cron_expr: str, tz_name: str, now_utc: datetime) -> Optional[datetime]:
     spec = _compile_cron(cron_expr)
-    tz = ZoneInfo(str(tz_name or "UTC"))
+    tz = _load_timezone(tz_name)
     now_local = now_utc.astimezone(tz)
     cursor = now_local.replace(second=0, microsecond=0)
     if now_local > cursor:
@@ -1624,7 +1628,7 @@ class AutomationManager:
                     tz_name = str(getattr(rule.trigger, "timezone", "UTC") or "UTC").strip() or "UTC"
                     try:
                         cron_spec = _compile_cron(cron_expr)
-                        tz = ZoneInfo(tz_name)
+                        tz = _load_timezone(tz_name)
                     except Exception as e:
                         _record_error(f"invalid cron trigger: {e}")
                         continue

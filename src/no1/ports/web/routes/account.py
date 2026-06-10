@@ -6,12 +6,15 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from starlette.concurrency import run_in_threadpool
 
+from ..codex_client_config import sync_codex_custom_provider_config
 from ..schemas import AccountLoginRequest, AccountSelfRequest, RouteContext
 
 _ACCOUNT_TIMEOUT = 15.0
 _DEFAULT_SMART_OPS_BASE_URL = "https://dongdongkc.shierkeji.com:6201"
 _DEFAULT_OCS_PUBLIC_BASE_URL = "https://dongdongkc.shierkeji.com:6201/ocs"
+_CLIENT_CONFIG_ERROR_MESSAGE = "Login succeeded, but local Codex config.toml could not be verified."
 
 
 def _normalize_base_url(raw: str, *, code: str, label: str) -> str:
@@ -152,6 +155,12 @@ def _normalize_session(*, access_token: str, ua2_me: Dict[str, Any], ocs_account
     }
 
 
+async def _sync_codex_config_for_session(session: Dict[str, Any]) -> None:
+    if not str(session.get("codex_api_key") or "").strip():
+        return
+    await run_in_threadpool(sync_codex_custom_provider_config)
+
+
 async def _fetch_account_session(
     access_token: str,
     *,
@@ -204,7 +213,18 @@ async def _fetch_account_session(
         }
     except httpx.HTTPError as exc:
         return {"ok": False, "error": {"code": "account_network_error", "message": str(exc)}}
-    return {"ok": True, "result": {"session": _normalize_session(access_token=token, ua2_me=ua2_me, ocs_account=ocs_account)}}
+    session = _normalize_session(access_token=token, ua2_me=ua2_me, ocs_account=ocs_account)
+    try:
+        await _sync_codex_config_for_session(session)
+    except (OSError, ValueError, TypeError):
+        return {
+            "ok": False,
+            "error": {
+                "code": "account_client_config_failed",
+                "message": _CLIENT_CONFIG_ERROR_MESSAGE,
+            },
+        }
+    return {"ok": True, "result": {"session": session}}
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:

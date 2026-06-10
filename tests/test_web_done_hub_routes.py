@@ -56,7 +56,15 @@ class TestWebDoneHubRoutes(unittest.TestCase):
     def _create_client(self) -> TestClient:
         from no1.ports.web.app import create_app
 
-        return TestClient(create_app())
+        client = TestClient(create_app())
+        self.addCleanup(self._close_client, client)
+        return client
+
+    def _close_client(self, client: TestClient) -> None:
+        client.close()
+        from no1.ports.web.app import _close_web_logging
+
+        _close_web_logging()
 
     def test_done_hub_login_rejects_invalid_base_url(self) -> None:
         client = self._create_client()
@@ -329,7 +337,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         headers = calls[0][2].get("headers") or {}
         self.assertEqual(headers.get("Authorization"), "Bearer token-32")
 
-    def test_done_hub_login_provisions_client_files_for_normal_user(self) -> None:
+    def test_done_hub_login_returns_client_env_without_writing_files_for_normal_user(self) -> None:
         base = "https://peer.shierkeji.com"
         calls: list[tuple[str, str, dict]] = []
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -343,16 +351,16 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 "[windows]\n"
                 'sandbox = "elevated"\n'
             )
-            (codex_dir / "config.toml").write_text(
+            existing_config = (
                 'model_provider = "legacy"\n'
                 'model = "old-model"\n'
                 "\n"
                 "[model_providers.legacy]\n"
                 'name = "legacy"\n'
                 "\n"
-                f"{existing_tail}",
-                encoding="utf-8",
+                f"{existing_tail}"
             )
+            (codex_dir / "config.toml").write_text(existing_config, encoding="utf-8")
             responses = {
                 ("POST", f"{base}/api/user/login"): _FakeResponse(200, {"success": True, "message": "", "data": {"id": 2}}),
                 ("GET", f"{base}/api/user/self"): _FakeResponse(
@@ -439,13 +447,16 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-                patch("no1.ports.web.routes.done_hub.Path.home", return_value=home_path),
+                patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
             ):
                 client = self._create_client()
-                resp = client.post(
-                    "/api/v1/done_hub/login",
-                    json={"base_url": base, "username": "agent1", "password": "admin123"},
-                )
+                try:
+                    resp = client.post(
+                        "/api/v1/done_hub/login",
+                        json={"base_url": base, "username": "agent1", "password": "admin123"},
+                    )
+                finally:
+                    self._close_client(client)
 
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
@@ -461,45 +472,25 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 "remain_quota": 250000,
                 "unlimited_quota": True,
             })
-            self.assertEqual(
-                (codex_dir / "auth.json").read_text(encoding="utf-8"),
-                '{\n  "OPENAI_API_KEY": "sk-codex-secret"\n}\n',
-            )
+            self.assertFalse((codex_dir / "auth.json").exists())
             self.assertEqual(
                 (codex_dir / "config.toml").read_text(encoding="utf-8"),
                 'model_provider = "custom"\n'
-                'model = "gpt-5.4"\n'
                 'model_reasoning_effort = "high"\n'
                 "disable_response_storage = true\n"
+                'model = "old-model"\n'
                 "\n"
                 "[model_providers.custom]\n"
                 'name = "custom"\n'
                 'wire_api = "responses"\n'
-                "requires_openai_auth = true\n"
                 'base_url = "https://peer.shierkeji.com/v1"\n'
+                'env_key = "ONECOLLEAGUE_API_KEY"\n'
+                "[model_providers.legacy]\n"
+                'name = "legacy"\n'
                 "\n"
                 f"{existing_tail}",
             )
-            gemini_dir = home_path / ".gemini"
-            self.assertEqual(
-                (gemini_dir / ".env").read_text(encoding="utf-8"),
-                "GOOGLE_GEMINI_BASE_URL=https://peer.shierkeji.com/gemini\n"
-                "GEMINI_API_KEY=gemini-secret\n"
-                "GEMINI_MODEL=gemini-3.1-pro-preview\n",
-            )
-            self.assertEqual(
-                (gemini_dir / "settings.json").read_text(encoding="utf-8"),
-                '{\n'
-                '  "ide": {\n'
-                '    "enabled": true\n'
-                "  },\n"
-                '  "security": {\n'
-                '    "auth": {\n'
-                '      "selectedType": "gemini-api-key"\n'
-                "    }\n"
-                "  }\n"
-                "}\n",
-            )
+            self.assertFalse((home_path / ".gemini").exists())
 
     def test_done_hub_login_skips_client_files_for_pro_user(self) -> None:
         base = "https://peer.shierkeji.com"
@@ -532,13 +523,15 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-                patch("no1.ports.web.routes.done_hub.Path.home", return_value=home_path),
             ):
                 client = self._create_client()
-                resp = client.post(
-                    "/api/v1/done_hub/login",
-                    json={"base_url": base, "username": "agent2", "password": "admin123"},
-                )
+                try:
+                    resp = client.post(
+                        "/api/v1/done_hub/login",
+                        json={"base_url": base, "username": "agent2", "password": "admin123"},
+                    )
+                finally:
+                    self._close_client(client)
 
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
@@ -627,14 +620,17 @@ class TestWebDoneHubRoutes(unittest.TestCase):
 
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-                patch("no1.ports.web.routes.done_hub.Path.home", return_value=home_path),
+                patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
                 patch("no1.ports.web.routes.done_hub._TOKEN_PAGE_SIZE", 2),
             ):
                 client = self._create_client()
-                resp = client.post(
-                    "/api/v1/done_hub/login",
-                    json={"base_url": base, "username": "agent1", "password": "admin123"},
-                )
+                try:
+                    resp = client.post(
+                        "/api/v1/done_hub/login",
+                        json={"base_url": base, "username": "agent1", "password": "admin123"},
+                    )
+                finally:
+                    self._close_client(client)
 
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
@@ -651,102 +647,109 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 {"page": 1, "size": 2, "keyword": "", "order": "-id"},
                 {"page": 2, "size": 2, "keyword": "", "order": "-id"},
             ])
-            self.assertEqual(
-                (home_path / ".codex" / "auth.json").read_text(encoding="utf-8"),
-                '{\n  "OPENAI_API_KEY": "sk-codex-key"\n}\n',
-            )
+            codex_config = home_path / ".codex" / "config.toml"
+            self.assertTrue(codex_config.exists())
+            content = codex_config.read_text(encoding="utf-8")
+            self.assertIn('model_provider = "custom"\n', content)
+            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
+            self.assertFalse((home_path / ".codex" / "auth.json").exists())
+            self.assertFalse((home_path / ".gemini").exists())
 
-    def test_done_hub_login_returns_generic_error_when_config_write_fails(self) -> None:
+    def test_done_hub_login_writes_only_codex_provider_config(self) -> None:
         base = "https://peer.shierkeji.com"
         calls: list[tuple[str, str, dict]] = []
-        responses = {
-            ("POST", f"{base}/api/user/login"): _FakeResponse(200, {"success": True, "message": "", "data": {"id": 2}}),
-            ("GET", f"{base}/api/user/self"): _FakeResponse(
-                200,
-                {
-                    "success": True,
-                    "message": "",
-                    "data": {
-                        "username": "agent1",
-                        "display_name": "Agent 1",
-                        "group": "default",
-                        "quota": 250000,
-                        "used_quota": 1200,
-                        "role": 1,
-                        "status": 1,
-                        "access_token": "token-32",
-                    },
-                },
-            ),
-            ("GET", f"{base}/api/token/"): [
-                _FakeResponse(
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home_path = Path(tmpdir)
+            responses = {
+                ("POST", f"{base}/api/user/login"): _FakeResponse(200, {"success": True, "message": "", "data": {"id": 2}}),
+                ("GET", f"{base}/api/user/self"): _FakeResponse(
                     200,
                     {
                         "success": True,
                         "message": "",
                         "data": {
-                            "data": [
-                                {"id": 20, "name": "codex", "key": "codex-secret"},
-                                {"id": 21, "name": "gemini", "key": "gemini-secret"},
-                            ],
-                            "page": 1,
-                            "size": 100,
-                            "total_count": 2,
+                            "username": "agent1",
+                            "display_name": "Agent 1",
+                            "group": "default",
+                            "quota": 250000,
+                            "used_quota": 1200,
+                            "role": 1,
+                            "status": 1,
+                            "access_token": "token-32",
                         },
                     },
                 ),
-                _FakeResponse(
+                ("GET", f"{base}/api/token/"): [
+                    _FakeResponse(
+                        200,
+                        {
+                            "success": True,
+                            "message": "",
+                            "data": {
+                                "data": [
+                                    {"id": 20, "name": "codex", "key": "codex-secret"},
+                                    {"id": 21, "name": "gemini", "key": "gemini-secret"},
+                                ],
+                                "page": 1,
+                                "size": 100,
+                                "total_count": 2,
+                            },
+                        },
+                    ),
+                    _FakeResponse(
+                        200,
+                        {
+                            "success": True,
+                            "message": "",
+                            "data": {
+                                "data": [
+                                    {"id": 20, "name": "codex", "key": "codex-secret"},
+                                    {"id": 21, "name": "gemini", "key": "gemini-secret"},
+                                ],
+                                "page": 1,
+                                "size": 100,
+                                "total_count": 2,
+                            },
+                        },
+                    ),
+                ],
+                ("GET", f"{base}/api/available_model"): _FakeResponse(
                     200,
                     {
                         "success": True,
                         "message": "",
                         "data": {
-                            "data": [
-                                {"id": 20, "name": "codex", "key": "codex-secret"},
-                                {"id": 21, "name": "gemini", "key": "gemini-secret"},
-                            ],
-                            "page": 1,
-                            "size": 100,
-                            "total_count": 2,
+                            "gpt-5.4": {},
+                            "gemini-3.1-pro-preview": {},
                         },
                     },
                 ),
-            ],
-            ("GET", f"{base}/api/available_model"): _FakeResponse(
-                200,
-                {
-                    "success": True,
-                    "message": "",
-                    "data": {
-                        "gpt-5.4": {},
-                        "gemini-3.1-pro-preview": {},
-                    },
-                },
-            ),
-        }
+            }
 
-        def _factory(*args, **kwargs):
-            return _FakeAsyncClient(responses, calls)
+            def _factory(*args, **kwargs):
+                return _FakeAsyncClient(responses, calls)
 
-        with (
-            patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-            patch("no1.ports.web.routes.done_hub._sync_local_client_files", side_effect=OSError("failed to write /tmp/.codex/config.toml")),
-        ):
-            client = self._create_client()
-            resp = client.post(
-                "/api/v1/done_hub/login",
-                json={"base_url": base, "username": "agent1", "password": "admin123"},
-            )
+            with (
+                patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+                patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
+            ):
+                client = self._create_client()
+                try:
+                    resp = client.post(
+                        "/api/v1/done_hub/login",
+                        json={"base_url": base, "username": "agent1", "password": "admin123"},
+                    )
+                finally:
+                    self._close_client(client)
 
-        self.assertEqual(resp.status_code, 200)
-        body = resp.json()
-        self.assertFalse(bool(body.get("ok")))
-        self.assertEqual(str((body.get("error") or {}).get("code") or ""), "done_hub_client_config_failed")
-        self.assertEqual(
-            str((body.get("error") or {}).get("message") or ""),
-            "登录成功，但本机客户端配置写入失败，请稍后重试或联系管理员。",
-        )
-        self.assertNotIn("/tmp/.codex/config.toml", str((body.get("error") or {}).get("message") or ""))
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(bool(body.get("ok")))
+            session = ((body.get("result") or {}).get("session") or {})
+            self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-secret")
+            self.assertTrue((home_path / ".codex" / "config.toml").exists())
+            self.assertFalse((home_path / ".codex" / "auth.json").exists())
+            self.assertFalse((home_path / ".gemini").exists())
 
 
 if __name__ == "__main__":

@@ -31,15 +31,14 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     id: "model:deepseek-v4-pro-claude",
     label: "deepseek-v4",
     runtime: "claude",
-    model: "deepseek-v4-pro[1m]",
+    model: "DeepSeek-V4-Pro",
     envPrivate: {
-      ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
-      ANTHROPIC_AUTH_TOKEN: "sk-7f21d214c2dc4947b06a7289c357f558",
-      ANTHROPIC_MODEL: "deepseek-v4-pro[1m]",
-      ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro[1m]",
-      ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro[1m]",
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
-      CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash",
+      ANTHROPIC_BASE_URL: "https://peer.shierkeji.com/claude",
+      ANTHROPIC_MODEL: "DeepSeek-V4-Pro",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "DeepSeek-V4-Pro",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "DeepSeek-V4-Pro",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "DeepSeek-V4-Pro",
+      CLAUDE_CODE_SUBAGENT_MODEL: "DeepSeek-V4-Pro",
       CLAUDE_CODE_EFFORT_LEVEL: "max",
     },
   },
@@ -153,7 +152,7 @@ export function secretsTextForRuntimePreset(preset: RuntimePreset, authToken?: s
 export function mergePresetSecrets(existing: string, preset: RuntimePreset, authToken?: string): string {
   const presetText = secretsTextForRuntimePreset(preset, authToken);
   const current = String(existing || "").trim();
-  const presetKeys = knownPresetSecretKeysForRuntime(preset.runtime);
+  const presetKeys = knownAllPresetSecretKeys();
   const authKey = authSecretKeyForRuntimePreset(preset);
   const shouldReplaceAuthToken = Boolean(authKey && String(authToken || "").trim());
   if (!current) return presetText;
@@ -175,7 +174,7 @@ export function mergePresetUnsetKeys(existing: string, preset: RuntimePreset): s
   const activeKeys = new Set(Object.keys(preset.envPrivate || {}));
   const authKey = authSecretKeyForRuntimePreset(preset);
   if (authKey) activeKeys.add(authKey);
-  const keysToUnset = Array.from(knownPresetSecretKeysForRuntime(preset.runtime)).filter((key) => !activeKeys.has(key));
+  const keysToUnset = Array.from(knownAllPresetSecretKeys()).filter((key) => !activeKeys.has(key));
   if (!keysToUnset.length) return current;
   const seen = new Set<string>();
   const lines = [...current.split("\n"), ...keysToUnset]
@@ -197,11 +196,27 @@ export function knownPresetSecretKeysForRuntime(runtime: string): Set<string> {
     for (const key of Object.keys(preset.envPrivate || {})) out.add(key);
   }
   if (runtime === "claude") out.add("ANTHROPIC_AUTH_TOKEN");
+  if (runtime === "codex") {
+    out.add("ONECOLLEAGUE_API_KEY");
+    out.add("OPENAI_API_KEY");
+  }
   if (runtime === "kimi") out.add("KIMI_API_KEY");
   return out;
 }
 
+function knownAllPresetSecretKeys(): Set<string> {
+  const out = new Set<string>();
+  for (const preset of RUNTIME_PRESETS) {
+    for (const key of Object.keys(preset.envPrivate || {})) out.add(key);
+    const authKey = authSecretKeyForRuntimePreset(preset);
+    if (authKey) out.add(authKey);
+  }
+  out.add("OPENAI_API_KEY");
+  return out;
+}
+
 function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
+  if (preset.runtime === "codex") return "ONECOLLEAGUE_API_KEY";
   if (!preset.model) return "";
   if (preset.runtime === "claude") return "ANTHROPIC_AUTH_TOKEN";
   if (preset.runtime === "kimi") return "KIMI_API_KEY";
