@@ -61,11 +61,6 @@ export function RolePresetPicker({ draftValue, disabled = false, onChangeDraft }
 
   return (
     <div className="space-y-2">
-      <div className="min-w-0">
-        <div className="text-xs font-semibold text-[var(--color-text-primary)]">{t("rolePreset")}</div>
-        <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{t("rolePresetHint")}</div>
-      </div>
-
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <GroupCombobox
           items={BUILTIN_ROLE_PRESETS.map((preset) => {
