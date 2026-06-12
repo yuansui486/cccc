@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { buildRuntimeChoiceGroups } from "./runtimeChoiceGroups";
 import {
   claudeReasoningEffortFromCommand,
   codexReasoningEffortFromCommand,
@@ -12,6 +13,44 @@ import {
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
+  it("groups model choices by CLI family", () => {
+    const groups = buildRuntimeChoiceGroups([
+      { name: "claude", display_name: "Claude Code", available: true, recommended_command: "claude" },
+      { name: "codex", display_name: "Codex CLI", available: true, recommended_command: "codex" },
+      { name: "gemini", display_name: "Gemini CLI", available: true, recommended_command: "gemini" },
+      { name: "kimi", display_name: "Kimi CLI", available: true, recommended_command: "kimi" },
+    ]);
+
+    expect(groups.map((group) => group.labelKey)).toEqual([
+      "runtimeGroupCodex",
+      "runtimeGroupClaude",
+      "runtimeGroupGemini",
+      "runtimeGroupKimi",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options.map((option) => option.id)).toEqual([
+      "default:claude",
+      "model:deepseek-v4-pro-claude",
+      "model:qwen3.6-max-claude",
+      "model:doubao-code-claude",
+      "droid",
+      "amp",
+      "auggie",
+      "neovate",
+      "hermes",
+      "web_model",
+      "custom",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.id)).toEqual([
+      "default:codex",
+      "model:gpt-5.4-codex",
+      "model:gpt-5.5-codex",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupGemini")?.options.map((option) => option.id)).toEqual(["gemini"]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options.map((option) => option.id)).toEqual([
+      "model:kimi-k2.6-kimi",
+    ]);
+  });
+
   it("builds Codex model commands from the runtime default", () => {
     const preset = runtimePresetById("model:gpt-5.5-codex");
     expect(preset).toBeTruthy();

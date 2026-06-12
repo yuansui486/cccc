@@ -265,5 +265,9 @@
   "headlessControlFailed": "制御タスクが失敗しました",
   "headlessControlUpdated": "制御タスクを更新しました",
   "runtimePresets": "モデル + CLI プリセット",
-  "runtimeRawChoices": "基本 CLI ランタイム"
+  "runtimeRawChoices": "基本 CLI ランタイム",
+  "runtimeGroupClaude": "Claude Code",
+  "runtimeGroupCodex": "Codex",
+  "runtimeGroupGemini": "Gemini",
+  "runtimeGroupKimi": "Kimi"
 }

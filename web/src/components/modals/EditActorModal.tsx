@@ -1,4 +1,4 @@
-import { ActorProfile, RuntimeInfo, SupportedRuntime, SUPPORTED_RUNTIMES, RUNTIME_INFO } from "../../types";
+import { ActorProfile, RuntimeInfo, SupportedRuntime, RUNTIME_INFO } from "../../types";
 import { useTranslation } from "react-i18next";
 import { BASIC_MCP_CONFIG_SNIPPET } from "../../utils/mcpConfigSnippets";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,8 +12,8 @@ import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
 import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
 import {
-  RUNTIME_PRESETS,
   claudeReasoningEffortFromCommand,
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
@@ -197,6 +197,7 @@ export function EditActorModal({
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const secretFetchSeqRef = useRef(0);
   const presetSecretsPrimedRef = useRef("");
+  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes), [runtimes]);
   const modalStateRef = useRef<{
     groupId: string;
     actorId: string;
@@ -790,32 +791,16 @@ export function EditActorModal({
                           }
                         }}
                       >
-                        <optgroup label={t("runtimePresets")}>
-                          {RUNTIME_PRESETS.map((preset) => {
-                            const rtInfoLocal = runtimes.find((r) => r.name === preset.runtime);
-                            const runtimeAvailable = rtInfoLocal?.available ?? false;
-                            return (
-                              <option key={preset.id} value={preset.id} disabled={!runtimeAvailable}>
-                                {preset.label}
-                                {!runtimeAvailable ? ` ${t("notInstalled")}` : ""}
+                        {runtimeChoiceGroups.map((group) => (
+                          <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
+                            {group.options.map((option) => (
+                              <option key={option.id} value={option.id} disabled={option.disabled}>
+                                {option.label}
+                                {option.disabled ? ` ${t("notInstalled")}` : ""}
                               </option>
-                            );
-                          })}
-                        </optgroup>
-                        <optgroup label={t("runtimeRawChoices")}>
-                        {SUPPORTED_RUNTIMES.map((rt) => {
-                          const info = RUNTIME_INFO[rt];
-                          const rtInfoLocal = runtimes.find((r) => r.name === rt);
-                          const runtimeAvailable = rtInfoLocal?.available ?? false;
-                          const selectable = runtimeAvailable || rt === "custom";
-                          return (
-                            <option key={rt} value={rt} disabled={!selectable}>
-                              {info?.label || rt}
-                              {!runtimeAvailable && rt !== "custom" ? ` ${t("notInstalled")}` : ""}
-                            </option>
-                          );
-                        })}
-                        </optgroup>
+                            ))}
+                          </optgroup>
+                        ))}
                       </select>
                     </div>
 
