@@ -40,7 +40,7 @@
   "fileTypeYamlJson": "YAML / YML / JSON",
   "appName": "一号同事",
   "userLabel": "User",
-  "recipientAll": "@Everyone",
+  "recipientAll": "@All AI",
   "recipientForeman": "@Lead",
   "recipientPeers": "@Collaborators",
   "groupStatusRun": "Running",

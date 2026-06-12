@@ -9,6 +9,7 @@ import { getPresentationRefChipLabel } from "../../utils/presentationRefs";
 import { useTranslation } from 'react-i18next';
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem, type SlashSkillScope } from "../../utils/slashCommands";
+import { getRecipientDisplayLabel } from "../../utils/displayText";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
 
@@ -886,7 +887,7 @@ export function ChatComposer({
                         disabled={!selectedGroupId || busy === "send"}
                         aria-pressed={active}
                       >
-                        {renderRecipientChipContent(tok)}
+                        {renderRecipientChipContent(getRecipientDisplayLabel(tok))}
                       </button>
                     );
                   })}
