@@ -90,6 +90,8 @@
   "sectionBasicsHint": "Edit the actor label, built-in role preset seed, and stable actor-scoped role notes here.",
   "sectionRuntime": "Runtime Setup",
   "sectionRuntimeHint": "Choose a runtime profile or custom runtime config. Role presets above only affect role notes.",
+  "promptSettings": "Prompt Settings",
+  "promptSettingsHint": "Choose a built-in role as a starting point, then add stable working guidance for this agent.",
   "sectionAdvanced": "Advanced",
   "sectionAdvancedHint": "Keep low-frequency configuration here so the main edit path stays short.",
   "runtimeSetupSection": "Connection setup",

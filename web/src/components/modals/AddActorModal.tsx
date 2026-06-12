@@ -280,89 +280,57 @@ export function AddActorModal({
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
           <div className="mx-auto max-w-2xl space-y-4">
             <Surface className={sectionCardClass}>
-              <div className={sectionTitleClass}>
-                {newActorRole === "foreman" ? t("addForemanRole") : t("addPeerRole")}
+              <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
+                  {t("customAgent")}
+                </Button>
+                <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
+                  {t("fromActorProfile")}
+                </Button>
               </div>
-              <div className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                {hasForeman ? t("foremanLeads") : t("firstAgentForeman")}
-                <span className="mx-1.5 text-[var(--color-text-tertiary)]">·</span>
-                {t("addSectionBasicsCompactHint")}
-              </div>
+            </Surface>
 
-              <div className="mt-4 space-y-4">
-                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                  <div className="sm:w-[104px] sm:flex-shrink-0">
-                    <ActorAvatarField
-                      label={null}
-                      avatarUrl={undefined}
-                      previewUrl={avatarPreviewUrl}
-                      runtime={previewRuntime}
-                      command={newActorUseProfile ? selectedProfile?.command : newActorCommand}
-                      title={previewTitle}
-                      isDark={isDark}
-                      sizeClassName="h-14 w-14"
-                      disabled={busy === "actor-add"}
-                      resetDisabled={!avatarFile}
-                      onSelectFile={setAvatarFile}
-                      onReset={() => setAvatarFile(null)}
-                    />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                      {t("agentName")}
-                    </label>
-                    <Input
-                      value={newActorId}
-                      onChange={(e) => setNewActorId(e.target.value)}
-                      placeholder={suggestedActorId}
-                    />
-                    <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                      {t("leaveEmptyToUse")}{" "}
-                      <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                        {suggestedActorId}
-                      </code>
-                    </div>
-                  </div>
+            <Surface className={sectionCardClass}>
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                <div className="sm:w-[104px] sm:flex-shrink-0">
+                  <ActorAvatarField
+                    label={null}
+                    avatarUrl={undefined}
+                    previewUrl={avatarPreviewUrl}
+                    runtime={previewRuntime}
+                    command={newActorUseProfile ? selectedProfile?.command : newActorCommand}
+                    title={previewTitle}
+                    isDark={isDark}
+                    sizeClassName="h-14 w-14"
+                    disabled={busy === "actor-add"}
+                    resetDisabled={!avatarFile}
+                    onSelectFile={setAvatarFile}
+                    onReset={() => setAvatarFile(null)}
+                  />
                 </div>
 
-                <RolePresetPicker
-                  draftValue={newActorRoleNotes}
-                  onChangeDraft={setNewActorRoleNotes}
-                  disabled={busy === "actor-add"}
-                />
-
-                <div>
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
-                  <Textarea
-                    className="min-h-[144px]"
-                    value={newActorRoleNotes}
-                    onChange={(e) => setNewActorRoleNotes(e.target.value)}
-                    placeholder={t("roleNotesPlaceholder")}
-                    spellCheck={false}
+                <div className="min-w-0 flex-1">
+                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                    {t("agentName")}
+                  </label>
+                  <Input
+                    value={newActorId}
+                    onChange={(e) => setNewActorId(e.target.value)}
+                    placeholder={suggestedActorId}
                   />
-                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("newActorRoleNotesHint")}</div>
+                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                    {t("leaveEmptyToUse")}{" "}
+                    <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                      {suggestedActorId}
+                    </code>
+                  </div>
                 </div>
               </div>
             </Surface>
 
             <Surface className={sectionCardClass}>
-              <div className={sectionTitleClass}>{t("sectionRuntime")}</div>
-              <div className={sectionHintClass}>{t("sectionRuntimeHint")}</div>
-
-              <div className="mt-4">
-                <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
-                    {t("customAgent")}
-                  </Button>
-                  <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
-                    {t("fromActorProfile")}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-4">
+              <div className="space-y-4">
                 {newActorUseProfile ? (
                   <>
                     <div>
@@ -548,6 +516,31 @@ export function AddActorModal({
                     ) : null}
                   </>
                 )}
+              </div>
+            </Surface>
+
+            <Surface className={sectionCardClass}>
+              <div className={sectionTitleClass}>{t("promptSettings")}</div>
+              <div className={sectionHintClass}>{t("promptSettingsHint")}</div>
+
+              <div className="mt-4 space-y-4">
+                <RolePresetPicker
+                  draftValue={newActorRoleNotes}
+                  onChangeDraft={setNewActorRoleNotes}
+                  disabled={busy === "actor-add"}
+                />
+
+                <div>
+                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
+                  <Textarea
+                    className="min-h-[144px]"
+                    value={newActorRoleNotes}
+                    onChange={(e) => setNewActorRoleNotes(e.target.value)}
+                    placeholder={t("roleNotesPlaceholder")}
+                    spellCheck={false}
+                  />
+                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("newActorRoleNotesHint")}</div>
+                </div>
               </div>
             </Surface>
 

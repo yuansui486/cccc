@@ -88,6 +88,8 @@
   "sectionBasicsHint": "ここでは actor の表示名、内蔵ロールプリセットの起点、安定した actor ごとの Role Notes を編集します。",
   "sectionRuntime": "ランタイム設定",
   "sectionRuntimeHint": "ここでは runtime profile かカスタム実行設定を決めます。上の role preset は role notes だけに影響します。",
+  "promptSettings": "プロンプト設定",
+  "promptSettingsHint": "内蔵ロールを起点として選び、このエージェントの安定した作業ガイダンスを追加します。",
   "sectionAdvanced": "詳細設定",
   "sectionAdvancedHint": "低頻度の設定はここへまとめ、主編集フローを短く保ちます。",
   "runtimeSetupSection": "接続設定",

@@ -11,6 +11,7 @@
     "presetNoDescription": "点击后会拉取配置，并使用配置标题填入团队名称",
     "projectDirectory": "团队目录地址",
     "browse": "浏览",
+    "findWindowsPath": "快速找 Windows 地址",
     "noSubdirectories": "没有子目录",
     "groupName": "团队名称",
     "groupNamePlaceholder": "请输入团队名称",
@@ -18,7 +19,6 @@
     "pathAutoCreateHint": "如果文件夹还不存在，将自动创建。",
     "blueprintLabel": "快速复制团队（可选）",
     "loadingBlueprint": "加载团队配置中…",
-    "blueprintHint": "复用智能体、设置和自动化规则/片段。",
     "creating": "创建中…",
     "createFromBlueprint": "快速复制团队",
     "createGroup": "创建团队"
