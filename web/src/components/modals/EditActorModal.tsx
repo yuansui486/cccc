@@ -10,16 +10,20 @@ import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
+import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
 import {
   RUNTIME_PRESETS,
+  claudeReasoningEffortFromCommand,
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
   runtimePresetIdFor,
+  withClaudeReasoningEffort,
   withCodexReasoningEffort,
+  type ClaudeReasoningEffort,
   type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
@@ -135,14 +139,6 @@ function modeButtonClass(selected: boolean): string {
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
-
-const CODEX_REASONING_OPTIONS: Array<{ value: CodexReasoningEffort; key: string }> = [
-  { value: "xhigh", key: "reasoningXhigh" },
-  { value: "high", key: "reasoningHigh" },
-  { value: "medium", key: "reasoningMedium" },
-  { value: "low", key: "reasoningLow" },
-  { value: "minimal", key: "reasoningMinimal" },
-];
 
 export function EditActorModal({
   isOpen,
@@ -395,8 +391,8 @@ export function EditActorModal({
       : derivedRuntimePresetId;
   const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
-  const codexReasoningEffort = runtime === "codex" ? codexReasoningEffortFromCommand(command) : "";
-  const selectedCodexReasoningEffort = codexReasoningEffort || "medium";
+  const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(command) || "medium";
+  const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(command) || "high";
 
   useEffect(() => {
     if (!isOpen) {
@@ -454,6 +450,12 @@ export function EditActorModal({
   const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
     const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, rtInfo);
     onChangeCommand(withCodexReasoningEffort(baseCommand, effort));
+    setSelectedRuntimePresetId("");
+  };
+
+  const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
+    const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:claude")!, rtInfo);
+    onChangeCommand(withClaudeReasoningEffort(baseCommand, effort));
     setSelectedRuntimePresetId("");
   };
 
@@ -818,25 +820,19 @@ export function EditActorModal({
                     </div>
 
                     {runtime === "codex" ? (
-                      <div>
-                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                          {t("reasoningEffort")}
-                        </label>
-                        <div className="grid grid-cols-5 gap-2">
-                          {CODEX_REASONING_OPTIONS.map((option) => (
-                            <Button
-                              key={option.key}
-                              type="button"
-                              variant="outline"
-                              className={modeButtonClass(selectedCodexReasoningEffort === option.value)}
-                              onClick={() => updateCodexReasoningEffort(option.value)}
-                              disabled={busy === "actor-update"}
-                            >
-                              {t(option.key)}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
+                      <CodexReasoningEffortSelector
+                        value={selectedCodexReasoningEffort}
+                        disabled={busy === "actor-update"}
+                        onChange={updateCodexReasoningEffort}
+                      />
+                    ) : null}
+
+                    {runtime === "claude" ? (
+                      <ClaudeReasoningEffortSelector
+                        value={selectedClaudeReasoningEffort}
+                        disabled={busy === "actor-update"}
+                        onChange={updateClaudeReasoningEffort}
+                      />
                     ) : null}
 
                     {supportsStandardWebHeadlessRuntime(runtime) ? (

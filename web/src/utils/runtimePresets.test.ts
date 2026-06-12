@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  claudeReasoningEffortFromCommand,
   codexReasoningEffortFromCommand,
   commandForRuntimePreset,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
+  withClaudeReasoningEffort,
   withCodexReasoningEffort,
 } from "./runtimePresets";
 
@@ -33,6 +35,19 @@ describe("runtime presets", () => {
       "codex -c shell_environment_policy.inherit=all --search -m gpt-5.5 -c model_reasoning_effort=low"
     );
     expect(withCodexReasoningEffort(xhighCommand, "")).toBe(base);
+  });
+
+  it("adds, reads, replaces, and clears Claude Code reasoning effort", () => {
+    const base = "claude --model DeepSeek-V4-Pro";
+    const high = withClaudeReasoningEffort(base, "high");
+
+    expect(high).toBe("claude --model DeepSeek-V4-Pro --effort high");
+    expect(claudeReasoningEffortFromCommand(high)).toBe("high");
+    expect(claudeReasoningEffortFromCommand("claude --effort=max")).toBe("max");
+    expect(claudeReasoningEffortFromCommand("claude --effort x-high")).toBe("xhigh");
+    expect(withClaudeReasoningEffort(high, "xhigh")).toBe("claude --model DeepSeek-V4-Pro --effort xhigh");
+    expect(withClaudeReasoningEffort(high, "max")).toBe("claude --model DeepSeek-V4-Pro --effort max");
+    expect(withClaudeReasoningEffort(high, "")).toBe(base);
   });
 
   it("adds only the API key env for the default Codex preset", () => {
@@ -116,7 +131,7 @@ describe("runtime presets", () => {
     expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="qwen3.6-plus"');
     expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="qwen3.6-flash"');
     expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="qwen3.6-plus"');
-    expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
+    expect(secrets).not.toContain("CLAUDE_CODE_EFFORT_LEVEL");
     expect(secrets).not.toContain("ignored-token");
   });
 
@@ -132,7 +147,7 @@ describe("runtime presets", () => {
     expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek-V4-Pro"');
     expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek-V4-Pro"');
     expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="DeepSeek-V4-Pro"');
-    expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
+    expect(secrets).not.toContain("CLAUDE_CODE_EFFORT_LEVEL");
     expect(secrets).not.toContain("api.deepseek.com");
   });
 
