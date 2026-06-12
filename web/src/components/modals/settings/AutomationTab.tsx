@@ -69,6 +69,14 @@ interface AutomationTabProps {
   setHelpNudgeIntervalSeconds: (v: number) => void;
   helpNudgeMinMessages: number;
   setHelpNudgeMinMessages: (v: number) => void;
+  taskReminderEnabled: boolean;
+  setTaskReminderEnabled: (v: boolean) => void;
+  taskEmptyCooldownSeconds: number;
+  setTaskEmptyCooldownSeconds: (v: number) => void;
+  taskActiveOverdueMilestonesSeconds: number[];
+  setTaskActiveOverdueMilestonesSeconds: (v: number[]) => void;
+  taskPlannedUnassignedMilestonesSeconds: number[];
+  setTaskPlannedUnassignedMilestonesSeconds: (v: number[]) => void;
   onSavePolicies: () => void;
   onResetPolicies: () => void;
 }
@@ -593,6 +601,14 @@ export function AutomationTab(props: AutomationTabProps) {
         setIdleSeconds={props.setIdleSeconds}
         silenceSeconds={props.silenceSeconds}
         setSilenceSeconds={props.setSilenceSeconds}
+        taskReminderEnabled={props.taskReminderEnabled}
+        setTaskReminderEnabled={props.setTaskReminderEnabled}
+        taskEmptyCooldownSeconds={props.taskEmptyCooldownSeconds}
+        setTaskEmptyCooldownSeconds={props.setTaskEmptyCooldownSeconds}
+        taskActiveOverdueMilestonesSeconds={props.taskActiveOverdueMilestonesSeconds}
+        setTaskActiveOverdueMilestonesSeconds={props.setTaskActiveOverdueMilestonesSeconds}
+        taskPlannedUnassignedMilestonesSeconds={props.taskPlannedUnassignedMilestonesSeconds}
+        setTaskPlannedUnassignedMilestonesSeconds={props.setTaskPlannedUnassignedMilestonesSeconds}
         onSavePolicies={props.onSavePolicies}
         onResetPolicies={props.onResetPolicies}
       />

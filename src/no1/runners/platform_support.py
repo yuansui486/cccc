@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 def _windows_pty_hints() -> List[str]:
     return [
         "Run `python -m pip install pywinpty` to install the Windows ConPTY dependency.",
+        "If pywinpty is already installed, run `python -m pip install --force-reinstall pywinpty` to restore native DLLs.",
         "If you installed the project with uv, rerun `uv pip install -e .` to refresh platform dependencies.",
         "After installation, rerun `onecolleague doctor` or `pytest tests/test_windows_pty_backend.py -q` to verify support.",
     ]
@@ -39,7 +40,8 @@ def _probe_windows_pty_process() -> Tuple[Optional[Any], str, str, List[str]]:
         return (
             None,
             "winpty_import_failed",
-            f"Windows PTY backend import failed: {exc}",
+            "Windows PTY backend import failed. The pywinpty package may be incomplete "
+            f"or its native DLLs may be missing: {exc}",
             hints,
         )
 

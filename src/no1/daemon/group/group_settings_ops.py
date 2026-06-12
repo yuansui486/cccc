@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...kernel.group import load_group, normalize_group_capability_defaults
@@ -58,6 +58,25 @@ def _safe_int(value: Any, *, default: int, min_value: int = 0, max_value: Option
     return out
 
 
+def _safe_int_list(value: Any, *, default: List[int], min_value: int = 1) -> List[int]:
+    raw = value
+    if isinstance(raw, str):
+        items: Any = [p.strip() for p in raw.split(",")]
+    elif isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        items = default
+    out: List[int] = []
+    for item in items:
+        try:
+            n = int(item)
+        except Exception:
+            continue
+        if n >= min_value:
+            out.append(n)
+    return sorted(set(out)) or list(default)
+
+
 def _settings_payload(group: Any) -> Dict[str, Any]:
     automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
@@ -106,6 +125,20 @@ def _settings_payload(group: Any) -> Dict[str, Any]:
             min_value=0,
         ),
         "help_nudge_min_messages": _safe_int(automation.get("help_nudge_min_messages", 10), default=10, min_value=0),
+        "task_reminder_enabled": coerce_bool(automation.get("task_reminder_enabled"), default=True),
+        "task_empty_cooldown_seconds": _safe_int(
+            automation.get("task_empty_cooldown_seconds", 900),
+            default=900,
+            min_value=0,
+        ),
+        "task_active_overdue_milestones_seconds": _safe_int_list(
+            automation.get("task_active_overdue_milestones_seconds"),
+            default=[1800, 3000, 3600, 5400],
+        ),
+        "task_planned_unassigned_milestones_seconds": _safe_int_list(
+            automation.get("task_planned_unassigned_milestones_seconds"),
+            default=[900, 1800, 3600, 7200, 10800, 21600],
+        ),
         "min_interval_seconds": _safe_int(delivery.get("min_interval_seconds", 0), default=0, min_value=0),
         "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
         "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
@@ -146,7 +179,7 @@ def handle_group_settings_update(
 
     messaging_keys = {"default_send_to"}
     delivery_keys = {"min_interval_seconds", "auto_mark_on_delivery"}
-    automation_keys = {
+    automation_int_keys = {
         "nudge_after_seconds",
         "reply_required_nudge_after_seconds",
         "attention_ack_nudge_after_seconds",
@@ -160,7 +193,11 @@ def handle_group_settings_update(
         "silence_timeout_seconds",
         "help_nudge_interval_seconds",
         "help_nudge_min_messages",
+        "task_empty_cooldown_seconds",
     }
+    automation_bool_keys = {"task_reminder_enabled"}
+    automation_list_keys = {"task_active_overdue_milestones_seconds", "task_planned_unassigned_milestones_seconds"}
+    automation_keys = automation_int_keys | automation_bool_keys | automation_list_keys
     terminal_transcript_keys = {
         "terminal_transcript_visibility",
         "terminal_transcript_notify_tail",
@@ -207,7 +244,13 @@ def handle_group_settings_update(
         if automation_patch:
             automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
             for key, value in automation_patch.items():
-                automation[key] = int(value)
+                if key in automation_bool_keys:
+                    automation[key] = coerce_bool(value, default=True)
+                elif key in automation_list_keys:
+                    default = [1800, 3000, 3600, 5400] if key == "task_active_overdue_milestones_seconds" else [900, 1800, 3600, 7200, 10800, 21600]
+                    automation[key] = _safe_int_list(value, default=default)
+                else:
+                    automation[key] = int(value)
             group.doc["automation"] = automation
 
         tt_patch: Dict[str, Any] = {}

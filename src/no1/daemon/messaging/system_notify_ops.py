@@ -37,7 +37,22 @@ def handle_system_notify(
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
 
-    valid_kinds = {"nudge", "keepalive", "help_nudge", "actor_idle", "silence_check", "auto_idle", "automation", "status_change", "error", "info"}
+    valid_kinds = {
+        "nudge",
+        "keepalive",
+        "help_nudge",
+        "actor_idle",
+        "silence_check",
+        "auto_idle",
+        "automation",
+        "task_empty_active",
+        "task_empty_planned",
+        "task_active_overdue",
+        "task_planned_unassigned",
+        "status_change",
+        "error",
+        "info",
+    }
     valid_priorities = {"low", "normal", "high", "urgent"}
     if kind not in valid_kinds:
         kind = "info"

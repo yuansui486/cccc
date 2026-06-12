@@ -390,7 +390,8 @@ uv run cccc --help
 ### Windows 原生运行
 
 - 推荐直接使用仓库根目录的 `start.ps1` 启动开发环境。
-- 如果 `cccc doctor` 显示 `Windows PTY: NOT READY`，先执行 `python -m pip install pywinpty`，或重新执行 `uv pip install -e .`。
+- 如果 `cccc doctor` 显示 `Windows PTY: NOT READY`，先执行 `python -m pip install pywinpty`；如果已经安装但仍报 DLL 缺失，执行 `python -m pip install --force-reinstall pywinpty` 修复 native DLL。
+- 标准 wheel 安装（`python -m pip install dist/no1-*.whl`）会自动解析 Windows 的 `pywinpty` 依赖；离线安装或使用 `--no-deps` 时，必须单独提供匹配的 `pywinpty` wheel。
 - Web 打包可用 `scripts/build_web.ps1`，完整打包可用 `scripts/build_package.ps1`。
 
 ### Docker

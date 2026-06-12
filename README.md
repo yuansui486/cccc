@@ -396,7 +396,8 @@ uv run cccc --help
 ### Native Windows Notes
 
 - For local development on Windows, prefer the repo-root `start.ps1`.
-- If `cccc doctor` reports `Windows PTY: NOT READY`, run `python -m pip install pywinpty` or reinstall with `uv pip install -e .`.
+- If `cccc doctor` reports `Windows PTY: NOT READY`, run `python -m pip install pywinpty`; if it is already installed, run `python -m pip install --force-reinstall pywinpty` to restore the native DLLs.
+- Standard wheel installs (`python -m pip install dist/no1-*.whl`) resolve the Windows `pywinpty` dependency automatically. Offline or `--no-deps` installs must provide the matching `pywinpty` wheel separately.
 - Use `scripts/build_web.ps1` for the bundled UI and `scripts/build_package.ps1` for a full package build.
 
 ### Docker

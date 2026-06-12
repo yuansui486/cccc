@@ -26,6 +26,17 @@ export function useAutomationPolicyDraft({
   const [silenceSeconds, setSilenceSeconds] = useState(0);
   const [helpNudgeIntervalSeconds, setHelpNudgeIntervalSeconds] = useState(600);
   const [helpNudgeMinMessages, setHelpNudgeMinMessages] = useState(10);
+  const [taskReminderEnabled, setTaskReminderEnabled] = useState(true);
+  const [taskEmptyCooldownSeconds, setTaskEmptyCooldownSeconds] = useState(900);
+  const [taskActiveOverdueMilestonesSeconds, setTaskActiveOverdueMilestonesSeconds] = useState([1800, 3000, 3600, 5400]);
+  const [taskPlannedUnassignedMilestonesSeconds, setTaskPlannedUnassignedMilestonesSeconds] = useState([
+    900,
+    1800,
+    3600,
+    7200,
+    10800,
+    21600,
+  ]);
 
   useEffect(() => {
     if (!active || !settings) return;
@@ -42,6 +53,12 @@ export function useAutomationPolicyDraft({
     setSilenceSeconds(settings.silence_timeout_seconds);
     setHelpNudgeIntervalSeconds(settings.help_nudge_interval_seconds ?? 600);
     setHelpNudgeMinMessages(settings.help_nudge_min_messages ?? 10);
+    setTaskReminderEnabled(settings.task_reminder_enabled ?? true);
+    setTaskEmptyCooldownSeconds(settings.task_empty_cooldown_seconds ?? 900);
+    setTaskActiveOverdueMilestonesSeconds(settings.task_active_overdue_milestones_seconds ?? [1800, 3000, 3600, 5400]);
+    setTaskPlannedUnassignedMilestonesSeconds(
+      settings.task_planned_unassigned_milestones_seconds ?? [900, 1800, 3600, 7200, 10800, 21600],
+    );
   }, [active, settings]);
 
   const savePolicies = async () => {
@@ -59,6 +76,10 @@ export function useAutomationPolicyDraft({
       silence_timeout_seconds: silenceSeconds,
       help_nudge_interval_seconds: helpNudgeIntervalSeconds,
       help_nudge_min_messages: helpNudgeMinMessages,
+      task_reminder_enabled: taskReminderEnabled,
+      task_empty_cooldown_seconds: taskEmptyCooldownSeconds,
+      task_active_overdue_milestones_seconds: taskActiveOverdueMilestonesSeconds,
+      task_planned_unassigned_milestones_seconds: taskPlannedUnassignedMilestonesSeconds,
     });
   };
 
@@ -76,6 +97,10 @@ export function useAutomationPolicyDraft({
     setSilenceSeconds(0);
     setHelpNudgeIntervalSeconds(600);
     setHelpNudgeMinMessages(10);
+    setTaskReminderEnabled(true);
+    setTaskEmptyCooldownSeconds(900);
+    setTaskActiveOverdueMilestonesSeconds([1800, 3000, 3600, 5400]);
+    setTaskPlannedUnassignedMilestonesSeconds([900, 1800, 3600, 7200, 10800, 21600]);
   };
 
   return {
@@ -105,6 +130,14 @@ export function useAutomationPolicyDraft({
     setHelpNudgeIntervalSeconds,
     helpNudgeMinMessages,
     setHelpNudgeMinMessages,
+    taskReminderEnabled,
+    setTaskReminderEnabled,
+    taskEmptyCooldownSeconds,
+    setTaskEmptyCooldownSeconds,
+    taskActiveOverdueMilestonesSeconds,
+    setTaskActiveOverdueMilestonesSeconds,
+    taskPlannedUnassignedMilestonesSeconds,
+    setTaskPlannedUnassignedMilestonesSeconds,
     savePolicies,
     resetPoliciesDraft,
   };

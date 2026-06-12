@@ -26,6 +26,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertIn("pywinpty", str(details.get("message") or ""))
         hints = details.get("hints") if isinstance(details.get("hints"), list) else []
         self.assertTrue(any("pip install pywinpty" in str(item) for item in hints))
+        self.assertTrue(any("--force-reinstall pywinpty" in str(item) for item in hints))
 
     def test_platform_support_matches_real_import_path(self) -> None:
         from no1.runners import platform_support
@@ -55,6 +56,7 @@ class TestWindowsSupportDiagnostics(unittest.TestCase):
         self.assertFalse(bool(details.get("supported")))
         self.assertEqual(str(details.get("code") or ""), "winpty_import_failed")
         self.assertIn("native import failed", str(details.get("message") or ""))
+        self.assertIn("native DLLs", str(details.get("message") or ""))
 
     def test_actor_runtime_returns_explicit_windows_pty_error(self) -> None:
         from no1.daemon.actors import actor_runtime_ops

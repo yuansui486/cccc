@@ -261,6 +261,26 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
             v = max_v
         patch[k] = v
 
+    def _int_list(k: str, *, default: List[int], min_v: int = 1) -> None:
+        if k not in settings:
+            return
+        raw = settings.get(k)
+        if isinstance(raw, str):
+            items: Any = [p.strip() for p in raw.split(",")]
+        elif isinstance(raw, (list, tuple)):
+            items = raw
+        else:
+            items = default
+        out: List[int] = []
+        for item in items:
+            try:
+                v = int(item)
+            except Exception:
+                continue
+            if v >= min_v:
+                out.append(v)
+        patch[k] = sorted(set(out)) or list(default)
+
     _int("nudge_after_seconds", min_v=0)
     _int("reply_required_nudge_after_seconds", min_v=0)
     _int("attention_ack_nudge_after_seconds", min_v=0)
@@ -274,11 +294,16 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
     _int("silence_timeout_seconds", min_v=0)
     _int("help_nudge_interval_seconds", min_v=0)
     _int("help_nudge_min_messages", min_v=0)
+    _int("task_empty_cooldown_seconds", min_v=0)
+    _int_list("task_active_overdue_milestones_seconds", default=[1800, 3000, 3600, 5400])
+    _int_list("task_planned_unassigned_milestones_seconds", default=[900, 1800, 3600, 7200, 10800, 21600])
     _int("min_interval_seconds", min_v=0)
 
     # Delivery toggles
     if "auto_mark_on_delivery" in settings:
         patch["auto_mark_on_delivery"] = coerce_bool(settings.get("auto_mark_on_delivery"), default=False)
+    if "task_reminder_enabled" in settings:
+        patch["task_reminder_enabled"] = coerce_bool(settings.get("task_reminder_enabled"), default=True)
 
     # Terminal transcript policy
     if "terminal_transcript_visibility" in settings:
@@ -315,6 +340,10 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
         "silence_timeout_seconds",
         "help_nudge_interval_seconds",
         "help_nudge_min_messages",
+        "task_reminder_enabled",
+        "task_empty_cooldown_seconds",
+        "task_active_overdue_milestones_seconds",
+        "task_planned_unassigned_milestones_seconds",
     }
     messaging_keys = {"default_send_to"}
     feature_keys = {"panorama_enabled", "desktop_pet_enabled"}
@@ -330,7 +359,12 @@ def _apply_settings_replace(group: Group, settings: Dict[str, Any]) -> Dict[str,
             else:
                 delivery[k] = int(v)
         if k in automation_keys:
-            automation[k] = int(v)
+            if k == "task_reminder_enabled":
+                automation[k] = coerce_bool(v, default=True)
+            elif k in {"task_active_overdue_milestones_seconds", "task_planned_unassigned_milestones_seconds"}:
+                automation[k] = list(v) if isinstance(v, list) else []
+            else:
+                automation[k] = int(v)
         if k in messaging_keys:
             messaging["default_send_to"] = str(v)
 

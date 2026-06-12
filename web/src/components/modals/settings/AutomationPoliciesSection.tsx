@@ -29,6 +29,14 @@ interface AutomationPoliciesSectionProps {
   setHelpNudgeIntervalSeconds: (v: number) => void;
   helpNudgeMinMessages: number;
   setHelpNudgeMinMessages: (v: number) => void;
+  taskReminderEnabled: boolean;
+  setTaskReminderEnabled: (v: boolean) => void;
+  taskEmptyCooldownSeconds: number;
+  setTaskEmptyCooldownSeconds: (v: number) => void;
+  taskActiveOverdueMilestonesSeconds: number[];
+  setTaskActiveOverdueMilestonesSeconds: (v: number[]) => void;
+  taskPlannedUnassignedMilestonesSeconds: number[];
+  setTaskPlannedUnassignedMilestonesSeconds: (v: number[]) => void;
   idleSeconds: number;
   setIdleSeconds: (v: number) => void;
   silenceSeconds: number;
@@ -61,6 +69,16 @@ function PolicyGroup({
 
 export function AutomationPoliciesSection(props: AutomationPoliciesSectionProps) {
   const { t } = useTranslation("settings");
+  const setActiveMilestone = (index: number, value: number) => {
+    const next = [...props.taskActiveOverdueMilestonesSeconds];
+    next[index] = value;
+    props.setTaskActiveOverdueMilestonesSeconds(next);
+  };
+  const setPlannedMilestone = (index: number, value: number) => {
+    const next = [...props.taskPlannedUnassignedMilestonesSeconds];
+    next[index] = value;
+    props.setTaskPlannedUnassignedMilestonesSeconds(next);
+  };
   return (
     <Section
       isDark={props.isDark}
@@ -135,6 +153,57 @@ export function AutomationPoliciesSection(props: AutomationPoliciesSectionProps)
             formatValue={false}
             helperText={t("policies.helpRefreshMinMsgsHelp")}
           />
+        </div>
+      </PolicyGroup>
+
+      <PolicyGroup title={t("policies.taskRuntimeAlerts")} description={t("policies.taskRuntimeAlertsHelp")}>
+        <label className="flex items-start gap-3 rounded-lg border border-[var(--glass-border-subtle)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-[var(--glass-border)]"
+            checked={props.taskReminderEnabled}
+            onChange={(event) => props.setTaskReminderEnabled(event.currentTarget.checked)}
+          />
+          <span>
+            <span className="block font-medium text-[var(--color-text-primary)]">{t("policies.taskRuntimeAlertsEnabled")}</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-[var(--color-text-muted)]">
+              {t("policies.taskRuntimeAlertsEnabledHelp")}
+            </span>
+          </span>
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <NumberInputRow
+            isDark={props.isDark}
+            label={t("policies.taskEmptyCooldown")}
+            value={props.taskEmptyCooldownSeconds}
+            onChange={props.setTaskEmptyCooldownSeconds}
+            helperText={t("policies.taskEmptyCooldownHelp")}
+          />
+          {props.taskActiveOverdueMilestonesSeconds.map((value, index) => (
+            <NumberInputRow
+              key={`task-active-${index}`}
+              isDark={props.isDark}
+              label={t("policies.taskActiveMilestone", { index: index + 1 })}
+              value={value}
+              onChange={(next) => setActiveMilestone(index, next)}
+              helperText={t("policies.taskActiveMilestoneHelp")}
+            />
+          ))}
+        </div>
+      </PolicyGroup>
+
+      <PolicyGroup title={t("policies.taskPlannedAlerts")} description={t("policies.taskPlannedAlertsHelp")}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {props.taskPlannedUnassignedMilestonesSeconds.map((value, index) => (
+            <NumberInputRow
+              key={`task-planned-${index}`}
+              isDark={props.isDark}
+              label={t("policies.taskPlannedMilestone", { index: index + 1 })}
+              value={value}
+              onChange={(next) => setPlannedMilestone(index, next)}
+              helperText={t("policies.taskPlannedMilestoneHelp")}
+            />
+          ))}
         </div>
       </PolicyGroup>
 

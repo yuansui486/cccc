@@ -117,6 +117,7 @@ from ..schemas import (
     WEB_MAX_FILE_BYTES,
     WEB_MAX_TEMPLATE_BYTES,
     _safe_int,
+    _safe_int_list,
     check_group,
     filter_groups_for_principal,
     require_admin,
@@ -2342,6 +2343,10 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "silence_timeout_seconds": _safe_int(automation.get("silence_timeout_seconds", 0), default=0, min_value=0),
                     "help_nudge_interval_seconds": _safe_int(automation.get("help_nudge_interval_seconds", 600), default=600, min_value=0),
                     "help_nudge_min_messages": _safe_int(automation.get("help_nudge_min_messages", 10), default=10, min_value=0),
+                    "task_reminder_enabled": coerce_bool(automation.get("task_reminder_enabled"), default=True),
+                    "task_empty_cooldown_seconds": _safe_int(automation.get("task_empty_cooldown_seconds", 900), default=900, min_value=0),
+                    "task_active_overdue_milestones_seconds": _safe_int_list(automation.get("task_active_overdue_milestones_seconds"), default=[1800, 3000, 3600, 5400]),
+                    "task_planned_unassigned_milestones_seconds": _safe_int_list(automation.get("task_planned_unassigned_milestones_seconds"), default=[900, 1800, 3600, 7200, 10800, 21600]),
                     "min_interval_seconds": _safe_int(delivery.get("min_interval_seconds", 0), default=0, min_value=0),
                     "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
                     "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
@@ -3336,6 +3341,20 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch["help_nudge_interval_seconds"] = max(0, req.help_nudge_interval_seconds)
         if req.help_nudge_min_messages is not None:
             patch["help_nudge_min_messages"] = max(0, req.help_nudge_min_messages)
+        if req.task_reminder_enabled is not None:
+            patch["task_reminder_enabled"] = bool(req.task_reminder_enabled)
+        if req.task_empty_cooldown_seconds is not None:
+            patch["task_empty_cooldown_seconds"] = max(0, req.task_empty_cooldown_seconds)
+        if req.task_active_overdue_milestones_seconds is not None:
+            patch["task_active_overdue_milestones_seconds"] = _safe_int_list(
+                req.task_active_overdue_milestones_seconds,
+                default=[1800, 3000, 3600, 5400],
+            )
+        if req.task_planned_unassigned_milestones_seconds is not None:
+            patch["task_planned_unassigned_milestones_seconds"] = _safe_int_list(
+                req.task_planned_unassigned_milestones_seconds,
+                default=[900, 1800, 3600, 7200, 10800, 21600],
+            )
         if req.min_interval_seconds is not None:
             patch["min_interval_seconds"] = max(0, req.min_interval_seconds)
         if req.auto_mark_on_delivery is not None:

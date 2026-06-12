@@ -750,6 +750,10 @@ export type GroupSettings = {
   silence_timeout_seconds: number;
   help_nudge_interval_seconds: number;
   help_nudge_min_messages: number;
+  task_reminder_enabled: boolean;
+  task_empty_cooldown_seconds: number;
+  task_active_overdue_milestones_seconds: number[];
+  task_planned_unassigned_milestones_seconds: number[];
   min_interval_seconds: number;
   auto_mark_on_delivery: boolean;
 

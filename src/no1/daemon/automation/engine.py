@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 from ...contracts.v1 import AutomationRule, AutomationRuleSet, SystemNotifyData
 from ...kernel.actors import find_actor, find_foreman, list_visible_actors
 from ...kernel.agent_state_hygiene import evaluate_agent_state_hygiene, sync_mind_context_runtime_state
-from ...kernel.context import ContextStorage
+from ...kernel.context import ContextStorage, Task, TaskStatus
 from ...kernel.group import (
     Group,
     effective_automation_snippets,
@@ -50,6 +50,12 @@ from ...util.fs import atomic_write_json, read_json
 from ...util.time import parse_utc_iso, utc_now_iso
 
 
+_DEFAULT_TASK_EMPTY_COOLDOWN_SECONDS = 15 * 60
+_DEFAULT_TASK_ACTIVE_OVERDUE_MILESTONES_SECONDS = (30 * 60, 50 * 60, 60 * 60, 90 * 60)
+_DEFAULT_TASK_PLANNED_UNASSIGNED_MILESTONES_SECONDS = (15 * 60, 30 * 60, 60 * 60, 2 * 60 * 60, 3 * 60 * 60, 6 * 60 * 60)
+_TASK_USER_ESCALATION_SECONDS = 90 * 60
+
+
 @dataclass(frozen=True)
 class AutomationConfig:
     """Automation configuration for a group."""
@@ -72,6 +78,12 @@ class AutomationConfig:
     help_nudge_interval_seconds: int  # Minimum time between help nudges per actor (0 to disable)
     help_nudge_min_messages: int      # Minimum delivered messages between help nudges (0 to disable)
 
+    # Level 4: Task board stewardship
+    task_reminder_enabled: bool
+    task_empty_cooldown_seconds: int
+    task_active_overdue_milestones_seconds: Tuple[int, ...]
+    task_planned_unassigned_milestones_seconds: Tuple[int, ...]
+
 
 def _cfg(group: Group) -> AutomationConfig:
     """Load automation config from group.yaml."""
@@ -84,6 +96,24 @@ def _cfg(group: Group) -> AutomationConfig:
         except Exception:
             v = int(default)
         return max(0, v)
+
+    def _int_list(key: str, default: Tuple[int, ...]) -> Tuple[int, ...]:
+        raw = d.get(key) if key in d else default
+        if isinstance(raw, str):
+            items: Any = [p.strip() for p in raw.split(",")]
+        elif isinstance(raw, (list, tuple)):
+            items = raw
+        else:
+            items = default
+        out: List[int] = []
+        for item in items:
+            try:
+                n = int(item)
+            except Exception:
+                continue
+            if n > 0:
+                out.append(n)
+        return tuple(sorted(set(out))) or tuple(default)
 
     return AutomationConfig(
         # Level 1
@@ -102,6 +132,17 @@ def _cfg(group: Group) -> AutomationConfig:
         # Level 3
         help_nudge_interval_seconds=_int("help_nudge_interval_seconds", 600),
         help_nudge_min_messages=_int("help_nudge_min_messages", 10),
+        # Level 4
+        task_reminder_enabled=coerce_bool(d.get("task_reminder_enabled"), default=True),
+        task_empty_cooldown_seconds=_int("task_empty_cooldown_seconds", _DEFAULT_TASK_EMPTY_COOLDOWN_SECONDS),
+        task_active_overdue_milestones_seconds=_int_list(
+            "task_active_overdue_milestones_seconds",
+            _DEFAULT_TASK_ACTIVE_OVERDUE_MILESTONES_SECONDS,
+        ),
+        task_planned_unassigned_milestones_seconds=_int_list(
+            "task_planned_unassigned_milestones_seconds",
+            _DEFAULT_TASK_PLANNED_UNASSIGNED_MILESTONES_SECONDS,
+        ),
     )
 
 
@@ -253,6 +294,86 @@ def _actor_display_names(group: Group) -> str:
         title = str(a.get("title") or "").strip()
         names.append(title or aid)
     return ", ".join(names)
+
+
+def _task_reminder_state(doc: Dict[str, Any]) -> Dict[str, Any]:
+    state = doc.get("task_reminders")
+    if not isinstance(state, dict):
+        state = {}
+        doc["task_reminders"] = state
+    empty = state.get("empty")
+    if not isinstance(empty, dict):
+        empty = {}
+        state["empty"] = empty
+    tasks = state.get("tasks")
+    if not isinstance(tasks, dict):
+        tasks = {}
+        state["tasks"] = tasks
+    return state
+
+
+def _task_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    return parse_utc_iso(str(value))
+
+
+def _task_age_base(task: Task) -> datetime:
+    return (
+        _task_dt(getattr(task, "updated_at", None))
+        or _task_dt(getattr(task, "created_at", None))
+        or datetime.now(timezone.utc)
+    )
+
+
+def _task_status_value(task: Task) -> str:
+    status = getattr(task, "status", "")
+    return str(getattr(status, "value", status) or "").strip().lower()
+
+
+def _format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    if total < 3600:
+        return f"{max(1, total // 60)}m"
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    if minutes:
+        return f"{hours}h {minutes}m"
+    return f"{hours}h"
+
+
+def _task_progress_text(task: Task) -> str:
+    checklist = getattr(task, "checklist", None) or []
+    if not checklist:
+        return "progress: no checklist"
+    total = len(checklist)
+    done = 0
+    for item in checklist:
+        status = getattr(item, "status", "")
+        if str(getattr(status, "value", status) or "").strip().lower() == "done":
+            done += 1
+    current = getattr(task, "current_checklist_item", None)
+    current_text = str(getattr(current, "text", "") or "").strip() if current is not None else ""
+    pct = int(round((done / total) * 100)) if total else 0
+    suffix = f"; current: {current_text}" if current_text else ""
+    return f"progress: {done}/{total} ({pct}%){suffix}"
+
+
+def _task_summary_line(task: Task, *, now: Optional[datetime] = None) -> str:
+    tid = str(getattr(task, "id", "") or "").strip()
+    title = str(getattr(task, "title", "") or "").strip()
+    assignee = str(getattr(task, "assignee", "") or "").strip() or "unassigned"
+    status = _task_status_value(task) or "unknown"
+    base = _task_age_base(task)
+    age = ""
+    if now is not None:
+        age = f"; age: {_format_duration((now - base).total_seconds())}"
+    return f"- {tid}: {title} [{status}; assignee: {assignee}; {_task_progress_text(task)}{age}]"
+
+
+def _recent_done_task_lines(done_tasks: List[Task], *, now: datetime, limit: int = 3) -> List[str]:
+    ordered = sorted(done_tasks, key=lambda t: _task_age_base(t), reverse=True)
+    return [_task_summary_line(t, now=now) for t in ordered[:limit]]
 
 
 @dataclass(frozen=True)
@@ -499,6 +620,10 @@ _AUTOMATION_ACTIVITY_NOTIFY_KINDS = frozenset(
         "silence_check",
         "auto_idle",
         "automation",
+        "task_empty_active",
+        "task_empty_planned",
+        "task_active_overdue",
+        "task_planned_unassigned",
     }
 )
 
@@ -896,7 +1021,10 @@ class AutomationManager:
         # Level 3: Actor-facing help nudges
         self._check_help_nudge(group, cfg, now)
 
-        # Level 4: User-defined automation rules
+        # Level 4: Task board stewardship
+        self._check_task_reminders(group, cfg, now)
+
+        # Level 5: User-defined automation rules
         self._check_rules(group, now)
 
     def _check_nudge(self, group: Group, cfg: AutomationConfig, now: datetime) -> None:
@@ -1553,6 +1681,301 @@ class AutomationManager:
         if errors:
             return False, " ; ".join(errors[:3])
         return False, "no actor operations applied"
+
+    def _append_task_notify(
+        self,
+        group: Group,
+        *,
+        target_actor_id: str,
+        runner_kind: str,
+        kind: str,
+        priority: str,
+        title: str,
+        message: str,
+        context: Dict[str, Any],
+        deliver: bool = True,
+    ) -> Dict[str, Any]:
+        notify_data = SystemNotifyData(
+            kind=kind,
+            priority=priority,
+            title=title,
+            message=message,
+            target_actor_id=target_actor_id,
+            requires_ack=False,
+            context=context,
+        )
+        ev = append_event(
+            group.ledger_path,
+            kind="system.notify",
+            group_id=group.group_id,
+            scope_key="",
+            by="system",
+            data=notify_data.model_dump(),
+        )
+        if deliver and target_actor_id and target_actor_id != "user":
+            _queue_notify_to_pty(group, actor_id=target_actor_id, runner_kind=runner_kind, ev=ev, notify=notify_data)
+        return ev
+
+    def _check_task_reminders(self, group: Group, cfg: AutomationConfig, now: datetime) -> None:
+        """Check task board health and remind foreman/executors about stale work."""
+        if not cfg.task_reminder_enabled:
+            return
+
+        try:
+            tasks = ContextStorage(group).list_tasks()
+        except Exception:
+            return
+
+        planned_tasks = [t for t in tasks if _task_status_value(t) == TaskStatus.PLANNED.value]
+        active_tasks = [t for t in tasks if _task_status_value(t) == TaskStatus.ACTIVE.value]
+        done_tasks = [t for t in tasks if _task_status_value(t) == TaskStatus.DONE.value]
+
+        try:
+            roster = {
+                str(a.get("id") or "").strip(): a
+                for a in list_visible_actors(group)
+                if isinstance(a, dict) and str(a.get("id") or "").strip()
+            }
+        except Exception:
+            roster = {}
+
+        foreman = find_foreman(group)
+        foreman_id = str((foreman or {}).get("id") or "").strip() if isinstance(foreman, dict) else ""
+        foreman_runner = str((foreman or {}).get("runner") or "pty").strip() if isinstance(foreman, dict) else "pty"
+        if not foreman_id:
+            return
+
+        now_iso = _iso_utc(now)
+        notices: List[Dict[str, Any]] = []
+
+        def _runner_for(aid: str) -> str:
+            actor = roster.get(aid)
+            return str((actor or {}).get("runner") or "pty").strip()
+
+        def _targets_for_task(task: Task) -> List[Tuple[str, str]]:
+            out: List[Tuple[str, str]] = [(foreman_id, foreman_runner)]
+            assignee = str(getattr(task, "assignee", "") or "").strip()
+            if assignee and assignee != foreman_id and assignee in roster:
+                out.append((assignee, _runner_for(assignee)))
+            return out
+
+        with self._lock:
+            state = _load_state(group)
+            tr = _task_reminder_state(state)
+            empty_state = tr.get("empty") if isinstance(tr.get("empty"), dict) else {}
+            task_state = tr.get("tasks") if isinstance(tr.get("tasks"), dict) else {}
+            dirty = False
+
+            def _check_empty(kind: str, count: int, other_count: int) -> None:
+                nonlocal dirty
+                rec = empty_state.get(kind)
+                if not isinstance(rec, dict):
+                    rec = {}
+                    empty_state[kind] = rec
+                    dirty = True
+                was_zero = coerce_bool(rec.get("was_zero"), default=False)
+                last_at = parse_utc_iso(str(rec.get("last_notified_at") or "")) if rec.get("last_notified_at") else None
+                cooldown = max(0, int(cfg.task_empty_cooldown_seconds))
+                due = count == 0 and (
+                    not was_zero
+                    or last_at is None
+                    or (cooldown > 0 and (now - last_at).total_seconds() >= cooldown)
+                )
+                if count != 0:
+                    if rec.get("was_zero") is not False:
+                        rec["was_zero"] = False
+                        dirty = True
+                    return
+                if rec.get("was_zero") is not True:
+                    rec["was_zero"] = True
+                    dirty = True
+                if not due:
+                    return
+                rec["last_notified_at"] = now_iso
+                dirty = True
+                recent = _recent_done_task_lines(done_tasks, now=now)
+                done_block = "\nRecent done tasks:\n" + "\n".join(recent) if recent else "\nNo recent done tasks found."
+                if kind == "active":
+                    message = (
+                        f"Current active task count is 0; planned={other_count}, done={len(done_tasks)}.\n"
+                        "Confirm whether the current work is complete. If complete, output the final result and mark tasks done. "
+                        "If not complete, immediately assign/start the next task and keep the task record current."
+                        f"{done_block}"
+                    )
+                    title = "No active tasks"
+                    notify_kind = "task_empty_active"
+                else:
+                    message = (
+                        f"Current planned task count is 0; active={other_count}, done={len(done_tasks)}.\n"
+                        "Confirm whether the current work is complete. If complete, output the final result and mark tasks done. "
+                        "If not complete, immediately create/assign the next task with a clear outcome, owner, and evidence requirement."
+                        f"{done_block}"
+                    )
+                    title = "No planned tasks"
+                    notify_kind = "task_empty_planned"
+                notices.append(
+                    {
+                        "target_actor_id": foreman_id,
+                        "runner_kind": foreman_runner,
+                        "kind": notify_kind,
+                        "priority": "normal",
+                        "title": title,
+                        "message": message,
+                        "context": {"reason": kind, "active_count": len(active_tasks), "planned_count": len(planned_tasks)},
+                    }
+                )
+
+            _check_empty("active", len(active_tasks), len(planned_tasks))
+            _check_empty("planned", len(planned_tasks), len(active_tasks))
+
+            active_ids: set[str] = set()
+            planned_ids: set[str] = set()
+
+            for task in active_tasks:
+                tid = str(getattr(task, "id", "") or "").strip()
+                if not tid:
+                    continue
+                active_ids.add(tid)
+                rec = task_state.get(tid)
+                if not isinstance(rec, dict) or rec.get("status") != TaskStatus.ACTIVE.value:
+                    base = _task_age_base(task)
+                    rec = {
+                        "status": TaskStatus.ACTIVE.value,
+                        "observed_active_at": _iso_utc(base),
+                        "active_milestones": {},
+                    }
+                    task_state[tid] = rec
+                    dirty = True
+                sent = rec.get("active_milestones")
+                if not isinstance(sent, dict):
+                    sent = {}
+                    rec["active_milestones"] = sent
+                    dirty = True
+                base_dt = parse_utc_iso(str(rec.get("observed_active_at") or "")) or _task_age_base(task)
+                elapsed = max(0.0, (now - base_dt).total_seconds())
+                for milestone in cfg.task_active_overdue_milestones_seconds:
+                    key = str(int(milestone))
+                    if elapsed < float(milestone) or sent.get(key):
+                        continue
+                    sent[key] = now_iso
+                    dirty = True
+                    minute = int(milestone // 60)
+                    reminder_ord = "first"
+                    requires_solution = False
+                    if milestone >= 60 * 60:
+                        reminder_ord = "third"
+                        requires_solution = True
+                    elif milestone >= 50 * 60:
+                        reminder_ord = "second"
+                        requires_solution = True
+                    body = (
+                        f"Task {tid} has been active for {minute} minutes and is not marked done.\n"
+                        f"{_task_summary_line(task, now=now)}\n"
+                        "Check whether this is normal task complexity or executor abnormality. "
+                        "If the task is already complete, update status to done and provide the result. "
+                        "If it is not complete, update progress, blockers, and the next action."
+                    )
+                    if requires_solution:
+                        body += f"\nThis is the {reminder_ord} reminder; provide a concrete solution or escalation path."
+                    for target_actor_id, runner_kind in _targets_for_task(task):
+                        notices.append(
+                            {
+                                "target_actor_id": target_actor_id,
+                                "runner_kind": runner_kind,
+                                "kind": "task_active_overdue",
+                                "priority": "high" if milestone >= 50 * 60 else "normal",
+                                "title": f"Task active for {minute} minutes",
+                                "message": body,
+                                "context": {"task_id": tid, "milestone_seconds": int(milestone), "reminder": reminder_ord},
+                            }
+                        )
+                    if milestone >= _TASK_USER_ESCALATION_SECONDS:
+                        notices.append(
+                            {
+                                "target_actor_id": "user",
+                                "runner_kind": "",
+                                "kind": "task_active_overdue",
+                                "priority": "urgent",
+                                "title": f"Task exceeded {minute} minutes",
+                                "message": (
+                                    f"Task {tid} has been active for {minute} minutes without completion.\n"
+                                    f"{_task_summary_line(task, now=now)}\n"
+                                    "The system has reminded the executor and foreman; user review may be needed."
+                                ),
+                                "context": {"task_id": tid, "milestone_seconds": int(milestone), "escalated_to_user": True},
+                                "deliver": False,
+                            }
+                        )
+
+            for task in planned_tasks:
+                tid = str(getattr(task, "id", "") or "").strip()
+                if not tid:
+                    continue
+                planned_ids.add(tid)
+                rec = task_state.get(tid)
+                if not isinstance(rec, dict) or rec.get("status") != TaskStatus.PLANNED.value:
+                    base = _task_age_base(task)
+                    rec = {
+                        "status": TaskStatus.PLANNED.value,
+                        "observed_planned_at": _iso_utc(base),
+                        "planned_milestones": {},
+                    }
+                    task_state[tid] = rec
+                    dirty = True
+                sent = rec.get("planned_milestones")
+                if not isinstance(sent, dict):
+                    sent = {}
+                    rec["planned_milestones"] = sent
+                    dirty = True
+                base_dt = parse_utc_iso(str(rec.get("observed_planned_at") or "")) or _task_age_base(task)
+                elapsed = max(0.0, (now - base_dt).total_seconds())
+                for milestone in cfg.task_planned_unassigned_milestones_seconds:
+                    key = str(int(milestone))
+                    if elapsed < float(milestone) or sent.get(key):
+                        continue
+                    sent[key] = now_iso
+                    dirty = True
+                    minute = int(milestone // 60)
+                    notices.append(
+                        {
+                            "target_actor_id": foreman_id,
+                            "runner_kind": foreman_runner,
+                            "kind": "task_planned_unassigned",
+                            "priority": "normal" if milestone < 60 * 60 else "high",
+                            "title": f"Planned task unassigned for {minute} minutes",
+                            "message": (
+                                f"The following planned task has not been moved into execution after {minute} minutes:\n"
+                                f"{_task_summary_line(task, now=now)}\n"
+                                "Assign it now, or mark it done/archived if it is no longer needed. "
+                                "When delegating, preserve the original request, scope, constraints, success criteria, evidence, and known context."
+                            ),
+                            "context": {"task_id": tid, "milestone_seconds": int(milestone)},
+                        }
+                    )
+
+            alive_ids = active_ids | planned_ids
+            for tid in list(task_state.keys()):
+                if tid not in alive_ids:
+                    task_state.pop(tid, None)
+                    dirty = True
+
+            tr["empty"] = empty_state
+            tr["tasks"] = task_state
+            if dirty or notices:
+                _save_state(group, state)
+
+        for notice in notices:
+            self._append_task_notify(
+                group,
+                target_actor_id=str(notice.get("target_actor_id") or ""),
+                runner_kind=str(notice.get("runner_kind") or "pty"),
+                kind=str(notice.get("kind") or "info"),
+                priority=str(notice.get("priority") or "normal"),
+                title=str(notice.get("title") or ""),
+                message=str(notice.get("message") or ""),
+                context=notice.get("context") if isinstance(notice.get("context"), dict) else {},
+                deliver=coerce_bool(notice.get("deliver"), default=True),
+            )
 
     # Rule IDs of built-in automation that should NOT fire when group is idle.
     _IDLE_SUPPRESSED_RULE_IDS = frozenset({"standup"})

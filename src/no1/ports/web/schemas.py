@@ -225,6 +225,10 @@ class GroupSettingsRequest(BaseModel):
     silence_timeout_seconds: Optional[int] = None
     help_nudge_interval_seconds: Optional[int] = None
     help_nudge_min_messages: Optional[int] = None
+    task_reminder_enabled: Optional[bool] = None
+    task_empty_cooldown_seconds: Optional[int] = None
+    task_active_overdue_milestones_seconds: Optional[list[int]] = None
+    task_planned_unassigned_milestones_seconds: Optional[list[int]] = None
     min_interval_seconds: Optional[int] = None  # delivery throttle
     auto_mark_on_delivery: Optional[bool] = None  # auto-mark messages as read after delivery
 
@@ -442,6 +446,25 @@ def _safe_int(value: Any, *, default: int, min_value: Optional[int] = None, max_
     if max_value is not None and n > max_value:
         n = max_value
     return n
+
+
+def _safe_int_list(value: Any, *, default: list[int], min_value: int = 1) -> list[int]:
+    raw = value
+    if isinstance(raw, str):
+        items: Any = [p.strip() for p in raw.split(",")]
+    elif isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        items = default
+    out: list[int] = []
+    for item in items:
+        try:
+            n = int(item)
+        except Exception:
+            continue
+        if n >= min_value:
+            out.append(n)
+    return sorted(set(out)) or list(default)
 
 
 class ObservabilityUpdateRequest(BaseModel):

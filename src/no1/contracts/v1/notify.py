@@ -10,6 +10,10 @@ Kinds:
 - silence_check: group silence alert (to foreman)
 - auto_idle: group automatically transitioned to idle after repeated silence checks
 - automation: user-defined automation rule notification
+- task_empty_active: no active tasks remain on the board
+- task_empty_planned: no planned tasks remain on the board
+- task_active_overdue: active task runtime reminder
+- task_planned_unassigned: planned task remains unassigned
 - status_change: actor/group status change
 - error: system error
 """
@@ -28,6 +32,10 @@ NotifyKind = Literal[
     "silence_check",   # Group silence alert (to foreman)
     "auto_idle",       # Group auto-idled after repeated silence checks
     "automation",      # User-defined automation rule notification
+    "task_empty_active",  # No active tasks remain
+    "task_empty_planned",  # No planned tasks remain
+    "task_active_overdue",  # Active task runtime reminder
+    "task_planned_unassigned",  # Planned task remains unassigned
     "status_change",   # Status change notification
     "error",           # Error notification
     "info",            # Informational notification
