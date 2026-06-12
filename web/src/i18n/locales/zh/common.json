@@ -40,7 +40,7 @@
   "fileTypeYamlJson": "支持 YAML / YML / JSON 格式",
   "appName": "一号同事",
   "userLabel": "用户",
-  "recipientAll": "@所有人",
+  "recipientAll": "@所有AI",
   "recipientForeman": "@负责人",
   "recipientPeers": "@协作者",
   "groupStatusRun": "运行中",

@@ -21,7 +21,7 @@ export function getUserDisplayName(): string {
 export function getRecipientTokenLabel(token: string): string {
   switch (String(token || "").trim()) {
     case "@all":
-      return tr("common:recipientAll", "@所有人");
+      return tr("common:recipientAll", "@所有AI");
     case "@foreman":
       return tr("common:recipientForeman", "@负责人");
     case "@peers":

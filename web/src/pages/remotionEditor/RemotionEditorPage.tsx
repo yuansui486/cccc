@@ -3,7 +3,14 @@ import { Player, type PlayerRef } from "@remotion/player";
 import { classNames } from "../../utils/classNames";
 import { CloseIcon, MutedIcon, PauseIcon, PlayIcon, VolumeIcon } from "../../components/Icons";
 import { apiJson, withAuthToken } from "../../services/api";
-import { VideoEditorRuntime, ensureVideoEditorHost, type ComponentRegistry, type ComponentRegistryMetadata } from "./VideoEditorRuntime";
+import {
+  VideoEditorRuntime,
+  ensureVideoEditorHost,
+  type ComponentManifestItem,
+  type ComponentPropDefinition,
+  type ComponentRegistry,
+  type ComponentRegistryMetadata,
+} from "./VideoEditorRuntime";
 
 type ClipProps = Record<string, unknown>;
 
@@ -41,7 +48,6 @@ type BatchScope = "component" | "track" | "selection";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const PROP_KEY_ORDER = ["x", "y", "width", "height", "size", "fontSize", "scale", "opacity", "radius"];
-const DEFAULT_COMPONENT_REGISTRY_FILE = "video-editor-components.js";
 const emptySpec: RemotionTimelineSpec = {
   composition: {
     id: "RemotionWorkspace",
@@ -188,12 +194,6 @@ function buildAssetBaseUrl(specPath: string): string {
   return `${base}${base.includes("?") ? "&" : "?"}path=`;
 }
 
-function buildBundledAssetUrl(path: string): string {
-  const base = String(import.meta.env.BASE_URL || "/");
-  const cleanBase = base.endsWith("/") ? base : `${base}/`;
-  return `${cleanBase}${path.replace(/^\/+/, "")}`;
-}
-
 function getUrlRegistryRef(): string {
   if (typeof window === "undefined") return "";
   const params = new URLSearchParams(window.location.search);
@@ -218,7 +218,12 @@ function buildRegistryUrl(specPath: string, assetBaseUrl: string, spec: Remotion
   const specRegistryRef = registryRefFromSpec(spec);
   const path = urlRegistryRef || specRegistryRef.path;
   const name = urlRegistryRef ? "default" : specRegistryRef.name;
-  if (!path) return { url: buildBundledAssetUrl(DEFAULT_COMPONENT_REGISTRY_FILE), name };
+  if (!path) {
+    return {
+      url: withAuthToken(`/api/v1/video-editor/component-bundle?spec=${encodeURIComponent(specPath)}`),
+      name: "default",
+    };
+  }
   if (/^(?:https?:|blob:|data:|\/api\/)/i.test(path)) return { url: path, name };
   if (path.startsWith("/")) {
     return {
@@ -235,13 +240,13 @@ async function loadComponentRegistryScript(url: string): Promise<void> {
   const existing = componentScriptLoads.get(cleanUrl);
   if (existing) return existing;
   const promise = new Promise<void>((resolve, reject) => {
-    const previous = document.querySelector<HTMLScriptElement>(`script[data-video-editor-components="${CSS.escape(cleanUrl)}"]`);
+    const previous = document.querySelector<HTMLScriptElement>(`script[data-video-editor-registry="${CSS.escape(cleanUrl)}"]`);
     if (previous?.dataset.loaded === "true") {
       resolve();
       return;
     }
     const script = previous || document.createElement("script");
-    script.dataset.videoEditorComponents = cleanUrl;
+    script.dataset.videoEditorRegistry = cleanUrl;
     script.async = true;
     script.src = cleanUrl;
     script.onload = () => {
@@ -282,6 +287,18 @@ function componentTone(component: string): string {
   if (component.includes("Transition") || component.includes("Firework")) return "bg-amber-500";
   if (component.includes("Audio")) return "bg-fuchsia-500";
   return "bg-slate-500";
+}
+
+function componentLabel(component: string, manifestByName: Map<string, ComponentManifestItem>): string {
+  return manifestByName.get(component)?.label || component;
+}
+
+function componentDescription(component: string, manifestByName: Map<string, ComponentManifestItem>): string {
+  return manifestByName.get(component)?.description || "";
+}
+
+function propDefinitionFor(component: string, key: string, manifestByName: Map<string, ComponentManifestItem>): ComponentPropDefinition | undefined {
+  return manifestByName.get(component)?.props?.find((prop) => prop.key === key);
 }
 
 function numberInputClass() {
@@ -329,6 +346,10 @@ export function RemotionEditorPage({
     for (const clip of spec.clips) map.set(clip.component, (map.get(clip.component) || 0) + 1);
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [spec.clips]);
+  const componentManifestByName = useMemo(() => {
+    const items = Array.isArray(componentMetadata.manifest) ? componentMetadata.manifest : [];
+    return new Map(items.filter((item) => item?.name).map((item) => [item.name, item]));
+  }, [componentMetadata.manifest]);
 
   const clipById = useMemo(() => new Map(spec.clips.map((clip) => [clip.id, clip])), [spec.clips]);
   const selectedClips = useMemo(() => selectedClipIds.map((id) => clipById.get(id)).filter(Boolean) as RemotionClip[], [clipById, selectedClipIds]);
@@ -668,9 +689,15 @@ export function RemotionEditorPage({
                 Component
                 <select value={selectedComponent} onChange={(event) => changeComponent(event.target.value)} className={classNames(numberInputClass(), "mt-1")}>
                   {componentCounts.map(([component, count]) => (
-                    <option key={component} value={component}>{component} ({count})</option>
+                    <option key={component} value={component}>{componentLabel(component, componentManifestByName)} ({count})</option>
                   ))}
                 </select>
+                {selectedComponent ? (
+                  <span className="mt-1 block text-[10px] leading-4 text-[var(--color-text-muted)]">
+                    {selectedComponent}
+                    {componentDescription(selectedComponent, componentManifestByName) ? ` · ${componentDescription(selectedComponent, componentManifestByName)}` : ""}
+                  </span>
+                ) : null}
               </label>
             ) : null}
 
@@ -708,7 +735,9 @@ export function RemotionEditorPage({
                     <span className={classNames("h-2.5 w-2.5 shrink-0 rounded-full", componentTone(clip.component))} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-medium text-[var(--color-text-primary)]">{clip.id}</span>
-                      <span className="block truncate text-[10px] text-[var(--color-text-muted)]">{clip.component}</span>
+                      <span className="block truncate text-[10px] text-[var(--color-text-muted)]">
+                        {componentLabel(clip.component, componentManifestByName)} · {clip.component}
+                      </span>
                     </span>
                     {activeClipIds.has(clip.id) ? <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-300">LIVE</span> : null}
                   </button>
@@ -799,7 +828,7 @@ export function RemotionEditorPage({
                             selectedSet.has(clip.id) && "ring-2 ring-white"
                           )}
                           style={{ left: `${left}%`, width: `${Math.max(width, 1.2)}%` }}
-                          title={`${clip.id} · ${clip.component}`}
+                          title={`${clip.id} · ${componentLabel(clip.component, componentManifestByName)} · ${clip.component}`}
                         >
                           <span className="block truncate">{clip.id}</span>
                         </button>
@@ -828,7 +857,9 @@ export function RemotionEditorPage({
               <div className="grid grid-cols-2 gap-2">
                 {selectedPropKeys.map((key) => (
                   <label key={key} className="text-xs font-medium text-[var(--color-text-muted)]">
-                    <span className="block truncate" title={key}>{key}</span>
+                    <span className="block truncate" title={key}>
+                      {selectedClips.length === 1 ? (propDefinitionFor(selectedClips[0].component, key, componentManifestByName)?.label || key) : key}
+                    </span>
                     <input
                       value={batchValues[key] || ""}
                       onChange={(event) => setBatchValues((prev) => ({ ...prev, [key]: event.target.value }))}
@@ -872,15 +903,35 @@ export function RemotionEditorPage({
                   </button>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{clip.id}</div>
-                    <div className="truncate text-xs text-[var(--color-text-muted)]">{clip.component} · {clip.from}-{clip.from + clip.durationInFrames}</div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">
+                      {componentLabel(clip.component, componentManifestByName)} · {clip.component} · {clip.from}-{clip.from + clip.durationInFrames}
+                    </div>
+                    {componentDescription(clip.component, componentManifestByName) ? (
+                      <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--color-text-muted)]">
+                        {componentDescription(clip.component, componentManifestByName)}
+                      </div>
+                    ) : null}
+                    {componentManifestByName.get(clip.component)?.tags?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {componentManifestByName.get(clip.component)?.tags?.map((tag) => (
+                          <span key={tag} className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-sky-600 dark:text-sky-300">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     {sortPropKeys(Object.keys(clip.props || {})).map((key) => {
                       const value = clip.props?.[key];
+                      const propDefinition = propDefinitionFor(clip.component, key, componentManifestByName);
                       if (Array.isArray(value)) {
                         return (
                           <div key={key} className="col-span-2 text-[10px] font-medium text-[var(--color-text-muted)]">
-                            <span className="block truncate" title={key}>{key}</span>
+                            <span className="block truncate" title={propDefinition?.description || key}>
+                              {propDefinition?.label || key}
+                              {propDefinition?.required ? " *" : ""}
+                            </span>
                             <div className="mt-1 space-y-1.5 rounded-lg border border-[var(--glass-border-subtle)] bg-[var(--color-bg-primary)] p-2">
                               {value.length === 0 ? (
                                 <div className="rounded-md border border-dashed border-[var(--glass-border-subtle)] px-2 py-2 text-xs text-[var(--color-text-muted)]">
@@ -926,7 +977,10 @@ export function RemotionEditorPage({
                       }
                       return (
                         <label key={key} className="text-[10px] font-medium text-[var(--color-text-muted)]">
-                          <span className="block truncate" title={key}>{key}</span>
+                          <span className="block truncate" title={propDefinition?.description || key}>
+                            {propDefinition?.label || key}
+                            {propDefinition?.required ? " *" : ""}
+                          </span>
                           <input
                             value={formatPropValue(value)}
                             onChange={(event) => setFocusedClipValue(clip.id, key, event.target.value)}

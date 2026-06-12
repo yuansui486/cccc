@@ -413,6 +413,13 @@ class AccountSelfRequest(BaseModel):
     onecolleague_session_version: Optional[int] = None
 
 
+class AccountCurrentTokenRequest(BaseModel):
+    access_token: str = Field(default="")
+    username: str = Field(default="")
+    tenant_code: str = Field(default="")
+    onecolleague_session_version: Optional[int] = None
+
+
 class DoneHubTeamPresetRequest(BaseModel):
     base_url: str = Field(default="")
     access_token: str = Field(default="")

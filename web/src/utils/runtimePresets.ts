@@ -20,6 +20,12 @@ export type RuntimePreset = {
   description?: string;
 };
 
+export type CodexReasoningEffort = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ClaudeReasoningEffort = "" | "low" | "medium" | "high" | "xhigh" | "max";
+
+const CODEX_REASONING_EFFORT_KEY = "model_reasoning_effort";
+const CLAUDE_LEGACY_EFFORT_ENV_KEY = "CLAUDE_CODE_EFFORT_LEVEL";
+
 export const RUNTIME_PRESETS: RuntimePreset[] = [
   {
     id: "default:claude",
@@ -39,7 +45,6 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
       ANTHROPIC_DEFAULT_SONNET_MODEL: "DeepSeek-V4-Pro",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "DeepSeek-V4-Pro",
       CLAUDE_CODE_SUBAGENT_MODEL: "DeepSeek-V4-Pro",
-      CLAUDE_CODE_EFFORT_LEVEL: "max",
     },
   },
   {
@@ -55,7 +60,6 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
       ANTHROPIC_DEFAULT_SONNET_MODEL: "qwen3.6-plus",
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "qwen3.6-flash",
       CLAUDE_CODE_SUBAGENT_MODEL: "qwen3.6-plus",
-      CLAUDE_CODE_EFFORT_LEVEL: "max",
     },
   },
   {
@@ -131,6 +135,69 @@ export function commandForRuntimePreset(preset: RuntimePreset, runtimeInfo?: Run
     return withCommandModel(command, preset.model, "-m").join(" ");
   }
   return command.join(" ");
+}
+
+export function codexReasoningEffortFromCommand(command: string | string[] | undefined): CodexReasoningEffort {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  for (let idx = 0; idx < tokens.length - 1; idx += 1) {
+    if (tokens[idx] !== "-c") continue;
+    const next = tokens[idx + 1];
+    if (!next.startsWith(`${CODEX_REASONING_EFFORT_KEY}=`)) continue;
+    return normalizeCodexReasoningEffort(next.slice(CODEX_REASONING_EFFORT_KEY.length + 1));
+  }
+  return "";
+}
+
+export function withCodexReasoningEffort(command: string | string[] | undefined, effort: CodexReasoningEffort): string {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  const normalized = normalizeCodexReasoningEffort(effort);
+  const cleaned: string[] = [];
+  for (let idx = 0; idx < tokens.length; idx += 1) {
+    const item = tokens[idx];
+    const next = tokens[idx + 1] || "";
+    if (item === "-c" && next.startsWith(`${CODEX_REASONING_EFFORT_KEY}=`)) {
+      idx += 1;
+      continue;
+    }
+    cleaned.push(item);
+  }
+  if (!normalized) return cleaned.join(" ");
+  return [...cleaned, "-c", `${CODEX_REASONING_EFFORT_KEY}=${normalized}`].join(" ");
+}
+
+export function claudeReasoningEffortFromCommand(command: string | string[] | undefined): ClaudeReasoningEffort {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  for (let idx = 0; idx < tokens.length; idx += 1) {
+    const item = tokens[idx];
+    if (item === "--effort" && idx + 1 < tokens.length) return normalizeClaudeReasoningEffort(tokens[idx + 1]);
+    if (item.startsWith("--effort=")) return normalizeClaudeReasoningEffort(item.slice("--effort=".length));
+  }
+  return "";
+}
+
+export function withClaudeReasoningEffort(command: string | string[] | undefined, effort: ClaudeReasoningEffort): string {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  const normalized = normalizeClaudeReasoningEffort(effort);
+  const cleaned: string[] = [];
+  for (let idx = 0; idx < tokens.length; idx += 1) {
+    const item = tokens[idx];
+    if (item === "--effort") {
+      idx += 1;
+      continue;
+    }
+    if (item.startsWith("--effort=")) continue;
+    cleaned.push(item);
+  }
+  if (!normalized) return cleaned.join(" ");
+  return [...cleaned, "--effort", normalized].join(" ");
 }
 
 export function secretsTextForRuntimePreset(preset: RuntimePreset, authToken?: string): string {
@@ -211,6 +278,7 @@ function knownAllPresetSecretKeys(): Set<string> {
     const authKey = authSecretKeyForRuntimePreset(preset);
     if (authKey) out.add(authKey);
   }
+  out.add(CLAUDE_LEGACY_EFFORT_ENV_KEY);
   out.add("OPENAI_API_KEY");
   return out;
 }
@@ -246,6 +314,46 @@ function modelFromCommand(command: string[]): string {
     if (item.startsWith("--model=")) return item.split("=", 2)[1] || "";
   }
   return "";
+}
+
+function normalizeCodexReasoningEffort(value: string): CodexReasoningEffort {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "minimal" ||
+    normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high" ||
+    normalized === "xhigh"
+  ) {
+    return normalized;
+  }
+  return "";
+}
+
+function normalizeClaudeReasoningEffort(value: string): ClaudeReasoningEffort {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "x-high" || normalized === "extra-high") return "xhigh";
+  if (
+    normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high" ||
+    normalized === "xhigh" ||
+    normalized === "max"
+  ) {
+    return normalized;
+  }
+  return "";
+}
+
+function parseEnvAssignmentLine(line: string): { key: string; value: string } | null {
+  const match = String(line || "").match(/^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/i);
+  if (!match) return null;
+  const key = String(match[1] || "").trim();
+  let value = String(match[2] || "").trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1);
+  }
+  return { key, value };
 }
 
 function splitCommand(command: string): string[] {

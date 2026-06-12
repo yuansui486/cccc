@@ -138,6 +138,45 @@ export async function refreshDoneHubSession(
   });
 }
 
+export async function syncCurrentAccountToken(
+  session: DoneHubSession,
+  tenantCode = "",
+): Promise<DoneHubApiResponse<{ available: boolean }>> {
+  return request<{ available: boolean }>("/api/v1/account/current-token", {
+    access_token: session.access_token,
+    username: session.username,
+    tenant_code: String(tenantCode || "").trim(),
+    onecolleague_session_version: Number(session.onecolleague_session_version || 0),
+  });
+}
+
+export async function clearCurrentAccountToken(accessToken = ""): Promise<DoneHubApiResponse<{ cleared: boolean }>> {
+  let resp: Response;
+  try {
+    resp = await fetch("/api/v1/account/current-token", {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ access_token: String(accessToken || "").trim() }),
+    });
+  } catch (error) {
+    return makeError("NETWORK_ERROR", error instanceof Error ? error.message : "Network request failed");
+  }
+
+  const text = await resp.text();
+  if (!text) {
+    if (resp.ok) return { ok: true, result: { cleared: true } };
+    return makeError("EMPTY_RESPONSE", `Server returned ${resp.status} with empty body`);
+  }
+
+  try {
+    return JSON.parse(text) as DoneHubApiResponse<{ cleared: boolean }>;
+  } catch {
+    return makeError("PARSE_ERROR", `Invalid JSON response: ${text.slice(0, 100)}`);
+  }
+}
+
 export async function listDoneHubTeamPresets(
   session: DoneHubSession,
 ): Promise<DoneHubApiResponse<DoneHubTeamPresetsResult>> {

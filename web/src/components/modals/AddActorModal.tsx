@@ -3,7 +3,6 @@ import {
   ActorProfile,
   RuntimeInfo,
   SupportedRuntime,
-  SUPPORTED_RUNTIMES,
   RUNTIME_INFO,
 } from "../../types";
 import { useTranslation } from "react-i18next";
@@ -12,15 +11,22 @@ import { useModalA11y } from "../../hooks/useModalA11y";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
+import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/capabilityAutoload";
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
 import {
-  RUNTIME_PRESETS,
+  claudeReasoningEffortFromCommand,
   commandForRuntimePreset,
+  codexReasoningEffortFromCommand,
   mergePresetSecrets,
   runtimePresetById,
   runtimePresetIdFor,
+  withClaudeReasoningEffort,
+  withCodexReasoningEffort,
+  type ClaudeReasoningEffort,
+  type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
@@ -165,6 +171,7 @@ export function AddActorModal({
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const primedRuntimePresetRef = useRef("");
+  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes), [runtimes]);
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
   useEffect(() => {
@@ -200,6 +207,8 @@ export function AddActorModal({
   const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
   const customRunnerLockedToPty = !newActorUseProfile && !supportsStandardWebHeadlessRuntime(newActorRuntime);
+  const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(newActorCommand) || "medium";
+  const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(newActorCommand) || "high";
 
   useEffect(() => {
     if (!isOpen) {
@@ -256,6 +265,20 @@ export function AddActorModal({
     onCancelAndReset();
   };
 
+  const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
+    const baseCommand = newActorCommand.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, runtimeInfo);
+    setNewActorCommand(withCodexReasoningEffort(baseCommand, effort));
+    setNewActorUseDefaultCommand(false);
+    setSelectedRuntimePresetId("");
+  };
+
+  const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
+    const baseCommand = newActorCommand.trim() || commandForRuntimePreset(runtimePresetById("default:claude")!, runtimeInfo);
+    setNewActorCommand(withClaudeReasoningEffort(baseCommand, effort));
+    setNewActorUseDefaultCommand(false);
+    setSelectedRuntimePresetId("");
+  };
+
   return (
     <div
       className="fixed inset-0 backdrop-blur-sm flex items-stretch sm:items-start justify-center p-0 sm:p-6 z-50 animate-fade-in glass-overlay"
@@ -280,89 +303,57 @@ export function AddActorModal({
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
           <div className="mx-auto max-w-2xl space-y-4">
             <Surface className={sectionCardClass}>
-              <div className={sectionTitleClass}>
-                {newActorRole === "foreman" ? t("addForemanRole") : t("addPeerRole")}
+              <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
+                  {t("customAgent")}
+                </Button>
+                <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
+                  {t("fromActorProfile")}
+                </Button>
               </div>
-              <div className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                {hasForeman ? t("foremanLeads") : t("firstAgentForeman")}
-                <span className="mx-1.5 text-[var(--color-text-tertiary)]">·</span>
-                {t("addSectionBasicsCompactHint")}
-              </div>
+            </Surface>
 
-              <div className="mt-4 space-y-4">
-                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                  <div className="sm:w-[104px] sm:flex-shrink-0">
-                    <ActorAvatarField
-                      label={null}
-                      avatarUrl={undefined}
-                      previewUrl={avatarPreviewUrl}
-                      runtime={previewRuntime}
-                      command={newActorUseProfile ? selectedProfile?.command : newActorCommand}
-                      title={previewTitle}
-                      isDark={isDark}
-                      sizeClassName="h-14 w-14"
-                      disabled={busy === "actor-add"}
-                      resetDisabled={!avatarFile}
-                      onSelectFile={setAvatarFile}
-                      onReset={() => setAvatarFile(null)}
-                    />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                      {t("agentName")}
-                    </label>
-                    <Input
-                      value={newActorId}
-                      onChange={(e) => setNewActorId(e.target.value)}
-                      placeholder={suggestedActorId}
-                    />
-                    <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                      {t("leaveEmptyToUse")}{" "}
-                      <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                        {suggestedActorId}
-                      </code>
-                    </div>
-                  </div>
+            <Surface className={sectionCardClass}>
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                <div className="sm:w-[104px] sm:flex-shrink-0">
+                  <ActorAvatarField
+                    label={null}
+                    avatarUrl={undefined}
+                    previewUrl={avatarPreviewUrl}
+                    runtime={previewRuntime}
+                    command={newActorUseProfile ? selectedProfile?.command : newActorCommand}
+                    title={previewTitle}
+                    isDark={isDark}
+                    sizeClassName="h-14 w-14"
+                    disabled={busy === "actor-add"}
+                    resetDisabled={!avatarFile}
+                    onSelectFile={setAvatarFile}
+                    onReset={() => setAvatarFile(null)}
+                  />
                 </div>
 
-                <RolePresetPicker
-                  draftValue={newActorRoleNotes}
-                  onChangeDraft={setNewActorRoleNotes}
-                  disabled={busy === "actor-add"}
-                />
-
-                <div>
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
-                  <Textarea
-                    className="min-h-[144px]"
-                    value={newActorRoleNotes}
-                    onChange={(e) => setNewActorRoleNotes(e.target.value)}
-                    placeholder={t("roleNotesPlaceholder")}
-                    spellCheck={false}
+                <div className="min-w-0 flex-1">
+                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                    {t("agentName")}
+                  </label>
+                  <Input
+                    value={newActorId}
+                    onChange={(e) => setNewActorId(e.target.value)}
+                    placeholder={suggestedActorId}
                   />
-                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("newActorRoleNotesHint")}</div>
+                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                    {t("leaveEmptyToUse")}{" "}
+                    <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                      {suggestedActorId}
+                    </code>
+                  </div>
                 </div>
               </div>
             </Surface>
 
             <Surface className={sectionCardClass}>
-              <div className={sectionTitleClass}>{t("sectionRuntime")}</div>
-              <div className={sectionHintClass}>{t("sectionRuntimeHint")}</div>
-
-              <div className="mt-4">
-                <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
-                    {t("customAgent")}
-                  </Button>
-                  <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
-                    {t("fromActorProfile")}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-4">
+              <div className="space-y-4">
                 {newActorUseProfile ? (
                   <>
                     <div>
@@ -430,32 +421,16 @@ export function AddActorModal({
                           }
                         }}
                       >
-                        <optgroup label={t("runtimePresets")}>
-                          {RUNTIME_PRESETS.map((preset) => {
-                            const rtInfo = runtimes.find((r) => r.name === preset.runtime);
-                            const available = rtInfo?.available ?? false;
-                            return (
-                              <option key={preset.id} value={preset.id} disabled={!available}>
-                                {preset.label}
-                                {!available ? ` ${t("notInstalled")}` : ""}
+                        {runtimeChoiceGroups.map((group) => (
+                          <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
+                            {group.options.map((option) => (
+                              <option key={option.id} value={option.id} disabled={option.disabled}>
+                                {option.label}
+                                {option.disabled ? ` ${t("notInstalled")}` : ""}
                               </option>
-                            );
-                          })}
-                        </optgroup>
-                        <optgroup label={t("runtimeRawChoices")}>
-                        {SUPPORTED_RUNTIMES.map((rt) => {
-                          const info = RUNTIME_INFO[rt];
-                          const rtInfo = runtimes.find((r) => r.name === rt);
-                          const available = rtInfo?.available ?? false;
-                          const selectable = available || rt === "custom";
-                          return (
-                            <option key={rt} value={rt} disabled={!selectable}>
-                              {info?.label || rt}
-                              {!available && rt !== "custom" ? ` ${t("notInstalled")}` : ""}
-                            </option>
-                          );
-                        })}
-                        </optgroup>
+                            ))}
+                          </optgroup>
+                        ))}
                       </select>
                       {runtimeChoiceDescription ? (
                         <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
@@ -478,6 +453,14 @@ export function AddActorModal({
                         />
                         {t("useRuntimeDefaultCommand")}
                       </label>
+                    ) : null}
+
+                    {newActorRuntime === "codex" ? (
+                      <CodexReasoningEffortSelector value={selectedCodexReasoningEffort} onChange={updateCodexReasoningEffort} />
+                    ) : null}
+
+                    {newActorRuntime === "claude" ? (
+                      <ClaudeReasoningEffortSelector value={selectedClaudeReasoningEffort} onChange={updateClaudeReasoningEffort} />
                     ) : null}
 
                     {supportsStandardWebHeadlessRuntime(newActorRuntime) ? (
@@ -548,6 +531,31 @@ export function AddActorModal({
                     ) : null}
                   </>
                 )}
+              </div>
+            </Surface>
+
+            <Surface className={sectionCardClass}>
+              <div className={sectionTitleClass}>{t("promptSettings")}</div>
+              <div className={sectionHintClass}>{t("promptSettingsHint")}</div>
+
+              <div className="mt-4 space-y-4">
+                <RolePresetPicker
+                  draftValue={newActorRoleNotes}
+                  onChangeDraft={setNewActorRoleNotes}
+                  disabled={busy === "actor-add"}
+                />
+
+                <div>
+                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("roleNotes")}</label>
+                  <Textarea
+                    className="min-h-[144px]"
+                    value={newActorRoleNotes}
+                    onChange={(e) => setNewActorRoleNotes(e.target.value)}
+                    placeholder={t("roleNotesPlaceholder")}
+                    spellCheck={false}
+                  />
+                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("newActorRoleNotesHint")}</div>
+                </div>
               </div>
             </Surface>
 

@@ -1,4 +1,4 @@
-import { ActorProfile, RuntimeInfo, SupportedRuntime, SUPPORTED_RUNTIMES, RUNTIME_INFO } from "../../types";
+import { ActorProfile, RuntimeInfo, SupportedRuntime, RUNTIME_INFO } from "../../types";
 import { useTranslation } from "react-i18next";
 import { BASIC_MCP_CONFIG_SNIPPET } from "../../utils/mcpConfigSnippets";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -10,14 +10,21 @@ import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
 import { ActorAvatarField } from "../ActorAvatarField";
+import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
+import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
 import {
-  RUNTIME_PRESETS,
+  claudeReasoningEffortFromCommand,
   commandForRuntimePreset,
+  codexReasoningEffortFromCommand,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
   runtimePresetIdFor,
+  withClaudeReasoningEffort,
+  withCodexReasoningEffort,
+  type ClaudeReasoningEffort,
+  type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
@@ -190,6 +197,7 @@ export function EditActorModal({
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const secretFetchSeqRef = useRef(0);
   const presetSecretsPrimedRef = useRef("");
+  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes), [runtimes]);
   const modalStateRef = useRef<{
     groupId: string;
     actorId: string;
@@ -384,6 +392,8 @@ export function EditActorModal({
       : derivedRuntimePresetId;
   const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
+  const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(command) || "medium";
+  const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(command) || "high";
 
   useEffect(() => {
     if (!isOpen) {
@@ -436,6 +446,18 @@ export function EditActorModal({
     } catch (e) {
       setSecretsError(e instanceof Error ? e.message : t("saveFailed"));
     }
+  };
+
+  const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
+    const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, rtInfo);
+    onChangeCommand(withCodexReasoningEffort(baseCommand, effort));
+    setSelectedRuntimePresetId("");
+  };
+
+  const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
+    const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:claude")!, rtInfo);
+    onChangeCommand(withClaudeReasoningEffort(baseCommand, effort));
+    setSelectedRuntimePresetId("");
   };
 
   const handleUploadAvatar = async (file: File | null) => {
@@ -745,7 +767,7 @@ export function EditActorModal({
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("runtime")}</label>
+                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("switchModel")}</label>
                       <select
                         className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
                         value={effectiveRuntimePresetId || runtime}
@@ -769,34 +791,34 @@ export function EditActorModal({
                           }
                         }}
                       >
-                        <optgroup label={t("runtimePresets")}>
-                          {RUNTIME_PRESETS.map((preset) => {
-                            const rtInfoLocal = runtimes.find((r) => r.name === preset.runtime);
-                            const runtimeAvailable = rtInfoLocal?.available ?? false;
-                            return (
-                              <option key={preset.id} value={preset.id} disabled={!runtimeAvailable}>
-                                {preset.label}
-                                {!runtimeAvailable ? ` ${t("notInstalled")}` : ""}
+                        {runtimeChoiceGroups.map((group) => (
+                          <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
+                            {group.options.map((option) => (
+                              <option key={option.id} value={option.id} disabled={option.disabled}>
+                                {option.label}
+                                {option.disabled ? ` ${t("notInstalled")}` : ""}
                               </option>
-                            );
-                          })}
-                        </optgroup>
-                        <optgroup label={t("runtimeRawChoices")}>
-                        {SUPPORTED_RUNTIMES.map((rt) => {
-                          const info = RUNTIME_INFO[rt];
-                          const rtInfoLocal = runtimes.find((r) => r.name === rt);
-                          const runtimeAvailable = rtInfoLocal?.available ?? false;
-                          const selectable = runtimeAvailable || rt === "custom";
-                          return (
-                            <option key={rt} value={rt} disabled={!selectable}>
-                              {info?.label || rt}
-                              {!runtimeAvailable && rt !== "custom" ? ` ${t("notInstalled")}` : ""}
-                            </option>
-                          );
-                        })}
-                        </optgroup>
+                            ))}
+                          </optgroup>
+                        ))}
                       </select>
                     </div>
+
+                    {runtime === "codex" ? (
+                      <CodexReasoningEffortSelector
+                        value={selectedCodexReasoningEffort}
+                        disabled={busy === "actor-update"}
+                        onChange={updateCodexReasoningEffort}
+                      />
+                    ) : null}
+
+                    {runtime === "claude" ? (
+                      <ClaudeReasoningEffortSelector
+                        value={selectedClaudeReasoningEffort}
+                        disabled={busy === "actor-update"}
+                        onChange={updateClaudeReasoningEffort}
+                      />
+                    ) : null}
 
                     {supportsStandardWebHeadlessRuntime(runtime) ? (
                       <div>

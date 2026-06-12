@@ -174,7 +174,7 @@ export function CreateGroupModal({
                 variant="secondary"
                 onClick={() => onFetchDirContents(createGroupPath || "~")}
               >
-                {t("createGroup.browse")}
+                {t("createGroup.findWindowsPath")}
               </Button>
             </div>
             <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
@@ -241,9 +241,9 @@ export function CreateGroupModal({
               </label>
             <Surface
               radius="md"
-              className="border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(250,248,245,0.96))] px-4 py-3 shadow-[0_24px_60px_-40px_rgba(15,23,42,0.18)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(24,26,31,0.9),rgba(13,14,18,0.98))]"
+              className="border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(250,248,245,0.96))] px-3 py-2.5 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.18)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(24,26,31,0.9),rgba(13,14,18,0.98))]"
             >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   id={blueprintInputId}
                   key={createGroupTemplateFile ? createGroupTemplateFile.name : "none"}
@@ -258,7 +258,7 @@ export function CreateGroupModal({
                 />
                 <label
                   htmlFor={blueprintInputId}
-                  className={`inline-flex min-h-[40px] cursor-pointer items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                  className={`inline-flex min-h-[36px] cursor-pointer items-center justify-center rounded-xl px-3 py-1.5 text-sm font-medium transition-colors ${
                     templateBusy || busy === "create"
                       ? "pointer-events-none opacity-50 border border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-muted)]"
                       : "glass-btn-accent text-[var(--color-accent-primary)]"
@@ -271,7 +271,7 @@ export function CreateGroupModal({
                   <div className="truncate">
                     {createGroupTemplateFile ? createGroupTemplateFile.name : t("common:noFileChosen", "未选择文件")}
                   </div>
-                  <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{t("common:fileTypeYamlJson", "支持 YAML / YML / JSON")}</div>
+                  <div className="text-[11px] leading-tight text-[var(--color-text-muted)]">{t("common:fileTypeYamlJson", "支持 YAML / YML / JSON")}</div>
                 </div>
                 {createGroupTemplateFile && (
                   <Button
@@ -301,9 +301,6 @@ export function CreateGroupModal({
                   />
                 </div>
               )}
-              <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-                {t("createGroup.blueprintHint")}
-              </div>
             </Surface>
           </div>
         </div>

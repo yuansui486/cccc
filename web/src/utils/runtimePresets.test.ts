@@ -1,13 +1,56 @@
 import { describe, expect, it } from "vitest";
 
+import { buildRuntimeChoiceGroups } from "./runtimeChoiceGroups";
 import {
+  claudeReasoningEffortFromCommand,
+  codexReasoningEffortFromCommand,
   commandForRuntimePreset,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
+  withClaudeReasoningEffort,
+  withCodexReasoningEffort,
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
+  it("groups model choices by CLI family", () => {
+    const groups = buildRuntimeChoiceGroups([
+      { name: "claude", display_name: "Claude Code", available: true, recommended_command: "claude" },
+      { name: "codex", display_name: "Codex CLI", available: true, recommended_command: "codex" },
+      { name: "gemini", display_name: "Gemini CLI", available: true, recommended_command: "gemini" },
+      { name: "kimi", display_name: "Kimi CLI", available: true, recommended_command: "kimi" },
+    ]);
+
+    expect(groups.map((group) => group.labelKey)).toEqual([
+      "runtimeGroupCodex",
+      "runtimeGroupClaude",
+      "runtimeGroupGemini",
+      "runtimeGroupKimi",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options.map((option) => option.id)).toEqual([
+      "default:claude",
+      "model:deepseek-v4-pro-claude",
+      "model:qwen3.6-max-claude",
+      "model:doubao-code-claude",
+      "droid",
+      "amp",
+      "auggie",
+      "neovate",
+      "hermes",
+      "web_model",
+      "custom",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.id)).toEqual([
+      "default:codex",
+      "model:gpt-5.4-codex",
+      "model:gpt-5.5-codex",
+    ]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupGemini")?.options.map((option) => option.id)).toEqual(["gemini"]);
+    expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options.map((option) => option.id)).toEqual([
+      "model:kimi-k2.6-kimi",
+    ]);
+  });
+
   it("builds Codex model commands from the runtime default", () => {
     const preset = runtimePresetById("model:gpt-5.5-codex");
     expect(preset).toBeTruthy();
@@ -19,6 +62,31 @@ describe("runtime presets", () => {
         recommended_command: "codex -c shell_environment_policy.inherit=all --search",
       })
     ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5");
+  });
+
+  it("adds, reads, replaces, and clears Codex reasoning effort", () => {
+    const base = "codex -c shell_environment_policy.inherit=all --search -m gpt-5.5";
+    const xhighCommand = withCodexReasoningEffort(base, "xhigh");
+
+    expect(xhighCommand).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5 -c model_reasoning_effort=xhigh");
+    expect(codexReasoningEffortFromCommand(xhighCommand)).toBe("xhigh");
+    expect(withCodexReasoningEffort(xhighCommand, "low")).toBe(
+      "codex -c shell_environment_policy.inherit=all --search -m gpt-5.5 -c model_reasoning_effort=low"
+    );
+    expect(withCodexReasoningEffort(xhighCommand, "")).toBe(base);
+  });
+
+  it("adds, reads, replaces, and clears Claude Code reasoning effort", () => {
+    const base = "claude --model DeepSeek-V4-Pro";
+    const high = withClaudeReasoningEffort(base, "high");
+
+    expect(high).toBe("claude --model DeepSeek-V4-Pro --effort high");
+    expect(claudeReasoningEffortFromCommand(high)).toBe("high");
+    expect(claudeReasoningEffortFromCommand("claude --effort=max")).toBe("max");
+    expect(claudeReasoningEffortFromCommand("claude --effort x-high")).toBe("xhigh");
+    expect(withClaudeReasoningEffort(high, "xhigh")).toBe("claude --model DeepSeek-V4-Pro --effort xhigh");
+    expect(withClaudeReasoningEffort(high, "max")).toBe("claude --model DeepSeek-V4-Pro --effort max");
+    expect(withClaudeReasoningEffort(high, "")).toBe(base);
   });
 
   it("adds only the API key env for the default Codex preset", () => {
@@ -102,7 +170,7 @@ describe("runtime presets", () => {
     expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="qwen3.6-plus"');
     expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="qwen3.6-flash"');
     expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="qwen3.6-plus"');
-    expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
+    expect(secrets).not.toContain("CLAUDE_CODE_EFFORT_LEVEL");
     expect(secrets).not.toContain("ignored-token");
   });
 
@@ -118,7 +186,7 @@ describe("runtime presets", () => {
     expect(secrets).toContain('ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek-V4-Pro"');
     expect(secrets).toContain('ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek-V4-Pro"');
     expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="DeepSeek-V4-Pro"');
-    expect(secrets).toContain('CLAUDE_CODE_EFFORT_LEVEL="max"');
+    expect(secrets).not.toContain("CLAUDE_CODE_EFFORT_LEVEL");
     expect(secrets).not.toContain("api.deepseek.com");
   });
 

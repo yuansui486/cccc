@@ -127,7 +127,7 @@ export function ProjectPanel({
             />
             <label className={classNames("mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", "glass-card text-[var(--color-text-primary)]")}>
               <input type="checkbox" checked={notifyAgents} onChange={(event) => onNotifyAgentsChange(event.target.checked)} />
-              {tr("context.notifyAgents", "Notify the team in chat (@all) after save")}
+              {tr("context.notifyAgents", "Notify all AI in chat after save")}
             </label>
             <div className="mt-3 flex items-center gap-2">
               <button type="button" onClick={onSaveProject} disabled={projectBusy} className={ui.buttonPrimaryClass}>

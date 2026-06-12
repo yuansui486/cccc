@@ -36,22 +36,29 @@ export const Section = ({
   icon: Icon,
   title,
   description,
+  actions,
   children,
 }: {
   isDark?: boolean;
   icon: React.ElementType;
   title: string;
   description: string;
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }) => (
   <div className={settingsWorkspacePanelClass(isDark)}>
-    <div className="flex items-center gap-2 mb-1">
-      <div className="rounded-md border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] p-1.5 text-[var(--color-accent-primary)]">
-        <Icon className="w-4 h-4" />
+    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <div className="rounded-md border border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] p-1.5 text-[var(--color-accent-primary)]">
+            <Icon className="w-4 h-4" />
+          </div>
+          <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</h3>
+        </div>
+        <p className="mt-1 text-xs ml-9 text-[var(--color-text-muted)]">{description}</p>
       </div>
-      <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</h3>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">{actions}</div> : null}
     </div>
-    <p className="text-xs ml-9 mb-4 text-[var(--color-text-muted)]">{description}</p>
     <div className="space-y-4 ml-1">{children}</div>
   </div>
 );

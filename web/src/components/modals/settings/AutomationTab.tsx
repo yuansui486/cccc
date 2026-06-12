@@ -27,7 +27,6 @@ import { AutomationRuleList } from "./AutomationRuleList";
 import { AutomationSnippetModal } from "./AutomationSnippetModal";
 import {
   dangerButtonClass,
-  primaryButtonClass,
   secondaryButtonClass,
   settingsWorkspaceHeaderClass,
   settingsWorkspacePanelClass,
@@ -465,6 +464,10 @@ export function AutomationTab(props: AutomationTabProps) {
       versionConflictMessage: t("automation.versionConflict"),
     });
 
+  const saveRule = async (_ruleId: string): Promise<void> => {
+    await saveRules();
+  };
+
   const saveRuleEditor = async (): Promise<void> => {
     if (!editingRuleDraft) return;
     const nextRules = editingRuleSourceId
@@ -491,9 +494,14 @@ export function AutomationTab(props: AutomationTabProps) {
     if (ok) closeSnippetManager();
   };
 
-  const removeRule = (ruleId: string) => {
-    setDraft({ ...draft, rules: draft.rules.filter((rule) => rule.id !== ruleId) });
+  const removeRule = async (ruleId: string) => {
+    const nextDraft = { ...draft, rules: draft.rules.filter((rule) => rule.id !== ruleId) };
+    setDraft(nextDraft);
     if (editingRuleSourceId === ruleId) closeRuleEditor();
+    await persistRuleset(nextDraft, {
+      failureMessage: t("automation.failedToSave"),
+      versionConflictMessage: t("automation.versionConflict"),
+    });
   };
 
   const clearCompletedRules = async () => {
@@ -572,6 +580,65 @@ export function AutomationTab(props: AutomationTabProps) {
         </div>
       )}
 
+      <Section
+        isDark={isDark}
+        icon={SparkIcon}
+        title={t("automation.rulesTitle")}
+        description={t("automation.rulesDescription")}
+        actions={(
+          <>
+            <button
+              type="button"
+              className={`${secondaryButtonClass()} whitespace-nowrap`}
+              onClick={openNewRule}
+              disabled={rulesBusy}
+              title={t("automation.createRuleTitle")}
+            >
+              {t("automation.newRule")}
+            </button>
+            <button
+              type="button"
+              className={`${secondaryButtonClass()} whitespace-nowrap`}
+              onClick={openSnippetManager}
+              disabled={rulesBusy}
+              title={t("automation.manageSnippetsTitle")}
+            >
+              {t("automation.snippets")}
+            </button>
+            <button
+              type="button"
+              className={`${dangerButtonClass()} whitespace-nowrap`}
+              onClick={resetToBaseline}
+              disabled={rulesBusy}
+              title={t("automation.resetTitle")}
+            >
+              {t("automation.resetToDefaults")}
+            </button>
+          </>
+        )}
+      >
+        {rulesErr ? <div className="text-xs text-rose-600 dark:text-rose-300">{rulesErr}</div> : null}
+
+        <AutomationRuleList
+          isDark={isDark}
+          visibleRules={visibleRules}
+          status={status}
+          rulesBusy={rulesBusy}
+          showCompletedRules={showCompletedRules}
+          completedOneTimeRuleIds={completedOneTimeRuleIds}
+          onToggleShowCompleted={setShowCompletedRules}
+          onClearCompleted={clearCompletedRules}
+          onToggleRuleEnabled={(ruleId, enabled) => updateRule(ruleId, { enabled })}
+          onEditRule={openExistingRule}
+          onDeleteRule={(ruleId) => void removeRule(ruleId)}
+          onSaveRule={(ruleId) => void saveRule(ruleId)}
+        />
+
+        <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+          {t("automation.editHint")}
+        </div>
+      </Section>
+
       <AutomationPoliciesSection
         isDark={isDark}
         busy={props.busy}
@@ -612,79 +679,6 @@ export function AutomationTab(props: AutomationTabProps) {
         onSavePolicies={props.onSavePolicies}
         onResetPolicies={props.onResetPolicies}
       />
-
-      <Section
-        isDark={isDark}
-        icon={SparkIcon}
-        title={t("automation.rulesTitle")}
-        description={t("automation.rulesDescription")}
-      >
-        {rulesErr ? <div className="text-xs text-rose-600 dark:text-rose-300">{rulesErr}</div> : null}
-
-        <div className="space-y-2">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-              <button
-                type="button"
-                className={`${secondaryButtonClass()} w-full sm:w-auto whitespace-nowrap`}
-                onClick={openNewRule}
-                disabled={rulesBusy}
-                title={t("automation.createRuleTitle")}
-              >
-                {t("automation.newRule")}
-              </button>
-              <button
-                type="button"
-                className={`${secondaryButtonClass()} w-full sm:w-auto whitespace-nowrap`}
-                onClick={openSnippetManager}
-                disabled={rulesBusy}
-                title={t("automation.manageSnippetsTitle")}
-              >
-                {t("automation.snippets")}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-              <button
-                type="button"
-                className={`${dangerButtonClass()} w-full sm:w-auto whitespace-nowrap`}
-                onClick={resetToBaseline}
-                disabled={rulesBusy}
-                title={t("automation.resetTitle")}
-              >
-                {t("automation.resetToDefaults")}
-              </button>
-              <button
-                type="button"
-                className={`${primaryButtonClass(rulesBusy)} w-full sm:w-auto whitespace-nowrap`}
-                onClick={() => void saveRules()}
-                disabled={rulesBusy}
-                title={t("automation.saveTitle")}
-              >
-                {rulesBusy ? t("automation.saving") : t("common:save")}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <AutomationRuleList
-          isDark={isDark}
-          visibleRules={visibleRules}
-          status={status}
-          rulesBusy={rulesBusy}
-          showCompletedRules={showCompletedRules}
-          completedOneTimeRuleIds={completedOneTimeRuleIds}
-          onToggleShowCompleted={setShowCompletedRules}
-          onClearCompleted={clearCompletedRules}
-          onToggleRuleEnabled={(ruleId, enabled) => updateRule(ruleId, { enabled })}
-          onEditRule={openExistingRule}
-          onDeleteRule={removeRule}
-        />
-
-        <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          {t("automation.editHint")}
-        </div>
-      </Section>
 
       <AutomationRuleEditorModal
         isDark={isDark}

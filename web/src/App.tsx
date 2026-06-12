@@ -404,7 +404,7 @@ export default function App() {
 
   React.useEffect(() => {
     if (!doneHubInitialized) return;
-    if (!(doneHubConnected || doneHubHasSession)) return;
+    if (!doneHubHasSession) return;
     void refreshDoneHub();
     const timer = window.setInterval(() => {
       void refreshDoneHub();
@@ -420,7 +420,7 @@ export default function App() {
       window.removeEventListener("focus", refreshOnVisible);
       document.removeEventListener("visibilitychange", refreshOnVisible);
     };
-  }, [doneHubConnected, doneHubHasSession, doneHubInitialized, refreshDoneHub]);
+  }, [doneHubHasSession, doneHubInitialized, refreshDoneHub]);
 
   const doneHub = useMemo(() => ({
     status: doneHubStatus,

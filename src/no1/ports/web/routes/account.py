@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict
 from urllib.parse import urlsplit
 
@@ -9,12 +10,13 @@ from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from ..codex_client_config import sync_codex_custom_provider_config
-from ..schemas import AccountLoginRequest, AccountSelfRequest, RouteContext
+from ..schemas import AccountCurrentTokenRequest, AccountLoginRequest, AccountSelfRequest, RouteContext
 
 _ACCOUNT_TIMEOUT = 15.0
 _DEFAULT_SMART_OPS_BASE_URL = "https://dongdongkc.shierkeji.com:6201"
 _DEFAULT_OCS_PUBLIC_BASE_URL = "https://dongdongkc.shierkeji.com:6201/ocs"
 _CLIENT_CONFIG_ERROR_MESSAGE = "Login succeeded, but local Codex config.toml could not be verified."
+_CURRENT_TOKEN: Dict[str, Any] = {}
 
 
 def _normalize_base_url(raw: str, *, code: str, label: str) -> str:
@@ -68,6 +70,52 @@ def _ocs_base_url() -> str:
 
 def _default_tenant_code() -> str:
     return str(os.environ.get("ONECOLLEAGUE_UA2_TENANT_CODE") or os.environ.get("UA2_TENANT_CODE") or "").strip()
+
+
+def _current_token_result() -> Dict[str, Any]:
+    token = str(_CURRENT_TOKEN.get("access_token") or "").strip()
+    if not token:
+        return {"available": False}
+    return {
+        "available": True,
+        "access_token": token,
+        "username": str(_CURRENT_TOKEN.get("username") or "").strip(),
+        "tenant_code": str(_CURRENT_TOKEN.get("tenant_code") or "").strip(),
+        "onecolleague_session_version": int(_CURRENT_TOKEN.get("onecolleague_session_version") or 0),
+        "updated_at": float(_CURRENT_TOKEN.get("updated_at") or 0),
+    }
+
+
+def _set_current_token(
+    *,
+    access_token: str,
+    username: str = "",
+    tenant_code: str = "",
+    onecolleague_session_version: int | None = None,
+) -> None:
+    token = str(access_token or "").strip()
+    if not token:
+        _CURRENT_TOKEN.clear()
+        return
+    _CURRENT_TOKEN.clear()
+    _CURRENT_TOKEN.update(
+        {
+            "access_token": token,
+            "username": str(username or "").strip(),
+            "tenant_code": str(tenant_code or "").strip(),
+            "onecolleague_session_version": int(onecolleague_session_version or 0),
+            "updated_at": time.time(),
+        }
+    )
+
+
+def _clear_current_token(access_token: str = "") -> bool:
+    expected = str(access_token or "").strip()
+    current = str(_CURRENT_TOKEN.get("access_token") or "").strip()
+    if expected and current and expected != current:
+        return False
+    _CURRENT_TOKEN.clear()
+    return True
 
 
 def _extract_error_message(payload: Any, *, fallback: str) -> str:
@@ -230,6 +278,30 @@ async def _fetch_account_session(
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     router = APIRouter(prefix="/api/v1/account")
 
+    @router.get("/current-token")
+    async def account_current_token_get() -> Dict[str, Any]:
+        result = _current_token_result()
+        return {"ok": bool(result.get("available")), "result": result}
+
+    @router.post("/current-token")
+    async def account_current_token_set(req: AccountCurrentTokenRequest) -> Dict[str, Any]:
+        token = str(req.access_token or "").strip()
+        if not token:
+            _clear_current_token()
+            return {"ok": True, "result": _current_token_result()}
+        _set_current_token(
+            access_token=token,
+            username=req.username,
+            tenant_code=req.tenant_code,
+            onecolleague_session_version=req.onecolleague_session_version,
+        )
+        return {"ok": True, "result": _current_token_result()}
+
+    @router.delete("/current-token")
+    async def account_current_token_delete(req: AccountCurrentTokenRequest) -> Dict[str, Any]:
+        cleared = _clear_current_token(req.access_token)
+        return {"ok": True, "result": {"cleared": cleared, **_current_token_result()}}
+
     @router.post("/login")
     async def account_login(req: AccountLoginRequest) -> Dict[str, Any]:
         if ctx.read_only:
@@ -270,13 +342,30 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         access_token = str(login_payload.get("access_token") or "").strip()
         if not access_token:
             return {"ok": False, "error": {"code": "ua2_missing_access_token", "message": "UA2 login response did not include access_token"}}
-        return await _fetch_account_session(access_token, start_onecolleague_session=True)
+        result = await _fetch_account_session(access_token, start_onecolleague_session=True)
+        session = (result.get("result") or {}).get("session") if isinstance(result, dict) else None
+        if result.get("ok") and isinstance(session, dict):
+            _set_current_token(
+                access_token=access_token,
+                username=str(session.get("username") or username),
+                tenant_code=tenant_code,
+                onecolleague_session_version=int(session.get("onecolleague_session_version") or 0),
+            )
+        return result
 
     @router.post("/self")
     async def account_self(req: AccountSelfRequest) -> Dict[str, Any]:
-        return await _fetch_account_session(
+        result = await _fetch_account_session(
             req.access_token,
             onecolleague_session_version=req.onecolleague_session_version,
         )
+        session = (result.get("result") or {}).get("session") if isinstance(result, dict) else None
+        if result.get("ok") and isinstance(session, dict):
+            _set_current_token(
+                access_token=req.access_token,
+                username=str(session.get("username") or ""),
+                onecolleague_session_version=int(session.get("onecolleague_session_version") or 0),
+            )
+        return result
 
     return [router]

@@ -79,6 +79,16 @@ def _coerce_string_env(raw: Any) -> Dict[str, str]:
     return out
 
 
+def _apply_runtime_env_compat(runtime: str, env: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(env or {})
+    if str(runtime or "").strip().lower() == "codex":
+        onecolleague_key = str(out.get("ONECOLLEAGUE_API_KEY") or "").strip()
+        openai_key = str(out.get("OPENAI_API_KEY") or "").strip()
+        if not onecolleague_key and openai_key:
+            out["ONECOLLEAGUE_API_KEY"] = openai_key
+    return out
+
+
 def _coerce_command(raw: Any, fallback: List[str]) -> List[str]:
     source = raw if isinstance(raw, list) else fallback
     return [str(item) for item in source if isinstance(item, str) and str(item).strip()]
@@ -133,6 +143,7 @@ def resolve_actor_launch_config(
         merged_env.update(private_env)
     else:
         merged_env = dict(public_env)
+    merged_env = _apply_runtime_env_compat(resolved_runtime, merged_env)
 
     return {
         "actor": dict(actor),
