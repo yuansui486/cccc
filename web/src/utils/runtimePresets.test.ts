@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  codexReasoningEffortFromCommand,
   commandForRuntimePreset,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
+  withCodexReasoningEffort,
 } from "./runtimePresets";
 
 describe("runtime presets", () => {
@@ -19,6 +21,18 @@ describe("runtime presets", () => {
         recommended_command: "codex -c shell_environment_policy.inherit=all --search",
       })
     ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5");
+  });
+
+  it("adds, reads, replaces, and clears Codex reasoning effort", () => {
+    const base = "codex -c shell_environment_policy.inherit=all --search -m gpt-5.5";
+    const xhighCommand = withCodexReasoningEffort(base, "xhigh");
+
+    expect(xhighCommand).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5 -c model_reasoning_effort=xhigh");
+    expect(codexReasoningEffortFromCommand(xhighCommand)).toBe("xhigh");
+    expect(withCodexReasoningEffort(xhighCommand, "low")).toBe(
+      "codex -c shell_environment_policy.inherit=all --search -m gpt-5.5 -c model_reasoning_effort=low"
+    );
+    expect(withCodexReasoningEffort(xhighCommand, "")).toBe(base);
   });
 
   it("adds only the API key env for the default Codex preset", () => {

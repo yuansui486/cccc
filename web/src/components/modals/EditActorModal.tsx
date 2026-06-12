@@ -14,10 +14,13 @@ import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../
 import {
   RUNTIME_PRESETS,
   commandForRuntimePreset,
+  codexReasoningEffortFromCommand,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
   runtimePresetIdFor,
+  withCodexReasoningEffort,
+  type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
@@ -132,6 +135,14 @@ function modeButtonClass(selected: boolean): string {
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
+
+const CODEX_REASONING_OPTIONS: Array<{ value: CodexReasoningEffort; key: string }> = [
+  { value: "xhigh", key: "reasoningXhigh" },
+  { value: "high", key: "reasoningHigh" },
+  { value: "medium", key: "reasoningMedium" },
+  { value: "low", key: "reasoningLow" },
+  { value: "minimal", key: "reasoningMinimal" },
+];
 
 export function EditActorModal({
   isOpen,
@@ -384,6 +395,8 @@ export function EditActorModal({
       : derivedRuntimePresetId;
   const selectedRuntimePreset = runtimePresetById(effectiveRuntimePresetId);
   const requireCommand = !effectiveLinked && editMode === "custom" && (runtime === "custom" || !available);
+  const codexReasoningEffort = runtime === "codex" ? codexReasoningEffortFromCommand(command) : "";
+  const selectedCodexReasoningEffort = codexReasoningEffort || "medium";
 
   useEffect(() => {
     if (!isOpen) {
@@ -436,6 +449,12 @@ export function EditActorModal({
     } catch (e) {
       setSecretsError(e instanceof Error ? e.message : t("saveFailed"));
     }
+  };
+
+  const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
+    const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, rtInfo);
+    onChangeCommand(withCodexReasoningEffort(baseCommand, effort));
+    setSelectedRuntimePresetId("");
   };
 
   const handleUploadAvatar = async (file: File | null) => {
@@ -797,6 +816,28 @@ export function EditActorModal({
                         </optgroup>
                       </select>
                     </div>
+
+                    {runtime === "codex" ? (
+                      <div>
+                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                          {t("reasoningEffort")}
+                        </label>
+                        <div className="grid grid-cols-5 gap-2">
+                          {CODEX_REASONING_OPTIONS.map((option) => (
+                            <Button
+                              key={option.key}
+                              type="button"
+                              variant="outline"
+                              className={modeButtonClass(selectedCodexReasoningEffort === option.value)}
+                              onClick={() => updateCodexReasoningEffort(option.value)}
+                              disabled={busy === "actor-update"}
+                            >
+                              {t(option.key)}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
                     {supportsStandardWebHeadlessRuntime(runtime) ? (
                       <div>

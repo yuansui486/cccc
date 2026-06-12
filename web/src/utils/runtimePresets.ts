@@ -20,6 +20,10 @@ export type RuntimePreset = {
   description?: string;
 };
 
+export type CodexReasoningEffort = "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+const CODEX_REASONING_EFFORT_KEY = "model_reasoning_effort";
+
 export const RUNTIME_PRESETS: RuntimePreset[] = [
   {
     id: "default:claude",
@@ -133,6 +137,38 @@ export function commandForRuntimePreset(preset: RuntimePreset, runtimeInfo?: Run
   return command.join(" ");
 }
 
+export function codexReasoningEffortFromCommand(command: string | string[] | undefined): CodexReasoningEffort {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  for (let idx = 0; idx < tokens.length - 1; idx += 1) {
+    if (tokens[idx] !== "-c") continue;
+    const next = tokens[idx + 1];
+    if (!next.startsWith(`${CODEX_REASONING_EFFORT_KEY}=`)) continue;
+    return normalizeCodexReasoningEffort(next.slice(CODEX_REASONING_EFFORT_KEY.length + 1));
+  }
+  return "";
+}
+
+export function withCodexReasoningEffort(command: string | string[] | undefined, effort: CodexReasoningEffort): string {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  const normalized = normalizeCodexReasoningEffort(effort);
+  const cleaned: string[] = [];
+  for (let idx = 0; idx < tokens.length; idx += 1) {
+    const item = tokens[idx];
+    const next = tokens[idx + 1] || "";
+    if (item === "-c" && next.startsWith(`${CODEX_REASONING_EFFORT_KEY}=`)) {
+      idx += 1;
+      continue;
+    }
+    cleaned.push(item);
+  }
+  if (!normalized) return cleaned.join(" ");
+  return [...cleaned, "-c", `${CODEX_REASONING_EFFORT_KEY}=${normalized}`].join(" ");
+}
+
 export function secretsTextForRuntimePreset(preset: RuntimePreset, authToken?: string): string {
   const lines: string[] = [];
   const env = preset.envPrivate || {};
@@ -244,6 +280,20 @@ function modelFromCommand(command: string[]): string {
     const item = command[idx];
     if ((item === "-m" || item === "--model") && idx + 1 < command.length) return command[idx + 1];
     if (item.startsWith("--model=")) return item.split("=", 2)[1] || "";
+  }
+  return "";
+}
+
+function normalizeCodexReasoningEffort(value: string): CodexReasoningEffort {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "minimal" ||
+    normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high" ||
+    normalized === "xhigh"
+  ) {
+    return normalized;
   }
   return "";
 }

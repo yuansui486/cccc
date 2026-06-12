@@ -18,9 +18,12 @@ import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeS
 import {
   RUNTIME_PRESETS,
   commandForRuntimePreset,
+  codexReasoningEffortFromCommand,
   mergePresetSecrets,
   runtimePresetById,
   runtimePresetIdFor,
+  withCodexReasoningEffort,
+  type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
@@ -102,6 +105,14 @@ function modeButtonClass(selected: boolean): string {
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
+
+const CODEX_REASONING_OPTIONS: Array<{ value: CodexReasoningEffort; key: string }> = [
+  { value: "xhigh", key: "reasoningXhigh" },
+  { value: "high", key: "reasoningHigh" },
+  { value: "medium", key: "reasoningMedium" },
+  { value: "low", key: "reasoningLow" },
+  { value: "minimal", key: "reasoningMinimal" },
+];
 
 function secretsPlaceholderForRuntime(runtime: SupportedRuntime): string {
   if (runtime === "claude") {
@@ -200,6 +211,8 @@ export function AddActorModal({
   const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
   const customRunnerLockedToPty = !newActorUseProfile && !supportsStandardWebHeadlessRuntime(newActorRuntime);
+  const codexReasoningEffort = newActorRuntime === "codex" ? codexReasoningEffortFromCommand(newActorCommand) : "";
+  const selectedCodexReasoningEffort = codexReasoningEffort || "medium";
 
   useEffect(() => {
     if (!isOpen) {
@@ -254,6 +267,13 @@ export function AddActorModal({
     setAvatarFile(null);
     setSelectedRuntimePresetId("");
     onCancelAndReset();
+  };
+
+  const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
+    const baseCommand = newActorCommand.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, runtimeInfo);
+    setNewActorCommand(withCodexReasoningEffort(baseCommand, effort));
+    setNewActorUseDefaultCommand(false);
+    setSelectedRuntimePresetId("");
   };
 
   return (
@@ -446,6 +466,27 @@ export function AddActorModal({
                         />
                         {t("useRuntimeDefaultCommand")}
                       </label>
+                    ) : null}
+
+                    {newActorRuntime === "codex" ? (
+                      <div>
+                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                          {t("reasoningEffort")}
+                        </label>
+                        <div className="grid grid-cols-5 gap-2">
+                          {CODEX_REASONING_OPTIONS.map((option) => (
+                            <Button
+                              key={option.key}
+                              type="button"
+                              variant="outline"
+                              className={modeButtonClass(selectedCodexReasoningEffort === option.value)}
+                              onClick={() => updateCodexReasoningEffort(option.value)}
+                            >
+                              {t(option.key)}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
                     ) : null}
 
                     {supportsStandardWebHeadlessRuntime(newActorRuntime) ? (
