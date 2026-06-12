@@ -49,6 +49,7 @@
   "unicodeSupport": "(supports Unicode, incl. CJK)",
   "leaveEmptyToUse": "Leave empty to use:",
   "aiRuntime": "AI Runtime",
+  "switchModel": "Switch Model",
   "runtimePresets": "Model + CLI presets",
   "runtimeRawChoices": "Base CLI runtimes",
   "notInstalled": "(not installed)",

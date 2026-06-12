@@ -49,6 +49,7 @@
   "unicodeSupport": "（支持 Unicode，包括中文）",
   "leaveEmptyToUse": "留空则使用：",
   "aiRuntime": "选择模型",
+  "switchModel": "切换模型",
   "runtimePresets": "选择模型",
   "runtimeRawChoices": "基础CLI运行",
   "notInstalled": "（未安装）",

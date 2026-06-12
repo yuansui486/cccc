@@ -49,6 +49,7 @@
   "unicodeSupport": "(CJK を含む Unicode をサポート)",
   "leaveEmptyToUse": "空欄の場合は次を使用：",
   "aiRuntime": "AI ランタイム",
+  "switchModel": "モデル切り替え",
   "notInstalled": "(インストールされていません)",
   "manualMcpRequired": "手動 MCP インストールが必要です",
   "customCommandHint": "<1>詳細オプション → コマンドオーバーライド</1> でランタイムのコマンドを指定します。",

@@ -745,7 +745,7 @@ export function EditActorModal({
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("runtime")}</label>
+                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("switchModel")}</label>
                       <select
                         className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
                         value={effectiveRuntimePresetId || runtime}

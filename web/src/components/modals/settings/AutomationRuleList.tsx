@@ -27,6 +27,7 @@ interface AutomationRuleListProps {
   onToggleRuleEnabled: (ruleId: string, enabled: boolean) => void;
   onEditRule: (ruleId: string) => void;
   onDeleteRule: (ruleId: string) => void;
+  onSaveRule: (ruleId: string) => void;
 }
 
 export function AutomationRuleList({
@@ -41,6 +42,7 @@ export function AutomationRuleList({
   onToggleRuleEnabled,
   onEditRule,
   onDeleteRule,
+  onSaveRule,
 }: AutomationRuleListProps) {
   const { t } = useTranslation("settings");
   const actorOperationCopy = getActorOperationCopy(t);
@@ -172,6 +174,15 @@ export function AutomationRuleList({
                   title={t("automation.deleteRuleTitle")}
                 >
                   {t("common:delete")}
+                </button>
+                <button
+                  type="button"
+                  className={secondaryButtonClass("sm")}
+                  onClick={() => onSaveRule(ruleId)}
+                  disabled={rulesBusy}
+                  title={t("automation.saveTitle")}
+                >
+                  {rulesBusy ? t("automation.saving") : t("common:save")}
                 </button>
               </div>
             </div>
