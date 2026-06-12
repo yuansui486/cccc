@@ -115,6 +115,72 @@ class TestActorRuntimeOps(unittest.TestCase):
         self.assertNotIn("HERMES_HOME", spec["merged_env"])
         self.assertEqual(spec["effective_command"], ["hermes", "--profile", "other", "--tui", "--yolo"])
 
+    def test_codex_launch_env_falls_back_to_openai_api_key_for_legacy_agents(self) -> None:
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_config
+
+        group = SimpleNamespace(
+            group_id="g-test",
+            doc={
+                "actors": [
+                    {
+                        "id": "codex-1",
+                        "runner": "pty",
+                        "runtime": "codex",
+                        "command": ["codex"],
+                        "env": {"OPENAI_API_KEY": "legacy-key"},
+                    }
+                ],
+            },
+        )
+
+        spec = resolve_actor_launch_config(
+            group,
+            "codex-1",
+            command=[],
+            env={},
+            runner="pty",
+            runtime="codex",
+            effective_runner_kind=lambda runner: runner,
+            merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+        )
+
+        self.assertEqual(spec["merged_env"].get("ONECOLLEAGUE_API_KEY"), "legacy-key")
+        self.assertEqual(spec["merged_env"].get("OPENAI_API_KEY"), "legacy-key")
+
+    def test_codex_launch_env_keeps_explicit_onecolleague_api_key(self) -> None:
+        from no1.daemon.actors.actor_runtime_ops import resolve_actor_launch_config
+
+        group = SimpleNamespace(
+            group_id="g-test",
+            doc={
+                "actors": [
+                    {
+                        "id": "codex-1",
+                        "runner": "pty",
+                        "runtime": "codex",
+                        "command": ["codex"],
+                        "env": {
+                            "OPENAI_API_KEY": "legacy-key",
+                            "ONECOLLEAGUE_API_KEY": "current-key",
+                        },
+                    }
+                ],
+            },
+        )
+
+        spec = resolve_actor_launch_config(
+            group,
+            "codex-1",
+            command=[],
+            env={},
+            runner="pty",
+            runtime="codex",
+            effective_runner_kind=lambda runner: runner,
+            merge_actor_env_with_private=lambda _gid, _aid, env: dict(env),
+        )
+
+        self.assertEqual(spec["merged_env"].get("ONECOLLEAGUE_API_KEY"), "current-key")
+
     def test_web_model_actor_start_schedules_chatgpt_browser_warmup(self) -> None:
         from no1.daemon.actors import actor_runtime_ops
 
