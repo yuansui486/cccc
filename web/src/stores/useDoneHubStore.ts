@@ -15,6 +15,7 @@ const DONE_HUB_STORAGE_KEY = "onecolleague_done_hub_session";
 const DONE_HUB_LOGIN_KEY = "onecolleague_done_hub_login";
 const LEGACY_DONE_HUB_STORAGE_KEY = "cccc_done_hub_session";
 const LEGACY_DONE_HUB_LOGIN_KEY = "cccc_done_hub_login";
+const DONE_HUB_AUTO_REFRESH_MIN_INTERVAL_MS = 10_000;
 
 const EMPTY_SAVED_LOGIN: DoneHubSavedLogin = {
   base_url: DONE_HUB_BASE_URL,
@@ -25,6 +26,8 @@ const EMPTY_SAVED_LOGIN: DoneHubSavedLogin = {
 };
 
 let initializePromise: Promise<void> | null = null;
+let refreshPromise: Promise<boolean> | null = null;
+let lastRefreshStartedAt = 0;
 
 function isDoneHubHardAuthFailure(code: string | null | undefined, message: string | null | undefined): boolean {
   const normalizedCode = String(code || "").trim().toLowerCase();
@@ -53,7 +56,7 @@ type DoneHubState = {
     rememberPassword?: boolean,
     tenantCode?: string,
   ) => Promise<boolean>;
-  refresh: () => Promise<boolean>;
+  refresh: (opts?: { force?: boolean }) => Promise<boolean>;
   disconnect: () => void;
   clearError: () => void;
   clearAuthNotice: () => void;
@@ -210,7 +213,7 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
           status: "refreshing",
           errorMessage: "",
         });
-        const refreshed = await get().refresh();
+        const refreshed = await get().refresh({ force: true });
         if (refreshed || get().session) return;
       }
 
@@ -292,7 +295,16 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
     return true;
   },
 
-  refresh: async () => {
+  refresh: async (opts?: { force?: boolean }) => {
+    if (refreshPromise) return refreshPromise;
+    const force = Boolean(opts?.force);
+    const now = Date.now();
+    if (!force && lastRefreshStartedAt > 0 && now - lastRefreshStartedAt < DONE_HUB_AUTO_REFRESH_MIN_INTERVAL_MS) {
+      return Boolean(get().session);
+    }
+    lastRefreshStartedAt = now;
+
+    refreshPromise = (async () => {
     const session = get().session;
     if (!session) {
       void syncSessionToken(null);
@@ -362,6 +374,11 @@ export const useDoneHubStore = create<DoneHubState>((set, get) => ({
       authNotice: null,
     });
     return true;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+
+    return refreshPromise;
   },
 
   disconnect: () => {

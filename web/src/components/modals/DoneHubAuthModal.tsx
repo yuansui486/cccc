@@ -196,7 +196,7 @@ export function DoneHubAuthModal({ isOpen, isDark: _isDark, onClose, onBeforeDis
               <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => void refresh()}
+                onClick={() => void refresh({ force: true })}
                 disabled={busy}
                 className="glass-btn rounded-xl px-4 py-2.5 text-sm text-[var(--color-text-secondary)] disabled:opacity-50"
               >
