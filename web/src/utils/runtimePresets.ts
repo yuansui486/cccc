@@ -3,6 +3,9 @@ import type { RuntimeInfo, SupportedRuntime } from "../types";
 export type RuntimePresetId =
   | "model:deepseek-v4-pro-claude"
   | "model:qwen3.6-max-claude"
+  | "model:qwen3.6-plus-claude"
+  | "model:qwen3.6-flash-claude"
+  | "model:glm-4.7-claude"
   | "model:doubao-code-claude"
   | "model:gpt-5.4-codex"
   | "model:gpt-5.5-codex"
@@ -55,6 +58,51 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     },
   },
   {
+    id: "model:qwen3.6-plus-claude",
+    label: "qwen3.6-plus",
+    runtime: "claude",
+    model: "qwen3.6-plus",
+    envPrivate: {
+      ANTHROPIC_BASE_URL: "https://peer.shierkeji.com/claude",
+      ANTHROPIC_MODEL: "qwen3.6-plus",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "qwen3.6-plus",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "qwen3.6-plus",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "qwen3.6-plus",
+      CLAUDE_CODE_SUBAGENT_MODEL: "qwen3.6-plus",
+      ENABLE_TOOL_SEARCH: "true",
+    },
+  },
+  {
+    id: "model:qwen3.6-flash-claude",
+    label: "qwen3.6-flash",
+    runtime: "claude",
+    model: "qwen3.6-flash",
+    envPrivate: {
+      ANTHROPIC_BASE_URL: "https://peer.shierkeji.com/claude",
+      ANTHROPIC_MODEL: "qwen3.6-flash",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "qwen3.6-flash",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "qwen3.6-flash",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "qwen3.6-flash",
+      CLAUDE_CODE_SUBAGENT_MODEL: "qwen3.6-flash",
+      ENABLE_TOOL_SEARCH: "true",
+    },
+  },
+  {
+    id: "model:glm-4.7-claude",
+    label: "GLM-4.7",
+    runtime: "claude",
+    model: "GLM-4.7",
+    envPrivate: {
+      ANTHROPIC_BASE_URL: "https://peer.shierkeji.com/claude",
+      ANTHROPIC_MODEL: "GLM-4.7",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "GLM-4.7",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "GLM-4.7",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "GLM-4.7",
+      CLAUDE_CODE_SUBAGENT_MODEL: "GLM-4.7",
+      ENABLE_TOOL_SEARCH: "true",
+    },
+  },
+  {
     id: "model:doubao-code-claude",
     label: "豆包（字节跳动）",
     runtime: "claude",
@@ -103,6 +151,9 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
   if (normalizedRuntime === "claude") {
     if (model === "DeepSeek-V4-Pro") return "model:deepseek-v4-pro-claude";
     if (model === "qwen3.6-max-preview") return "model:qwen3.6-max-claude";
+    if (model === "qwen3.6-plus") return "model:qwen3.6-plus-claude";
+    if (model === "qwen3.6-flash") return "model:qwen3.6-flash-claude";
+    if (model === "GLM-4.7") return "model:glm-4.7-claude";
     if (model === "doubao-seed-2-0-pro-260215") return "model:doubao-code-claude";
     return "";
   }

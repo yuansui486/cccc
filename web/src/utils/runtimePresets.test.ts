@@ -31,6 +31,9 @@ describe("runtime presets", () => {
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options.map((option) => option.id)).toEqual([
       "model:deepseek-v4-pro-claude",
       "model:qwen3.6-max-claude",
+      "model:qwen3.6-plus-claude",
+      "model:qwen3.6-flash-claude",
+      "model:glm-4.7-claude",
       "model:doubao-code-claude",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.id)).toEqual([
@@ -55,12 +58,17 @@ describe("runtime presets", () => {
         "gpt-5.4": { model: "gpt-5.4", input: 0.625, output: 3.75 },
         "deepseek-v4-pro": { model: "deepseek-v4-pro", input: 1.5, output: 3 },
         "qwen3.6-max-preview": { model: "qwen3.6-max-preview", input: 0, output: 0 },
+        "qwen3.6-plus": { model: "qwen3.6-plus", input: 0, output: 0 },
+        "qwen3.6-flash": { model: "qwen3.6-flash", input: 0, output: 0 },
       }
     );
 
     expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options[0]?.label).toBe("gpt5.4 · 输入 ¥1.25 / 输出 ¥7.5（每 1M tokens）");
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[0]?.label).toBe("deepseek-v4 · 输入 ¥3 / 输出 ¥6（每 1M tokens）");
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[1]?.label).toBe("Qwen3.6（阿里千问） · 输入 ¥0 / 输出 ¥0（每 1M tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[2]?.label).toBe("qwen3.6-plus · 输入 ¥0 / 输出 ¥0（每 1M tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[3]?.label).toBe("qwen3.6-flash · 输入 ¥0 / 输出 ¥0（每 1M tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[4]?.label).toBe("GLM-4.7 · 价格暂无");
     expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options[0]?.label).toBe("kimi（月之暗面） · 价格暂无");
   });
 
@@ -167,6 +175,38 @@ describe("runtime presets", () => {
     expect(secrets).toContain('CLAUDE_CODE_SUBAGENT_MODEL="qwen3.6-plus"');
     expect(secrets).not.toContain("CLAUDE_CODE_EFFORT_LEVEL");
     expect(secrets).not.toContain("ignored-token");
+  });
+
+  it("adds Peer Claude presets for Qwen plus, Qwen flash, and GLM", () => {
+    const cases = [
+      { id: "model:qwen3.6-plus-claude", model: "qwen3.6-plus" },
+      { id: "model:qwen3.6-flash-claude", model: "qwen3.6-flash" },
+      { id: "model:glm-4.7-claude", model: "GLM-4.7" },
+    ] as const;
+
+    for (const item of cases) {
+      const preset = runtimePresetById(item.id);
+      expect(preset).toBeTruthy();
+      expect(runtimePresetIdFor("claude", `claude --model ${item.model}`)).toBe(item.id);
+      expect(
+        commandForRuntimePreset(preset!, {
+          name: "claude",
+          display_name: "Claude Code",
+          available: true,
+          recommended_command: "claude --dangerously-skip-permissions",
+        })
+      ).toBe(`claude --dangerously-skip-permissions --model ${item.model}`);
+
+      const secrets = mergePresetSecrets("", preset!, "done-hub-key");
+      expect(secrets).toContain('ANTHROPIC_BASE_URL="https://peer.shierkeji.com/claude"');
+      expect(secrets).toContain('ANTHROPIC_AUTH_TOKEN="done-hub-key"');
+      expect(secrets).toContain(`ANTHROPIC_MODEL="${item.model}"`);
+      expect(secrets).toContain(`ANTHROPIC_DEFAULT_OPUS_MODEL="${item.model}"`);
+      expect(secrets).toContain(`ANTHROPIC_DEFAULT_SONNET_MODEL="${item.model}"`);
+      expect(secrets).toContain(`ANTHROPIC_DEFAULT_HAIKU_MODEL="${item.model}"`);
+      expect(secrets).toContain(`CLAUDE_CODE_SUBAGENT_MODEL="${item.model}"`);
+      expect(secrets).toContain('ENABLE_TOOL_SEARCH="true"');
+    }
   });
 
   it("uses the fixed DeepSeek Claude provider environment", () => {
