@@ -63,6 +63,7 @@ export interface EditActorModalProps {
   avatarUrl?: string | null;
   hasCustomAvatar?: boolean;
   isRunning: boolean;
+  developerMode: boolean;
   runtimes: RuntimeInfo[];
   runtime: SupportedRuntime;
   onChangeRuntime: (runtime: SupportedRuntime) => void;
@@ -149,6 +150,7 @@ export function EditActorModal({
   avatarUrl,
   hasCustomAvatar = false,
   isRunning,
+  developerMode,
   runtimes,
   runtime,
   onChangeRuntime,
@@ -449,13 +451,13 @@ export function EditActorModal({
   };
 
   const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
-    const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, rtInfo);
+    const baseCommand = command.trim() || defaultCommand.trim();
     onChangeCommand(withCodexReasoningEffort(baseCommand, effort));
     setSelectedRuntimePresetId("");
   };
 
   const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
-    const baseCommand = command.trim() || commandForRuntimePreset(runtimePresetById("default:claude")!, rtInfo);
+    const baseCommand = command.trim() || defaultCommand.trim();
     onChangeCommand(withClaudeReasoningEffort(baseCommand, effort));
     setSelectedRuntimePresetId("");
   };
@@ -820,56 +822,44 @@ export function EditActorModal({
                       />
                     ) : null}
 
-                    {supportsStandardWebHeadlessRuntime(runtime) ? (
+                    <div>
+                      <label className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-[var(--glass-border-subtle)]"
+                          checked={runner === "pty" || customRunnerLockedToPty}
+                          disabled={busy === "actor-update" || customRunnerLockedToPty}
+                          onChange={(e) => onChangeRunner(e.target.checked ? "pty" : "headless")}
+                        />
+                        {t("pty", { defaultValue: "显示运行状态" })}
+                      </label>
+                      <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                        {customRunnerLockedToPty
+                          ? t("runnerModeHeadlessNote", { defaultValue: "仅部分运行时（如 codex、claude）支持不显示运行状态，其他运行时固定显示运行状态。" })
+                          : t("runnerModeHint", { defaultValue: "显示运行状态会展示终端交互；不显示运行状态会隐藏终端输出。" })}
+                      </div>
+                    </div>
+
+                    {developerMode ? (
                       <div>
-                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                          {t("runnerMode", { defaultValue: "运行模式" })}
-                        </label>
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className={modeButtonClass(runner === "pty")}
-                            onClick={() => onChangeRunner("pty")}
-                          >
-                            {t("pty", { defaultValue: "PTY" })}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className={modeButtonClass(runner === "headless")}
-                            onClick={() => onChangeRunner("headless")}
-                            disabled={customRunnerLockedToPty}
-                          >
-                            {t("headless")}
-                          </Button>
-                        </div>
-                        <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                          {customRunnerLockedToPty
-                            ? t("runnerModeHeadlessNote", { defaultValue: "仅部分运行时（如 codex、claude）支持 Headless 模式，其他运行时固定为 PTY。" })
-                            : t("runnerModeHint", { defaultValue: "PTY 走终端交互；Headless 走结构化事件流。" })}
-                        </div>
+                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("command")}</label>
+                        <Input
+                          className="font-mono"
+                          value={command}
+                          onChange={(e) => {
+                            onChangeCommand(e.target.value);
+                            setSelectedRuntimePresetId("");
+                          }}
+                          placeholder={defaultCommand || t("enterCommand")}
+                        />
+                        {isRunning ? <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("runtimeChangesNote")}</div> : null}
+                        {defaultCommand.trim() ? (
+                          <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                            {t("default")} <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{defaultCommand}</code>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
-
-                    <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("command")}</label>
-                      <Input
-                        className="font-mono"
-                        value={command}
-                        onChange={(e) => {
-                          onChangeCommand(e.target.value);
-                          setSelectedRuntimePresetId("");
-                        }}
-                        placeholder={defaultCommand || t("enterCommand")}
-                      />
-                      {isRunning ? <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">{t("runtimeChangesNote")}</div> : null}
-                      {defaultCommand.trim() ? (
-                        <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                          {t("default")} <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">{defaultCommand}</code>
-                        </div>
-                      ) : null}
-                    </div>
                   </div>
                 )}
               </div>

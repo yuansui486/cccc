@@ -40,6 +40,7 @@ export interface AddActorModalProps {
   isDark: boolean;
   busy: string;
   hasForeman: boolean;
+  developerMode: boolean;
   runtimes: RuntimeInfo[];
 
   suggestedActorId: string;
@@ -63,8 +64,6 @@ export interface AddActorModalProps {
 
   newActorCommand: string;
   setNewActorCommand: (cmd: string) => void;
-  newActorUseDefaultCommand: boolean;
-  setNewActorUseDefaultCommand: (v: boolean) => void;
 
   newActorSecretsSetText: string;
   setNewActorSecretsSetText: (v: string) => void;
@@ -130,6 +129,7 @@ export function AddActorModal({
   isDark,
   busy,
   hasForeman,
+  developerMode,
   runtimes,
   suggestedActorId,
   newActorId,
@@ -148,8 +148,6 @@ export function AddActorModal({
   setNewActorRunner,
   newActorCommand,
   setNewActorCommand,
-  newActorUseDefaultCommand,
-  setNewActorUseDefaultCommand,
   newActorSecretsSetText,
   setNewActorSecretsSetText,
   newActorCapabilityAutoloadText,
@@ -171,6 +169,7 @@ export function AddActorModal({
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const primedRuntimePresetRef = useRef("");
+  const primedCommandRef = useRef("");
   const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes), [runtimes]);
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
@@ -191,7 +190,7 @@ export function AddActorModal({
   const runtimeInfo = runtimes.find((r) => r.name === newActorRuntime);
   const runtimeAvailable = runtimeInfo?.available ?? false;
   const defaultCommand = runtimeInfo?.recommended_command || "";
-  const derivedRuntimePresetId = runtimePresetIdFor(newActorRuntime, newActorUseDefaultCommand ? "" : newActorCommand);
+  const derivedRuntimePresetId = runtimePresetIdFor(newActorRuntime, newActorCommand);
   const effectiveRuntimePresetId =
     selectedRuntimePresetId && runtimePresetById(selectedRuntimePresetId)?.runtime === newActorRuntime
       ? selectedRuntimePresetId
@@ -203,7 +202,7 @@ export function AddActorModal({
   const selectedProfileRuntime = String(selectedProfile?.runtime || "").trim() as SupportedRuntime;
   const selectedProfileCommand = commandPreview(selectedProfile?.command);
   const showRuntimeSetup = !newActorUseProfile && newActorRuntime === "custom";
-  const showCommandEditor = !newActorUseProfile && (newActorRuntime === "custom" || !newActorUseDefaultCommand);
+  const showCommandEditor = !newActorUseProfile;
   const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
   const customRunnerLockedToPty = !newActorUseProfile && !supportsStandardWebHeadlessRuntime(newActorRuntime);
@@ -213,6 +212,7 @@ export function AddActorModal({
   useEffect(() => {
     if (!isOpen) {
       primedRuntimePresetRef.current = "";
+      primedCommandRef.current = "";
       return;
     }
     if (newActorUseProfile || !selectedRuntimePreset) return;
@@ -234,6 +234,16 @@ export function AddActorModal({
     setNewActorSecretsSetText,
     setShowAdvancedActor,
   ]);
+
+  useEffect(() => {
+    if (!isOpen || newActorUseProfile || newActorCommand.trim()) return;
+    const commandToPrime = defaultCommand.trim();
+    if (!commandToPrime) return;
+    const primeKey = `${newActorRuntime}:${commandToPrime}`;
+    if (primedCommandRef.current === primeKey) return;
+    primedCommandRef.current = primeKey;
+    setNewActorCommand(commandToPrime);
+  }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, setNewActorCommand]);
 
   if (!isOpen) return null;
 
@@ -266,16 +276,14 @@ export function AddActorModal({
   };
 
   const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
-    const baseCommand = newActorCommand.trim() || commandForRuntimePreset(runtimePresetById("default:codex")!, runtimeInfo);
+    const baseCommand = newActorCommand.trim() || defaultCommand.trim();
     setNewActorCommand(withCodexReasoningEffort(baseCommand, effort));
-    setNewActorUseDefaultCommand(false);
     setSelectedRuntimePresetId("");
   };
 
   const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
-    const baseCommand = newActorCommand.trim() || commandForRuntimePreset(runtimePresetById("default:claude")!, runtimeInfo);
+    const baseCommand = newActorCommand.trim() || defaultCommand.trim();
     setNewActorCommand(withClaudeReasoningEffort(baseCommand, effort));
-    setNewActorUseDefaultCommand(false);
     setSelectedRuntimePresetId("");
   };
 
@@ -291,7 +299,7 @@ export function AddActorModal({
     >
       <div
         ref={modalRef}
-        className="w-full h-full sm:h-auto sm:max-w-2xl sm:mt-10 sm:max-h-[calc(100vh-5rem)] border border-[var(--glass-border-subtle)] shadow-2xl animate-scale-in rounded-none sm:rounded-2xl glass-modal flex flex-col overflow-hidden text-[var(--color-text-primary)]"
+        className="w-full h-full sm:h-auto sm:max-w-4xl sm:mt-10 sm:max-h-[calc(100vh-5rem)] border border-[var(--glass-border-subtle)] shadow-2xl animate-scale-in rounded-none sm:rounded-2xl glass-modal flex flex-col overflow-hidden text-[var(--color-text-primary)]"
       >
         <div className="px-6 py-4 border-b safe-area-inset-top border-[var(--glass-border-subtle)] glass-header flex-shrink-0">
           <div id="add-actor-title" className="text-lg font-semibold text-[var(--color-text-primary)]">
@@ -301,22 +309,24 @@ export function AddActorModal({
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
-          <div className="mx-auto max-w-2xl space-y-4">
+          <div className="mx-auto max-w-4xl space-y-4">
             <Surface className={sectionCardClass}>
-              <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("creationMode")}</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-24 sm:shrink-0">{t("creationMode")}</label>
+                <div className="grid flex-1 grid-cols-2 gap-2">
                 <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
                   {t("customAgent")}
                 </Button>
                 <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
                   {t("fromActorProfile")}
                 </Button>
+                </div>
               </div>
             </Surface>
 
-            <Surface className={sectionCardClass}>
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                <div className="sm:w-[104px] sm:flex-shrink-0">
+            <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
+              <Surface className={sectionCardClass}>
+                <div className="flex flex-col gap-4">
                   <ActorAvatarField
                     label={null}
                     avatarUrl={undefined}
@@ -331,11 +341,10 @@ export function AddActorModal({
                     onSelectFile={setAvatarFile}
                     onReset={() => setAvatarFile(null)}
                   />
-                </div>
 
-                <div className="min-w-0 flex-1">
+                  <div className="min-w-0">
                   <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                    {t("agentName")}
+                    {t("nickname", { defaultValue: "昵称" })}
                   </label>
                   <Input
                     value={newActorId}
@@ -348,11 +357,11 @@ export function AddActorModal({
                       {suggestedActorId}
                     </code>
                   </div>
+                  </div>
                 </div>
-              </div>
-            </Surface>
+              </Surface>
 
-            <Surface className={sectionCardClass}>
+              <Surface className={sectionCardClass}>
               <div className="space-y-4">
                 {newActorUseProfile ? (
                   <>
@@ -408,7 +417,6 @@ export function AddActorModal({
                           setNewActorRuntime(next);
                           if (!supportsStandardWebHeadlessRuntime(next)) setNewActorRunner("pty");
                           setNewActorCommand(presetCommand);
-                          setNewActorUseDefaultCommand(Boolean(preset && !preset.model) || (!preset && next !== "custom"));
                           setSelectedRuntimePresetId(preset?.id || "");
                           if (preset) {
                             const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
@@ -439,22 +447,6 @@ export function AddActorModal({
                       ) : null}
                     </div>
 
-                    {newActorRuntime !== "custom" ? (
-                      <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-                        <input
-                          type="checkbox"
-                          checked={newActorUseDefaultCommand}
-                          onChange={(e) => {
-                          const checked = e.target.checked;
-                          setNewActorUseDefaultCommand(checked);
-                          if (checked) setNewActorCommand("");
-                          setSelectedRuntimePresetId("");
-                        }}
-                        />
-                        {t("useRuntimeDefaultCommand")}
-                      </label>
-                    ) : null}
-
                     {newActorRuntime === "codex" ? (
                       <CodexReasoningEffortSelector value={selectedCodexReasoningEffort} onChange={updateCodexReasoningEffort} />
                     ) : null}
@@ -463,39 +455,25 @@ export function AddActorModal({
                       <ClaudeReasoningEffortSelector value={selectedClaudeReasoningEffort} onChange={updateClaudeReasoningEffort} />
                     ) : null}
 
-                    {supportsStandardWebHeadlessRuntime(newActorRuntime) ? (
-                      <div>
-                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                          {t("runnerMode", { defaultValue: "运行模式" })}
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className={modeButtonClass(newActorRunner === "pty")}
-                            onClick={() => setNewActorRunner("pty")}
-                          >
-                            {t("pty", { defaultValue: "PTY" })}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className={modeButtonClass(newActorRunner === "headless")}
-                            onClick={() => setNewActorRunner("headless")}
-                            disabled={customRunnerLockedToPty}
-                          >
-                            {t("headless")}
-                          </Button>
-                        </div>
-                        <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                          {customRunnerLockedToPty
-                            ? t("runnerModeHeadlessNote", { defaultValue: "仅部分运行时（如 codex、claude）支持 Headless 模式，其他运行时固定为 PTY。" })
-                            : t("runnerModeHint", { defaultValue: "PTY 走终端交互；Headless 走结构化事件流。" })}
-                        </div>
+                    <div>
+                      <label className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-[var(--glass-border-subtle)]"
+                          checked={newActorRunner === "pty" || customRunnerLockedToPty}
+                          disabled={customRunnerLockedToPty}
+                          onChange={(e) => setNewActorRunner(e.target.checked ? "pty" : "headless")}
+                        />
+                        {t("pty", { defaultValue: "显示运行状态" })}
+                      </label>
+                      <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                        {customRunnerLockedToPty
+                          ? t("runnerModeHeadlessNote", { defaultValue: "仅部分运行时（如 codex、claude）支持不显示运行状态，其他运行时固定显示运行状态。" })
+                          : t("runnerModeHint", { defaultValue: "显示运行状态会展示终端交互；不显示运行状态会隐藏终端输出。" })}
                       </div>
-                    ) : null}
+                    </div>
 
-                    {showCommandEditor ? (
+                    {developerMode && showCommandEditor ? (
                       <div>
                         <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
                           {t("commandOverrideOptional")}
@@ -512,11 +490,9 @@ export function AddActorModal({
                       </div>
                     ) : null}
 
-                    {defaultCommand.trim() ? (
+                    {developerMode && defaultCommand.trim() ? (
                       <div className="text-[10px] text-[var(--color-text-muted)]">
-                        {newActorUseDefaultCommand && newActorRuntime !== "custom"
-                          ? t("usingRuntimeDefaultCommand")
-                          : t("default")}{" "}
+                        {t("default")}{" "}
                         <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
                           {defaultCommand}
                         </code>
@@ -532,7 +508,8 @@ export function AddActorModal({
                   </>
                 )}
               </div>
-            </Surface>
+              </Surface>
+            </div>
 
             <Surface className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("promptSettings")}</div>

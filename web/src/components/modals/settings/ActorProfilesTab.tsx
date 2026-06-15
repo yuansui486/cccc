@@ -36,7 +36,6 @@ type EditorState = {
   runtime: string;
   runner: "pty" | "headless";
   command: string;
-  useDefaultCommand: boolean;
   submit: "enter" | "newline" | "none";
   capabilityAutoloadText: string;
   capabilityDefaultScope: "actor" | "session";
@@ -65,10 +64,6 @@ function defaultCommandForRuntime(runtime: string): string {
   return String(RUNTIME_DEFAULT_COMMANDS[key] || key || "").trim();
 }
 
-function supportsRuntimeDefaultCommand(runtime: string): boolean {
-  return String(runtime || "").trim() !== "custom";
-}
-
 function modeButtonClass(selected: boolean): string {
   return [
     "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
@@ -81,11 +76,7 @@ function modeButtonClass(selected: boolean): string {
 function buildEditor(profile?: ActorProfile | null): EditorState {
   const runtime = String(profile?.runtime || "codex");
   const runner = supportsStandardWebHeadlessRuntime(runtime) ? normalizeActorRunner(profile?.runner) : "pty";
-  const command = formatCommand(profile?.command);
-  const defaultCommand = defaultCommandForRuntime(runtime);
-  const useDefaultCommand =
-    supportsRuntimeDefaultCommand(runtime) &&
-    (!command.trim() || command.trim() === defaultCommand);
+  const command = formatCommand(profile?.command) || defaultCommandForRuntime(runtime);
   return {
     id: String(profile?.id || ""),
     revision: Number(profile?.revision || 0),
@@ -93,7 +84,6 @@ function buildEditor(profile?: ActorProfile | null): EditorState {
     runtime,
     runner,
     command,
-    useDefaultCommand,
     submit: (String(profile?.submit || "enter") as "enter" | "newline" | "none"),
     capabilityAutoloadText: formatCapabilityIdInput(profile?.capability_defaults?.autoload_capabilities),
     capabilityDefaultScope:
@@ -159,10 +149,6 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
     return String(profile.name || profile.id || sourceId).trim() || sourceId;
   }, [duplicateSourceProfileId, profiles]);
 
-  const editorSupportsDefaultCommand = useMemo(
-    () => supportsRuntimeDefaultCommand(editor.runtime),
-    [editor.runtime]
-  );
   const editorSupportsHeadlessRunner = useMemo(
     () => supportsStandardWebHeadlessRuntime(editor.runtime),
     [editor.runtime]
@@ -252,13 +238,12 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
                 onChange={(e) => {
                   const nextRuntime = String(e.target.value || "");
                   setEditor((prev) => {
-                    const supportsDefault = supportsRuntimeDefaultCommand(nextRuntime);
+                    const nextDefault = defaultCommandForRuntime(nextRuntime);
                     return {
                       ...prev,
                       runtime: nextRuntime,
                       runner: supportsStandardWebHeadlessRuntime(nextRuntime) ? prev.runner : "pty",
-                      useDefaultCommand: supportsDefault ? prev.useDefaultCommand : false,
-                      command: supportsDefault && prev.useDefaultCommand ? "" : prev.command,
+                      command: prev.command.trim() ? prev.command : nextDefault,
                     };
                   });
                 }}
@@ -299,34 +284,15 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
 
           <div>
             <label className={labelClass()}>{t("actorProfiles.commandOverrideOptional")}</label>
-            {editorSupportsDefaultCommand ? (
-              <label className="inline-flex items-center gap-2 text-xs mb-2 text-[var(--color-text-secondary)]">
-                <input
-                  type="checkbox"
-                  checked={editor.useDefaultCommand}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setEditor((prev) => ({
-                      ...prev,
-                      useDefaultCommand: checked,
-                      command: checked ? "" : prev.command,
-                    }));
-                  }}
-                />
-                {t("actorProfiles.useRuntimeDefaultCommand")}
-              </label>
-            ) : null}
-            {!editorSupportsDefaultCommand || !editor.useDefaultCommand ? (
-              <input
-                value={editor.command}
-                onChange={(e) => setEditor((prev) => ({ ...prev, command: e.target.value }))}
-                className={`${inputClass()} font-mono`}
-                placeholder={editorDefaultCommand || "codex"}
-              />
-            ) : null}
-            {editorSupportsDefaultCommand && editorDefaultCommand ? (
+            <input
+              value={editor.command}
+              onChange={(e) => setEditor((prev) => ({ ...prev, command: e.target.value }))}
+              className={`${inputClass()} font-mono`}
+              placeholder={editorDefaultCommand || "codex"}
+            />
+            {editorDefaultCommand ? (
               <div className="text-[10px] mt-1 text-[var(--color-text-muted)]">
-                {editor.useDefaultCommand ? t("actorProfiles.usingRuntimeDefaultCommand") : t("actorProfiles.default")}{" "}
+                {t("actorProfiles.default")}{" "}
                 <code className="px-1 rounded bg-[var(--color-bg-secondary)]">{editorDefaultCommand}</code>
               </div>
             ) : null}
@@ -732,7 +698,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
         owner_id: ownerId,
         runtime: editor.runtime,
         runner: editorSupportsHeadlessRunner ? editor.runner : "pty",
-        command: editorSupportsDefaultCommand && editor.useDefaultCommand ? "" : editor.command.trim(),
+        command: editor.command.trim(),
         submit: editor.submit,
         env: {},
         capability_defaults: {
@@ -741,11 +707,7 @@ export function ActorProfilesTab({ isDark, isActive, scope }: ActorProfilesTabPr
           session_ttl_seconds: Math.max(60, Math.trunc(editor.capabilitySessionTtlSeconds || 3600)),
         },
       };
-      if (
-        editorSupportsDefaultCommand &&
-        !editor.useDefaultCommand &&
-        !String(payload.command || "").trim()
-      ) {
+      if (!String(payload.command || "").trim()) {
         setEditorErr(t("actorProfiles.commandOverrideRequired"));
         return;
       }

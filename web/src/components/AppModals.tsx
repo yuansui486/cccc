@@ -47,6 +47,7 @@ import {
   useInboxStore,
   useFormStore,
   useDoneHubStore,
+  useObservabilityStore,
 } from "../stores";
 import { getAckRecipientIdsForEvent, getRecipientActorIdsForEvent } from "../hooks/useSSE";
 import { getChatSession } from "../stores/useUIStore";
@@ -123,6 +124,7 @@ export function AppModals({
   canManageGroups,
 }: AppModalsProps) {
   const { t } = useTranslation(['actors', 'chat', 'modals']);
+  const developerMode = useObservabilityStore((state) => state.developerMode);
   // Stores
   const {
     groups,
@@ -225,7 +227,6 @@ export function AppModals({
     newActorRuntime,
     newActorRunner,
     newActorCommand,
-    newActorUseDefaultCommand,
     newActorSecretsSetText,
     newActorCapabilityAutoloadText,
     newActorRoleNotes,
@@ -238,7 +239,6 @@ export function AppModals({
     setNewActorRuntime,
     setNewActorRunner,
     setNewActorCommand,
-    setNewActorUseDefaultCommand,
     setNewActorSecretsSetText,
     setNewActorCapabilityAutoloadText,
     setNewActorRoleNotes,
@@ -1198,7 +1198,7 @@ export function AppModals({
     setBusy("actor-add");
     setAddActorError("");
     try {
-      const commandToUse = newActorUseProfile ? "" : (newActorUseDefaultCommand ? "" : newActorCommand);
+      const commandToUse = newActorUseProfile ? "" : newActorCommand.trim();
       const resp = await api.addActor(
         selectedGroupId,
         actorId,
@@ -1276,7 +1276,7 @@ export function AppModals({
     if (!name || !name.trim()) return;
     setBusy("actor-profile-save");
     try {
-      const commandToUse = newActorUseDefaultCommand ? "" : newActorCommand.trim();
+      const commandToUse = newActorCommand.trim();
       const resp = await api.upsertActorProfile({
         name: name.trim(),
         runtime: newActorRuntime,
@@ -1335,9 +1335,9 @@ export function AppModals({
     if (newActorUseProfile) return Boolean(String(newActorProfileId || "").trim());
     const rtInfo = runtimes.find((r) => r.name === newActorRuntime);
     const available = rtInfo?.available ?? false;
-    if (!newActorUseDefaultCommand && !newActorCommand.trim()) return false;
-    if (newActorRuntime === "custom" && (newActorUseDefaultCommand || !newActorCommand.trim())) return false;
-    if (!available && (newActorUseDefaultCommand || !newActorCommand.trim())) return false;
+    if (!newActorCommand.trim()) return false;
+    if (newActorRuntime === "custom" && !newActorCommand.trim()) return false;
+    if (!available && !newActorCommand.trim()) return false;
     return true;
   })();
 
@@ -1348,13 +1348,13 @@ export function AppModals({
     }
     const rtInfo = runtimes.find((r) => r.name === newActorRuntime);
     const available = rtInfo?.available ?? false;
-    if (!newActorUseDefaultCommand && !newActorCommand.trim()) {
+    if (!newActorCommand.trim()) {
       return t("commandOverrideRequired");
     }
-    if (newActorRuntime === "custom" && (newActorUseDefaultCommand || !newActorCommand.trim())) {
+    if (newActorRuntime === "custom" && !newActorCommand.trim()) {
       return t('customRuntimeRequiresCommand');
     }
-    if (!available && (newActorUseDefaultCommand || !newActorCommand.trim())) {
+    if (!available && !newActorCommand.trim()) {
       return t('runtimeNotInstalled', { runtime: RUNTIME_INFO[newActorRuntime]?.label || newActorRuntime });
     }
     return "";
@@ -1859,6 +1859,7 @@ export function AppModals({
         avatarUrl={editingActor?.avatar_url || undefined}
         hasCustomAvatar={!!editingActor?.has_custom_avatar}
         isRunning={!!(editingActor && (editingActor.running ?? editingActor.enabled ?? false))}
+        developerMode={developerMode}
         runtimes={runtimes}
         runtime={editActorRuntime}
         onChangeRuntime={setEditActorRuntime}
@@ -1928,6 +1929,7 @@ export function AppModals({
         isDark={isDark}
         busy={busy}
         hasForeman={hasForeman}
+        developerMode={developerMode}
         runtimes={runtimes}
         suggestedActorId={suggestedActorId}
         newActorId={newActorId}
@@ -1946,8 +1948,6 @@ export function AppModals({
         setNewActorRunner={setNewActorRunner}
         newActorCommand={newActorCommand}
         setNewActorCommand={setNewActorCommand}
-        newActorUseDefaultCommand={newActorUseDefaultCommand}
-        setNewActorUseDefaultCommand={setNewActorUseDefaultCommand}
         newActorSecretsSetText={newActorSecretsSetText}
         setNewActorSecretsSetText={setNewActorSecretsSetText}
         newActorCapabilityAutoloadText={newActorCapabilityAutoloadText}

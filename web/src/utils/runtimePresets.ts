@@ -1,8 +1,6 @@
 import type { RuntimeInfo, SupportedRuntime } from "../types";
 
 export type RuntimePresetId =
-  | "default:claude"
-  | "default:codex"
   | "model:deepseek-v4-pro-claude"
   | "model:qwen3.6-max-claude"
   | "model:doubao-code-claude"
@@ -27,12 +25,6 @@ const CODEX_REASONING_EFFORT_KEY = "model_reasoning_effort";
 const CLAUDE_LEGACY_EFFORT_ENV_KEY = "CLAUDE_CODE_EFFORT_LEVEL";
 
 export const RUNTIME_PRESETS: RuntimePreset[] = [
-  {
-    id: "default:claude",
-    label: "claude",
-    runtime: "claude",
-    description: "不指定模型，使用 Claude CLI 本机默认配置。",
-  },
   {
     id: "model:deepseek-v4-pro-claude",
     label: "deepseek-v4",
@@ -73,12 +65,6 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
     },
   },
   {
-    id: "default:codex",
-    label: "codex",
-    runtime: "codex",
-    description: "不指定模型，使用 Codex CLI 本机默认配置。",
-  },
-  {
     id: "model:gpt-5.4-codex",
     label: "gpt5.4",
     runtime: "codex",
@@ -115,10 +101,9 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
     : splitCommand(String(command || "").trim());
   const model = modelFromCommand(tokens);
   if (normalizedRuntime === "claude") {
-    return model ? "" : "default:claude";
+    return "";
   }
   if (normalizedRuntime === "codex") {
-    if (!model) return "default:codex";
     if (model === "gpt-5.4") return "model:gpt-5.4-codex";
     if (model === "gpt-5.5") return "model:gpt-5.5-codex";
   }

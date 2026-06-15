@@ -28,7 +28,6 @@ describe("runtime presets", () => {
       "runtimeGroupKimi",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options.map((option) => option.id)).toEqual([
-      "default:claude",
       "model:deepseek-v4-pro-claude",
       "model:qwen3.6-max-claude",
       "model:doubao-code-claude",
@@ -41,7 +40,6 @@ describe("runtime presets", () => {
       "custom",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.id)).toEqual([
-      "default:codex",
       "model:gpt-5.4-codex",
       "model:gpt-5.5-codex",
     ]);
@@ -87,25 +85,6 @@ describe("runtime presets", () => {
     expect(withClaudeReasoningEffort(high, "xhigh")).toBe("claude --model DeepSeek-V4-Pro --effort xhigh");
     expect(withClaudeReasoningEffort(high, "max")).toBe("claude --model DeepSeek-V4-Pro --effort max");
     expect(withClaudeReasoningEffort(high, "")).toBe(base);
-  });
-
-  it("adds only the API key env for the default Codex preset", () => {
-    const preset = runtimePresetById("default:codex");
-    expect(preset).toBeTruthy();
-    const secrets = mergePresetSecrets("", preset!, "done-hub-key");
-
-    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
-    expect(secrets).not.toContain("OPENAI_BASE_URL");
-    expect(secrets).not.toContain("OPENAI_MODEL");
-  });
-
-  it("does not add an empty API key env for Codex presets without a login key", () => {
-    const preset = runtimePresetById("default:codex");
-    expect(preset).toBeTruthy();
-    const secrets = mergePresetSecrets("", preset!, "");
-
-    expect(secrets).toBe("");
-    expect(secrets).not.toContain('ONECOLLEAGUE_API_KEY=""');
   });
 
   it("adds only the API key env for Codex model presets", () => {

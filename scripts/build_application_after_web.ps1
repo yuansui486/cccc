@@ -11,8 +11,23 @@ $workspaceRoot = Split-Path -Parent $repoRoot
 $appRoot = Join-Path $workspaceRoot "OneColleague_application"
 $appResourcesDir = Join-Path $appRoot "src-tauri\resources"
 $programData = if ($env:ProgramData) { $env:ProgramData } else { "C:\ProgramData" }
-$bizVenvPython = Join-Path $programData "onecolleague\runtime\biz-venv\Scripts\python.exe"
+$bizVenvDir = Join-Path $programData "onecolleague\runtime\biz-venv"
+$bizVenvPython = Join-Path $bizVenvDir "Scripts\python.exe"
 $buildTmpRoot = $null
+$defaultUvIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+function Stop-OneColleagueProcesses {
+  $processes = Get-Process -Name "onecolleague" -ErrorAction SilentlyContinue
+  if (!$processes) {
+    return
+  }
+
+  Write-Host "==> Stop running onecolleague.exe processes"
+  foreach ($process in $processes) {
+    Write-Host ("  stopping PID {0}" -f $process.Id)
+    Stop-Process -Id $process.Id -Force -ErrorAction Stop
+  }
+}
 
 function Remove-BuildTemp {
   if ($script:buildTmpRoot -and (Test-Path -LiteralPath $script:buildTmpRoot)) {
@@ -35,6 +50,33 @@ function Resolve-Tool {
     }
   }
   throw $InstallHint
+}
+
+function Invoke-CheckedNative {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath,
+    [string[]]$ArgumentList = @(),
+    [string]$WorkingDirectory = ""
+  )
+
+  $previousLocation = Get-Location
+  if ($WorkingDirectory) {
+    Push-Location $WorkingDirectory
+  }
+  try {
+    & $FilePath @ArgumentList | Out-Host
+    $exitCode = $LASTEXITCODE
+    if ($null -ne $exitCode -and $exitCode -ne 0) {
+      throw "$FilePath failed with exit code $exitCode"
+    }
+  }
+  finally {
+    if ($WorkingDirectory) {
+      Pop-Location
+    }
+    Set-Location $previousLocation
+  }
 }
 
 function Invoke-Robocopy {
@@ -102,6 +144,77 @@ function Test-WheelContainsWebDist {
   throw "built wheel is missing bundled Web UI: no1/ports/web/dist/index.html"
 }
 
+function Get-BizVenvSitePackages {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PythonPath
+  )
+
+  $probeScript = @"
+import site
+
+paths = site.getsitepackages()
+print(paths[0] if paths else "")
+"@
+  $probePath = Join-Path $script:buildTmpRoot "probe-site-packages.py"
+  Set-Content -LiteralPath $probePath -Value $probeScript -Encoding UTF8
+  $output = & $PythonPath $probePath
+  $exitCode = $LASTEXITCODE
+  if ($null -ne $exitCode -and $exitCode -ne 0) {
+    throw "failed to resolve biz venv site-packages with exit code $exitCode"
+  }
+  $sitePackages = ($output | Select-Object -First 1).ToString().Trim()
+  if (-not $sitePackages) {
+    throw "failed to resolve biz venv site-packages"
+  }
+  return $sitePackages
+}
+
+function Clear-InstalledNo1Package {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PythonPath
+  )
+
+  $sitePackages = Join-Path $bizVenvDir "Lib\site-packages"
+  if (-not (Test-Path -LiteralPath $sitePackages)) {
+    $sitePackages = Get-BizVenvSitePackages -PythonPath $PythonPath
+  }
+  if (-not (Test-Path -LiteralPath $sitePackages)) {
+    return
+  }
+
+  $resolvedSite = [System.IO.Path]::GetFullPath($sitePackages).TrimEnd('\')
+  $targets = @()
+  foreach ($pattern in @("no1", "no1-*.dist-info", "~*")) {
+    $targets += Get-ChildItem -LiteralPath $sitePackages -Force -Filter $pattern -ErrorAction SilentlyContinue
+  }
+  $targets = $targets | Sort-Object FullName -Unique
+  if ($targets) {
+    Write-Host "  clearing stale package paths:"
+    foreach ($target in $targets) {
+      Write-Host "    $($target.FullName)"
+    }
+  }
+
+  foreach ($target in $targets) {
+    $resolvedTarget = [System.IO.Path]::GetFullPath($target.FullName)
+    if (-not $resolvedTarget.StartsWith($resolvedSite + "\", [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "refusing to remove package path outside site-packages: $resolvedTarget"
+    }
+
+    try {
+      Get-ChildItem -LiteralPath $resolvedTarget -Recurse -Force -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly) }
+      $target.Attributes = $target.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+      Remove-Item -LiteralPath $resolvedTarget -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+      throw "failed to remove stale package path $resolvedTarget. Close OneColleague and rerun from an Administrator PowerShell if Windows still reports access denied. $($_.Exception.Message)"
+    }
+  }
+}
+
 function Get-ProjectVersion {
   param(
     [Parameter(Mandatory = $true)]
@@ -117,6 +230,8 @@ function Get-ProjectVersion {
 }
 
 try {
+  Stop-OneColleagueProcesses
+
   if (-not (Test-Path -LiteralPath (Join-Path $repoRoot "web"))) {
     throw "web directory not found: $(Join-Path $repoRoot "web")"
   }
@@ -137,9 +252,9 @@ try {
   $npm = Resolve-Tool -Names @("npm.cmd", "npm") -InstallHint "ERROR: npm is required to build the web UI."
   $webDir = Join-Path $repoRoot "web"
   if ($InstallDeps) {
-    & $npm ci --prefix $webDir | Out-Host
+    Invoke-CheckedNative -FilePath $npm -ArgumentList @("ci", "--prefix", $webDir)
   }
-  & $npm -C $webDir run build | Out-Host
+  Invoke-CheckedNative -FilePath $npm -ArgumentList @("-C", $webDir, "run", "build")
   $distIndex = Join-Path $repoRoot "src\no1\ports\web\dist\index.html"
   if (-not (Test-Path -LiteralPath $distIndex)) {
     throw "Web build failed, missing $distIndex"
@@ -160,12 +275,19 @@ try {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
   $uv = Resolve-Tool -Names @("uv.exe", "uv") -InstallHint "ERROR: uv is required to build the no1 package."
-  Push-Location $buildRoot
+  $previousUvCacheDir = $env:UV_CACHE_DIR
+  $previousUvIndexUrl = $env:UV_INDEX_URL
+  $env:UV_CACHE_DIR = Join-Path $script:buildTmpRoot "uv-cache"
+  if (!$env:UV_INDEX_URL) {
+    $env:UV_INDEX_URL = $defaultUvIndexUrl
+    Write-Host "  using UV_INDEX_URL=$env:UV_INDEX_URL"
+  }
   try {
-    & $uv build | Out-Host
+    Invoke-CheckedNative -FilePath $uv -ArgumentList @("build") -WorkingDirectory $buildRoot
   }
   finally {
-    Pop-Location
+    $env:UV_CACHE_DIR = $previousUvCacheDir
+    $env:UV_INDEX_URL = $previousUvIndexUrl
   }
 
   New-Item -ItemType Directory -Force -Path $repoDist | Out-Null
@@ -192,7 +314,8 @@ try {
 
   Write-Host "==> Update installed application business package"
   if (Test-Path -LiteralPath $bizVenvPython) {
-    & $bizVenvPython -m pip install --force-reinstall --no-deps $latestWheel.FullName | Out-Host
+    Clear-InstalledNo1Package -PythonPath $bizVenvPython
+    Invoke-CheckedNative -FilePath $bizVenvPython -ArgumentList @("-m", "pip", "install", "--no-deps", $latestWheel.FullName)
     $verifyScript = @'
 import importlib.metadata as metadata
 import pathlib
@@ -211,7 +334,9 @@ print(f"installed no1={metadata.version('no1')}")
 print(f"no1={pathlib.Path(no1.__file__).resolve()}")
 print(f"web_dist_index={dist}")
 '@
-    & $bizVenvPython -c $verifyScript | Out-Host
+    $verifyScriptPath = Join-Path $script:buildTmpRoot "verify-installed-no1.py"
+    Set-Content -LiteralPath $verifyScriptPath -Value $verifyScript -Encoding UTF8
+    Invoke-CheckedNative -FilePath $bizVenvPython -ArgumentList @($verifyScriptPath)
   }
   else {
     Write-Warning "application business venv not found; bundled wheel refreshed only: $bizVenvPython"

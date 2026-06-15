@@ -535,9 +535,9 @@ export function SettingsModal({
   ], [globalSettingsEnabled, currentBrowserSignedIn, groupId, t]);
 
   const hiddenTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => {
-    if (!hiddenMenuUnlocked || !groupId) return [];
+    if ((!developerMode && !hiddenMenuUnlocked) || !groupId) return [];
     return [{ id: "guidance" as const, label: t("tabs.guidance") }];
-  }, [groupId, hiddenMenuUnlocked, t]);
+  }, [developerMode, groupId, hiddenMenuUnlocked, t]);
 
   useEffect(() => {
     if (scope !== "global") return;
@@ -586,6 +586,8 @@ export function SettingsModal({
         }
         if (windowState.count >= 6) {
           setHiddenMenuUnlocked(true);
+          setDeveloperMode(true);
+          useObservabilityStore.setState({ developerMode: true, loaded: true });
           windowState.firstClickAt = 0;
           windowState.count = 0;
         }
