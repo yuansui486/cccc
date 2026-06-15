@@ -13,6 +13,7 @@ export type RuntimeChoiceGroup = {
 
 const GROUP_ORDER = ["codex", "claude", "gemini", "kimi"] as const;
 type GroupKey = typeof GROUP_ORDER[number];
+const VISIBLE_RUNTIME_CHOICES = new Set<SupportedRuntime>(["gemini"]);
 
 const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }> = {
   claude: { labelKey: "runtimeGroupClaude", labelFallback: "Claude Code" },
@@ -38,8 +39,9 @@ export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[]): RuntimeChoice
 
   for (const runtime of SUPPORTED_RUNTIMES) {
     if (runtimeHasPreset(runtime)) continue;
+    if (!VISIBLE_RUNTIME_CHOICES.has(runtime)) continue;
     const runtimeAvailable = Boolean(runtimes.find((item) => item.name === runtime)?.available);
-    const selectable = runtimeAvailable || runtime === "custom";
+    const selectable = runtimeAvailable;
     groups.get(groupKeyForRuntime(runtime))?.push({
       kind: "runtime",
       id: runtime,

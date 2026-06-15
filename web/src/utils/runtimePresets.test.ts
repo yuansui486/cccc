@@ -31,13 +31,6 @@ describe("runtime presets", () => {
       "model:deepseek-v4-pro-claude",
       "model:qwen3.6-max-claude",
       "model:doubao-code-claude",
-      "droid",
-      "amp",
-      "auggie",
-      "neovate",
-      "hermes",
-      "web_model",
-      "custom",
     ]);
     expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options.map((option) => option.id)).toEqual([
       "model:gpt-5.4-codex",
