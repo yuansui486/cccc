@@ -468,6 +468,20 @@ select.onecolleague-group-select option {
   color: var(--color-text-primary);
 }
 
+select.onecolleague-runtime-select optgroup {
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+select.onecolleague-runtime-select option {
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 400;
+}
+
 /* ============================================
    Focus States (Accessibility)
    ============================================ */
