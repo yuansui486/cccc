@@ -8,6 +8,7 @@ import {
   mergePresetSecrets,
   mergePresetUnsetKeys,
   runtimePresetById,
+  runtimePresetIdFor,
   withClaudeReasoningEffort,
   withCodexReasoningEffort,
 } from "./runtimePresets";
@@ -72,6 +73,7 @@ describe("runtime presets", () => {
     const high = withClaudeReasoningEffort(base, "high");
 
     expect(high).toBe("claude --model DeepSeek-V4-Pro --effort high");
+    expect(runtimePresetIdFor("claude", high)).toBe("model:deepseek-v4-pro-claude");
     expect(claudeReasoningEffortFromCommand(high)).toBe("high");
     expect(claudeReasoningEffortFromCommand("claude --effort=max")).toBe("max");
     expect(claudeReasoningEffortFromCommand("claude --effort x-high")).toBe("xhigh");

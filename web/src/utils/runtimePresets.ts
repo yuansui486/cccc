@@ -101,6 +101,9 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
     : splitCommand(String(command || "").trim());
   const model = modelFromCommand(tokens);
   if (normalizedRuntime === "claude") {
+    if (model === "DeepSeek-V4-Pro") return "model:deepseek-v4-pro-claude";
+    if (model === "qwen3.6-max-preview") return "model:qwen3.6-max-claude";
+    if (model === "doubao-seed-2-0-pro-260215") return "model:doubao-code-claude";
     return "";
   }
   if (normalizedRuntime === "codex") {
