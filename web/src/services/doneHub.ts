@@ -35,6 +35,19 @@ type DoneHubTeamPresetDownloadResult = {
   sha256?: string;
 };
 
+export type DoneHubModelPrice = {
+  model: string;
+  input?: number;
+  output?: number;
+  type?: string;
+  locked?: boolean;
+};
+
+type DoneHubPricesResult = {
+  items?: DoneHubModelPrice[];
+  models?: string[];
+};
+
 export const DONE_HUB_BASE_URL = "https://peer.shierkeji.com";
 const DONE_HUB_BASE_URL_ERROR = "Login service URL is invalid.";
 
@@ -195,6 +208,32 @@ export async function downloadDoneHubTeamPreset(
     access_token: session.access_token,
     preset_id: String(presetId || "").trim(),
   });
+}
+
+export async function fetchDoneHubPrices(): Promise<DoneHubApiResponse<DoneHubPricesResult>> {
+  let resp: Response;
+  try {
+    resp = await fetch("/api/v1/done_hub/prices", {
+      method: "GET",
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  } catch (error) {
+    return makeError("NETWORK_ERROR", error instanceof Error ? error.message : "Network request failed");
+  }
+
+  const text = await resp.text();
+  if (!text) {
+    if (resp.ok) return { ok: true, result: { items: [] } };
+    return makeError("EMPTY_RESPONSE", `Server returned ${resp.status} with empty body`);
+  }
+
+  try {
+    return JSON.parse(text) as DoneHubApiResponse<DoneHubPricesResult>;
+  } catch {
+    return makeError("PARSE_ERROR", `Invalid JSON response: ${text.slice(0, 100)}`);
+  }
 }
 
 export function extractDoneHubSession(resp: DoneHubApiResponse<DoneHubSessionResult>): DoneHubSession | null {

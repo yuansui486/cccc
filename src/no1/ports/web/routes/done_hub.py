@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple
 from urllib.parse import quote, urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from ..codex_client_config import sync_codex_custom_provider_config
@@ -14,6 +14,7 @@ from ..schemas import DoneHubLoginRequest, DoneHubSelfRequest, DoneHubTeamPreset
 
 _DONE_HUB_TIMEOUT = 15.0
 _TOKEN_PAGE_SIZE = 100
+_DEFAULT_DONE_HUB_BASE_URL = "https://peer.shierkeji.com"
 _TEAM_PRESET_BASE_URLS = (
     "https://dongdongkc.shierkeji.com:5205/onecolleague_agent",
     "http://127.0.0.1:8012",
@@ -248,6 +249,51 @@ def _normalize_codex_api_key(raw_key: str) -> str:
     return api_key
 
 
+def _normalize_price_rows(payload: Any) -> list[Dict[str, Any]]:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    rows = data if isinstance(data, list) else []
+    out: list[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        model = str(row.get("model") or "").strip()
+        if not model:
+            continue
+        normalized: Dict[str, Any] = {
+            "model": model,
+            "type": str(row.get("type") or "").strip(),
+            "locked": bool(row.get("locked")),
+        }
+        for key in ("input", "output"):
+            value = row.get(key)
+            if isinstance(value, (int, float)):
+                normalized[key] = float(value)
+        out.append(normalized)
+    return out
+
+
+def _normalize_model_list(payload: Any) -> list[str]:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        raw_items = data.get("models") or data.get("items") or data.get("data")
+    else:
+        raw_items = data
+    rows = raw_items if isinstance(raw_items, list) else []
+    out: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        if isinstance(row, dict):
+            model = str(row.get("model") or row.get("name") or row.get("id") or "").strip()
+        else:
+            model = str(row or "").strip()
+        key = model.lower()
+        if not model or key in seen:
+            continue
+        seen.add(key)
+        out.append(model)
+    return out
+
+
 async def _sync_codex_config_for_client_config(client_config: Dict[str, Any]) -> None:
     if not str(client_config.get("codex_api_key") or "").strip():
         return
@@ -463,5 +509,37 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "sha256": str(resp.headers.get("x-team-preset-sha256") or ""),
             },
         }
+
+    @router.get("/prices")
+    async def done_hub_prices(req: Request) -> Dict[str, Any]:
+        try:
+            base_url = _normalize_base_url(os.environ.get("ONECOLLEAGUE_DONE_HUB_BASE_URL", "") or _DEFAULT_DONE_HUB_BASE_URL)
+            async with httpx.AsyncClient(timeout=_DONE_HUB_TIMEOUT, follow_redirects=True) as client:
+                auth_header = str(req.headers.get("authorization") or "").strip()
+                auth_headers = {"Authorization": auth_header} if auth_header else None
+                resp = await client.get(f"{base_url}/api/prices")
+                if resp.status_code >= 400:
+                    return {
+                        "ok": False,
+                        "error": {
+                            "code": "done_hub_prices_failed",
+                            "message": f"done-hub returned HTTP {resp.status_code}",
+                        },
+                    }
+                try:
+                    payload = resp.json()
+                except Exception:
+                    return {"ok": False, "error": {"code": "done_hub_prices_failed", "message": "done-hub returned invalid JSON"}}
+                models: list[str] = []
+                try:
+                    model_resp = await client.get(f"{base_url}/api/prices/model_list", headers=auth_headers)
+                    if model_resp.status_code < 400:
+                        models = _normalize_model_list(model_resp.json())
+                except Exception:
+                    models = []
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": {"code": "done_hub_prices_failed", "message": str(exc)}}
+
+        return {"ok": True, "result": {"items": _normalize_price_rows(payload), "models": models}}
 
     return [router]

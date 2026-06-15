@@ -303,6 +303,53 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         self.assertEqual(result.get("filename"), "skill-team.yaml")
         self.assertEqual(result.get("sha256"), "abc123")
 
+    def test_done_hub_prices_proxy_normalizes_price_rows(self) -> None:
+        base = "https://peer.shierkeji.com"
+        calls: list[tuple[str, str, dict]] = []
+
+        def _factory(*args, **kwargs):
+            return _FakeAsyncClient(
+                {
+                    ("GET", f"{base}/api/prices"): _FakeResponse(
+                        200,
+                        {
+                            "data": [
+                                {
+                                    "model": "gpt-5.4",
+                                    "type": "tokens",
+                                    "input": 0.625,
+                                    "output": 3.75,
+                                    "locked": False,
+                                },
+                                {"model": "", "input": 1, "output": 2},
+                            ]
+                        },
+                    ),
+                    ("GET", f"{base}/api/prices/model_list"): _FakeResponse(
+                        200,
+                        {"data": ["gpt-5.4", {"model": "deepseek-v4-pro"}, {"name": "gemini-pro"}]},
+                    ),
+                },
+                calls,
+            )
+
+        with patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory):
+            client = self._create_client()
+            resp = client.get("/api/v1/done_hub/prices")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(bool(body.get("ok")))
+        result = body.get("result") or {}
+        self.assertEqual(
+            result.get("items"),
+            [{"model": "gpt-5.4", "type": "tokens", "locked": False, "input": 0.625, "output": 3.75}],
+        )
+        self.assertEqual(result.get("models"), ["gpt-5.4", "deepseek-v4-pro", "gemini-pro"])
+        self.assertEqual(calls[0][0:2], ("GET", f"{base}/api/prices"))
+        self.assertEqual(calls[1][0:2], ("GET", f"{base}/api/prices/model_list"))
+        self.assertIsNone(calls[1][2].get("headers"))
+
     def test_done_hub_team_presets_can_use_env_override(self) -> None:
         base = "https://peer.shierkeji.com"
         preset_base = "http://agent-service.local:8012"

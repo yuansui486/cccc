@@ -1,5 +1,6 @@
 import { RUNTIME_INFO, SUPPORTED_RUNTIMES, type RuntimeInfo, type SupportedRuntime } from "../types";
 import { RUNTIME_PRESETS, type RuntimePreset } from "./runtimePresets";
+import { runtimePriceLabel, type RuntimePriceMap } from "./runtimePrices";
 
 export type RuntimeChoiceOption =
   | { kind: "preset"; id: string; label: string; runtime: SupportedRuntime; disabled: boolean }
@@ -22,7 +23,7 @@ const GROUP_LABELS: Record<GroupKey, { labelKey: string; labelFallback: string }
   kimi: { labelKey: "runtimeGroupKimi", labelFallback: "Kimi" },
 };
 
-export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[]): RuntimeChoiceGroup[] {
+export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[], priceMap?: RuntimePriceMap | null): RuntimeChoiceGroup[] {
   const groups = new Map<GroupKey, RuntimeChoiceOption[]>();
   for (const key of GROUP_ORDER) groups.set(key, []);
 
@@ -31,7 +32,7 @@ export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[]): RuntimeChoice
     groups.get(groupKeyForRuntime(preset.runtime))?.push({
       kind: "preset",
       id: preset.id,
-      label: preset.label,
+      label: runtimePriceLabel({ id: preset.id, kind: "preset", label: preset.label }, priceMap, preset),
       runtime: preset.runtime,
       disabled: !runtimeAvailable,
     });
@@ -45,7 +46,7 @@ export function buildRuntimeChoiceGroups(runtimes: RuntimeInfo[]): RuntimeChoice
     groups.get(groupKeyForRuntime(runtime))?.push({
       kind: "runtime",
       id: runtime,
-      label: RUNTIME_INFO[runtime]?.label || runtime,
+      label: runtimePriceLabel({ id: runtime, kind: "runtime", label: RUNTIME_INFO[runtime]?.label || runtime }, priceMap),
       runtime,
       disabled: !selectable,
     });

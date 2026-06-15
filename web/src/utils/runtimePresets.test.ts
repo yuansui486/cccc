@@ -43,6 +43,27 @@ describe("runtime presets", () => {
     ]);
   });
 
+  it("adds per-1M token prices to matching model choices", () => {
+    const groups = buildRuntimeChoiceGroups(
+      [
+        { name: "claude", display_name: "Claude Code", available: true, recommended_command: "claude" },
+        { name: "codex", display_name: "Codex CLI", available: true, recommended_command: "codex" },
+        { name: "gemini", display_name: "Gemini CLI", available: true, recommended_command: "gemini" },
+        { name: "kimi", display_name: "Kimi CLI", available: true, recommended_command: "kimi" },
+      ],
+      {
+        "gpt-5.4": { model: "gpt-5.4", input: 0.625, output: 3.75 },
+        "deepseek-v4-pro": { model: "deepseek-v4-pro", input: 1.5, output: 3 },
+        "qwen3.6-max-preview": { model: "qwen3.6-max-preview", input: 0, output: 0 },
+      }
+    );
+
+    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options[0]?.label).toBe("gpt5.4 · 输入 ¥1.25 / 输出 ¥7.5（每 1M tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[0]?.label).toBe("deepseek-v4 · 输入 ¥3 / 输出 ¥6（每 1M tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[1]?.label).toBe("Qwen3.6（阿里千问） · 输入 ¥0 / 输出 ¥0（每 1M tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options[0]?.label).toBe("kimi（月之暗面） · 价格暂无");
+  });
+
   it("builds Codex model commands from the runtime default", () => {
     const preset = runtimePresetById("model:gpt-5.5-codex");
     expect(preset).toBeTruthy();

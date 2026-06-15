@@ -16,6 +16,7 @@ import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/cap
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
 import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
+import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
   commandForRuntimePreset,
@@ -30,6 +31,7 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
+import { fetchDoneHubPrices } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -168,9 +170,10 @@ export function AddActorModal({
   const { t } = useTranslation("actors");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
+  const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const primedRuntimePresetRef = useRef("");
   const primedCommandRef = useRef("");
-  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes), [runtimes]);
+  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes, runtimePriceMap), [runtimes, runtimePriceMap]);
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
   useEffect(() => {
@@ -178,6 +181,18 @@ export function AddActorModal({
       if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
     };
   }, [avatarPreviewUrl]);
+
+  useEffect(() => {
+    if (!isOpen || runtimePriceMap) return;
+    let cancelled = false;
+    void fetchDoneHubPrices().then((resp) => {
+      if (cancelled) return;
+      setRuntimePriceMap(resp.ok ? buildRuntimePriceMap(resp.result?.items || []) : {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, runtimePriceMap]);
 
   const handleClose = () => {
     setAvatarFile(null);

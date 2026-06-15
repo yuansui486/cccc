@@ -13,6 +13,7 @@ import { ActorAvatarField } from "../ActorAvatarField";
 import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
 import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
+import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
   commandForRuntimePreset,
@@ -28,6 +29,7 @@ import {
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
 import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
+import { fetchDoneHubPrices } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Surface } from "../ui/surface";
@@ -197,9 +199,10 @@ export function EditActorModal({
   const [secretsPrimed, setSecretsPrimed] = useState(false);
   const [capabilitiesPrimed, setCapabilitiesPrimed] = useState(false);
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
+  const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const secretFetchSeqRef = useRef(0);
   const presetSecretsPrimedRef = useRef("");
-  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes), [runtimes]);
+  const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes, runtimePriceMap), [runtimes, runtimePriceMap]);
   const modalStateRef = useRef<{
     groupId: string;
     actorId: string;
@@ -377,6 +380,18 @@ export function EditActorModal({
     if (!effectiveLinked && secretsPrimed) void refreshSecretKeys();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editMode, effectiveLinked, secretsPrimed]);
+
+  useEffect(() => {
+    if (!isOpen || runtimePriceMap) return;
+    let cancelled = false;
+    void fetchDoneHubPrices().then((resp) => {
+      if (cancelled) return;
+      setRuntimePriceMap(resp.ok ? buildRuntimePriceMap(resp.result?.items || []) : {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, runtimePriceMap]);
 
   useEffect(() => {
     if (!isOpen) return;
