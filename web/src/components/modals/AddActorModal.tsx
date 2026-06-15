@@ -323,7 +323,11 @@ export function AddActorModal({
 
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
           <div className="mx-auto max-w-4xl space-y-4">
-            <Surface className={sectionCardClass}>
+            <Surface className={`${sectionCardClass} relative overflow-hidden`}>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-0 top-0 h-0 w-0 border-r-[4.75rem] border-t-[4.75rem] border-r-transparent border-t-blue-600 opacity-95 dark:border-t-blue-500"
+              />
               <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-center">
                 <div className="flex min-h-[7rem] items-center justify-center">
                   <ActorAvatarField
