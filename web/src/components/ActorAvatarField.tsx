@@ -18,6 +18,7 @@ type ActorAvatarFieldProps = {
   resetDisabled?: boolean;
   uploadBusy?: boolean;
   resetBusy?: boolean;
+  reserveActionSpace?: boolean;
   onSelectFile: (file: File | null) => void;
   onReset: () => void;
 };
@@ -37,6 +38,7 @@ export function ActorAvatarField({
   resetDisabled = false,
   uploadBusy = false,
   resetBusy = false,
+  reserveActionSpace = true,
   onSelectFile,
   onReset,
 }: ActorAvatarFieldProps) {
@@ -91,7 +93,7 @@ export function ActorAvatarField({
           }}
         />
 
-        <div className="mt-2 min-h-[1.25rem] text-center">
+        <div className={`text-center ${reserveActionSpace || showReset || uploadBusy || resetBusy ? "mt-2 min-h-[1.25rem]" : ""}`}>
           {uploadBusy ? (
             <span className="text-[11px] font-medium text-[var(--color-text-muted)]">{t("avatarUploading")}</span>
           ) : resetBusy ? (

@@ -1,5 +1,6 @@
 import { ActorProfile, RuntimeInfo, SupportedRuntime, RUNTIME_INFO } from "../../types";
 import { useTranslation } from "react-i18next";
+import { CircleHelp } from "lucide-react";
 import { BASIC_MCP_CONFIG_SNIPPET } from "../../utils/mcpConfigSnippets";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../../services/api";
@@ -9,6 +10,7 @@ import { formatCapabilityIdInput, parseCapabilityIdInput } from "../../utils/cap
 import { actorProfileIdentityKey } from "../../utils/actorProfiles";
 import { CapabilityPicker } from "../CapabilityPicker";
 import { RolePresetPicker } from "../RolePresetPicker";
+import { HoverTooltip } from "../HoverTooltip";
 import { ActorAvatarField } from "../ActorAvatarField";
 import { ClaudeReasoningEffortSelector, CodexReasoningEffortSelector } from "../ReasoningEffortSelector";
 import { normalizeActorRunner, supportsStandardWebHeadlessRuntime } from "../../utils/headlessRuntimeSupport";
@@ -838,20 +840,32 @@ export function EditActorModal({
                     ) : null}
 
                     <div>
-                      <label className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-[var(--glass-border-subtle)]"
-                          checked={runner === "pty" || customRunnerLockedToPty}
-                          disabled={busy === "actor-update" || customRunnerLockedToPty}
-                          onChange={(e) => onChangeRunner(e.target.checked ? "pty" : "headless")}
-                        />
-                        {t("pty", { defaultValue: "显示运行状态" })}
-                      </label>
-                      <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                        {customRunnerLockedToPty
-                          ? t("runnerModeHeadlessNote", { defaultValue: "仅部分运行时（如 codex、claude）支持不显示运行状态，其他运行时固定显示运行状态。" })
-                          : t("runnerModeHint", { defaultValue: "显示运行状态会展示终端交互；不显示运行状态会隐藏终端输出。" })}
+                      <div className="inline-flex min-h-[44px] items-center gap-2">
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-[var(--glass-border-subtle)]"
+                            checked={runner === "pty" || customRunnerLockedToPty}
+                            disabled={busy === "actor-update" || customRunnerLockedToPty}
+                            onChange={(e) => onChangeRunner(e.target.checked ? "pty" : "headless")}
+                          />
+                          {t("pty", { defaultValue: "显示运行状态" })}
+                        </label>
+                        <HoverTooltip label={t("runnerModeHint", { defaultValue: "显示运行状态会展示终端交互；不显示运行状态会隐藏终端输出。" })}>
+                          {(getReferenceProps, setReference) => (
+                            <button
+                              ref={setReference}
+                              type="button"
+                              aria-label={t("runnerModeHint", { defaultValue: "显示运行状态会展示终端交互；不显示运行状态会隐藏终端输出。" })}
+                              {...getReferenceProps({
+                                className:
+                                  "inline-flex h-5 w-5 items-center justify-center rounded-full text-[var(--color-text-muted)] transition-colors hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-secondary)]",
+                              })}
+                            >
+                              <CircleHelp className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </HoverTooltip>
                       </div>
                     </div>
 

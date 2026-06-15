@@ -477,7 +477,7 @@ select.onecolleague-runtime-select optgroup {
 
 select.onecolleague-runtime-select option {
   background-color: var(--color-bg-elevated);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   font-size: 14px;
   font-weight: 400;
 }

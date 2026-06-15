@@ -7,6 +7,8 @@ type ReasoningEffortOption<T extends string> = {
   labelKey: string;
 };
 
+type ReasoningEffortLayout = "stacked" | "inline";
+
 const CODEX_REASONING_OPTIONS: Array<ReasoningEffortOption<CodexReasoningEffort>> = [
   { value: "xhigh", labelKey: "reasoningXhigh" },
   { value: "high", labelKey: "reasoningHigh" },
@@ -37,32 +39,54 @@ function ReasoningEffortButtonGrid<T extends string>({
   value,
   disabled,
   onChange,
+  layout = "stacked",
 }: {
   options: Array<ReasoningEffortOption<T>>;
   value: T;
   disabled?: boolean;
   onChange: (value: T) => void;
+  layout?: ReasoningEffortLayout;
 }) {
   const { t } = useTranslation("actors");
+  const label = (
+    <label
+      className={
+        layout === "inline"
+          ? "text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0"
+          : "block text-xs font-medium mb-2 text-[var(--color-text-muted)]"
+      }
+    >
+      {t("reasoningEffort")}
+    </label>
+  );
+  const buttons = (
+    <div className={layout === "inline" ? "grid min-w-0 flex-1 grid-cols-5 gap-2" : "grid grid-cols-5 gap-2"}>
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          variant="outline"
+          className={modeButtonClass(value === option.value)}
+          onClick={() => onChange(option.value)}
+          disabled={disabled}
+        >
+          {t(option.labelKey)}
+        </Button>
+      ))}
+    </div>
+  );
+  if (layout === "inline") {
+    return (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        {label}
+        {buttons}
+      </div>
+    );
+  }
   return (
     <div>
-      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-        {t("reasoningEffort")}
-      </label>
-      <div className="grid grid-cols-5 gap-2">
-        {options.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            variant="outline"
-            className={modeButtonClass(value === option.value)}
-            onClick={() => onChange(option.value)}
-            disabled={disabled}
-          >
-            {t(option.labelKey)}
-          </Button>
-        ))}
-      </div>
+      {label}
+      {buttons}
     </div>
   );
 }
@@ -71,22 +95,26 @@ export function CodexReasoningEffortSelector({
   value,
   disabled,
   onChange,
+  labelPlacement = "stacked",
 }: {
   value: CodexReasoningEffort;
   disabled?: boolean;
   onChange: (value: CodexReasoningEffort) => void;
+  labelPlacement?: ReasoningEffortLayout;
 }) {
-  return <ReasoningEffortButtonGrid options={CODEX_REASONING_OPTIONS} value={value} disabled={disabled} onChange={onChange} />;
+  return <ReasoningEffortButtonGrid options={CODEX_REASONING_OPTIONS} value={value} disabled={disabled} onChange={onChange} layout={labelPlacement} />;
 }
 
 export function ClaudeReasoningEffortSelector({
   value,
   disabled,
   onChange,
+  labelPlacement = "stacked",
 }: {
   value: ClaudeReasoningEffort;
   disabled?: boolean;
   onChange: (value: ClaudeReasoningEffort) => void;
+  labelPlacement?: ReasoningEffortLayout;
 }) {
-  return <ReasoningEffortButtonGrid options={CLAUDE_REASONING_OPTIONS} value={value} disabled={disabled} onChange={onChange} />;
+  return <ReasoningEffortButtonGrid options={CLAUDE_REASONING_OPTIONS} value={value} disabled={disabled} onChange={onChange} layout={labelPlacement} />;
 }

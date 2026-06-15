@@ -101,12 +101,11 @@ function profileScopeLabel(profile: ActorProfile, t: (key: string, options?: Rec
   return t("profileScopeGlobal");
 }
 
-function modeButtonClass(selected: boolean): string {
+function modeSwitchButtonClass(): string {
   return [
-    "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
-    selected
-      ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white"
-      : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
+    "rounded-2xl border px-4 py-2 text-sm font-semibold transition-colors sm:text-base",
+    "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] shadow-sm",
+    "hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]",
   ].join(" ");
 }
 
@@ -220,7 +219,6 @@ export function AddActorModal({
   const showCommandEditor = !newActorUseProfile;
   const previewRuntime = newActorUseProfile ? selectedProfileRuntime || null : newActorRuntime;
   const previewTitle = String(newActorId || "").trim() || suggestedActorId;
-  const customRunnerLockedToPty = !newActorUseProfile && !supportsStandardWebHeadlessRuntime(newActorRuntime);
   const selectedCodexReasoningEffort = codexReasoningEffortFromCommand(newActorCommand) || "medium";
   const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(newActorCommand) || "high";
 
@@ -326,22 +324,8 @@ export function AddActorModal({
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
           <div className="mx-auto max-w-4xl space-y-4">
             <Surface className={sectionCardClass}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-24 sm:shrink-0">{t("creationMode")}</label>
-                <div className="grid flex-1 grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className={modeButtonClass(!newActorUseProfile)} onClick={() => setNewActorUseProfile(false)}>
-                  {t("customAgent")}
-                </Button>
-                <Button type="button" variant="outline" className={modeButtonClass(newActorUseProfile)} onClick={() => setNewActorUseProfile(true)}>
-                  {t("fromActorProfile")}
-                </Button>
-                </div>
-              </div>
-            </Surface>
-
-            <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
-              <Surface className={sectionCardClass}>
-                <div className="flex flex-col gap-4">
+              <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-center">
+                <div className="flex min-h-[7rem] items-center justify-center">
                   <ActorAvatarField
                     label={null}
                     avatarUrl={undefined}
@@ -350,181 +334,174 @@ export function AddActorModal({
                     command={newActorUseProfile ? selectedProfile?.command : newActorCommand}
                     title={previewTitle}
                     isDark={isDark}
-                    sizeClassName="h-14 w-14"
+                    sizeClassName="h-[5.25rem] w-[5.25rem]"
                     disabled={busy === "actor-add"}
                     resetDisabled={!avatarFile}
+                    reserveActionSpace={false}
                     onSelectFile={setAvatarFile}
                     onReset={() => setAvatarFile(null)}
                   />
-
-                  <div className="min-w-0">
-                  <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                    {t("nickname", { defaultValue: "昵称" })}
-                  </label>
-                  <Input
-                    value={newActorId}
-                    onChange={(e) => setNewActorId(e.target.value)}
-                    placeholder={suggestedActorId}
-                  />
-                  <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                    {t("leaveEmptyToUse")}{" "}
-                    <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                      {suggestedActorId}
-                    </code>
-                  </div>
-                  </div>
                 </div>
-              </Surface>
 
-              <Surface className={sectionCardClass}>
-              <div className="space-y-4">
-                {newActorUseProfile ? (
-                  <>
-                    <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("actorProfile")}</label>
-                      <select
-                        className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
-                        value={newActorProfileId}
-                        onChange={(e) => setNewActorProfileId(e.target.value)}
-                        disabled={actorProfilesBusy}
-                      >
-                        <option value="">{actorProfilesBusy ? t("loadingProfiles") : t("selectActorProfile")}</option>
-                        {actorProfiles.map((profile) => (
-                          <option key={actorProfileIdentityKey(profile)} value={actorProfileIdentityKey(profile)}>
-                            {(profile.name || profile.id) + " · " + profileScopeLabel(profile, t)}
-                          </option>
-                        ))}
-                      </select>
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+                      <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0">
+                        {t("nickname", { defaultValue: "昵称" })}
+                      </label>
+                      <div className="min-w-0 flex-1">
+                        <Input
+                          value={newActorId}
+                          onChange={(e) => setNewActorId(e.target.value)}
+                          placeholder={`${t("leaveEmptyToUse")} ${suggestedActorId}`}
+                        />
+                      </div>
                     </div>
 
-                    {selectedProfile ? (
-                      <Surface className="px-3 py-3 text-[var(--color-text-secondary)]" variant="subtle" radius="md" padding="none">
-                        <div className="text-sm font-medium text-[var(--color-text-primary)]">
-                          {selectedProfile.name || selectedProfile.id}
-                        </div>
-                        <div className="mt-1 text-xs">
-                          {profileScopeLabel(selectedProfile, t)}
-                        </div>
-                        <div className="mt-1 text-xs">
-                          {RUNTIME_INFO[selectedProfileRuntime]?.label || selectedProfile.runtime}
-                        </div>
-                        {selectedProfileCommand ? (
-                          <div className="mt-2 font-mono text-[11px] break-all text-[var(--color-text-tertiary)]">
-                            {selectedProfileCommand}
-                          </div>
-                        ) : null}
-                      </Surface>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">{t("aiRuntime")}</label>
-                      <select
-                        className="onecolleague-runtime-select w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
-                        value={effectiveRuntimePresetId || newActorRuntime}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const preset = runtimePresetById(raw);
-                          const next = (preset?.runtime || raw) as SupportedRuntime;
-                          const nextRuntimeInfo = runtimes.find((r) => r.name === next);
-                          const presetCommand = preset ? commandForRuntimePreset(preset, nextRuntimeInfo) : "";
-                          setNewActorRuntime(next);
-                          if (!supportsStandardWebHeadlessRuntime(next)) setNewActorRunner("pty");
-                          setNewActorCommand(presetCommand);
-                          setSelectedRuntimePresetId(preset?.id || "");
-                          if (preset) {
-                            const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
-                            setNewActorSecretsSetText(
-                              mergePresetSecrets(newActorSecretsSetText, preset, doneHubCodexApiKey)
-                            );
-                            if (preset.envPrivate || (preset.runtime === "codex" && doneHubCodexApiKey)) {
-                              setShowAdvancedActor(true);
-                            }
-                          }
-                        }}
+                    <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
+                      <button
+                        type="button"
+                        className={modeSwitchButtonClass()}
+                        onClick={() => setNewActorUseProfile(!newActorUseProfile)}
                       >
-                        {runtimeChoiceGroups.map((group) => (
-                          <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
-                            {group.options.map((option) => (
-                              <option key={option.id} value={option.id} disabled={option.disabled}>
-                                {option.label}
-                                {option.disabled ? ` ${t("notInstalled")}` : ""}
+                        {newActorUseProfile ? t("customAgent") : t("fromActorProfile")}
+                      </button>
+                    </div>
+                  </div>
+
+                  {newActorUseProfile ? (
+                    <>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0">{t("actorProfile")}</label>
+                        <div className="min-w-0 flex-1">
+                          <select
+                            className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
+                            value={newActorProfileId}
+                            onChange={(e) => setNewActorProfileId(e.target.value)}
+                            disabled={actorProfilesBusy}
+                          >
+                            <option value="">{actorProfilesBusy ? t("loadingProfiles") : t("selectActorProfile")}</option>
+                            {actorProfiles.map((profile) => (
+                              <option key={actorProfileIdentityKey(profile)} value={actorProfileIdentityKey(profile)}>
+                                {(profile.name || profile.id) + " · " + profileScopeLabel(profile, t)}
                               </option>
                             ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                      {runtimeChoiceDescription ? (
-                        <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                          {runtimeChoiceDescription}
+                          </select>
                         </div>
+                      </div>
+
+                      {selectedProfile ? (
+                        <Surface className="ml-0 px-3 py-3 text-[var(--color-text-secondary)] sm:ml-20" variant="subtle" radius="md" padding="none">
+                          <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                            {selectedProfile.name || selectedProfile.id}
+                          </div>
+                          <div className="mt-1 text-xs">
+                            {profileScopeLabel(selectedProfile, t)}
+                          </div>
+                          <div className="mt-1 text-xs">
+                            {RUNTIME_INFO[selectedProfileRuntime]?.label || selectedProfile.runtime}
+                          </div>
+                          {selectedProfileCommand ? (
+                            <div className="mt-2 font-mono text-[11px] break-all text-[var(--color-text-tertiary)]">
+                              {selectedProfileCommand}
+                            </div>
+                          ) : null}
+                        </Surface>
                       ) : null}
-                    </div>
-
-                    {newActorRuntime === "codex" ? (
-                      <CodexReasoningEffortSelector value={selectedCodexReasoningEffort} onChange={updateCodexReasoningEffort} />
-                    ) : null}
-
-                    {newActorRuntime === "claude" ? (
-                      <ClaudeReasoningEffortSelector value={selectedClaudeReasoningEffort} onChange={updateClaudeReasoningEffort} />
-                    ) : null}
-
-                    <div>
-                      <label className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-[var(--glass-border-subtle)]"
-                          checked={newActorRunner === "pty" || customRunnerLockedToPty}
-                          disabled={customRunnerLockedToPty}
-                          onChange={(e) => setNewActorRunner(e.target.checked ? "pty" : "headless")}
-                        />
-                        {t("pty", { defaultValue: "显示运行状态" })}
-                      </label>
-                      <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
-                        {customRunnerLockedToPty
-                          ? t("runnerModeHeadlessNote", { defaultValue: "仅部分运行时（如 codex、claude）支持不显示运行状态，其他运行时固定显示运行状态。" })
-                          : t("runnerModeHint", { defaultValue: "显示运行状态会展示终端交互；不显示运行状态会隐藏终端输出。" })}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0">{t("aiRuntime")}</label>
+                        <div className="min-w-0 flex-1">
+                          <select
+                            className="onecolleague-runtime-select w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
+                            value={effectiveRuntimePresetId || newActorRuntime}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const preset = runtimePresetById(raw);
+                              const next = (preset?.runtime || raw) as SupportedRuntime;
+                              const nextRuntimeInfo = runtimes.find((r) => r.name === next);
+                              const presetCommand = preset ? commandForRuntimePreset(preset, nextRuntimeInfo) : "";
+                              setNewActorRuntime(next);
+                              if (!supportsStandardWebHeadlessRuntime(next)) setNewActorRunner("pty");
+                              setNewActorCommand(presetCommand);
+                              setSelectedRuntimePresetId(preset?.id || "");
+                              if (preset) {
+                                const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
+                                setNewActorSecretsSetText(
+                                  mergePresetSecrets(newActorSecretsSetText, preset, doneHubCodexApiKey)
+                                );
+                                if (preset.envPrivate || (preset.runtime === "codex" && doneHubCodexApiKey)) {
+                                  setShowAdvancedActor(true);
+                                }
+                              }
+                            }}
+                          >
+                            {runtimeChoiceGroups.map((group) => (
+                              <optgroup key={group.labelKey} label={t(group.labelKey, { defaultValue: group.labelFallback })}>
+                                {group.options.map((option) => (
+                                  <option key={option.id} value={option.id} disabled={option.disabled}>
+                                    {option.label}
+                                    {option.disabled ? ` ${t("notInstalled")}` : ""}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                          {runtimeChoiceDescription ? (
+                            <div className="text-[10px] mt-1.5 text-[var(--color-text-muted)]">
+                              {runtimeChoiceDescription}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
 
-                    {developerMode && showCommandEditor ? (
-                      <div>
-                        <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
-                          {t("commandOverrideOptional")}
-                        </label>
-                        <Input
-                          className="font-mono"
-                          value={newActorCommand}
-                          onChange={(e) => {
-                            setNewActorCommand(e.target.value);
-                            setSelectedRuntimePresetId("");
-                          }}
-                          placeholder={defaultCommand || t("enterCommand")}
-                        />
-                      </div>
-                    ) : null}
+                      {newActorRuntime === "codex" ? (
+                        <CodexReasoningEffortSelector value={selectedCodexReasoningEffort} onChange={updateCodexReasoningEffort} labelPlacement="inline" />
+                      ) : null}
 
-                    {developerMode && defaultCommand.trim() ? (
-                      <div className="text-[10px] text-[var(--color-text-muted)]">
-                        {t("default")}{" "}
-                        <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
-                          {defaultCommand}
-                        </code>
-                      </div>
-                    ) : null}
-
-                    {newActorRuntime === "custom" || !runtimeAvailable ? (
-                      <div className="rounded-xl border px-3 py-2 text-[11px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                        <div className="font-medium">{t("manualMcpRequired")}</div>
-                        <div className="mt-1">{t("customCommandHint").replace(/<1>|<\/1>/g, "")}</div>
-                      </div>
-                    ) : null}
-                  </>
-                )}
+                      {newActorRuntime === "claude" ? (
+                        <ClaudeReasoningEffortSelector value={selectedClaudeReasoningEffort} onChange={updateClaudeReasoningEffort} labelPlacement="inline" />
+                      ) : null}
+                    </>
+                  )}
+                </div>
               </div>
-              </Surface>
-            </div>
+
+                  {developerMode && showCommandEditor ? (
+                    <div>
+                      <label className="block text-xs font-medium mb-2 text-[var(--color-text-muted)]">
+                        {t("commandOverrideOptional")}
+                      </label>
+                      <Input
+                        className="font-mono"
+                        value={newActorCommand}
+                        onChange={(e) => {
+                          setNewActorCommand(e.target.value);
+                          setSelectedRuntimePresetId("");
+                        }}
+                        placeholder={defaultCommand || t("enterCommand")}
+                      />
+                    </div>
+                  ) : null}
+
+                  {developerMode && defaultCommand.trim() ? (
+                    <div className="text-[10px] text-[var(--color-text-muted)]">
+                      {t("default")}{" "}
+                      <code className="px-1 rounded bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)]">
+                        {defaultCommand}
+                      </code>
+                    </div>
+                  ) : null}
+
+                  {newActorRuntime === "custom" || !runtimeAvailable ? (
+                    <div className="rounded-xl border px-3 py-2 text-[11px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                      <div className="font-medium">{t("manualMcpRequired")}</div>
+                      <div className="mt-1">{t("customCommandHint").replace(/<1>|<\/1>/g, "")}</div>
+                    </div>
+                  ) : null}
+            </Surface>
 
             <Surface className={sectionCardClass}>
               <div className={sectionTitleClass}>{t("promptSettings")}</div>

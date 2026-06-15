@@ -50,9 +50,9 @@ export function formatRuntimePrice(price: RuntimePrice | null | undefined): stri
   const output = typeof price.output === "number" && Number.isFinite(price.output) ? price.output * DISPLAY_PRICE_MULTIPLIER : null;
   if (input === null && output === null) return "";
   const fmt = (value: number) => `¥${new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(value)}`;
-  if (input !== null && output !== null) return `输入 ${fmt(input)} / 输出 ${fmt(output)}（每 1M tokens）`;
-  if (input !== null) return `输入 ${fmt(input)}（每 1M tokens）`;
-  return `输出 ${fmt(output!)}（每 1M tokens）`;
+  if (input !== null && output !== null) return `输入 ${fmt(input)} / 输出 ${fmt(output)}，每百万 tokens`;
+  if (input !== null) return `输入 ${fmt(input)}，每百万 tokens`;
+  return `输出 ${fmt(output!)}，每百万 tokens`;
 }
 
 export function runtimePriceLabel(
@@ -61,7 +61,7 @@ export function runtimePriceLabel(
   preset?: RuntimePreset | null,
 ): string {
   const price = formatRuntimePrice(priceForRuntimeChoice(option, priceMap, preset));
-  if (price) return `${option.label} · ${price}`;
-  if (priceMap) return `${option.label} · ${RUNTIME_PRICE_UNAVAILABLE_LABEL}`;
+  if (price) return `${option.label}（${price}）`;
+  if (priceMap) return `${option.label}（${RUNTIME_PRICE_UNAVAILABLE_LABEL}）`;
   return option.label;
 }

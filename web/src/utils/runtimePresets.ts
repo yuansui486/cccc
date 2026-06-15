@@ -44,7 +44,7 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
   },
   {
     id: "model:qwen3.6-max-claude",
-    label: "Qwen3.6（阿里千问）",
+    label: "Qwen3.6",
     runtime: "claude",
     model: "qwen3.6-max-preview",
     envPrivate: {
@@ -104,7 +104,7 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
   },
   {
     id: "model:doubao-code-claude",
-    label: "豆包（字节跳动）",
+    label: "豆包",
     runtime: "claude",
     model: "doubao-seed-2-0-pro-260215",
     envPrivate: {
@@ -126,7 +126,7 @@ export const RUNTIME_PRESETS: RuntimePreset[] = [
   },
   {
     id: "model:kimi-k2.6-kimi",
-    label: "kimi（月之暗面）",
+    label: "kimi",
     runtime: "kimi",
     model: "kimi-k2.6",
     envPrivate: {
