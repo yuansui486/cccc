@@ -275,6 +275,26 @@ export function mergePresetSecrets(existing: string, preset: RuntimePreset, auth
   return kept ? `${kept}\n${presetText}` : presetText;
 }
 
+export function mergeRuntimeAuthSecret(existing: string, runtime: string, authToken?: string): string {
+  const authKey = authSecretKeyForRuntime(runtime);
+  const token = String(authToken || "").trim();
+  const current = String(existing || "").trim();
+  if (!authKey) return current;
+  if (!token) return current;
+  const authText = `${authKey}=${quoteEnvValue(token)}`;
+  const obsoleteKeys = new Set<string>([authKey]);
+  if (authKey === "ONECOLLEAGUE_API_KEY") obsoleteKeys.add("OPENAI_API_KEY");
+  const kept = current
+    .split("\n")
+    .filter((line) => {
+      const key = line.match(/^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=/i)?.[1];
+      return !key || !obsoleteKeys.has(key);
+    })
+    .join("\n")
+    .trim();
+  return kept ? `${kept}\n${authText}` : authText;
+}
+
 export function mergePresetUnsetKeys(existing: string, preset: RuntimePreset): string {
   const current = String(existing || "").trim();
   const activeKeys = new Set(Object.keys(preset.envPrivate || {}));
@@ -323,10 +343,16 @@ function knownAllPresetSecretKeys(): Set<string> {
 }
 
 function authSecretKeyForRuntimePreset(preset: RuntimePreset): string {
-  if (preset.runtime === "codex") return "ONECOLLEAGUE_API_KEY";
+  const runtimeAuthKey = authSecretKeyForRuntime(preset.runtime);
+  if (runtimeAuthKey) return runtimeAuthKey;
   if (!preset.model) return "";
   if (preset.runtime === "claude") return "ANTHROPIC_AUTH_TOKEN";
   if (preset.runtime === "kimi") return "KIMI_API_KEY";
+  return "";
+}
+
+function authSecretKeyForRuntime(runtime: string): string {
+  if (String(runtime || "").trim() === "codex") return "ONECOLLEAGUE_API_KEY";
   return "";
 }
 

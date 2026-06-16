@@ -7,6 +7,7 @@ import {
   commandForRuntimePreset,
   mergePresetSecrets,
   mergePresetUnsetKeys,
+  mergeRuntimeAuthSecret,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -119,6 +120,24 @@ describe("runtime presets", () => {
     expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
     expect(secrets).not.toContain("OPENAI_BASE_URL");
     expect(secrets).not.toContain("OPENAI_MODEL");
+  });
+
+  it("adds the Codex API key from runtime auth even without a model preset", () => {
+    const secrets = mergeRuntimeAuthSecret("", "codex", "done-hub-key");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
+  });
+
+  it("replaces stale OpenAI Codex runtime key when available", () => {
+    const secrets = mergeRuntimeAuthSecret('OPENAI_API_KEY="old-key"', "codex", "done-hub-key");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="done-hub-key"');
+  });
+
+  it("preserves existing runtime auth when no Codex token is available", () => {
+    const secrets = mergeRuntimeAuthSecret('ONECOLLEAGUE_API_KEY="manual-key"', "codex", "");
+
+    expect(secrets).toBe('ONECOLLEAGUE_API_KEY="manual-key"');
   });
 
   it("preserves an existing Codex API key when no DoneHub token is available", () => {

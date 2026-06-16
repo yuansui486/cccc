@@ -22,6 +22,7 @@ import {
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
   mergePresetSecrets,
+  mergeRuntimeAuthSecret,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -30,7 +31,7 @@ import {
   type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
-import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
+import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
 import { fetchDoneHubPrices } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -171,7 +172,9 @@ export function AddActorModal({
   const [selectedRuntimePresetId, setSelectedRuntimePresetId] = useState<RuntimePresetId | "">("");
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const primedRuntimePresetRef = useRef("");
+  const primedRuntimeAuthRef = useRef("");
   const primedCommandRef = useRef("");
+  const doneHubCodexApiKey = useDoneHubStore((state) => String(state.session?.codex_api_key || "").trim());
   const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes, runtimePriceMap), [runtimes, runtimePriceMap]);
   const avatarPreviewUrl = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile]);
 
@@ -225,24 +228,54 @@ export function AddActorModal({
   useEffect(() => {
     if (!isOpen) {
       primedRuntimePresetRef.current = "";
+      primedRuntimeAuthRef.current = "";
       primedCommandRef.current = "";
       return;
     }
     if (newActorUseProfile || !selectedRuntimePreset) return;
-    if (primedRuntimePresetRef.current === selectedRuntimePreset.id) return;
-    primedRuntimePresetRef.current = selectedRuntimePreset.id;
-    const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
-    const nextSecrets = mergePresetSecrets(newActorSecretsSetText, selectedRuntimePreset, doneHubCodexApiKey);
+    const currentDoneHubCodexApiKey = doneHubCodexApiKey || getCurrentDoneHubCodexApiKey();
+    const primeKey = `${selectedRuntimePreset.id}:${currentDoneHubCodexApiKey ? "auth" : "noauth"}`;
+    if (primedRuntimePresetRef.current === primeKey) return;
+    primedRuntimePresetRef.current = primeKey;
+    const nextSecrets = mergePresetSecrets(newActorSecretsSetText, selectedRuntimePreset, currentDoneHubCodexApiKey);
     if (nextSecrets !== newActorSecretsSetText) {
       setNewActorSecretsSetText(nextSecrets);
     }
-    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && doneHubCodexApiKey)) {
+    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && currentDoneHubCodexApiKey)) {
       setShowAdvancedActor(true);
     }
   }, [
     isOpen,
     newActorUseProfile,
     selectedRuntimePreset,
+    doneHubCodexApiKey,
+    newActorSecretsSetText,
+    setNewActorSecretsSetText,
+    setShowAdvancedActor,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      primedRuntimeAuthRef.current = "";
+      return;
+    }
+    if (newActorUseProfile) return;
+    const currentDoneHubCodexApiKey = doneHubCodexApiKey || getCurrentDoneHubCodexApiKey();
+    const primeKey = `${newActorRuntime}:${currentDoneHubCodexApiKey ? "auth" : "noauth"}`;
+    if (primedRuntimeAuthRef.current === primeKey) return;
+    primedRuntimeAuthRef.current = primeKey;
+    const nextSecrets = mergeRuntimeAuthSecret(newActorSecretsSetText, newActorRuntime, currentDoneHubCodexApiKey);
+    if (nextSecrets !== newActorSecretsSetText) {
+      setNewActorSecretsSetText(nextSecrets);
+    }
+    if (newActorRuntime === "codex" && currentDoneHubCodexApiKey) {
+      setShowAdvancedActor(true);
+    }
+  }, [
+    isOpen,
+    newActorUseProfile,
+    newActorRuntime,
+    doneHubCodexApiKey,
     newActorSecretsSetText,
     setNewActorSecretsSetText,
     setShowAdvancedActor,

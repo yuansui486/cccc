@@ -22,6 +22,7 @@ import {
   codexReasoningEffortFromCommand,
   mergePresetSecrets,
   mergePresetUnsetKeys,
+  mergeRuntimeAuthSecret,
   runtimePresetById,
   runtimePresetIdFor,
   withClaudeReasoningEffort,
@@ -30,7 +31,7 @@ import {
   type CodexReasoningEffort,
   type RuntimePresetId,
 } from "../../utils/runtimePresets";
-import { getCurrentDoneHubCodexApiKey } from "../../stores/useDoneHubStore";
+import { getCurrentDoneHubCodexApiKey, useDoneHubStore } from "../../stores/useDoneHubStore";
 import { fetchDoneHubPrices } from "../../services/doneHub";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -204,6 +205,8 @@ export function EditActorModal({
   const [runtimePriceMap, setRuntimePriceMap] = useState<RuntimePriceMap | null>(null);
   const secretFetchSeqRef = useRef(0);
   const presetSecretsPrimedRef = useRef("");
+  const runtimeAuthPrimedRef = useRef("");
+  const doneHubCodexApiKey = useDoneHubStore((state) => String(state.session?.codex_api_key || "").trim());
   const runtimeChoiceGroups = useMemo(() => buildRuntimeChoiceGroups(runtimes, runtimePriceMap), [runtimes, runtimePriceMap]);
   const modalStateRef = useRef<{
     groupId: string;
@@ -417,24 +420,51 @@ export function EditActorModal({
   useEffect(() => {
     if (!isOpen) {
       presetSecretsPrimedRef.current = "";
+      runtimeAuthPrimedRef.current = "";
       return;
     }
     if (editMode !== "custom" || effectiveLinked || !selectedRuntimePreset) return;
-    if (presetSecretsPrimedRef.current === selectedRuntimePreset.id) return;
-    presetSecretsPrimedRef.current = selectedRuntimePreset.id;
-    const doneHubCodexApiKey = getCurrentDoneHubCodexApiKey();
+    const currentDoneHubCodexApiKey = doneHubCodexApiKey || getCurrentDoneHubCodexApiKey();
+    const primeKey = `${selectedRuntimePreset.id}:${currentDoneHubCodexApiKey ? "auth" : "noauth"}`;
+    if (presetSecretsPrimedRef.current === primeKey) return;
+    presetSecretsPrimedRef.current = primeKey;
     setSecretsSetText((current) => {
-      const next = mergePresetSecrets(current, selectedRuntimePreset, doneHubCodexApiKey);
+      const next = mergePresetSecrets(current, selectedRuntimePreset, currentDoneHubCodexApiKey);
       return next === current ? current : next;
     });
     setSecretsUnsetText((current) => {
       const next = mergePresetUnsetKeys(current, selectedRuntimePreset);
       return next === current ? current : next;
     });
-    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && doneHubCodexApiKey)) {
+    if (selectedRuntimePreset.envPrivate || (selectedRuntimePreset.runtime === "codex" && currentDoneHubCodexApiKey)) {
       setSecretsPrimed(true);
     }
-  }, [isOpen, editMode, effectiveLinked, selectedRuntimePreset]);
+  }, [
+    isOpen,
+    editMode,
+    effectiveLinked,
+    selectedRuntimePreset,
+    doneHubCodexApiKey,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      runtimeAuthPrimedRef.current = "";
+      return;
+    }
+    if (editMode !== "custom" || effectiveLinked) return;
+    const currentDoneHubCodexApiKey = doneHubCodexApiKey || getCurrentDoneHubCodexApiKey();
+    const primeKey = `${runtime}:${currentDoneHubCodexApiKey ? "auth" : "noauth"}`;
+    if (runtimeAuthPrimedRef.current === primeKey) return;
+    runtimeAuthPrimedRef.current = primeKey;
+    setSecretsSetText((current) => {
+      const next = mergeRuntimeAuthSecret(current, runtime, currentDoneHubCodexApiKey);
+      return next === current ? current : next;
+    });
+    if (runtime === "codex" && currentDoneHubCodexApiKey) {
+      setSecretsPrimed(true);
+    }
+  }, [isOpen, editMode, effectiveLinked, runtime, doneHubCodexApiKey]);
 
   if (!isOpen) return null;
 
