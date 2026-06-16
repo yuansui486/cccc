@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 STUDIO_DIRNAME = "studio"
-STUDIO_ASSTES_DIRNAME = "asstes"
+STUDIO_ASSETS_DIRNAME = "assets"
 STUDIO_DRAFTS_DIRNAME = "drafts"
 
 
@@ -35,8 +35,8 @@ def onecolleague_studio_dir(home: Optional[Path] = None) -> Path:
     return base / STUDIO_DIRNAME
 
 
-def onecolleague_studio_asstes_dir(home: Optional[Path] = None) -> Path:
-    return onecolleague_studio_dir(home) / STUDIO_ASSTES_DIRNAME
+def onecolleague_studio_assets_dir(home: Optional[Path] = None) -> Path:
+    return onecolleague_studio_dir(home) / STUDIO_ASSETS_DIRNAME
 
 
 def onecolleague_studio_drafts_dir(home: Optional[Path] = None) -> Path:
@@ -45,14 +45,14 @@ def onecolleague_studio_drafts_dir(home: Optional[Path] = None) -> Path:
 
 def ensure_studio_dirs(home: Optional[Path] = None) -> Dict[str, Path]:
     studio = onecolleague_studio_dir(home)
-    asstes = onecolleague_studio_asstes_dir(home)
+    assets = onecolleague_studio_assets_dir(home)
     drafts = onecolleague_studio_drafts_dir(home)
     studio.mkdir(parents=True, exist_ok=True)
-    asstes.mkdir(parents=True, exist_ok=True)
+    assets.mkdir(parents=True, exist_ok=True)
     drafts.mkdir(parents=True, exist_ok=True)
     return {
         "home": studio.parent,
         "studio": studio,
-        "asstes": asstes,
+        "assets": assets,
         "drafts": drafts,
     }

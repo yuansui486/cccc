@@ -47,9 +47,9 @@ class TestWebStudioRoutes(unittest.TestCase):
             home = Path(td).resolve()
             self.assertEqual(result.get("home_path"), str(home))
             self.assertEqual(result.get("studio_path"), str(home / "studio"))
-            self.assertEqual(result.get("asstes_path"), str(home / "studio" / "asstes"))
+            self.assertEqual(result.get("assets_path"), str(home / "studio" / "assets"))
             self.assertEqual(result.get("drafts_path"), str(home / "studio" / "drafts"))
-            self.assertTrue((home / "studio" / "asstes").is_dir())
+            self.assertTrue((home / "studio" / "assets").is_dir())
             self.assertTrue((home / "studio" / "drafts").is_dir())
         finally:
             cleanup()

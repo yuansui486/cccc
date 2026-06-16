@@ -72,10 +72,10 @@ class TestPaths(unittest.TestCase):
                 paths = ensure_studio_dirs()
                 self.assertEqual(paths["home"], Path(td).resolve())
                 self.assertEqual(paths["studio"], Path(td).resolve() / "studio")
-                self.assertEqual(paths["asstes"], Path(td).resolve() / "studio" / "asstes")
+                self.assertEqual(paths["assets"], Path(td).resolve() / "studio" / "assets")
                 self.assertEqual(paths["drafts"], Path(td).resolve() / "studio" / "drafts")
                 self.assertTrue(paths["studio"].is_dir())
-                self.assertTrue(paths["asstes"].is_dir())
+                self.assertTrue(paths["assets"].is_dir())
                 self.assertTrue(paths["drafts"].is_dir())
         finally:
             cleanup()

@@ -13,7 +13,7 @@ def _studio_paths_payload(ctx: RouteContext) -> Dict[str, Any]:
     return {
         "home_path": str(paths["home"]),
         "studio_path": str(paths["studio"]),
-        "asstes_path": str(paths["asstes"]),
+        "assets_path": str(paths["assets"]),
         "drafts_path": str(paths["drafts"]),
     }
 
