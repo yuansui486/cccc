@@ -104,9 +104,10 @@ function profileScopeLabel(profile: ActorProfile, t: (key: string, options?: Rec
 
 function modeSwitchButtonClass(): string {
   return [
-    "rounded-2xl border px-4 py-2 text-sm font-semibold transition-colors sm:text-base",
-    "border-[var(--glass-border-subtle)] bg-[var(--glass-tab-bg)] text-[var(--color-text-secondary)] shadow-sm",
-    "hover:bg-[var(--glass-tab-bg-hover)] hover:text-[var(--color-text-primary)]",
+    "rounded-2xl border px-4 py-2 text-sm font-semibold shadow-[0_10px_24px_-20px_rgba(37,99,235,0.72)] transition-all active:scale-[0.98] sm:text-base",
+    "border-blue-200/80 bg-blue-50/80 text-blue-700",
+    "hover:border-blue-300 hover:bg-blue-100/80 hover:text-blue-800",
+    "dark:border-blue-400/25 dark:bg-blue-500/12 dark:text-blue-100 dark:hover:border-blue-300/35 dark:hover:bg-blue-500/18",
   ].join(" ");
 }
 
@@ -345,7 +346,7 @@ export function AddActorModal({
     >
       <div
         ref={modalRef}
-        className="w-full h-full sm:h-auto sm:max-w-4xl sm:mt-10 sm:max-h-[calc(100vh-5rem)] border border-[var(--glass-border-subtle)] shadow-2xl animate-scale-in rounded-none sm:rounded-2xl glass-modal flex flex-col overflow-hidden text-[var(--color-text-primary)]"
+        className="w-full h-full sm:h-auto sm:max-w-2xl sm:mt-10 sm:max-h-[calc(100vh-5rem)] border border-[var(--glass-border-subtle)] shadow-2xl animate-scale-in rounded-none sm:rounded-2xl glass-modal flex flex-col overflow-hidden text-[var(--color-text-primary)]"
       >
         <div className="px-6 py-4 border-b safe-area-inset-top border-[var(--glass-border-subtle)] glass-header flex-shrink-0">
           <div id="add-actor-title" className="text-lg font-semibold text-[var(--color-text-primary)]">
@@ -355,13 +356,13 @@ export function AddActorModal({
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.92),rgba(255,255,255,0)_30%),linear-gradient(180deg,rgb(251,250,247),rgb(245,244,241))] p-4 dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),rgba(255,255,255,0)_34%),linear-gradient(180deg,rgba(17,18,22,0.98),rgba(11,12,15,1))] sm:p-6 safe-area-bottom-compact">
-          <div className="mx-auto max-w-4xl space-y-4">
+          <div className="mx-auto max-w-2xl space-y-4">
             <Surface className={`${sectionCardClass} relative overflow-hidden`}>
               <span
                 aria-hidden="true"
                 className="pointer-events-none absolute left-0 top-0 h-0 w-0 border-r-[4.75rem] border-t-[4.75rem] border-r-transparent border-t-blue-600 opacity-95 dark:border-t-blue-500"
               />
-              <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-center">
+              <div className="grid gap-5 lg:grid-cols-[10rem_minmax(0,1fr)] lg:items-center">
                 <div className="flex min-h-[7rem] items-center justify-center">
                   <ActorAvatarField
                     label={null}
@@ -383,7 +384,7 @@ export function AddActorModal({
                 <div className="space-y-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-                      <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0">
+                      <label className="text-sm font-medium text-[var(--color-text-muted)] sm:w-16 sm:shrink-0">
                         {t("nickname", { defaultValue: "昵称" })}
                       </label>
                       <div className="min-w-0 flex-1">
@@ -409,7 +410,7 @@ export function AddActorModal({
                   {newActorUseProfile ? (
                     <>
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0">{t("actorProfile")}</label>
+                        <label className="text-sm font-medium text-[var(--color-text-muted)] sm:w-16 sm:shrink-0">{t("actorProfile")}</label>
                         <div className="min-w-0 flex-1">
                           <select
                             className="w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"
@@ -449,7 +450,7 @@ export function AddActorModal({
                   ) : (
                     <>
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <label className="text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0">{t("aiRuntime")}</label>
+                        <label className="text-sm font-medium text-[var(--color-text-muted)] sm:w-16 sm:shrink-0">{t("aiRuntime")}</label>
                         <div className="min-w-0 flex-1">
                           <select
                             className="onecolleague-runtime-select w-full rounded-xl border px-4 py-2.5 text-sm min-h-[44px] transition-colors glass-input text-[var(--color-text-primary)]"

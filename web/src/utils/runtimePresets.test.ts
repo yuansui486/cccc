@@ -64,11 +64,11 @@ describe("runtime presets", () => {
       }
     );
 
-    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options[0]?.label).toBe("gpt5.4（输入 ¥1.25 / 输出 ¥7.5，每百万 tokens）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[0]?.label).toBe("deepseek-v4（输入 ¥3 / 输出 ¥6，每百万 tokens）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[1]?.label).toBe("Qwen3.6（输入 ¥0 / 输出 ¥0，每百万 tokens）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[2]?.label).toBe("qwen3.6-plus（输入 ¥0 / 输出 ¥0，每百万 tokens）");
-    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[3]?.label).toBe("qwen3.6-flash（输入 ¥0 / 输出 ¥0，每百万 tokens）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupCodex")?.options[0]?.label).toBe("gpt5.4（输入 ¥1.25/M，输出 ¥7.5/M）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[0]?.label).toBe("deepseek-v4（输入 ¥3/M，输出 ¥6/M）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[1]?.label).toBe("Qwen3.6（输入 ¥0/M，输出 ¥0/M）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[2]?.label).toBe("qwen3.6-plus（输入 ¥0/M，输出 ¥0/M）");
+    expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[3]?.label).toBe("qwen3.6-flash（输入 ¥0/M，输出 ¥0/M）");
     expect(groups.find((group) => group.labelKey === "runtimeGroupClaude")?.options[4]?.label).toBe("GLM-4.7（价格暂无）");
     expect(groups.find((group) => group.labelKey === "runtimeGroupKimi")?.options[0]?.label).toBe("kimi（价格暂无）");
   });

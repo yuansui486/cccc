@@ -27,9 +27,9 @@ const CLAUDE_REASONING_OPTIONS: Array<ReasoningEffortOption<ClaudeReasoningEffor
 
 function modeButtonClass(selected: boolean): string {
   return [
-    "px-3 py-2.5 rounded-xl border text-sm min-h-[44px] font-medium transition-colors",
+    "px-3 py-1.5 rounded-xl border text-sm min-h-[38px] font-medium transition-colors",
     selected
-      ? "border-[var(--glass-accent-border)] bg-[var(--glass-accent-bg)] text-[var(--color-accent-primary)] dark:border-[var(--glass-accent-border)] dark:bg-white/[0.06] dark:text-white"
+      ? "border-blue-500/45 bg-blue-50 text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.08)] hover:bg-blue-100/80 dark:border-blue-400/45 dark:bg-blue-500/15 dark:text-blue-100 dark:hover:bg-blue-500/20"
       : "border-[var(--glass-border-subtle)] bg-[var(--glass-panel-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--glass-tab-bg-hover)]",
   ].join(" ");
 }
@@ -52,7 +52,7 @@ function ReasoningEffortButtonGrid<T extends string>({
     <label
       className={
         layout === "inline"
-          ? "text-xs font-medium text-[var(--color-text-muted)] sm:w-20 sm:shrink-0"
+          ? "text-sm font-medium text-[var(--color-text-muted)] sm:w-16 sm:shrink-0"
           : "block text-xs font-medium mb-2 text-[var(--color-text-muted)]"
       }
     >
