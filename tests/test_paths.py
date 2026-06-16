@@ -62,6 +62,24 @@ class TestPaths(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_ensure_studio_dirs_uses_resolved_home(self) -> None:
+        from no1.paths import ensure_studio_dirs
+
+        cleanup = self._clean_home_env()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                os.environ["ONECOLLEAGUE_HOME"] = td
+                paths = ensure_studio_dirs()
+                self.assertEqual(paths["home"], Path(td).resolve())
+                self.assertEqual(paths["studio"], Path(td).resolve() / "studio")
+                self.assertEqual(paths["asstes"], Path(td).resolve() / "studio" / "asstes")
+                self.assertEqual(paths["drafts"], Path(td).resolve() / "studio" / "drafts")
+                self.assertTrue(paths["studio"].is_dir())
+                self.assertTrue(paths["asstes"].is_dir())
+                self.assertTrue(paths["drafts"].is_dir())
+        finally:
+            cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

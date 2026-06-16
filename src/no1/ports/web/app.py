@@ -495,6 +495,7 @@ def create_app() -> FastAPI:
     from .routes.im import register_im_routes
     from .routes.access_tokens import create_routers as create_access_token_routers
     from .routes.nomcp import create_routers as create_nomcp_routers
+    from .routes.studio import create_routers as create_studio_routers
 
     route_ctx = RouteContext(
         home=home,
@@ -520,6 +521,8 @@ def create_app() -> FastAPI:
     for router in create_account_routers(route_ctx):
         app.include_router(router)
     for router in create_done_hub_routers(route_ctx):
+        app.include_router(router)
+    for router in create_studio_routers(route_ctx):
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)
     for router in create_access_token_routers(route_ctx):
