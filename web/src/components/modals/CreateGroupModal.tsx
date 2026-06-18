@@ -176,7 +176,7 @@ export function CreateGroupModal({
                 variant="secondary"
                 onClick={onPickDirectory}
               >
-                {t("createGroup.findWindowsPath")}
+                {t("createGroup.browse")}
               </Button>
             </div>
             <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
