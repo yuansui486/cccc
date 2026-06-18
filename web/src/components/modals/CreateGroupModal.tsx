@@ -49,6 +49,7 @@ export interface CreateGroupModalProps {
   onSelectTeamPreset: (preset: DoneHubTeamPreset) => void;
 
   dirBrowseError?: string;
+  onPickDirectory: () => void;
   onFetchDirContents: (path: string) => void;
   onCreateGroup: () => void;
   onClose: () => void;
@@ -77,6 +78,7 @@ export function CreateGroupModal({
   dirBrowseError,
   onSelectTemplate,
   onSelectTeamPreset,
+  onPickDirectory,
   onFetchDirContents,
   onCreateGroup,
   onClose,
@@ -172,7 +174,7 @@ export function CreateGroupModal({
               />
               <Button
                 variant="secondary"
-                onClick={() => onFetchDirContents(createGroupPath || "~")}
+                onClick={onPickDirectory}
               >
                 {t("createGroup.findWindowsPath")}
               </Button>

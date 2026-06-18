@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
@@ -85,6 +88,104 @@ class WebModelBrowserBindRequest(BaseModel):
     conversation_url: str = ""
     new_chat: bool = False
     clear: bool = False
+
+
+class FsPickDirectoryRequest(BaseModel):
+    initial_path: str = "~"
+    title: str = "Select folder"
+
+
+def _nearest_existing_directory(raw_path: str) -> Path:
+    path = Path(str(raw_path or "~").strip() or "~").expanduser()
+    if path.exists():
+        return path if path.is_dir() else path.parent
+    for parent in path.parents:
+        if parent.exists() and parent.is_dir():
+            return parent
+    return Path.home()
+
+
+def _pick_directory_with_windows_dialog(*, initial_path: str, title: str) -> Dict[str, Any]:
+    if os.name != "nt":
+        return {
+            "ok": False,
+            "error": {
+                "code": "NATIVE_PICKER_UNAVAILABLE",
+                "message": "Native directory picker is only available on Windows.",
+            },
+        }
+
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        return {
+            "ok": False,
+            "error": {
+                "code": "NATIVE_PICKER_UNAVAILABLE",
+                "message": "PowerShell is required to open the Windows folder picker.",
+            },
+        }
+
+    initial_dir = _nearest_existing_directory(initial_path)
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = [Environment]::GetEnvironmentVariable('ONECOLLEAGUE_PICK_DIR_TITLE', 'Process')
+$dialog.ShowNewFolderButton = $true
+$initial = [Environment]::GetEnvironmentVariable('ONECOLLEAGUE_PICK_DIR_INITIAL', 'Process')
+if ($initial -and [System.IO.Directory]::Exists($initial)) {
+  $dialog.SelectedPath = $initial
+}
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.WriteLine($dialog.SelectedPath)
+}
+"""
+    env = dict(os.environ)
+    env["ONECOLLEAGUE_PICK_DIR_INITIAL"] = str(initial_dir)
+    env["ONECOLLEAGUE_PICK_DIR_TITLE"] = str(title or "Select folder")
+
+    try:
+        proc = subprocess.run(
+            [powershell, "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": {"code": "NATIVE_PICKER_TIMEOUT", "message": "Folder picker timed out."}}
+    except Exception as exc:
+        return {"ok": False, "error": {"code": "NATIVE_PICKER_FAILED", "message": str(exc)}}
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return {
+            "ok": False,
+            "error": {
+                "code": "NATIVE_PICKER_FAILED",
+                "message": detail or "Windows folder picker failed.",
+            },
+        }
+
+    selected = (proc.stdout or "").strip().splitlines()
+    selected_path = selected[-1].strip() if selected else ""
+    if not selected_path:
+        return {"ok": True, "result": {"path": "", "cancelled": True}}
+
+    path = Path(selected_path).expanduser()
+    if path.exists() and not path.is_dir():
+        return {"ok": False, "error": {"code": "NOT_DIR", "message": f"Not a directory: {selected_path}"}}
+    return {"ok": True, "result": {"path": str(path.resolve() if path.exists() else path), "cancelled": False}}
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -1627,6 +1728,24 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             }
         except Exception as e:
             return {"ok": False, "error": {"code": "ERROR", "message": str(e)}}
+
+    @global_router.post("/api/v1/fs/pick-directory", dependencies=[Depends(require_admin)])
+    async def fs_pick_directory(req: FsPickDirectoryRequest) -> Dict[str, Any]:
+        """Open the native folder picker and return a selected directory path."""
+        if ctx.read_only:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "read_only",
+                    "message": "File system endpoints are disabled in read-only (exhibit) mode.",
+                    "details": {"endpoint": "fs_pick_directory"},
+                },
+            )
+        return await run_in_threadpool(
+            _pick_directory_with_windows_dialog,
+            initial_path=req.initial_path,
+            title=req.title,
+        )
 
     @global_router.get("/api/v1/fs/recent", dependencies=[Depends(require_admin)])
     async def fs_recent() -> Dict[str, Any]:

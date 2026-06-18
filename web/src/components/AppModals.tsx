@@ -1021,6 +1021,31 @@ export function AppModals({
     }
   };
 
+  const handlePickCreateGroupDirectory = async () => {
+    setDirBrowseError("");
+    const resp = await api.pickDirectory(createGroupPath || "~", t("modals:createGroup.title"));
+    if (resp.ok) {
+      const pickedPath = String(resp.result?.path || "").trim();
+      if (pickedPath) {
+        setCreateGroupPath(pickedPath);
+        setShowDirBrowser(false);
+        setDirItems([]);
+        setCurrentDir("");
+        setParentDir(null);
+      }
+      return;
+    }
+
+    const errorCode = String(resp.error?.code || "").trim();
+    if (errorCode === "NATIVE_PICKER_UNAVAILABLE" || errorCode === "NATIVE_PICKER_FAILED" || errorCode === "NATIVE_PICKER_TIMEOUT") {
+      await handleFetchDirContents(createGroupPath || "~");
+      return;
+    }
+
+    setShowDirBrowser(true);
+    setDirBrowseError(resp.error?.message || t("failedToListDir"));
+  };
+
   const previewCreateGroupTemplate = async (file: File): Promise<TemplatePreviewDetailsProps["template"] | null> => {
     const resp = await api.previewTemplate(file);
     if (!resp.ok) {
@@ -1910,6 +1935,7 @@ export function AppModals({
         onSelectTemplate={handleSelectCreateGroupTemplate}
         onSelectTeamPreset={handleSelectTeamPreset}
         dirBrowseError={dirBrowseError}
+        onPickDirectory={handlePickCreateGroupDirectory}
         onFetchDirContents={handleFetchDirContents}
         onCreateGroup={handleCreateGroup}
         onClose={() => closeModal("createGroup")}

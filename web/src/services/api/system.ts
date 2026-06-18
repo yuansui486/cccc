@@ -33,6 +33,16 @@ export async function fetchDirContents(path: string) {
   );
 }
 
+export async function pickDirectory(initialPath: string, title: string) {
+  return apiJson<{ path: string; cancelled: boolean }>("/api/v1/fs/pick-directory", {
+    method: "POST",
+    body: JSON.stringify({
+      initial_path: initialPath,
+      title,
+    }),
+  });
+}
+
 export async function resolveScopeRoot(path: string) {
   return apiJson<{ path: string; scope_root: string; scope_key: string; git_remote: string }>(
     `/api/v1/fs/scope_root?path=${encodeURIComponent(path)}`,
