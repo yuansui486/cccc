@@ -1,10 +1,9 @@
 import json
-import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, call, patch
+from unittest.mock import ANY, Mock, call, patch
 
 from no1.daemon.mcp_install import ensure_mcp_installed, is_mcp_installed
 from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
@@ -98,6 +97,9 @@ class TestMcpInstall(unittest.TestCase):
                         ["kimi", "mcp", "add", "--transport", "stdio", "onecolleague", "--", "/abs/onecolleague", "mcp"],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=ANY,
                         cwd=str(cwd),
                         timeout=30,
                     )
@@ -199,18 +201,25 @@ class TestMcpInstall(unittest.TestCase):
                                 ["claude", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=False,
+                                env=ANY,
                                 timeout=10,
                             ),
                             call(
                                 ["claude", "mcp", "get", "cccc"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 timeout=10,
                             ),
                             call(
                                 ["claude", "mcp", "remove", "onecolleague", "-s", "user"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 cwd=str(cwd),
                                 timeout=30,
                             ),
@@ -218,6 +227,9 @@ class TestMcpInstall(unittest.TestCase):
                                 ["claude", "mcp", "add", "-s", "user", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 cwd=str(cwd),
                                 timeout=30,
                             ),
@@ -225,6 +237,7 @@ class TestMcpInstall(unittest.TestCase):
                                 ["claude", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=False,
+                                env=ANY,
                                 timeout=10,
                             ),
                         ],
@@ -252,19 +265,29 @@ class TestMcpInstall(unittest.TestCase):
                                 ["codex", "mcp", "get", "cccc"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
                                 timeout=10,
-                                env={**os.environ, **env},
+                                env=ANY,
                             ),
                             call(
                                 ["codex", "mcp", "add", "onecolleague", "--", "/abs/onecolleague", "mcp"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
                                 cwd=str(cwd),
                                 timeout=30,
-                                env={**os.environ, **env},
+                                env=ANY,
                             ),
                         ],
                     )
+                    for run_call in mock_run.call_args_list:
+                        run_env = run_call.kwargs["env"]
+                        self.assertEqual(run_env["CODEX_HOME"], env["CODEX_HOME"])
+                        self.assertEqual(run_env["OPENAI_API_KEY"], env["OPENAI_API_KEY"])
+                        self.assertEqual(run_env["PYTHONUTF8"], "1")
+                        self.assertEqual(run_env["PYTHONIOENCODING"], "utf-8")
 
     def test_ensure_mcp_installed_hermes_prepares_default_profile(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -346,6 +369,9 @@ class TestMcpInstall(unittest.TestCase):
             capture_output=True,
             timeout=10,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=ANY,
         )
 
     def test_ensure_mcp_installed_codex_uses_resolved_windows_cli_path(self) -> None:
@@ -373,12 +399,18 @@ class TestMcpInstall(unittest.TestCase):
                         [r"C:\Tools\codex.cmd", "mcp", "get", "cccc"],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=ANY,
                         timeout=10,
                     ),
                     call(
                         [r"C:\Tools\codex.cmd", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=ANY,
                         cwd=str(cwd),
                         timeout=30,
                     ),
@@ -411,12 +443,18 @@ class TestMcpInstall(unittest.TestCase):
                         ["codex", "mcp", "get", "cccc"],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=ANY,
                         timeout=10,
                     ),
                     call(
                         ["codex", "mcp", "remove", "cccc"],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=ANY,
                         cwd=str(cwd),
                         timeout=30,
                     ),
@@ -424,6 +462,9 @@ class TestMcpInstall(unittest.TestCase):
                         ["codex", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        env=ANY,
                         cwd=str(cwd),
                         timeout=30,
                     ),
@@ -475,18 +516,27 @@ class TestMcpInstall(unittest.TestCase):
                                 ["codex", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 timeout=10,
                             ),
                             call(
                                 ["codex", "mcp", "get", "cccc"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 timeout=10,
                             ),
                             call(
                                 ["codex", "mcp", "remove", "onecolleague"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 cwd=str(cwd),
                                 timeout=30,
                             ),
@@ -494,6 +544,9 @@ class TestMcpInstall(unittest.TestCase):
                                 ["codex", "mcp", "add", "onecolleague", "--", "C:\\OneColleague\\onecolleague.exe", "mcp"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 cwd=str(cwd),
                                 timeout=30,
                             ),
@@ -501,6 +554,9 @@ class TestMcpInstall(unittest.TestCase):
                                 ["codex", "mcp", "get", "onecolleague"],
                                 capture_output=True,
                                 text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                env=ANY,
                                 timeout=10,
                             ),
                         ],
@@ -523,6 +579,9 @@ class TestMcpInstall(unittest.TestCase):
         with patch("no1.kernel.runtime.sys.platform", "win32"), patch(
             "no1.kernel.runtime.sys.executable",
             "C:\\Python312\\python.exe",
+        ), patch("no1.kernel.runtime.sys.prefix", "C:\\Python312"), patch(
+            "no1.kernel.runtime.Path.exists",
+            return_value=False,
         ), patch("no1.kernel.runtime.shutil.which", return_value=None):
             self.assertEqual(
                 get_onecolleague_mcp_stdio_command(),

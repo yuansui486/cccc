@@ -56,9 +56,14 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "--output-filename=onecolleague.exe" in script
     assert "--include-package=no1" in script
     assert "--include-package-data=no1" in script
+    assert "--include-distribution-metadata=no1" in script
     assert "src\\no1\\ports\\web\\dist=no1\\ports\\web\\dist" in script
     assert "src\\no1\\resources=no1\\resources" in script
     assert "--nofollow-import-to=lark_oapi.*" in script
+    assert "Get-ProjectVersion" in script
+    assert "Test-OneColleagueVersion" in script
+    assert "Nuitka smoke version mismatch" in script
+    assert '$actualVersion -eq "0.0.0"' in script
     assert "onecolleague-nuitka-smoke-" in script
     assert "$env:ONECOLLEAGUE_HOME = $script:smokeHome" in script
     assert "$env:CCCC_HOME = $script:smokeHome" in script

@@ -203,6 +203,15 @@ def build_mcp_get_command(runtime: str, server_name: str = MCP_SERVER_NAME) -> l
     return None
 
 
+def _mcp_subprocess_env(env: Dict[str, str] | None) -> dict[str, str]:
+    merged_env = dict(os.environ)
+    merged_env.setdefault("PYTHONUTF8", "1")
+    merged_env.setdefault("PYTHONIOENCODING", "utf-8")
+    if env is not None:
+        merged_env.update({str(k): str(v) for k, v in env.items() if isinstance(k, str)})
+    return merged_env
+
+
 def _run_cli(
     argv: list[str],
     *,
@@ -215,13 +224,13 @@ def _run_cli(
         "capture_output": True,
         "timeout": timeout,
         "text": text,
+        "env": _mcp_subprocess_env(env),
     }
+    if text:
+        kwargs["encoding"] = "utf-8"
+        kwargs["errors"] = "replace"
     if cwd is not None:
         kwargs["cwd"] = str(cwd)
-    if env is not None:
-        merged_env = dict(os.environ)
-        merged_env.update({str(k): str(v) for k, v in env.items() if isinstance(k, str)})
-        kwargs["env"] = merged_env
     return subprocess.run(resolve_subprocess_argv(argv), **kwargs)
 
 

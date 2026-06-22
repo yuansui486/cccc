@@ -18,6 +18,16 @@ $webDistDir = Join-Path $rootDir "src\no1\ports\web\dist"
 $resourcesDir = Join-Path $rootDir "src\no1\resources"
 $smokeHome = $null
 
+function Get-ProjectVersion {
+  $pyprojectPath = Join-Path $rootDir "pyproject.toml"
+  foreach ($line in Get-Content -Path $pyprojectPath -Encoding UTF8) {
+    if ($line -match '^\s*version\s*=\s*"([^"]+)"') {
+      return $Matches[1]
+    }
+  }
+  throw "Could not determine project version from pyproject.toml"
+}
+
 function Resolve-Tool {
   param(
     [Parameter(Mandatory = $true)]
@@ -73,6 +83,24 @@ function Test-PathExists {
   }
 }
 
+function Test-OneColleagueVersion {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ExePath
+  )
+
+  $expectedVersion = Get-ProjectVersion
+  $actualVersion = (& $ExePath version)
+  $exitCode = $LASTEXITCODE
+  if ($null -ne $exitCode -and $exitCode -ne 0) {
+    throw "$ExePath version failed with exit code $exitCode"
+  }
+  $actualVersion = (($actualVersion | Out-String).Trim())
+  if (-not $actualVersion -or $actualVersion -eq "0.0.0" -or $actualVersion -ne $expectedVersion) {
+    throw "Nuitka smoke version mismatch: expected $expectedVersion, got $actualVersion"
+  }
+}
+
 function Resolve-ProjectPython {
   param(
     [Parameter(Mandatory = $true)]
@@ -112,7 +140,7 @@ function Invoke-OneColleagueSmoke {
     $env:ONECOLLEAGUE_HOME = $script:smokeHome
     $env:CCCC_HOME = $script:smokeHome
 
-    Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("version") -WorkingDirectory $rootDir
+    Test-OneColleagueVersion -ExePath $ExePath
     Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("doctor") -WorkingDirectory $rootDir
     Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("daemon", "start") -WorkingDirectory $rootDir
     Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("daemon", "status") -WorkingDirectory $rootDir
@@ -195,6 +223,7 @@ $nuitkaArgs = @(
   "--output-folder-name=no1.frozen_entry.dist",
   "--include-package=no1",
   "--include-package-data=no1",
+  "--include-distribution-metadata=no1",
   "--include-data-dir=src\no1\ports\web\dist=no1\ports\web\dist",
   "--include-data-dir=src\no1\resources=no1\resources",
   "--nofollow-import-to=lark_oapi.*",
@@ -208,6 +237,7 @@ Write-Host "==> Validate Nuitka distribution"
 Test-PathExists -Path $exePath -Message "Nuitka build did not produce $exePath"
 Test-PathExists -Path (Join-Path $distDir "no1\ports\web\dist\index.html") -Message "Nuitka dist is missing bundled Web UI"
 Test-PathExists -Path (Join-Path $distDir "no1\resources\onecolleague-help.md") -Message "Nuitka dist is missing no1 resources"
+Test-OneColleagueVersion -ExePath $exePath
 
 if (-not $SkipSmokeTests) {
   Write-Host "==> Run packaged smoke tests with temporary CCCC_HOME"

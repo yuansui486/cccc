@@ -212,14 +212,24 @@ class TestProcessUtils(unittest.TestCase):
     def test_pid_is_alive_posix_rejects_zombie_process(self) -> None:
         from no1.util import process as process_utils
 
+        class MissingProcPath:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def __truediv__(self, other: object) -> "MissingProcPath":
+                return MissingProcPath(f"{self.value}/{other}")
+
+            def read_text(self, **_kwargs: object) -> str:
+                raise FileNotFoundError(self.value)
+
         with patch.object(process_utils.os, "name", "posix"), patch.object(
             process_utils.os,
             "kill",
             return_value=None,
         ), patch.object(
-            process_utils.Path,
-            "exists",
-            return_value=False,
+            process_utils,
+            "Path",
+            MissingProcPath,
         ), patch.object(
             process_utils.subprocess,
             "run",
