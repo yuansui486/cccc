@@ -9,10 +9,9 @@ CODEX_PROVIDER_ENV_KEY = "ONECOLLEAGUE_API_KEY"
 
 _MANAGED_TOP_LEVEL = {
     "model_provider": json.dumps("custom"),
-    "model_reasoning_effort": json.dumps("high"),
     "disable_response_storage": "true",
 }
-_REMOVED_TOP_LEVEL = {"openai_base_url"}
+_REMOVED_TOP_LEVEL = {"model", "model_reasoning_effort", "openai_base_url"}
 _CUSTOM_PROVIDER_HEADER = "[model_providers.custom]"
 
 
@@ -70,6 +69,9 @@ def merge_codex_custom_provider_config(existing: str) -> str:
         if key in _MANAGED_TOP_LEVEL:
             continue
         out_top.append(line)
+
+    while out_top and not str(out_top[0] or "").strip():
+        out_top.pop(0)
 
     insert_at = 0
     while insert_at < len(out_top) and not str(out_top[insert_at] or "").strip():

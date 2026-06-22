@@ -18,8 +18,10 @@ import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
 import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
+  commandHasModelFlag,
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
+  defaultRuntimePresetFor,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
@@ -418,6 +420,17 @@ export function EditActorModal({
   const selectedClaudeReasoningEffort = claudeReasoningEffortFromCommand(command) || "high";
 
   useEffect(() => {
+    if (!isOpen) return;
+    if (editMode !== "custom" || effectiveLinked || commandHasModelFlag(command)) return;
+    const defaultPreset = defaultRuntimePresetFor(runtime);
+    if (!defaultPreset) return;
+    const normalizedCommand = commandForRuntimePreset(defaultPreset, rtInfo);
+    if (!normalizedCommand.trim() || normalizedCommand.trim() === command.trim()) return;
+    setSelectedRuntimePresetId(defaultPreset.id);
+    onChangeCommand(normalizedCommand);
+  }, [isOpen, editMode, effectiveLinked, runtime, command, rtInfo, onChangeCommand]);
+
+  useEffect(() => {
     if (!isOpen) {
       presetSecretsPrimedRef.current = "";
       runtimeAuthPrimedRef.current = "";
@@ -498,15 +511,23 @@ export function EditActorModal({
   };
 
   const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
-    const baseCommand = command.trim() || defaultCommand.trim();
+    const preset = selectedRuntimePreset || defaultRuntimePresetFor(runtime);
+    const baseCommand =
+      preset && !commandHasModelFlag(command)
+        ? commandForRuntimePreset(preset, rtInfo)
+        : command.trim() || defaultCommand.trim();
     onChangeCommand(withCodexReasoningEffort(baseCommand, effort));
-    setSelectedRuntimePresetId("");
+    if (preset) setSelectedRuntimePresetId(preset.id);
   };
 
   const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
-    const baseCommand = command.trim() || defaultCommand.trim();
+    const preset = selectedRuntimePreset || defaultRuntimePresetFor(runtime);
+    const baseCommand =
+      preset && !commandHasModelFlag(command)
+        ? commandForRuntimePreset(preset, rtInfo)
+        : command.trim() || defaultCommand.trim();
     onChangeCommand(withClaudeReasoningEffort(baseCommand, effort));
-    setSelectedRuntimePresetId("");
+    if (preset) setSelectedRuntimePresetId(preset.id);
   };
 
   const handleUploadAvatar = async (file: File | null) => {

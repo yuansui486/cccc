@@ -27,6 +27,12 @@ export type ClaudeReasoningEffort = "" | "low" | "medium" | "high" | "xhigh" | "
 const CODEX_REASONING_EFFORT_KEY = "model_reasoning_effort";
 const CLAUDE_LEGACY_EFFORT_ENV_KEY = "CLAUDE_CODE_EFFORT_LEVEL";
 
+const FALLBACK_RUNTIME_COMMANDS: Partial<Record<SupportedRuntime, string[]>> = {
+  claude: ["claude", "--dangerously-skip-permissions"],
+  codex: ["codex", "-c", "shell_environment_policy.inherit=all", "--dangerously-bypass-approvals-and-sandbox", "--search"],
+  kimi: ["kimi", "--yolo"],
+};
+
 export const RUNTIME_PRESETS: RuntimePreset[] = [
   {
     id: "model:deepseek-v4-pro-claude",
@@ -142,6 +148,12 @@ export function runtimePresetById(id: string): RuntimePreset | null {
   return RUNTIME_PRESETS.find((preset) => preset.id === needle) || null;
 }
 
+export function defaultRuntimePresetFor(runtime: string): RuntimePreset | null {
+  const normalizedRuntime = String(runtime || "").trim();
+  if (!normalizedRuntime) return null;
+  return RUNTIME_PRESETS.find((preset) => preset.runtime === normalizedRuntime) || null;
+}
+
 export function runtimePresetIdFor(runtime: string, command: string | string[] | undefined): RuntimePresetId | "" {
   const normalizedRuntime = String(runtime || "").trim();
   const tokens = Array.isArray(command)
@@ -164,9 +176,17 @@ export function runtimePresetIdFor(runtime: string, command: string | string[] |
   return "";
 }
 
+export function commandHasModelFlag(command: string | string[] | undefined): boolean {
+  const tokens = Array.isArray(command)
+    ? command.map((item) => String(item || "").trim()).filter(Boolean)
+    : splitCommand(String(command || "").trim());
+  return Boolean(modelFromCommand(tokens));
+}
+
 export function commandForRuntimePreset(preset: RuntimePreset, runtimeInfo?: RuntimeInfo): string {
   const base = splitCommand(String(runtimeInfo?.recommended_command || "").trim());
-  const command = preset.command && preset.command.length ? preset.command : base;
+  const fallback = FALLBACK_RUNTIME_COMMANDS[preset.runtime] || [];
+  const command = preset.command && preset.command.length ? preset.command : base.length ? base : fallback;
   if (preset.runtime === "claude" && preset.model) {
     return withCommandModel(command, preset.model, "--model").join(" ");
   }
