@@ -68,3 +68,10 @@ include = ["no1*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "nuitka>=4.1.2",
+    "ordered-set>=4.1.0",
+    "zstandard>=0.25.0",
+]

@@ -85,6 +85,82 @@ class TestProcessUtils(unittest.TestCase):
 
         self.assertEqual(resolved, argv)
 
+    def test_resolve_python_module_argv_rewrites_no1_modules_when_frozen(self) -> None:
+        from no1.util import process as process_utils
+
+        with patch.object(process_utils.sys, "frozen", True, create=True), patch.object(
+            process_utils.sys,
+            "executable",
+            r"C:\Program Files\OneColleague\onecolleague.exe",
+        ), patch.object(
+            process_utils.sys,
+            "argv",
+            [r"C:\Program Files\OneColleague\onecolleague.exe"],
+        ):
+            argv = process_utils.resolve_python_module_argv(["python", "-m", "no1.daemon_main", "run"])
+
+        self.assertEqual(
+            argv,
+            [
+                r"C:\Program Files\OneColleague\onecolleague.exe",
+                "--internal-module",
+                "no1.daemon_main",
+                "--",
+                "run",
+            ],
+        )
+
+    def test_current_frozen_executable_prefers_onecolleague_sibling_over_python_exe(self) -> None:
+        from no1.util import process as process_utils
+
+        with tempfile.TemporaryDirectory() as td:
+            dist = Path(td)
+            python_exe = dist / "python.exe"
+            onecolleague_exe = dist / "onecolleague.exe"
+            python_exe.write_text("", encoding="utf-8")
+            onecolleague_exe.write_text("", encoding="utf-8")
+
+            with patch.object(process_utils.sys, "executable", str(python_exe)), patch.object(
+                process_utils.sys,
+                "argv",
+                [str(python_exe)],
+            ):
+                self.assertEqual(process_utils.current_frozen_executable(), str(onecolleague_exe.resolve()))
+
+    def test_resolve_python_module_argv_preserves_source_mode_invocation(self) -> None:
+        from no1.util import process as process_utils
+
+        argv = ["python", "-m", "no1.daemon_main", "run"]
+        with patch.object(process_utils.sys, "frozen", False, create=True):
+            resolved = process_utils.resolve_python_module_argv(argv)
+
+        self.assertEqual(resolved, argv)
+
+    def test_is_frozen_executable_detects_nuitka_compiled_module(self) -> None:
+        from no1.util import process as process_utils
+
+        with patch.object(process_utils.sys, "frozen", False, create=True), patch.dict(
+            process_utils.__dict__,
+            {"__compiled__": object()},
+        ):
+            self.assertTrue(process_utils.is_frozen_executable())
+
+    def test_resolve_background_python_argv_uses_frozen_internal_module(self) -> None:
+        from no1.util import process as process_utils
+
+        with patch.object(process_utils.sys, "frozen", True, create=True), patch.object(
+            process_utils.sys,
+            "executable",
+            r"C:\OneColleague\onecolleague.exe",
+        ), patch.object(
+            process_utils,
+            "_windows_pythonw_executable",
+            side_effect=AssertionError("frozen exe should not be rewritten to pythonw"),
+        ):
+            argv = process_utils.resolve_background_python_argv(["python", "-m", "no1.ports.web.main", "--serve-child"])
+
+        self.assertEqual(argv, [r"C:\OneColleague\onecolleague.exe", "--internal-module", "no1.ports.web.main", "--", "--serve-child"])
+
     def test_supervised_process_popen_kwargs_windows_uses_detached_group(self) -> None:
         from no1.util import process as process_utils
 

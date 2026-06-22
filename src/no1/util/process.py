@@ -5,6 +5,7 @@ import os
 import signal
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any, Optional, Union
 SignalValue = Union[int, signal.Signals]
 SOFT_TERMINATE_SIGNAL: SignalValue = getattr(signal, "SIGTERM", signal.SIGINT)
 HARD_TERMINATE_SIGNAL: SignalValue = getattr(signal, "SIGKILL", SOFT_TERMINATE_SIGNAL)
+INTERNAL_MODULE_ARG = "--internal-module"
+INTERNAL_MODULE_SEPARATOR = "--"
 
 
 def find_subprocess_executable(command: str) -> Optional[str]:
@@ -123,6 +126,43 @@ def resolve_subprocess_argv(argv: Sequence[str]) -> list[str]:
     return parts
 
 
+def is_frozen_executable() -> bool:
+    """Return whether OneColleague is running from a frozen executable."""
+    return bool(getattr(sys, "frozen", False) or globals().get("__compiled__") is not None)
+
+
+def current_frozen_executable() -> str:
+    """Return the public OneColleague executable for frozen self re-entry."""
+    argv0 = str((sys.argv or [""])[0] or "").strip()
+    if argv0:
+        try:
+            argv0_path = Path(argv0)
+            if argv0_path.name.lower() == "onecolleague.exe":
+                return str(argv0_path.resolve())
+        except Exception:
+            pass
+
+    executable = str(sys.executable or "").strip()
+    try:
+        exe_path = Path(executable)
+        sibling = exe_path.with_name("onecolleague.exe")
+        if sibling.exists():
+            return str(sibling.resolve())
+    except Exception:
+        pass
+    return executable
+
+
+def resolve_python_module_argv(argv: Sequence[str]) -> list[str]:
+    """Resolve `python -m no1...` self re-entry argv for source and frozen modes."""
+    parts = [str(part) for part in (argv or [])]
+    if not parts:
+        return []
+    if is_frozen_executable() and len(parts) >= 3 and parts[1] == "-m" and parts[2].startswith("no1."):
+        return [current_frozen_executable(), INTERNAL_MODULE_ARG, parts[2], INTERNAL_MODULE_SEPARATOR, *parts[3:]]
+    return parts
+
+
 def _windows_pythonw_executable(executable: str) -> Optional[str]:
     raw = str(executable or "").strip()
     if os.name != "nt" or not raw:
@@ -149,6 +189,8 @@ def resolve_background_python_argv(argv: Sequence[str]) -> list[str]:
     parts = [str(part) for part in (argv or [])]
     if not parts:
         return []
+    if is_frozen_executable() and len(parts) >= 3 and parts[1] == "-m" and parts[2].startswith("no1."):
+        return resolve_python_module_argv(parts)
     if os.name != "nt":
         return parts
     parts = resolve_subprocess_argv(parts)

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
 from ..daemon.im.im_bridge_ops import read_live_im_bridge_pid
-from ..util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, resolve_background_python_argv, supervised_process_popen_kwargs
+from ..util.process import (
+    SOFT_TERMINATE_SIGNAL,
+    best_effort_signal_pid,
+    resolve_background_python_argv,
+    resolve_python_module_argv,
+    supervised_process_popen_kwargs,
+)
 
 __all__ = [
     "cmd_im_set",
@@ -388,7 +394,7 @@ def cmd_im_start(args: argparse.Namespace) -> int:
     try:
         log_file = log_path.open("a", encoding="utf-8")
         proc = subprocess.Popen(
-            resolve_background_python_argv([sys.executable, "-m", "no1.ports.im", group_id, platform]),
+            resolve_background_python_argv(resolve_python_module_argv([sys.executable, "-m", "no1.ports.im", group_id, platform])),
             env=env,
             stdout=log_file,
             stderr=log_file,

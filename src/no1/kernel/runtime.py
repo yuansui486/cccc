@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..util.process import find_subprocess_executable
+from ..util.process import current_frozen_executable, find_subprocess_executable, is_frozen_executable
 
 
 @dataclass
@@ -197,6 +197,9 @@ def get_onecolleague_mcp_stdio_command() -> List[str]:
     On Windows this avoids relying on runtime-specific PATH inheritance for MCP
     child processes. Fall back to the current Python interpreter otherwise.
     """
+    if is_frozen_executable():
+        return [current_frozen_executable(), "mcp"]
+
     candidates: List[Path] = []
     is_windows = sys.platform.startswith("win")
     try:

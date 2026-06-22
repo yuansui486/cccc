@@ -11,6 +11,7 @@ from .daemon.server import DaemonPaths, call_daemon, default_paths, read_pid, se
 from .ports.web.runtime_control import clear_web_runtime_state, read_web_runtime_state, web_runtime_pid_candidates
 from .util.process import (
     resolve_background_python_argv,
+    resolve_python_module_argv,
     SOFT_TERMINATE_SIGNAL,
     best_effort_signal_pid,
     pid_is_alive,
@@ -25,16 +26,21 @@ def _spawn_daemon(paths: DaemonPaths) -> int:
     env = os.environ.copy()
     env["ONECOLLEAGUE_HOME"] = str(paths.home)
     env["CCCC_HOME"] = str(paths.home)
+    daemon_argv = resolve_background_python_argv(resolve_python_module_argv([sys.executable, "-m", "no1.daemon_main", "run"]))
     with paths.log_path.open("a", encoding="utf-8") as log_f:
-        p = subprocess.Popen(
-            resolve_background_python_argv([sys.executable, "-m", "no1.daemon_main", "run"]),
-            stdout=log_f,
-            stderr=log_f,
-            stdin=subprocess.DEVNULL,
-            env=env,
-            cwd=str(paths.home),
-            **supervised_process_popen_kwargs(),
-        )
+        try:
+            p = subprocess.Popen(
+                daemon_argv,
+                stdout=log_f,
+                stderr=log_f,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                cwd=str(paths.home),
+                **supervised_process_popen_kwargs(),
+            )
+        except Exception:
+            print(f"failed to spawn daemon argv={daemon_argv!r} cwd={str(paths.home)!r}", file=log_f)
+            raise
     return int(p.pid)
 
 

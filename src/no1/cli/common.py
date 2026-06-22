@@ -54,6 +54,7 @@ from ..util.conv import coerce_bool
 from ..util.file_lock import LockUnavailableError, acquire_lockfile, release_lockfile
 from ..util.process import (
     resolve_background_python_argv,
+    resolve_python_module_argv,
     SOFT_TERMINATE_SIGNAL,
     best_effort_signal_pid,
     pid_is_alive,
@@ -419,7 +420,7 @@ def _ensure_daemon_running() -> bool:
 
     try:
         subprocess.run(
-            [sys.executable, "-m", "no1.daemon_main", "start"],
+            resolve_python_module_argv([sys.executable, "-m", "no1.daemon_main", "start"]),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -544,7 +545,7 @@ def _default_entry(*, web_host_override: str = "", web_port_override: Optional[i
                 daemon_env["CCCC_HOME"] = str(home)
                 daemon_env["CCCC_DAEMON_SUPERVISOR_PID"] = str(os.getpid())
                 daemon_process = subprocess.Popen(
-                    resolve_background_python_argv([sys.executable, "-m", "no1.daemon_main", "run"]),
+                    resolve_background_python_argv(resolve_python_module_argv([sys.executable, "-m", "no1.daemon_main", "run"])),
                     stdout=log_file,
                     stderr=log_file,
                     stdin=subprocess.DEVNULL,

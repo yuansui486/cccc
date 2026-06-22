@@ -31,6 +31,18 @@ class TestRuntimeCommandDefaults(unittest.TestCase):
             ):
                 self.assertEqual(get_onecolleague_mcp_stdio_command(), [str(onecolleague.resolve()), "mcp"])
 
+    def test_onecolleague_mcp_stdio_command_uses_current_exe_when_frozen(self) -> None:
+        from no1.kernel.runtime import get_onecolleague_mcp_stdio_command
+
+        with patch("no1.kernel.runtime.is_frozen_executable", return_value=True), patch(
+            "no1.kernel.runtime.current_frozen_executable",
+            return_value=r"C:\OneColleague\onecolleague.exe",
+        ), patch(
+            "no1.kernel.runtime.sys.executable",
+            r"C:\OneColleague\onecolleague.exe",
+        ):
+            self.assertEqual(get_onecolleague_mcp_stdio_command(), [r"C:\OneColleague\onecolleague.exe", "mcp"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,14 @@ from ....kernel.group import load_group
 from ....paths import ensure_home
 from ....ports.im.config_schema import canonicalize_im_config
 from ....util.conv import coerce_bool
-from ....util.process import SOFT_TERMINATE_SIGNAL, best_effort_signal_pid, pid_is_alive, resolve_background_python_argv, supervised_process_popen_kwargs
+from ....util.process import (
+    SOFT_TERMINATE_SIGNAL,
+    best_effort_signal_pid,
+    pid_is_alive,
+    resolve_background_python_argv,
+    resolve_python_module_argv,
+    supervised_process_popen_kwargs,
+)
 from ..schemas import (
     IMActionRequest,
     IMBindRequest,
@@ -660,7 +667,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
             with log_path.open("a", encoding="utf-8") as log_file:
                 proc = subprocess.Popen(
-                    resolve_background_python_argv([sys.executable, "-m", "no1.ports.im", req.group_id, platform]),
+                    resolve_background_python_argv(resolve_python_module_argv([sys.executable, "-m", "no1.ports.im", req.group_id, platform])),
                     stdout=log_file,
                     stderr=log_file,
                     **popen_kwargs,

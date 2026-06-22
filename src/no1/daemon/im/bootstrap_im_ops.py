@@ -12,7 +12,7 @@ from pathlib import Path
 from .im_bridge_ops import read_live_im_bridge_pid
 from ...kernel.group import load_group
 from ...util.conv import coerce_bool
-from ...util.process import resolve_background_python_argv, supervised_process_popen_kwargs
+from ...util.process import resolve_background_python_argv, resolve_python_module_argv, supervised_process_popen_kwargs
 
 logger = logging.getLogger("no1.daemon.server")
 
@@ -53,7 +53,7 @@ def autostart_enabled_im_bridges(home: Path) -> None:
                 env["ONECOLLEAGUE_HOME"] = str(home)
                 env["CCCC_HOME"] = str(home)
                 proc = subprocess.Popen(
-                    resolve_background_python_argv([sys.executable, "-m", "no1.ports.im.bridge", group_id, platform]),
+                    resolve_background_python_argv(resolve_python_module_argv([sys.executable, "-m", "no1.ports.im.bridge", group_id, platform])),
                     env=env,
                     stdout=log_file,
                     stderr=log_file,

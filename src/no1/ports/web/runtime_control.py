@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from ...paths import ensure_home
 from ...util.fs import atomic_write_json, read_json
-from ...util.process import resolve_background_python_argv, supervised_process_popen_kwargs, terminate_pid
+from ...util.process import resolve_background_python_argv, resolve_python_module_argv, supervised_process_popen_kwargs, terminate_pid
 from ...util.time import utc_now_iso
 
 WEB_RUNTIME_RESTART_EXIT_CODE = 75
@@ -171,7 +171,7 @@ def spawn_web_child(
     reload: bool,
     launch_source: str,
 ) -> subprocess.Popen[str]:
-    argv = [
+    argv = resolve_python_module_argv([
         sys.executable,
         "-m",
         "no1.ports.web.main",
@@ -184,7 +184,7 @@ def spawn_web_child(
         str(mode or "normal"),
         "--log-level",
         str(log_level or "info"),
-    ]
+    ])
     if reload:
         argv.append("--reload")
 
