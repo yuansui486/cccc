@@ -19,8 +19,10 @@ import { buildRuntimeChoiceGroups } from "../../utils/runtimeChoiceGroups";
 import { buildRuntimePriceMap, type RuntimePriceMap } from "../../utils/runtimePrices";
 import {
   claudeReasoningEffortFromCommand,
+  commandHasModelFlag,
   commandForRuntimePreset,
   codexReasoningEffortFromCommand,
+  defaultRuntimePresetFor,
   mergePresetSecrets,
   mergeRuntimeAuthSecret,
   runtimePresetById,
@@ -284,12 +286,16 @@ export function AddActorModal({
 
   useEffect(() => {
     if (!isOpen || newActorUseProfile || newActorCommand.trim()) return;
-    const commandToPrime = defaultCommand.trim();
+    const defaultPreset = defaultRuntimePresetFor(newActorRuntime);
+    const commandToPrime = defaultPreset
+      ? commandForRuntimePreset(defaultPreset, runtimeInfo).trim()
+      : defaultCommand.trim();
     if (!commandToPrime) return;
     const primeKey = `${newActorRuntime}:${commandToPrime}`;
     if (primedCommandRef.current === primeKey) return;
     primedCommandRef.current = primeKey;
     setNewActorCommand(commandToPrime);
+    if (defaultPreset) setSelectedRuntimePresetId(defaultPreset.id);
   }, [isOpen, newActorUseProfile, newActorRuntime, newActorCommand, runtimeInfo, defaultCommand, setNewActorCommand]);
 
   if (!isOpen) return null;
@@ -323,15 +329,23 @@ export function AddActorModal({
   };
 
   const updateCodexReasoningEffort = (effort: CodexReasoningEffort) => {
-    const baseCommand = newActorCommand.trim() || defaultCommand.trim();
+    const preset = selectedRuntimePreset || defaultRuntimePresetFor(newActorRuntime);
+    const baseCommand =
+      preset && !commandHasModelFlag(newActorCommand)
+        ? commandForRuntimePreset(preset, runtimeInfo)
+        : newActorCommand.trim() || defaultCommand.trim();
     setNewActorCommand(withCodexReasoningEffort(baseCommand, effort));
-    setSelectedRuntimePresetId("");
+    if (preset) setSelectedRuntimePresetId(preset.id);
   };
 
   const updateClaudeReasoningEffort = (effort: ClaudeReasoningEffort) => {
-    const baseCommand = newActorCommand.trim() || defaultCommand.trim();
+    const preset = selectedRuntimePreset || defaultRuntimePresetFor(newActorRuntime);
+    const baseCommand =
+      preset && !commandHasModelFlag(newActorCommand)
+        ? commandForRuntimePreset(preset, runtimeInfo)
+        : newActorCommand.trim() || defaultCommand.trim();
     setNewActorCommand(withClaudeReasoningEffort(baseCommand, effort));
-    setSelectedRuntimePresetId("");
+    if (preset) setSelectedRuntimePresetId(preset.id);
   };
 
   return (

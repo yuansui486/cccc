@@ -523,9 +523,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertEqual(
                 (codex_dir / "config.toml").read_text(encoding="utf-8"),
                 'model_provider = "custom"\n'
-                'model_reasoning_effort = "high"\n'
                 "disable_response_storage = true\n"
-                'model = "old-model"\n'
                 "\n"
                 "[model_providers.custom]\n"
                 'name = "custom"\n'
@@ -698,6 +696,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertTrue(codex_config.exists())
             content = codex_config.read_text(encoding="utf-8")
             self.assertIn('model_provider = "custom"\n', content)
+            self.assertNotIn('model = "gpt-5.4"\n', content)
             self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
             self.assertFalse((home_path / ".codex" / "auth.json").exists())
             self.assertFalse((home_path / ".gemini").exists())

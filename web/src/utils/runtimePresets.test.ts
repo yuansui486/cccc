@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buildRuntimeChoiceGroups } from "./runtimeChoiceGroups";
 import {
   claudeReasoningEffortFromCommand,
+  commandHasModelFlag,
   codexReasoningEffortFromCommand,
   commandForRuntimePreset,
+  defaultRuntimePresetFor,
   mergePresetSecrets,
   mergePresetUnsetKeys,
   mergeRuntimeAuthSecret,
@@ -84,6 +86,36 @@ describe("runtime presets", () => {
         recommended_command: "codex -c shell_environment_policy.inherit=all --search",
       })
     ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.5");
+  });
+
+  it("uses the first Codex preset as the dynamic default model command", () => {
+    const preset = defaultRuntimePresetFor("codex");
+
+    expect(preset?.id).toBe("model:gpt-5.4-codex");
+    expect(
+      commandForRuntimePreset(preset!, {
+        name: "codex",
+        display_name: "Codex CLI",
+        available: true,
+        recommended_command: "codex -c shell_environment_policy.inherit=all --search",
+      })
+    ).toBe("codex -c shell_environment_policy.inherit=all --search -m gpt-5.4");
+  });
+
+  it("builds full preset commands when runtime discovery has not loaded yet", () => {
+    const codex = runtimePresetById("model:gpt-5.4-codex");
+    const claude = runtimePresetById("model:deepseek-v4-pro-claude");
+
+    expect(commandForRuntimePreset(codex!)).toBe(
+      "codex -c shell_environment_policy.inherit=all --dangerously-bypass-approvals-and-sandbox --search -m gpt-5.4"
+    );
+    expect(commandForRuntimePreset(claude!)).toBe("claude --dangerously-skip-permissions --model DeepSeek-V4-Pro");
+  });
+
+  it("detects when a CLI command already specifies a model", () => {
+    expect(commandHasModelFlag("codex --search")).toBe(false);
+    expect(commandHasModelFlag("codex --search -m gpt-5.4")).toBe(true);
+    expect(commandHasModelFlag("claude --model=DeepSeek-V4-Pro")).toBe(true);
   });
 
   it("adds, reads, replaces, and clears Codex reasoning effort", () => {
