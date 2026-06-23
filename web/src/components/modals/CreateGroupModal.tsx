@@ -12,11 +12,11 @@ import { Surface } from "../ui/surface";
 
 const TEAM_PRESET_ICON_URLS = [
   "team-presets/1_team.png",
-  "team-presets/2_产品调研.png",
-  "team-presets/3_代码编写.png",
-  "team-presets/4_个人助理.png",
-  "team-presets/5_人事招聘.png",
-  "team-presets/6_私域销售.png",
+  "team-presets/2_product_research.png",
+  "team-presets/3_coding.png",
+  "team-presets/4_personal_assistant.png",
+  "team-presets/5_hr_recruitment.png",
+  "team-presets/6_private_domain_sales.png",
 ];
 
 function getTeamPresetIconUrl(index: number): string {
