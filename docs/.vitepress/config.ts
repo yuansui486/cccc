@@ -89,6 +89,7 @@ export default defineConfig({
             { text: 'Positioning', link: '/reference/positioning' },
             { text: 'Architecture', link: '/reference/architecture' },
             { text: 'Features', link: '/reference/features' },
+            { text: 'Group Automation API', link: '/reference/group-automation-api' },
             { text: 'CLI', link: '/reference/cli' }
           ]
         }
