@@ -8,6 +8,10 @@ describe("getGroupStatusUnified", () => {
     expect(getGroupStatusUnified(true, "active").dotClass).toBe(QUIET_RUN_INDICATOR_DOT_CLASS);
   });
 
+  it("shows running when actors are live even if lifecycle is idle", () => {
+    expect(getGroupStatusUnified(true, "idle").key).toBe("run");
+  });
+
   it("keeps stop state on the muted stopped indicator", () => {
     expect(getGroupStatusUnified(false, "active").dotClass).toBe(STOPPED_INDICATOR_DOT_CLASS);
   });
