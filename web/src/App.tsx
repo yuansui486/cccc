@@ -360,7 +360,7 @@ export default function App() {
     groups,
     selectedGroupId,
     groupDoc,
-    actors,
+    actors: [...actors, ...internalRuntimeActors],
   });
 
   const hasForeman = useMemo(() => actors.some((a) => a.role === "foreman"), [actors]);

@@ -117,4 +117,48 @@ describe("computeGroupRuntimeFromActorActivityUpdate", () => {
       has_running_foreman: false,
     });
   });
+
+  it("preserves the current group lifecycle when five running actors report idle work state", () => {
+    const actors: Actor[] = [
+      { id: "foreman", role: "foreman", running: true, effective_working_state: "idle" },
+      { id: "peer-1", role: "peer", running: true, effective_working_state: "idle" },
+      { id: "peer-2", role: "peer", running: true, effective_working_state: "idle" },
+      { id: "peer-3", role: "peer", running: true, effective_working_state: "idle" },
+      { id: "peer-4", role: "peer", running: true, effective_working_state: "idle" },
+    ];
+
+    expect(computeGroupRuntimeFromActorActivityUpdates(actors, actors.map((actor) => ({
+      id: actor.id,
+      running: true,
+      effective_working_state: "idle",
+    })), {
+      lifecycle_state: "active",
+      runtime_running: true,
+      running_actor_count: 5,
+      has_running_foreman: true,
+    })).toMatchObject({
+      lifecycle_state: "active",
+      runtime_running: true,
+      running_actor_count: 5,
+      has_running_foreman: true,
+    });
+  });
+
+  it("does not lower the running actor count from an incomplete activity merge", () => {
+    expect(computeGroupRuntimeFromActorActivityUpdates([
+      { id: "peer-4", role: "peer", running: true, effective_working_state: "idle" },
+    ], [
+      { id: "peer-4", running: true, effective_working_state: "idle" },
+    ], {
+      lifecycle_state: "active",
+      runtime_running: true,
+      running_actor_count: 5,
+      has_running_foreman: true,
+    })).toMatchObject({
+      lifecycle_state: "active",
+      runtime_running: true,
+      running_actor_count: 5,
+      has_running_foreman: true,
+    });
+  });
 });

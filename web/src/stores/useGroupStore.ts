@@ -151,7 +151,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     set({ archivedGroupIds: next });
   },
   getOrderedGroups: () => {
-    const { groups, groupOrder, selectedGroupId, groupDoc, actors } = get();
+    const { groups, groupOrder, selectedGroupId, groupDoc, actors, internalRuntimeActorsByGroup } = get();
     const groupMap = new Map(groups.map((g) => [String(g.group_id || ""), g]));
     const ordered: GroupMeta[] = [];
     for (const id of groupOrder) {
@@ -167,10 +167,12 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       const gid = String(group.group_id || "").trim();
       const isSelected = gid === String(selectedGroupId || "").trim();
       const cached = isSelected ? null : getCachedGroupView(gid);
+      const cachedActors = cached?.actors || [];
+      const internalActors = internalRuntimeActorsByGroup[gid] || [];
       const patch = computeGroupRuntimePatch({
         group,
         groupDoc: isSelected ? groupDoc : null,
-        actors: isSelected ? actors : (cached?.actors || []),
+        actors: isSelected ? [...actors, ...internalActors] : [...cachedActors, ...internalActors],
       });
       return {
         ...group,

@@ -62,16 +62,13 @@ export function getGroupStatusUnified(running: boolean, state?: string): GroupSt
     default:
       break;
   }
-  if (!running) {
-    return buildStatus("stop", getGroupStatusLabel("stop"), getGroupPresenceDotClass("stop"));
+  if (running) {
+    return buildStatus("run", getGroupStatusLabel("run"), getGroupPresenceDotClass("run"));
   }
-  switch (state) {
-    case "idle":
-      return buildStatus("idle", getGroupStatusLabel("idle"), getGroupPresenceDotClass("idle"));
-    default:
-      break;
+  if (state === "idle") {
+    return buildStatus("idle", getGroupStatusLabel("idle"), getGroupPresenceDotClass("idle"));
   }
-  return buildStatus("run", getGroupStatusLabel("run"), getGroupPresenceDotClass("run"));
+  return buildStatus("stop", getGroupStatusLabel("stop"), getGroupPresenceDotClass("stop"));
 }
 
 export function getGroupRuntimeStatus(source?: GroupStatusSource | null): GroupRuntimeStatus {

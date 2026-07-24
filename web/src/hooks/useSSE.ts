@@ -37,6 +37,7 @@ import { getPresentationMessageRefs, getPresentationRefStatus } from "../utils/p
 import { mergeLedgerEvents } from "../utils/mergeLedgerEvents";
 import { replayHeadlessSnapshotEvents } from "../utils/headlessSnapshotReplay";
 import { isHeadlessActorRunner } from "../utils/headlessRuntimeSupport";
+import { getGroupRuntimeStatus } from "../utils/groupStatus";
 import { createSseConnectionRegistry } from "./sseConnectionRegistry";
 import i18n from "../i18n";
 
@@ -139,13 +140,15 @@ type ActorActivityUpdate = {
 export function computeGroupRuntimeFromActorActivityUpdate(
   actors: Actor[],
   update: ActorActivityUpdate,
+  fallback?: GroupRuntimeStatus | null,
 ): GroupRuntimeStatus {
-  return computeGroupRuntimeFromActorActivityUpdates(actors, [update]);
+  return computeGroupRuntimeFromActorActivityUpdates(actors, [update], fallback);
 }
 
 export function computeGroupRuntimeFromActorActivityUpdates(
   actors: Actor[],
   updates: ActorActivityUpdate[],
+  fallback?: GroupRuntimeStatus | null,
 ): GroupRuntimeStatus {
   const actorById = new Map<string, Actor>();
   for (const actor of Array.isArray(actors) ? actors : []) {
@@ -170,13 +173,63 @@ export function computeGroupRuntimeFromActorActivityUpdates(
     const state = String(actor.effective_working_state || "").trim().toLowerCase();
     return state !== "idle" && state !== "stopped";
   });
+  const stoppedUpdateIds = new Set(
+    (Array.isArray(updates) ? updates : [])
+      .filter((update) => update && update.running === false)
+      .map((update) => String(update.id || "").trim())
+      .filter((id) => id),
+  );
+  const fallbackRunningCount = Number.isFinite(Number(fallback?.running_actor_count))
+    ? Math.max(0, Number(fallback?.running_actor_count || 0))
+    : 0;
+  const projectedFallbackCount = Math.max(0, fallbackRunningCount - stoppedUpdateIds.size);
+  const runningActorCount = Math.max(runningActors.length, projectedFallbackCount);
+  const inferredLifecycle = hasBusyActor ? "active" : (runningActorCount > 0 ? "idle" : "stopped");
 
   return {
-    lifecycle_state: hasBusyActor ? "active" : (runningActors.length > 0 ? "idle" : "stopped"),
-    runtime_running: runningActors.length > 0,
-    running_actor_count: runningActors.length,
-    has_running_foreman: runningActors.some((actor) => String(actor.role || "").trim().toLowerCase() === "foreman"),
+    lifecycle_state: String(fallback?.lifecycle_state || inferredLifecycle),
+    runtime_running: runningActorCount > 0,
+    running_actor_count: runningActorCount,
+    has_running_foreman:
+      runningActors.some((actor) => String(actor.role || "").trim().toLowerCase() === "foreman")
+      || (runningActorCount > runningActors.length && Boolean(fallback?.has_running_foreman)),
   };
+}
+
+function dedupeRuntimeActors(actors: Actor[]): Actor[] {
+  const out: Actor[] = [];
+  const seen = new Set<string>();
+  for (const actor of Array.isArray(actors) ? actors : []) {
+    const actorId = String(actor?.id || "").trim();
+    if (!actorId || seen.has(actorId)) continue;
+    seen.add(actorId);
+    out.push(actor);
+  }
+  return out;
+}
+
+function getRuntimeActorsSnapshot(groupId: string, fallbackActors: Actor[] = []): Actor[] {
+  const gid = String(groupId || "").trim();
+  const state = useGroupStore.getState();
+  if (gid && String(state.selectedGroupId || "").trim() === gid) {
+    return dedupeRuntimeActors([
+      ...state.actors,
+      ...(state.internalRuntimeActorsByGroup[gid] || []),
+      ...fallbackActors,
+    ]);
+  }
+  return dedupeRuntimeActors(fallbackActors);
+}
+
+function getRuntimeStatusSnapshot(groupId: string): GroupRuntimeStatus | null {
+  const gid = String(groupId || "").trim();
+  if (!gid) return null;
+  const state = useGroupStore.getState();
+  if (state.groupDoc && String(state.groupDoc.group_id || "").trim() === gid) {
+    return getGroupRuntimeStatus(state.groupDoc);
+  }
+  const group = state.groups.find((item) => String(item.group_id || "").trim() === gid) || null;
+  return group ? getGroupRuntimeStatus(group) : null;
 }
 
 function formatHeadlessErrorMessage(error: unknown): string {
@@ -542,11 +595,13 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
       appendHeadlessEvent(ev, groupId);
 
       function updateHeadlessActorRuntime(update: ActorActivityUpdate) {
-        const actorsSnapshot = useGroupStore.getState().actors;
+        const actorsSnapshot = getRuntimeActorsSnapshot(groupId, actorsRef.current);
+        const runtimeFallback = getRuntimeStatusSnapshot(groupId);
         updateActorActivity([update]);
         updateGroupRuntimeState(groupId, computeGroupRuntimeFromActorActivityUpdate(
-          actorsSnapshot.length > 0 ? actorsSnapshot : actorsRef.current,
+          actorsSnapshot,
           update,
+          runtimeFallback,
         ));
       }
 
@@ -1067,8 +1122,14 @@ export function useSSE({ activeTabRef, chatAtBottomRef, actorsRef }: UseSSEOptio
         if (isActorActivityEvent(ev)) {
           const actors = ev.data?.actors;
           if (Array.isArray(actors) && actors.length > 0) {
+            const actorsSnapshot = getRuntimeActorsSnapshot(groupId, actorsRef.current);
+            const runtimeFallback = getRuntimeStatusSnapshot(groupId);
             updateActorActivity(actors);
-            updateGroupRuntimeState(groupId, computeGroupRuntimeFromActorActivityUpdates(actorsRef.current, actors));
+            updateGroupRuntimeState(groupId, computeGroupRuntimeFromActorActivityUpdates(
+              actorsSnapshot,
+              actors,
+              runtimeFallback,
+            ));
           }
           return;
         }
