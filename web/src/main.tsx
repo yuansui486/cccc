@@ -15,6 +15,9 @@ const CapabilityCenterStandaloneApp = lazy(() =>
 const VideoEditorStandaloneApp = lazy(() =>
   import("./pages/remotionEditor/VideoEditorStandaloneApp").then((module) => ({ default: module.VideoEditorStandaloneApp }))
 );
+const ComputerControlStandaloneApp = lazy(() =>
+  import("./pages/computerControl/ComputerControlStandaloneApp").then((module) => ({ default: module.ComputerControlStandaloneApp }))
+);
 
 // v0.4: We intentionally do NOT use Service Workers.
 // Reason: SW caching frequently causes "stale UI" bugs in an ops/admin console.
@@ -42,11 +45,12 @@ applyTextScale(getStoredTextScale());
 void useBrandingStore.getState().refreshBranding();
 const isCapabilityCenterPage = isCapabilityCenterPath(window.location.pathname);
 const isVideoEditorPage = window.location.pathname === "/video-editor" || window.location.pathname.startsWith("/video-editor/");
+const isComputerControlPage = window.location.pathname === "/computer-control" || window.location.pathname.startsWith("/computer-control/");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AuthGate>
     <Suspense fallback={null}>
-      {isVideoEditorPage ? <VideoEditorStandaloneApp /> : isCapabilityCenterPage ? <CapabilityCenterStandaloneApp /> : <App />}
+      {isVideoEditorPage ? <VideoEditorStandaloneApp /> : isComputerControlPage ? <ComputerControlStandaloneApp /> : isCapabilityCenterPage ? <CapabilityCenterStandaloneApp /> : <App />}
     </Suspense>
   </AuthGate>,
 );

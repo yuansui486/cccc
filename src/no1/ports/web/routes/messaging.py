@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -40,6 +40,18 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             if isinstance(item, dict):
                 refs.append(item)
         return refs
+
+    def _parse_optional_object_json(raw: str, *, field: str) -> Optional[dict[str, Any]]:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"code": f"invalid_{field}", "message": f"{field} must be a JSON object"}) from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400, detail={"code": f"invalid_{field}", "message": f"{field} must be a JSON object"})
+        return parsed
 
     def _normalize_priority(raw: str) -> str:
         prio = str(raw or "normal").strip() or "normal"
@@ -101,6 +113,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "src_event_id": req.src_event_id,
                 "client_id": _normalize_client_id(req.client_id),
                 "refs": list(req.refs),
+                "computer_control_request": req.computer_control_request,
             },
         )
         return await _submit_message(daemon_req)
@@ -196,6 +209,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         collaboration_required: str = Form("false"),
         client_id: str = Form(""),
         refs_json: str = Form("[]"),
+        computer_control_request_json: str = Form(""),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
         group = load_group(group_id)
@@ -248,6 +262,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         msg_text = _message_text_for_upload(text=text, attachments=attachments)
         prio = _normalize_priority(priority)
         refs = _parse_refs_json(refs_json)
+        computer_control_request = _parse_optional_object_json(computer_control_request_json, field="computer_control_request")
         normalized_client_id = _normalize_client_id(client_id)
         daemon_req = _build_message_request(
             "send",
@@ -263,6 +278,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "collaboration_required": _normalize_reply_required(collaboration_required),
                 "client_id": normalized_client_id,
                 "refs": refs,
+                "computer_control_request": computer_control_request,
             },
         )
         return await _submit_message(daemon_req)

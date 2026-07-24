@@ -27,6 +27,40 @@ COLLABORATION_REQUIRED_INSTRUCTIONS = (
 )
 
 
+def render_computer_control_contract(request: dict[str, Any]) -> str:
+    request_id = compact_delivery_text(request.get("request_id"), limit=64)
+    mode = str(request.get("mode") or "create_and_run").strip()
+    workflow_id = compact_delivery_text(request.get("workflow_id"), limit=100)
+    actor_id = compact_delivery_text(request.get("actor_id"), limit=100)
+    lines = [
+        f"[onecolleague] 电脑控制执行契约（request_id={request_id}）：",
+        f"- 模式：{'运行已有工作流' if mode == 'run_existing' else '根据需求新建工作流并运行'}",
+        f"- 执行智能体：{actor_id}",
+    ]
+    if workflow_id:
+        lines.append(f"- 工作流：{workflow_id}")
+    if request.get("allow_high_risk") is True:
+        lines.append("- 本次请求已授予完整电脑权限，可使用 PowerShell、文件写删、进程和注册表等高风险能力，无需逐项确认。")
+    elevated = []
+    if request.get("allow_publish") is True:
+        elevated.append("发布版本")
+    if request.get("allow_trust") is True:
+        elevated.append("授予长期信任")
+    if request.get("allow_unattended_triggers") is True:
+        elevated.append("开启无人值守触发")
+    if elevated:
+        lines.append(f"- 用户额外授权：{'、'.join(elevated)}。只能用于本请求创建或指定的工作流。")
+    lines.extend([
+        "- 先调用 onecolleague_computer_control_catalog 获取实时 Windows-MCP 工具目录。",
+        "- 新建模式必须用 onecolleague_computer_workflow 创建并校验草稿，不得只在回复中描述步骤。",
+        "- 使用 onecolleague_computer_run(action=\"start\") 启动，并用 action=\"status\" 查询至终态；发布、信任和自动触发必须严格遵守上述额外授权。",
+        "- 运行进入 recovering 时，根据错误和当前界面调用 action=\"recover\" 提交本次运行的工具参数修补。",
+        "- 遇到需要用户批准的高风险操作时停止调用并说明待批准内容。",
+        "- 用户可见回复使用中文，说明草稿、运行结果或明确的阻塞原因。",
+    ])
+    return "\n".join(lines)
+
+
 def compact_delivery_text(value: Any, *, limit: int) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     if not text:
@@ -160,6 +194,7 @@ def build_actor_delivery_text(
     collaboration_required: bool = False,
     src_group_id: str = "",
     src_event_id: str = "",
+    computer_control_request: Any = None,
 ) -> str:
     delivery_text = text
     prefix_lines: list[str] = []
@@ -169,6 +204,8 @@ def build_actor_delivery_text(
         prefix_lines.append(f"[onecolleague] REPLY REQUIRED (event_id={event_id}): reply via onecolleague_message_reply.")
     if collaboration_required:
         prefix_lines.append(COLLABORATION_REQUIRED_INSTRUCTIONS)
+    if isinstance(computer_control_request, dict):
+        prefix_lines.append(render_computer_control_contract(computer_control_request))
     if src_group_id and src_event_id:
         prefix_lines.append(f"[onecolleague] RELAYED FROM (group_id={src_group_id}, event_id={src_event_id}):")
     if prefix_lines:
@@ -248,6 +285,7 @@ def render_actor_event_for_delivery(event: Dict[str, Any], *, actor_id: str = ""
             else [],
             src_group_id=str(data.get("src_group_id") or ""),
             src_event_id=str(data.get("src_event_id") or ""),
+            computer_control_request=data.get("computer_control_request") if isinstance(data.get("computer_control_request"), dict) else None,
         )
         return build_actor_headless_delivery_text(
             by=by,

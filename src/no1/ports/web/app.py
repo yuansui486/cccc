@@ -210,6 +210,10 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
+        from ...computer_control.services import get_services as get_computer_control_services
+
+        computer_control_services = get_computer_control_services(home)
+        await computer_control_services.scheduler.start()
         restart_supported = str(os.environ.get("CCCC_WEB_SUPERVISED") or "").strip().lower() in ("1", "true", "yes", "on")
         runtime_host_raw = str(os.environ.get("CCCC_WEB_EFFECTIVE_HOST") or "").strip()
         runtime_port_raw = str(os.environ.get("CCCC_WEB_EFFECTIVE_PORT") or "").strip()
@@ -278,6 +282,7 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            await computer_control_services.scheduler.stop()
             supervisor_watchdog_stop.set()
             if supervisor_watchdog_thread is not None:
                 try:
@@ -411,6 +416,12 @@ def create_app() -> FastAPI:
         async def _video_editor_page() -> FileResponse:
             return FileResponse(str(dist_dir / "index.html"))
 
+        @app.get("/computer-control/{group_id}", include_in_schema=False)
+        @app.get("/computer-control", include_in_schema=False)
+        async def _computer_control_page(group_id: str = "") -> FileResponse:
+            del group_id
+            return FileResponse(str(dist_dir / "index.html"))
+
         app.router.routes.append(
             HttpOnlyMount("/ui", app=StaticFiles(directory=str(dist_dir), html=True), name="ui")
         )
@@ -496,6 +507,7 @@ def create_app() -> FastAPI:
     from .routes.access_tokens import create_routers as create_access_token_routers
     from .routes.nomcp import create_routers as create_nomcp_routers
     from .routes.studio import create_routers as create_studio_routers
+    from .routes.computer_control import create_routers as create_computer_control_routers
 
     route_ctx = RouteContext(
         home=home,
@@ -523,6 +535,8 @@ def create_app() -> FastAPI:
     for router in create_done_hub_routers(route_ctx):
         app.include_router(router)
     for router in create_studio_routers(route_ctx):
+        app.include_router(router)
+    for router in create_computer_control_routers(route_ctx):
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)
     for router in create_access_token_routers(route_ctx):

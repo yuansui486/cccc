@@ -148,6 +148,19 @@ export type ChatMessageData = {
   priority?: "normal" | "attention";
   reply_required?: boolean;
   collaboration_required?: boolean;
+  computer_control_request?: {
+    request_id?: string;
+    mode: "create_and_run" | "run_existing";
+    workflow_id?: string;
+    version?: number;
+    actor_id: string;
+    inputs?: Record<string, unknown>;
+    allow_high_risk?: boolean;
+    allow_publish?: boolean;
+    allow_trust?: boolean;
+    allow_unattended_triggers?: boolean;
+    status?: string;
+  };
   sender_title?: string;
   sender_runtime?: string;
   sender_avatar_path?: string;

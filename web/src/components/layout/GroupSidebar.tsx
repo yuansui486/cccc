@@ -52,6 +52,7 @@ import { ThemeToggleCompact } from "../ThemeToggle";
 import { ActorAvatar } from "../ActorAvatar";
 import { SortableGroupItem } from "./SortableGroupItem";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../stores/useUIStore";
+import { Laptop } from "lucide-react";
 
 export interface GroupSidebarProps {
   orderedGroups: GroupMeta[];
@@ -740,6 +741,16 @@ export function GroupSidebar({
             )}
           </button>
 
+          <button
+            type="button"
+            onClick={() => window.location.assign(`/computer-control/${encodeURIComponent(selectedGroupId)}`)}
+            title="电脑控制"
+            aria-label="电脑控制"
+            className="glass-group-item relative flex h-11 w-11 items-center justify-center rounded-xl transition-all hover:scale-105"
+          >
+            <Laptop size={18} />
+          </button>
+
           {actors.map((actor) => {
             const indicator = getActorIndicator(actor);
             const isActive = activeTab === actor.id;
@@ -915,19 +926,8 @@ export function GroupSidebar({
         <section className="space-y-1">
           <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
             <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-              {t("memberManagement")}
+              工作区
             </div>
-            {!readOnly && onAddAgent && (
-              <button
-                type="button"
-                onClick={onAddAgent}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
-                aria-label={t("addAgent")}
-                title={t("addAgent")}
-              >
-                <PlusIcon size={18} />
-              </button>
-            )}
           </div>
 
           <div className="space-y-1">
@@ -950,6 +950,39 @@ export function GroupSidebar({
                 </span>
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => { if (selectedGroupId) window.location.assign(`/computer-control/${encodeURIComponent(selectedGroupId)}`); }}
+              className={navButtonClass(false)}
+              title="电脑控制"
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>
+              <span className="min-w-0 flex-1 truncate">电脑控制</span>
+            </button>
+
+          </div>
+        </section>
+
+        <section className="space-y-1">
+          <div className="flex items-center justify-between gap-2 px-3 pb-0 pt-1">
+            <div className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+              {t("memberManagement")}
+            </div>
+            {!readOnly && onAddAgent && (
+              <button
+                type="button"
+                onClick={onAddAgent}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-black/[0.05] hover:text-[var(--color-text-primary)] dark:hover:bg-white/[0.08]"
+                aria-label={t("addAgent")}
+                title={t("addAgent")}
+              >
+                <PlusIcon size={18} />
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-1">
 
             {actors.map((actor) => {
               const indicator = getActorIndicator(actor);

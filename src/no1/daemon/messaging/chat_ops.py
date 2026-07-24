@@ -6,6 +6,7 @@ import logging
 import hashlib
 import json
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -324,6 +325,41 @@ def handle_send(
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"))
     collaboration_required = coerce_bool(args.get("collaboration_required"))
+    computer_control_request_raw = args.get("computer_control_request")
+    computer_control_request: Optional[Dict[str, Any]] = None
+    if isinstance(computer_control_request_raw, dict):
+        mode = str(computer_control_request_raw.get("mode") or "create_and_run").strip()
+        actor_id = str(computer_control_request_raw.get("actor_id") or "").strip()
+        workflow_id = str(computer_control_request_raw.get("workflow_id") or "").strip()
+        inputs = computer_control_request_raw.get("inputs") if isinstance(computer_control_request_raw.get("inputs"), dict) else {}
+        allow_high_risk = computer_control_request_raw.get("allow_high_risk") is not False
+        allow_publish = computer_control_request_raw.get("allow_publish") is True
+        allow_trust = computer_control_request_raw.get("allow_trust") is True
+        allow_unattended_triggers = computer_control_request_raw.get("allow_unattended_triggers") is True
+        if mode not in {"create_and_run", "run_existing"}:
+            return _error("invalid_computer_control_request", "computer control mode must be create_and_run or run_existing")
+        if not actor_id:
+            return _error("invalid_computer_control_request", "computer control actor_id is required")
+        if mode == "run_existing" and not workflow_id:
+            return _error("invalid_computer_control_request", "workflow_id is required when running an existing workflow")
+        try:
+            from ...computer_control.models import WorkflowDefinition
+
+            WorkflowDefinition._reject_plain_secrets(inputs)
+        except ValueError as exc:
+            return _error("sensitive_value_rejected", str(exc))
+        computer_control_request = {
+            "request_id": "ccreq_" + uuid.uuid4().hex[:14],
+            "mode": mode,
+            "workflow_id": workflow_id,
+            "actor_id": actor_id,
+            "inputs": inputs,
+            "allow_high_risk": allow_high_risk,
+            "allow_publish": allow_publish,
+            "allow_trust": allow_trust,
+            "allow_unattended_triggers": allow_unattended_triggers,
+            "status": "accepted",
+        }
     quote_text = str(args.get("quote_text") or "").strip()
     src_group_id = str(args.get("src_group_id") or "").strip()
     src_event_id = str(args.get("src_event_id") or "").strip()
@@ -353,6 +389,8 @@ def handle_send(
         token = to_raw.strip()
         if token:
             to_tokens = [token]
+    if computer_control_request is not None:
+        to_tokens = [str(computer_control_request["actor_id"])]
     to_explicitly_set = len(to_tokens) > 0
     install_slash_command = parse_install_slash_command(text)
 
@@ -478,6 +516,7 @@ def handle_send(
             priority=priority,
             reply_required=reply_required,
             collaboration_required=collaboration_required,
+            computer_control_request=computer_control_request,
             quote_text=quote_text or None,
             to=to,
             refs=refs,
@@ -494,6 +533,22 @@ def handle_send(
             client_id=client_id or None,
         ).model_dump(),
     )
+    if computer_control_request is not None:
+        request_record = {
+            **computer_control_request,
+            "group_id": group.group_id,
+            "text": text,
+            "event_id": str(event.get("id") or ""),
+            "created_at": utc_now_iso(),
+            "created_ts": time.time(),
+        }
+        try:
+            request_path = group.path / "state" / "computer-control" / "requests.jsonl"
+            request_path.parent.mkdir(parents=True, exist_ok=True)
+            with request_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(request_record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except OSError:
+            logger.exception("failed to persist computer-control request %s", computer_control_request.get("request_id"))
     effective_to = to if to else ["@all"]
     event_id = str(event.get("id") or "").strip()
     event_ts = str(event.get("ts") or "").strip()
@@ -507,6 +562,7 @@ def handle_send(
         attachments=attachments,
         src_group_id=src_group_id,
         src_event_id=src_event_id,
+        computer_control_request=computer_control_request,
     )
     headless_delivery_text = append_mcp_reply_reminder(
         _build_headless_delivery_text(

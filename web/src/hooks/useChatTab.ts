@@ -666,6 +666,10 @@ export type FailedSendComposerSnapshot = {
   priority: "normal" | "attention";
   replyRequired: boolean;
   collaborationRequired: boolean;
+  computerControlEnabled: boolean;
+  computerControlWorkflowId: string;
+  computerControlActorId: string;
+  computerControlPermissions: { publish: boolean; trust: boolean; unattendedTriggers: boolean };
 };
 
 type FailedSendComposerRestoreActions = Pick<
@@ -679,6 +683,10 @@ type FailedSendComposerRestoreActions = Pick<
   | "setPriority"
   | "setReplyRequired"
   | "setCollaborationRequired"
+  | "setComputerControlEnabled"
+  | "setComputerControlWorkflowId"
+  | "setComputerControlActorId"
+  | "setComputerControlPermission"
   | "upsertDraft"
 >;
 
@@ -704,6 +712,12 @@ export function restoreFailedSendComposerState(
     restoreActions.setPriority(snapshot.priority);
     restoreActions.setReplyRequired(snapshot.replyRequired);
     restoreActions.setCollaborationRequired(snapshot.collaborationRequired);
+    restoreActions.setComputerControlEnabled(snapshot.computerControlEnabled);
+    restoreActions.setComputerControlWorkflowId(snapshot.computerControlWorkflowId);
+    restoreActions.setComputerControlActorId(snapshot.computerControlActorId);
+    for (const [permission, value] of Object.entries(snapshot.computerControlPermissions)) {
+      restoreActions.setComputerControlPermission(permission as "publish" | "trust" | "unattendedTriggers", value);
+    }
     restoreActions.setToText(snapshot.toText);
     return;
   }
@@ -718,6 +732,10 @@ export function restoreFailedSendComposerState(
     priority: snapshot.priority,
     replyRequired: snapshot.replyRequired,
     collaborationRequired: snapshot.collaborationRequired,
+    computerControlEnabled: snapshot.computerControlEnabled,
+    computerControlWorkflowId: snapshot.computerControlWorkflowId,
+    computerControlActorId: snapshot.computerControlActorId,
+    computerControlPermissions: snapshot.computerControlPermissions,
   }));
 }
 
@@ -827,6 +845,10 @@ export function useChatTab({
     priority,
     replyRequired,
     collaborationRequired,
+    computerControlEnabled,
+    computerControlWorkflowId,
+    computerControlActorId,
+    computerControlPermissions,
     destGroupId,
     setComposerText,
     setComposerFiles,
@@ -838,6 +860,10 @@ export function useChatTab({
     setPriority,
     setReplyRequired,
     setCollaborationRequired,
+    setComputerControlEnabled,
+    setComputerControlWorkflowId,
+    setComputerControlActorId,
+    setComputerControlPermission,
     setDestGroupId,
     upsertDraft,
     clearDraft,
@@ -1282,8 +1308,20 @@ export function useChatTab({
     const prioritySnapshot = composerStateSnapshot.priority;
     const replyRequiredSnapshot = composerStateSnapshot.replyRequired;
     const collaborationRequiredSnapshot = composerStateSnapshot.collaborationRequired;
+    const computerControlEnabledSnapshot = composerStateSnapshot.computerControlEnabled;
+    const computerControlWorkflowIdSnapshot = composerStateSnapshot.computerControlWorkflowId;
+    const requestedComputerActorId = composerStateSnapshot.computerControlActorId;
+    const computerControlPermissionsSnapshot = composerStateSnapshot.computerControlPermissions;
+    const computerControlActorIdSnapshot = String(
+      (requestedComputerActorId && requestedComputerActorId !== "foreman" ? requestedComputerActorId : actors.find((actor) => actor.role === "foreman")?.id)
+      || actors[0]?.id
+      || requestedComputerActorId
+      || "foreman",
+    );
     const toTextSnapshot = composerStateSnapshot.toText;
-    const toTokensSnapshot = parseComposerRecipientTokens(toTextSnapshot, validRecipientSet);
+    const toTokensSnapshot = computerControlEnabledSnapshot
+      ? [computerControlActorIdSnapshot]
+      : parseComposerRecipientTokens(toTextSnapshot, validRecipientSet);
     const prio = replyRequiredSnapshot ? "attention" : (prioritySnapshot || "normal");
     const assistantTargets = !isCrossGroup ? resolveAssistantTargets(toTokensSnapshot) : [];
 
@@ -1341,6 +1379,10 @@ export function useChatTab({
           priority: prioritySnapshot,
           replyRequired: replyRequiredSnapshot,
           collaborationRequired: collaborationRequiredSnapshot,
+          computerControlEnabled: computerControlEnabledSnapshot,
+          computerControlWorkflowId: computerControlWorkflowIdSnapshot,
+          computerControlActorId: computerControlActorIdSnapshot,
+          computerControlPermissions: computerControlPermissionsSnapshot,
         },
         {
           setComposerText,
@@ -1351,6 +1393,10 @@ export function useChatTab({
           setPriority,
           setReplyRequired,
           setCollaborationRequired,
+          setComputerControlEnabled,
+          setComputerControlWorkflowId,
+          setComputerControlActorId,
+          setComputerControlPermission,
           setToText,
           upsertDraft,
         },
@@ -1416,6 +1462,16 @@ export function useChatTab({
           priority: prio,
           reply_required: replyRequiredSnapshot,
           collaboration_required: collaborationRequiredSnapshot,
+          computer_control_request: computerControlEnabledSnapshot ? {
+            mode: computerControlWorkflowIdSnapshot ? "run_existing" : "create_and_run",
+            workflow_id: computerControlWorkflowIdSnapshot || undefined,
+            actor_id: computerControlActorIdSnapshot,
+            inputs: {},
+            allow_high_risk: true,
+            allow_publish: computerControlPermissionsSnapshot.publish,
+            allow_trust: computerControlPermissionsSnapshot.trust,
+            allow_unattended_triggers: computerControlPermissionsSnapshot.unattendedTriggers,
+          } : undefined,
           client_id: localId,
           reply_to: replyTargetSnapshot?.eventId || null,
           quote_text: replyTargetSnapshot?.text || undefined,
@@ -1461,6 +1517,16 @@ export function useChatTab({
             collaborationRequiredSnapshot,
             localId,
             refsSnapshot,
+            computerControlEnabledSnapshot ? {
+              mode: computerControlWorkflowIdSnapshot ? "run_existing" : "create_and_run",
+              workflow_id: computerControlWorkflowIdSnapshot || undefined,
+              actor_id: computerControlActorIdSnapshot,
+              inputs: {},
+              allow_high_risk: true,
+              allow_publish: computerControlPermissionsSnapshot.publish,
+              allow_trust: computerControlPermissionsSnapshot.trust,
+              allow_unattended_triggers: computerControlPermissionsSnapshot.unattendedTriggers,
+            } : undefined,
           );
         }
       }
@@ -1544,6 +1610,10 @@ export function useChatTab({
     setPriority,
     setReplyRequired,
     setCollaborationRequired,
+    setComputerControlEnabled,
+    setComputerControlWorkflowId,
+    setComputerControlActorId,
+    setComputerControlPermission,
     setToText,
     setDestGroupId,
     upsertDraft,
@@ -1561,6 +1631,7 @@ export function useChatTab({
     removeStreamingEventsByPrefix,
     resolveAssistantTargets,
     upsertStreamingEvent,
+    actors,
     t,
   ]);
 
@@ -1761,9 +1832,17 @@ export function useChatTab({
     priority,
     replyRequired,
     collaborationRequired,
+    computerControlEnabled,
+    computerControlWorkflowId,
+    computerControlActorId,
+    computerControlPermissions,
     setPriority,
     setReplyRequired,
     setCollaborationRequired,
+    setComputerControlEnabled,
+    setComputerControlWorkflowId,
+    setComputerControlActorId,
+    setComputerControlPermission,
     destGroupId: sendGroupId,
     setDestGroupId,
     composerGroupSettled,

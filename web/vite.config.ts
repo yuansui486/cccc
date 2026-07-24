@@ -46,7 +46,7 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           // React core + libs that import react (must stay in the same chunk
           // to avoid circular cross-chunk dependencies during initialisation)
-          if (/[\\/]node_modules[\\/](react|react-dom|zustand|@tanstack|scheduler)[\\/]/.test(id)) return "react-vendor";
+          if (/[\\/]node_modules[\\/](react|react-dom|zustand|use-sync-external-store|@tanstack|scheduler)[\\/]/.test(id)) return "react-vendor";
           // xterm terminal
           if (/[\\/]node_modules[\\/]@xterm[\\/]/.test(id)) return "xterm";
           // Markdown rendering

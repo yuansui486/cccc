@@ -588,6 +588,16 @@ export async function sendMessage(
   collaborationRequired = false,
   clientId = "",
   refs?: MessageRef[],
+  computerControlRequest?: {
+    mode: "create_and_run" | "run_existing";
+    workflow_id?: string;
+    actor_id: string;
+    inputs?: Record<string, unknown>;
+    allow_high_risk?: boolean;
+    allow_publish?: boolean;
+    allow_trust?: boolean;
+    allow_unattended_triggers?: boolean;
+  },
 ) {
   if (files && files.length > 0) {
     const form = new FormData();
@@ -600,6 +610,7 @@ export async function sendMessage(
     form.append("collaboration_required", collaborationRequired ? "true" : "false");
     if (clientId) form.append("client_id", clientId);
     if (refs && refs.length > 0) form.append("refs_json", JSON.stringify(refs));
+    if (computerControlRequest) form.append("computer_control_request_json", JSON.stringify(computerControlRequest));
     for (const file of files) form.append("files", file, file.name);
     return apiForm(`/api/v1/groups/${encodeURIComponent(groupId)}/send_upload`, form);
   }
@@ -615,6 +626,7 @@ export async function sendMessage(
       collaboration_required: collaborationRequired,
       client_id: clientId,
       refs: refs || [],
+      computer_control_request: computerControlRequest || null,
     }),
   });
 }

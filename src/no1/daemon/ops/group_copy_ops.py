@@ -561,6 +561,41 @@ def _cleanup_imported_runtime_state(group_dir: Path) -> None:
             _remove_path_if_exists(path)
 
 
+def _reset_imported_computer_control(group_dir: Path) -> None:
+    """Keep workflow definitions on group copy, but never copy trust or run state."""
+    state_dir = group_dir / "state" / "computer-control"
+    if state_dir.exists():
+        _remove_path_if_exists(state_dir)
+    root = group_dir / "computer-control" / "workflows"
+    if not root.exists():
+        return
+    for manifest_path in root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        manifest["trusted"] = {}
+        manifest["published_version"] = None
+        manifest["revision"] = int(manifest.get("revision") or 0) + 1
+        atomic_write_text(manifest_path, json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        versions_dir = manifest_path.parent / "versions"
+        for version_path in versions_dir.glob("*.json"):
+            try:
+                definition = json.loads(version_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(definition, dict):
+                continue
+            triggers = definition.get("triggers")
+            if isinstance(triggers, list):
+                for trigger in triggers:
+                    if isinstance(trigger, dict):
+                        trigger["enabled"] = False
+                atomic_write_text(version_path, json.dumps(definition, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
 def _choose_scope_for_workspace(
     *,
     workspace_root: str,
@@ -763,6 +798,7 @@ def group_copy_import(args: Dict[str, Any]) -> DaemonResponse:
     try:
         _write_package_entries_to_staging(entries, staging_group_dir)
         _cleanup_imported_runtime_state(staging_group_dir)
+        _reset_imported_computer_control(staging_group_dir)
 
         doc_path = staging_group_dir / "group.yaml"
         doc = _load_yaml_bytes(doc_path.read_bytes())

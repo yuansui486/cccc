@@ -44,6 +44,7 @@ class SendRequest(BaseModel):
     src_event_id: str = Field(default="")
     client_id: str = Field(default="")
     refs: list[dict[str, Any]] = Field(default_factory=list)
+    computer_control_request: Optional[dict[str, Any]] = None
 
 
 class SendCrossGroupRequest(BaseModel):

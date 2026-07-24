@@ -28,6 +28,7 @@ import {
     mayContainMarkdown,
 } from "./messageBubble/helpers";
 import { LazyMarkdownRenderer } from "./LazyMarkdownRenderer";
+import { Laptop } from "lucide-react";
 
 const ANIMATED_MESSAGE_BUBBLE_KEYS = new Set<string>();
 const NEW_MESSAGE_ANIMATION_WINDOW_MS = 12000;
@@ -621,6 +622,7 @@ export const MessageBubble = memo(function MessageBubble({
     const senderSnapshotAvatarPath = typeof msgData?.sender_avatar_path === "string" ? String(msgData.sender_avatar_path || "").trim() : "";
     const isAttention = String(msgData?.priority || "normal") === "attention";
     const replyRequired = !!msgData?.reply_required;
+    const computerControlRequest = msgData?.computer_control_request;
     const srcGroupId = typeof msgData?.src_group_id === "string" ? String(msgData.src_group_id || "").trim() : "";
     const srcEventId = typeof msgData?.src_event_id === "string" ? String(msgData.src_event_id || "").trim() : "";
     const hasSource = !!(srcGroupId && srcEventId);
@@ -910,6 +912,13 @@ export const MessageBubble = memo(function MessageBubble({
                         isHighlighted ? "outline outline-2 outline-[rgb(35,36,37)]/16 outline-offset-2 dark:outline-white/18" : ""
                     )}
                 >
+
+                    {computerControlRequest && (
+                        <div className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/25 bg-emerald-500/8 px-2 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                            <Laptop size={13} />
+                            <span>{computerControlRequest.mode === "run_existing" ? "运行电脑控制工作流" : "由 AI 新建并运行电脑控制流程"}</span>
+                        </div>
+                    )}
 
                     <MessageBubbleBody
                         event={ev}

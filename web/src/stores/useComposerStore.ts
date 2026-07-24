@@ -42,7 +42,17 @@ interface GroupDraft {
   priority: "normal" | "attention";
   replyRequired: boolean;
   collaborationRequired: boolean;
+  computerControlEnabled?: boolean;
+  computerControlWorkflowId?: string;
+  computerControlActorId?: string;
+  computerControlPermissions?: ComputerControlPermissions;
 }
+
+export type ComputerControlPermissions = {
+  publish: boolean;
+  trust: boolean;
+  unattendedTriggers: boolean;
+};
 
 interface ComposerState {
   activeGroupId: string;
@@ -56,6 +66,10 @@ interface ComposerState {
   priority: "normal" | "attention";
   replyRequired: boolean;
   collaborationRequired: boolean;
+  computerControlEnabled: boolean;
+  computerControlWorkflowId: string;
+  computerControlActorId: string;
+  computerControlPermissions: ComputerControlPermissions;
   destGroupId: string;
 
   // Drafts per group (memory only)
@@ -74,6 +88,10 @@ interface ComposerState {
   setPriority: (priority: "normal" | "attention") => void;
   setReplyRequired: (value: boolean) => void;
   setCollaborationRequired: (value: boolean) => void;
+  setComputerControlEnabled: (value: boolean) => void;
+  setComputerControlWorkflowId: (workflowId: string) => void;
+  setComputerControlActorId: (actorId: string) => void;
+  setComputerControlPermission: (permission: keyof ComputerControlPermissions, value: boolean) => void;
   setDestGroupId: (groupId: string) => void;
   clearComposer: () => void;
 
@@ -98,6 +116,10 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   priority: "normal",
   replyRequired: false,
   collaborationRequired: false,
+  computerControlEnabled: false,
+  computerControlWorkflowId: "",
+  computerControlActorId: "foreman",
+  computerControlPermissions: { publish: false, trust: false, unattendedTriggers: false },
   destGroupId: "",
   drafts: {},
   normalToTextByGroup: {},
@@ -169,6 +191,12 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   setPriority: (priority) => set({ priority }),
   setReplyRequired: (value) => set({ replyRequired: !!value }),
   setCollaborationRequired: (value) => set({ collaborationRequired: !!value }),
+  setComputerControlEnabled: (value) => set({ computerControlEnabled: !!value }),
+  setComputerControlWorkflowId: (workflowId) => set({ computerControlWorkflowId: String(workflowId || "").trim() }),
+  setComputerControlActorId: (actorId) => set({ computerControlActorId: String(actorId || "").trim() || "foreman" }),
+  setComputerControlPermission: (permission, value) => set((state) => ({
+    computerControlPermissions: { ...state.computerControlPermissions, [permission]: !!value },
+  })),
   setDestGroupId: (groupId) => set({ destGroupId: String(groupId || "").trim() }),
 
   clearComposer: () =>
@@ -186,6 +214,10 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
         priority: "normal",
         replyRequired: false,
         collaborationRequired: false,
+        computerControlEnabled: false,
+        computerControlWorkflowId: "",
+        computerControlActorId: "foreman",
+        computerControlPermissions: { publish: false, trust: false, unattendedTriggers: false },
         normalToTextByGroup: activeGroupId
           ? {
               ...state.normalToTextByGroup,
@@ -212,7 +244,8 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
         state.selectedSkillCommand.trim() ||
         state.toText.trim() ||
         state.replyTarget ||
-        state.quotedPresentationRef;
+        state.quotedPresentationRef ||
+        state.computerControlEnabled;
 
       if (hasContent) {
         newDrafts[normalizedFromGroupId] = {
@@ -225,6 +258,10 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
           priority: state.priority,
           replyRequired: state.replyRequired,
           collaborationRequired: state.collaborationRequired,
+          computerControlEnabled: state.computerControlEnabled,
+          computerControlWorkflowId: state.computerControlWorkflowId,
+          computerControlActorId: state.computerControlActorId,
+          computerControlPermissions: state.computerControlPermissions,
         };
       } else {
         delete newDrafts[normalizedFromGroupId];
@@ -250,6 +287,10 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       priority: draft?.priority || "normal",
       replyRequired: draft?.replyRequired || false,
       collaborationRequired: draft?.collaborationRequired || false,
+      computerControlEnabled: draft?.computerControlEnabled || false,
+      computerControlWorkflowId: draft?.computerControlWorkflowId || "",
+      computerControlActorId: draft?.computerControlActorId || "foreman",
+      computerControlPermissions: draft?.computerControlPermissions || { publish: false, trust: false, unattendedTriggers: false },
       // After switching groups, return delivery to the current group. Cross-group
       // sends must be selected explicitly so restored drafts do not trigger remote fetches.
       destGroupId: normalizedDestGroupId,

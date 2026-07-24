@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+NODE_TYPES = frozenset({"start", "action", "condition", "wait", "loop", "approval", "end"})
+TRIGGER_TYPES = frozenset({"cron", "interval", "event", "file", "element"})
+SECRET_REF_RE = re.compile(r"^\$\{secret:[A-Za-z_][A-Za-z0-9_]*\}$")
+TEMPLATE_REF_RE = re.compile(r"^\$\{(?:inputs|steps)\.[A-Za-z0-9_.-]+\}$")
+
+
+class WorkflowNode(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(min_length=1, max_length=100)
+    type: Literal["start", "action", "condition", "wait", "loop", "approval", "end"]
+    title: str = Field(default="", max_length=200)
+    tool: str = Field(default="", max_length=200)
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    success_condition: str = Field(default="", max_length=1000)
+    condition: str = Field(default="", max_length=1000)
+    timeout_seconds: int = Field(default=60, ge=1, le=600)
+    retries: int = Field(default=0, ge=0, le=3)
+    adaptive: bool = True
+    max_iterations: Optional[int] = Field(default=None, ge=1, le=100)
+    position: Dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_kind(self) -> "WorkflowNode":
+        if self.type == "action" and not self.tool:
+            raise ValueError("action nodes require a tool")
+        if self.type == "condition" and not self.condition:
+            raise ValueError("condition nodes require a condition")
+        if self.type == "loop" and self.max_iterations is None:
+            raise ValueError("loop nodes require max_iterations")
+        return self
+
+
+class WorkflowEdge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(default="", max_length=100)
+    source: str = Field(min_length=1, max_length=100)
+    target: str = Field(min_length=1, max_length=100)
+    branch: Literal["next", "true", "false", "body", "done"] = "next"
+
+
+class WorkflowTrigger(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(min_length=1, max_length=100)
+    type: Literal["cron", "interval", "event", "file", "element"]
+    enabled: bool = False
+    actor_id: str = Field(default="", max_length=100)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    cooldown_seconds: int = Field(default=30, ge=0, le=86400)
+
+
+class WorkflowDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    nodes: List[WorkflowNode] = Field(min_length=2, max_length=200)
+    edges: List[WorkflowEdge] = Field(default_factory=list, max_length=800)
+    triggers: List[WorkflowTrigger] = Field(default_factory=list, max_length=50)
+    save_screenshots: bool = True
+    max_run_seconds: int = Field(default=1800, ge=10, le=1800)
+
+    @model_validator(mode="after")
+    def validate_graph(self) -> "WorkflowDefinition":
+        ids = [node.id for node in self.nodes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("node ids must be unique")
+        starts = [node.id for node in self.nodes if node.type == "start"]
+        ends = [node.id for node in self.nodes if node.type == "end"]
+        if len(starts) != 1:
+            raise ValueError("workflow requires exactly one start node")
+        if not ends:
+            raise ValueError("workflow requires at least one end node")
+        known = set(ids)
+        outgoing: Dict[str, List[str]] = {node_id: [] for node_id in ids}
+        for edge in self.edges:
+            if edge.source not in known or edge.target not in known:
+                raise ValueError("edges must reference existing nodes")
+            outgoing[edge.source].append(edge.target)
+        reachable = set()
+        stack = [starts[0]]
+        while stack:
+            node_id = stack.pop()
+            if node_id in reachable:
+                continue
+            reachable.add(node_id)
+            stack.extend(outgoing[node_id])
+        if reachable != known:
+            raise ValueError("all nodes must be reachable from start")
+        reverse: Dict[str, List[str]] = {node_id: [] for node_id in ids}
+        for edge in self.edges:
+            reverse[edge.target].append(edge.source)
+        can_end = set()
+        stack = list(ends)
+        while stack:
+            node_id = stack.pop()
+            if node_id in can_end:
+                continue
+            can_end.add(node_id)
+            stack.extend(reverse[node_id])
+        if known - can_end:
+            raise ValueError("every node must be able to reach an end node")
+        self._reject_plain_secrets(self.model_dump())
+        return self
+
+    @classmethod
+    def _reject_plain_secrets(cls, value: Any, path: str = "") -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                lowered = str(key).lower()
+                if any(token in lowered for token in ("password", "passwd", "secret", "api_key", "token")):
+                    if isinstance(child, str) and child and not SECRET_REF_RE.fullmatch(child):
+                        raise ValueError(f"sensitive value at {child_path} must use a secret reference")
+                cls._reject_plain_secrets(child, child_path)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                cls._reject_plain_secrets(child, f"{path}[{index}]")
+
+
+class WorkflowCreateRequest(BaseModel):
+    definition: WorkflowDefinition
+
+
+class WorkflowUpdateRequest(BaseModel):
+    definition: WorkflowDefinition
+    expected_revision: int = Field(ge=1)
+    change_note: str = Field(default="", max_length=500)
+
+
+class WorkflowRunRequest(BaseModel):
+    actor_id: str = Field(default="foreman", min_length=1, max_length=100)
+    version: Optional[int] = Field(default=None, ge=1)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TrustRequest(BaseModel):
+    version: int = Field(ge=1)
+    permissions: List[str] = Field(default_factory=lambda: ["all_windows_mcp_tools"])
+
+
+class ElementLocator(BaseModel):
+    window_name: str = Field(default="", max_length=500)
+    control_type: str = Field(default="", max_length=100)
+    name: str = Field(default="", max_length=500)
+    text: str = Field(default="", max_length=500)
+    match: Literal["exact", "contains", "regex"] = "exact"
+    dom: bool = False
+    monitor: Optional[int] = Field(default=None, ge=0, le=32)
+    position_anchor: Optional[Dict[str, float]] = None
+
+    @model_validator(mode="after")
+    def require_identity(self) -> "ElementLocator":
+        if not any((self.window_name, self.control_type, self.name, self.text)):
+            raise ValueError("locator requires at least one stable attribute")
+        return self

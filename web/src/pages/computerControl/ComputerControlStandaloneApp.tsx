@@ -1,0 +1,602 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
+  type Connection,
+  type EdgeChange,
+  type NodeChange,
+} from "@xyflow/react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CircleStop,
+  Copy,
+  GitBranch,
+  Hourglass,
+  Laptop,
+  LoaderCircle,
+  MousePointer2,
+  Play,
+  RefreshCw,
+  Save,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Undo2,
+  Upload,
+  Wrench,
+  X,
+} from "lucide-react";
+import { computerControlApi, type ComputerControlRequest, type ComputerSetup, type OptimizationProposal, type WorkflowManifest, type WorkflowRecord, type WorkflowVersion } from "../../services/api/computerControl";
+import { SchemaForm } from "./SchemaForm";
+import { toolDescription, toolName } from "./localization";
+import type { CanvasEdge, CanvasNode, ToolCatalogItem, WorkflowDefinition, WorkflowNodeKind, WorkflowNodeModel } from "./types";
+import { normalizeDefinition, serializeDefinition } from "./types";
+import { WorkflowCanvas } from "./WorkflowCanvas";
+
+type Section = "tools" | "steps" | "properties" | "runs";
+type Snapshot = { nodes: CanvasNode[]; edges: CanvasEdge[] };
+
+let generatedId = 0;
+
+function nextId(prefix: string): string {
+  generatedId += 1;
+  return `${prefix}-${generatedId}`;
+}
+
+function groupIdFromPath(): string {
+  const match = window.location.pathname.match(/^\/computer-control\/([^/]+)/);
+  return decodeURIComponent(match?.[1] || "");
+}
+
+function initialDefinition(): WorkflowDefinition {
+  return normalizeDefinition({
+    name: "新电脑流程",
+    description: "",
+    nodes: [
+      { id: "start", type: "start", title: "开始", position: { x: 80, y: 160 } },
+      { id: "end", type: "end", title: "结束", position: { x: 500, y: 160 } },
+    ],
+    edges: [{ id: "start-end", source: "start", target: "end", branch: "next" }],
+    triggers: [],
+    inputs: {},
+    save_screenshots: true,
+    max_run_seconds: 1800,
+  });
+}
+
+function phaseLabel(phase: string): string {
+  return ({ checking: "正在检查", downloading: "正在准备组件", initializing: "正在启动服务", verifying: "正在验证工具", ready: "已就绪", failed: "安装失败", not_started: "等待安装" } as Record<string, string>)[phase] || phase;
+}
+
+function nodeLabel(kind: WorkflowNodeKind): string {
+  return ({ start: "开始", action: "执行操作", condition: "条件判断", wait: "等待", loop: "循环", approval: "人工确认", end: "结束" } as Record<WorkflowNodeKind, string>)[kind];
+}
+
+function runStatusLabel(status: unknown): string {
+  return ({ running: "正在运行", completed: "运行成功", failed: "运行失败", cancelled: "已停止", recovering: "正在自适应恢复", pending_approval: "等待用户确认" } as Record<string, string>)[String(status || "")] || "状态未知";
+}
+
+function friendlyError(message: unknown): string {
+  const text = String(message || "");
+  const rules: Array<[RegExp, string]> = [
+    [/workflow version is not trusted|workflow_not_trusted/i, "当前工作流版本尚未发布并信任。"],
+    [/computer control is currently occupied|computer_control_busy/i, "另一项电脑控制任务正在运行，请稍后再试。"],
+    [/windows-mcp exited/i, "Windows-MCP 连接意外中断，系统已尝试恢复。为避免重复操作，请确认桌面状态后重试。"],
+    [/revision conflict|revision_conflict/i, "工作流已被其他操作更新，请刷新后再保存。"],
+    [/approval_required|需要用户批准/i, "该流程包含高风险操作，需要用户确认后才能继续。"],
+  ];
+  return rules.find(([pattern]) => pattern.test(text))?.[1] || text || "操作未完成，请稍后重试。";
+}
+
+function toCanvas(definition: WorkflowDefinition): Snapshot {
+  return {
+    nodes: definition.nodes.map((model) => ({
+      id: model.id,
+      type: "workflow",
+      position: model.position || { x: 0, y: 0 },
+      data: { model },
+    })),
+    edges: definition.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.branch && edge.branch !== "next" ? edge.branch : undefined,
+      data: { branch: edge.branch || "next" },
+    })),
+  };
+}
+
+function fromCanvas(base: WorkflowDefinition, nodes: CanvasNode[], edges: CanvasEdge[]): WorkflowDefinition {
+  return {
+    ...base,
+    nodes: nodes.map((node) => ({ ...node.data.model, position: node.position })),
+    edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, branch: (edge.data?.branch || "next") as "next" })),
+  };
+}
+
+function cloneSnapshot(nodes: CanvasNode[], edges: CanvasEdge[]): Snapshot {
+  return { nodes: structuredClone(nodes), edges: structuredClone(edges) };
+}
+
+export function ComputerControlStandaloneApp() {
+  const groupId = groupIdFromPath();
+  const [setup, setSetup] = useState<ComputerSetup>({ phase: "not_started", version: "" });
+  const [tools, setTools] = useState<ToolCatalogItem[]>([]);
+  const [toolSearch, setToolSearch] = useState("");
+  const [workflows, setWorkflows] = useState<WorkflowManifest[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [record, setRecord] = useState<WorkflowRecord | null>(null);
+  const [definition, setDefinition] = useState<WorkflowDefinition>(initialDefinition);
+  const initialCanvas = useMemo(() => toCanvas(initialDefinition()), []);
+  const [nodes, setNodes] = useState<CanvasNode[]>(initialCanvas.nodes);
+  const [edges, setEdges] = useState<CanvasEdge[]>(initialCanvas.edges);
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [history, setHistory] = useState<Snapshot[]>([]);
+  const [runs, setRuns] = useState<Record<string, unknown>[]>([]);
+  const [versions, setVersions] = useState<WorkflowVersion[]>([]);
+  const [proposals, setProposals] = useState<OptimizationProposal[]>([]);
+  const [requests, setRequests] = useState<ComputerControlRequest[]>([]);
+  const [section, setSection] = useState<Section>("steps");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [trustDialogOpen, setTrustDialogOpen] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!groupId) return;
+    const [status, workflowResponse, runResponse, requestResponse] = await Promise.all([
+      computerControlApi.status(),
+      computerControlApi.workflows(groupId),
+      computerControlApi.runs(groupId),
+      computerControlApi.requests(groupId),
+    ]);
+    if (status.ok) setSetup(status.result);
+    if (workflowResponse.ok) {
+      setWorkflows(workflowResponse.result.workflows || []);
+      const first = workflowResponse.result.workflows?.[0];
+      if (first) setSelectedId((current) => current || first.workflow_id);
+    }
+    if (runResponse.ok) setRuns(runResponse.result.runs || []);
+    if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
+  }, [groupId]);
+
+  const loadCatalog = useCallback(async () => {
+    const response = await computerControlApi.catalog();
+    if (response.ok) setTools((response.result.tools || []) as ToolCatalogItem[]);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setBusy("ensure");
+      const response = await computerControlApi.ensure();
+      if (!cancelled && response.ok) {
+        setSetup(response.result);
+        if (response.result.phase === "ready") await loadCatalog();
+      }
+      if (!cancelled) setBusy("");
+      await refresh();
+    })();
+    return () => { cancelled = true; };
+  }, [loadCatalog, refresh]);
+
+  useEffect(() => {
+    if (setup.phase === "ready") {
+      return;
+    }
+    if (setup.phase === "failed") return;
+    const timer = window.setInterval(() => {
+      void computerControlApi.status().then((response) => {
+        if (response.ok) {
+          setSetup(response.result);
+          if (response.result.phase === "ready" && tools.length === 0) void loadCatalog();
+        }
+      });
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [loadCatalog, setup.phase, tools.length]);
+
+  useEffect(() => {
+    if (!groupId || !selectedId) return;
+    void Promise.all([
+      computerControlApi.workflow(groupId, selectedId),
+      computerControlApi.versions(groupId, selectedId),
+      computerControlApi.proposals(groupId, selectedId),
+    ]).then(([response, versionResponse, proposalResponse]) => {
+      if (!response.ok) {
+        setMessage(friendlyError(response.error.message));
+        return;
+      }
+      if (versionResponse.ok) setVersions(versionResponse.result.versions || []);
+      if (proposalResponse.ok) setProposals(proposalResponse.result.proposals || []);
+      const nextDefinition = normalizeDefinition(response.result.definition);
+      const canvas = toCanvas(nextDefinition);
+      setRecord(response.result);
+      setDefinition(nextDefinition);
+      setNodes(canvas.nodes);
+      setEdges(canvas.edges);
+      setSelectedNodeId("");
+      setHistory([]);
+    });
+  }, [groupId, selectedId]);
+
+  const selectedManifest = useMemo(() => workflows.find((item) => item.workflow_id === selectedId), [selectedId, workflows]);
+  const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
+  const selectedTool = useMemo(() => tools.find((tool) => tool.name === selectedNode?.data.model.tool), [selectedNode, tools]);
+  const filteredTools = useMemo(() => {
+    const search = toolSearch.trim().toLowerCase();
+    return tools.filter((tool) => !search || `${tool.name} ${toolName(tool.name)} ${tool.description || ""}`.toLowerCase().includes(search));
+  }, [toolSearch, tools]);
+  const setupReady = setup.phase === "ready";
+  const isTrusted = Boolean(selectedManifest?.trusted?.[String(selectedManifest.current_version)]);
+  const canLinearReorder = edges.length === Math.max(0, nodes.length - 1) && edges.every((edge) => !edge.data?.branch || edge.data.branch === "next");
+
+  function remember() {
+    setHistory((items) => [...items.slice(-29), cloneSnapshot(nodes, edges)]);
+  }
+
+  function undo() {
+    const previous = history[history.length - 1];
+    if (!previous) return;
+    setNodes(previous.nodes);
+    setEdges(previous.edges);
+    setHistory((items) => items.slice(0, -1));
+    setSelectedNodeId("");
+  }
+
+  function updateNode(nodeId: string, patch: Partial<WorkflowNodeModel>) {
+    remember();
+    setNodes((items) => items.map((node) => node.id === nodeId ? { ...node, data: { model: { ...node.data.model, ...patch } } } : node));
+  }
+
+  function addNode(kind: WorkflowNodeKind, tool?: ToolCatalogItem, position?: { x: number; y: number }) {
+    remember();
+    const id = nextId(kind);
+    const model: WorkflowNodeModel = {
+      id,
+      type: kind,
+      title: tool ? toolName(tool.name) : nodeLabel(kind),
+      position: position || { x: 260 + nodes.length * 25, y: 120 + nodes.length * 30 },
+    };
+    if (kind === "action") {
+      model.tool = tool?.name || tools[0]?.name || "";
+      model.arguments = {};
+      model.timeout_seconds = 60;
+      model.retries = 0;
+      model.adaptive = true;
+    }
+    if (kind === "condition") model.condition = "steps.previous.success";
+    if (kind === "loop") model.max_iterations = 3;
+    const end = nodes.find((node) => node.data.model.type === "end");
+    const incoming = end ? edges.find((edge) => edge.target === end.id) : undefined;
+    setNodes((items) => {
+      const next = [...items];
+      const endIndex = next.findIndex((node) => node.data.model.type === "end");
+      next.splice(endIndex >= 0 ? endIndex : next.length, 0, { id, type: "workflow", position: model.position!, data: { model } });
+      return next;
+    });
+    if (end && incoming) {
+      setEdges((items) => [
+        ...items.filter((edge) => edge.id !== incoming.id),
+        { id: `${incoming.source}-${id}`, source: incoming.source, target: id, data: { branch: "next" } },
+        { id: `${id}-${end.id}`, source: id, target: end.id, data: { branch: "next" } },
+      ]);
+    }
+    setSelectedNodeId(id);
+    setSection("properties");
+  }
+
+  function removeSelectedNode() {
+    if (!selectedNode || selectedNode.data.model.type === "start" || selectedNode.data.model.type === "end") return;
+    remember();
+    const incoming = edges.filter((edge) => edge.target === selectedNode.id);
+    const outgoing = edges.filter((edge) => edge.source === selectedNode.id);
+    const replacements = incoming.flatMap((left) => outgoing.map((right) => ({ id: nextId(`${left.source}-${right.target}`), source: left.source, target: right.target, data: { branch: left.data?.branch || "next" } } as CanvasEdge)));
+    setNodes((items) => items.filter((node) => node.id !== selectedNode.id));
+    setEdges((items) => [...items.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id), ...replacements]);
+    setSelectedNodeId("");
+  }
+
+  function moveNode(nodeId: string, direction: -1 | 1) {
+    const index = nodes.findIndex((node) => node.id === nodeId);
+    const target = index + direction;
+    if (!canLinearReorder || index <= 0 || target <= 0 || target >= nodes.length - 1) return;
+    remember();
+    const reordered = [...nodes];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setNodes(reordered);
+    setEdges(reordered.slice(0, -1).map((node, edgeIndex) => ({
+      id: nextId(`${node.id}-${reordered[edgeIndex + 1].id}`),
+      source: node.id,
+      target: reordered[edgeIndex + 1].id,
+      data: { branch: "next" },
+    })));
+  }
+
+  async function beginSetup(kind: "ensure" | "repair" | "upgrade") {
+    setBusy("ensure");
+    const response = kind === "repair" ? await computerControlApi.repair() : kind === "upgrade" ? await computerControlApi.upgrade() : await computerControlApi.ensure();
+    if (response.ok) {
+      setSetup(response.result);
+      setMessage(kind === "upgrade" ? "正在检查 Windows-MCP 更新" : "正在准备 Windows-MCP");
+    } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function createWorkflow() {
+    setBusy("create");
+    const response = await computerControlApi.createWorkflow(groupId, serializeDefinition(initialDefinition()));
+    if (response.ok) {
+      setSelectedId(response.result.manifest.workflow_id);
+      await refresh();
+    } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function save() {
+    if (!record) return;
+    setBusy("save");
+    const current = fromCanvas(definition, nodes, edges);
+    const response = await computerControlApi.updateWorkflow(groupId, record.manifest.workflow_id, serializeDefinition(current), record.manifest.revision);
+    if (response.ok) {
+      const next = normalizeDefinition(response.result.definition);
+      setRecord(response.result);
+      setDefinition(next);
+      setMessage("已保存为新版本");
+      setHistory([]);
+      await refresh();
+    } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function publish() {
+    if (!selectedManifest) return;
+    setBusy("publish");
+    const response = await computerControlApi.publish(groupId, selectedManifest.workflow_id, selectedManifest.current_version);
+    if (response.ok) { setMessage("当前版本已发布"); await refresh(); } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function run() {
+    if (!selectedManifest) return;
+    setBusy("run");
+    const response = await computerControlApi.run(groupId, selectedManifest.workflow_id, "foreman", selectedManifest.published_version || undefined);
+    if (response.ok) { setMessage("运行已启动"); await refresh(); setSection("runs"); } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function trust() {
+    if (!selectedManifest) return;
+    setBusy("trust");
+    const response = await computerControlApi.trust(groupId, selectedManifest.workflow_id, selectedManifest.current_version);
+    if (response.ok) { setMessage("当前版本已受信"); await refresh(); } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function rollback(version: number) {
+    if (!selectedManifest || version === selectedManifest.current_version) return;
+    setBusy("rollback");
+    const response = await computerControlApi.rollback(groupId, selectedManifest.workflow_id, version);
+    if (response.ok) {
+      setMessage(`已从版本 ${version} 创建新的可编辑版本，发布和信任状态已撤销。`);
+      await refresh();
+    } else {
+      setMessage(friendlyError(response.error.message));
+    }
+    setBusy("");
+  }
+
+  async function decideProposal(proposalId: string, decision: "accept" | "reject") {
+    if (!selectedManifest) return;
+    setBusy("proposal");
+    const response = await computerControlApi.decideProposal(groupId, selectedManifest.workflow_id, proposalId, decision);
+    if (response.ok) {
+      setMessage(decision === "accept" ? "优化建议已生成新的待发布版本。" : "优化建议已拒绝。");
+      await refresh();
+      const next = await computerControlApi.proposals(groupId, selectedManifest.workflow_id);
+      if (next.ok) setProposals(next.result.proposals || []);
+    } else {
+      setMessage(friendlyError(response.error.message));
+    }
+    setBusy("");
+  }
+
+  async function emergency(runId?: string) {
+    if (!runId) return;
+    setBusy("stop");
+    await computerControlApi.cancel(groupId, runId, true);
+    await refresh();
+    setBusy("");
+  }
+
+  async function decideRunApproval(runId: string, nodeId: string, approved: boolean) {
+    setBusy("approval");
+    const response = await computerControlApi.decideRunApproval(groupId, runId, nodeId, approved);
+    setMessage(response.ok ? (approved ? "已批准，工作流将继续执行。" : "已拒绝，工作流将停止。") : friendlyError(response.error.message));
+    await refresh();
+    setBusy("");
+  }
+
+  async function decideRequest(requestId: string, approved: boolean) {
+    setBusy("request-approval");
+    const response = approved
+      ? await computerControlApi.approveRequest(groupId, requestId)
+      : await computerControlApi.rejectRequest(groupId, requestId);
+    setMessage(response.ok ? (approved ? "已授予本次运行的一次性授权。" : "已拒绝本次电脑控制请求。") : friendlyError(response.error.message));
+    await refresh();
+    setBusy("");
+  }
+
+  function onConnect(connection: Connection) {
+    if (!connection.source || !connection.target || connection.source === connection.target) return;
+    remember();
+    setEdges((items) => addEdge({ ...connection, id: nextId(`${connection.source}-${connection.target}`), data: { branch: "next" } }, items));
+  }
+
+  const runsPanel = (
+    <div className="h-full overflow-auto p-4">
+      <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">运行时间线</h2><button title="刷新运行记录" className="rounded-md p-1.5 hover:bg-black/5" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>
+      {runs.length === 0 ? (
+        <div className="rounded-md border border-dashed border-[var(--color-border)] p-5 text-center text-xs text-[var(--color-text-secondary)]">暂无运行记录</div>
+      ) : (
+        <div className="space-y-2">
+          {runs.map((run) => {
+            const events = Array.isArray(run.events) ? run.events.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object")) : [];
+            const current = [...events].reverse().find((item) => item.status === "running") || events[events.length - 1];
+            const error = run.error && typeof run.error === "object" ? run.error as Record<string, unknown> : null;
+            return (
+              <div key={String(run.run_id)} className="rounded-md border border-[var(--color-border)] p-3 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold">{runStatusLabel(run.status)}</span>
+                  <span className="truncate text-[var(--color-text-secondary)]">{current ? String(current.node_id || "") : "尚未开始步骤"}</span>
+                </div>
+                <div className="mt-1 text-[var(--color-text-secondary)]">执行智能体：{String(run.actor_id || "未记录")} · 已完成 {events.filter((item) => item.status === "completed").length} 个步骤</div>
+                {error && <div className="mt-2 rounded bg-red-500/8 px-2 py-1.5 text-red-700 dark:text-red-300">{friendlyError(error.message)}</div>}
+                {run.status === "waiting_approval" && Boolean(run.current_node_id) && (
+                  <div className="mt-2 flex items-center gap-2 rounded bg-amber-500/8 px-2 py-1.5">
+                    <span className="flex-1 text-amber-800 dark:text-amber-200">此步骤要求人工确认</span>
+                    <button className="text-emerald-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void decideRunApproval(String(run.run_id), String(run.current_node_id), true)}>批准</button>
+                    <button className="text-red-600 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void decideRunApproval(String(run.run_id), String(run.current_node_id), false)}>拒绝</button>
+                  </div>
+                )}
+                {run.status === "running" && <button className="mt-2 inline-flex items-center gap-1 rounded border border-red-500/40 px-2 py-1 text-red-600" onClick={() => void emergency(String(run.run_id))}><CircleStop size={13} />紧急停止</button>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <main className="flex min-h-screen flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3 md:px-6">
+        <div className="flex min-w-0 items-center gap-3"><button title="返回一号同事主页" aria-label="返回一号同事主页" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] hover:bg-black/5" onClick={() => window.location.assign("/")}><ArrowLeft size={16} /></button><Laptop size={22} /><div className="min-w-0"><div className="truncate text-sm font-semibold">电脑控制</div><div className="truncate text-xs text-[var(--color-text-secondary)]">工作组 {groupId || "未选择"}</div></div></div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button title="撤销" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] disabled:opacity-40" onClick={undo} disabled={history.length === 0}><Undo2 size={15} /></button>
+          <button className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50" onClick={() => void save()} disabled={!record || Boolean(busy)}><Save size={15} />保存</button>
+          <button className="hidden h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50 sm:inline-flex" onClick={() => void publish()} disabled={!selectedManifest || Boolean(busy)}><Upload size={15} />发布</button>
+          <button className="hidden h-9 items-center gap-1 rounded-md border border-emerald-500/40 px-3 text-sm text-emerald-700 disabled:opacity-50 sm:inline-flex" onClick={() => setTrustDialogOpen(true)} disabled={!selectedManifest || Boolean(busy)}><ShieldCheck size={15} />信任</button>
+          <button className="inline-flex h-9 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-sm text-white disabled:opacity-50" onClick={() => void run()} disabled={!setupReady || !isTrusted || Boolean(busy)}><Play size={15} />运行</button>
+        </div>
+      </header>
+
+      {message && <div className="mx-4 mt-3 flex items-center justify-between rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm md:mx-6"><span>{message}</span><button aria-label="关闭" onClick={() => setMessage("")}><X size={15} /></button></div>}
+
+      <div className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
+        {setup.phase === "ready" ? <Check size={15} className="text-emerald-600" /> : setup.phase === "failed" ? <AlertTriangle size={15} className="text-red-600" /> : <LoaderCircle size={15} className="animate-spin text-amber-600" />}
+        <div className="min-w-0 flex-1"><span className="font-medium">Windows-MCP {phaseLabel(setup.phase)}</span>{setup.version && <span className="ml-2 text-[var(--color-text-secondary)]">版本 {setup.version}</span>}<div className="truncate text-[var(--color-text-secondary)]">{setup.error?.message || (setup.phase === "ready" ? `已验证 ${setup.tool_count || 0} 个电脑工具` : "首次准备可能需要一到两分钟，可以继续浏览此页面")}</div></div>
+        {setup.phase === "failed" ? <button className="inline-flex items-center gap-1 rounded-md border px-2 py-1" onClick={() => void beginSetup("repair")}><Wrench size={13} />修复</button> : <button title="检查更新" className="inline-flex items-center gap-1 rounded-md border px-2 py-1" onClick={() => void beginSetup("upgrade")} disabled={setup.phase !== "ready"}><RefreshCw size={13} />更新</button>}
+      </div>
+
+      {requests.filter((item) => item.status === "pending_approval").map((request) => (
+        <div key={request.request_id} className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-red-500/35 bg-red-500/6 px-3 py-2 text-xs md:mx-6">
+          <ShieldCheck size={16} className="shrink-0 text-red-600" />
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">电脑控制请求等待确认</div>
+            <div className="mt-0.5 truncate text-[var(--color-text-secondary)]">{request.text || "智能体请求执行高风险操作"}</div>
+            <div className="mt-1 text-red-700 dark:text-red-300">涉及：{request.risk?.high_risk_nodes?.map((item) => item.title || toolName(item.tool || "")).filter(Boolean).join("、") || "系统级操作"}</div>
+          </div>
+          <button className="shrink-0 rounded border border-emerald-500/40 px-2 py-1 text-emerald-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void decideRequest(request.request_id, true)}>仅批准本次</button>
+          <button className="shrink-0 rounded border border-red-500/30 px-2 py-1 text-red-600 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void decideRequest(request.request_id, false)}>拒绝</button>
+        </div>
+      ))}
+
+      <div className="mx-4 mt-3 grid grid-cols-4 gap-1 rounded-md bg-black/5 p-1 md:hidden">{(["tools", "steps", "properties", "runs"] as Section[]).map((item) => <button key={item} className={`rounded px-2 py-1.5 text-xs ${section === item ? "bg-white text-slate-900 shadow-sm" : "text-[var(--color-text-secondary)]"}`} onClick={() => setSection(item)}>{({ tools: "工具", steps: "步骤", properties: "属性", runs: "运行" } as Record<Section, string>)[item]}</button>)}</div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)_310px]">
+        <aside className={`${section === "tools" ? "block" : "hidden md:block"} min-h-0 border-r border-[var(--color-border)] p-3`}>
+          <div className="mb-4"><div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-semibold text-[var(--color-text-secondary)]">工作流</h2><button title="新建工作流" className="rounded-md p-1.5 hover:bg-black/5" onClick={() => void createWorkflow()}><Copy size={15} /></button></div><div className="relative"><select className="h-9 w-full appearance-none rounded-md border border-[var(--color-border)] bg-transparent px-2.5 pr-8 text-sm" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{workflows.map((item) => <option key={item.workflow_id} value={item.workflow_id}>{item.name}</option>)}</select><ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-3" /></div></div>
+          {versions.length > 0 && (
+            <div className="mb-4 border-t border-[var(--color-border)] pt-3">
+              <h2 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">版本历史</h2>
+              <div className="space-y-1">
+                {versions.slice(0, 4).map((item) => (
+                  <div key={item.version} className="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-black/5">
+                    <span>版本 {item.version}{item.version === selectedManifest?.published_version ? " · 已发布" : item.version === selectedManifest?.current_version ? " · 当前" : ""}</span>
+                    {item.version !== selectedManifest?.current_version && <button className="text-[var(--color-accent-primary)] disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void rollback(item.version)}>回滚</button>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {proposals.some((item) => item.status === "pending") && (
+            <div className="mb-4 border-t border-[var(--color-border)] pt-3">
+              <h2 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">AI 优化建议</h2>
+              {proposals.filter((item) => item.status === "pending").slice(0, 2).map((item) => (
+                <div key={item.proposal_id} className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
+                  <p className="leading-4">{item.summary || "根据运行恢复结果优化工作流"}</p>
+                  <div className="mt-2 flex gap-2"><button className="text-emerald-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void decideProposal(item.proposal_id, "accept")}>接受为新版本</button><button className="text-[var(--color-text-secondary)] disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void decideProposal(item.proposal_id, "reject")}>拒绝</button></div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-semibold text-[var(--color-text-secondary)]">Windows-MCP 工具</h2><span className="text-[10px] text-[var(--color-text-secondary)]">{tools.length}</span></div>
+          <div className="relative mb-2"><Search size={13} className="absolute left-2.5 top-2.5 text-[var(--color-text-secondary)]" /><input className="h-8 w-full rounded-md border border-[var(--color-border)] bg-transparent pl-8 pr-2 text-xs outline-none" value={toolSearch} onChange={(event) => setToolSearch(event.target.value)} placeholder="搜索工具" /></div>
+          <div className="max-h-[calc(100vh-310px)] space-y-1 overflow-auto">{filteredTools.map((tool) => <button draggable key={tool.name} onDragStart={(event) => { event.dataTransfer.setData("application/onecolleague-windows-mcp-tool", JSON.stringify(tool)); event.dataTransfer.effectAllowed = "copy"; }} onClick={() => addNode("action", tool)} className="block w-full rounded-md border border-transparent px-2 py-2 text-left hover:border-[var(--color-border)] hover:bg-black/5"><div className="truncate text-xs font-medium">{toolName(tool.name)} <span className="font-normal text-[var(--color-text-secondary)]">({tool.name})</span></div><div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">{toolDescription(tool.name, tool.description)}</div></button>)}{setupReady && filteredTools.length === 0 && <div className="p-3 text-center text-xs text-[var(--color-text-secondary)]">没有匹配的工具</div>}</div>
+        </aside>
+
+        <section className={`${section === "steps" ? "flex" : "hidden md:flex"} min-h-[520px] min-w-0 flex-col border-r border-[var(--color-border)]`}>
+          <div className="flex h-12 items-center gap-1 overflow-x-auto border-b border-[var(--color-border)] px-3">
+            <span className="mr-2 text-xs font-medium text-[var(--color-text-secondary)]">添加步骤</span>
+            <button className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5" onClick={() => addNode("action")}><MousePointer2 size={14} />操作</button>
+            <button className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5" onClick={() => addNode("condition")}><GitBranch size={14} />判断</button>
+            <button className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5" onClick={() => addNode("wait")}><Hourglass size={14} />等待</button>
+            <button className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs hover:bg-black/5" onClick={() => addNode("approval")}><ShieldCheck size={14} />确认</button>
+          </div>
+          <div className="hidden min-h-[400px] flex-1 md:block">
+            <WorkflowCanvas
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={(changes: NodeChange<CanvasNode>[]) => setNodes((items) => applyNodeChanges(changes, items))}
+              onEdgesChange={(changes: EdgeChange<CanvasEdge>[]) => setEdges((items) => applyEdgeChanges(changes, items))}
+              onConnect={onConnect}
+              onSelect={setSelectedNodeId}
+              onToolDrop={(tool, position) => addNode("action", tool, position)}
+            />
+          </div>
+          <div className="flex-1 space-y-2 overflow-auto p-3 md:hidden">
+            {nodes.map((node, index) => (
+              <div key={node.id} className={`flex items-center gap-2 rounded-md border p-2 ${selectedNodeId === node.id ? "border-[var(--color-accent-primary)] bg-black/5" : "border-[var(--color-border)]"}`}>
+                <button className="min-w-0 flex-1 text-left" onClick={() => { setSelectedNodeId(node.id); setSection("properties"); }}>
+                  <span className="block truncate text-sm font-medium">{index + 1}. {node.data.model.title}</span>
+                  <span className="mt-0.5 block truncate text-xs text-[var(--color-text-secondary)]">{nodeLabel(node.data.model.type)}{node.data.model.tool ? ` · ${toolName(node.data.model.tool)}` : ""}</span>
+                </button>
+                {!(["start", "end"] as WorkflowNodeKind[]).includes(node.data.model.type) && <div className="flex shrink-0 gap-1">
+                  <button title="上移步骤" className="rounded-md border border-[var(--color-border)] p-1.5 disabled:opacity-30" disabled={!canLinearReorder || index <= 1} onClick={() => moveNode(node.id, -1)}><ChevronUp size={14} /></button>
+                  <button title="下移步骤" className="rounded-md border border-[var(--color-border)] p-1.5 disabled:opacity-30" disabled={!canLinearReorder || index >= nodes.length - 2} onClick={() => moveNode(node.id, 1)}><ChevronDown size={14} /></button>
+                </div>}
+              </div>
+            ))}
+            {!canLinearReorder && nodes.length > 2 && <p className="px-1 text-xs text-[var(--color-text-secondary)]">包含分支的流程请在桌面端调整连线。</p>}
+          </div>
+          <div className="hidden h-44 border-t border-[var(--color-border)] lg:block">{runsPanel}</div>
+        </section>
+
+        <aside className={`${section === "properties" ? "block" : "hidden md:block"} min-h-0 overflow-auto p-4`}>
+          {selectedNode ? <div><div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-semibold">步骤属性</h2><p className="mt-1 text-xs text-[var(--color-text-secondary)]">{nodeLabel(selectedNode.data.model.type)}</p></div>{!(["start", "end"] as WorkflowNodeKind[]).includes(selectedNode.data.model.type) && <button title="删除步骤" className="rounded-md p-2 text-red-600 hover:bg-red-500/10" onClick={removeSelectedNode}><Trash2 size={15} /></button>}</div><label className="block text-xs font-medium">步骤名称<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm outline-none" value={selectedNode.data.model.title} onChange={(event) => updateNode(selectedNode.id, { title: event.target.value })} /></label>{selectedNode.data.model.type === "action" && <div className="mt-4"><label className="block text-xs font-medium">执行工具<select className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2 text-sm" value={selectedNode.data.model.tool || ""} onChange={(event) => updateNode(selectedNode.id, { tool: event.target.value, arguments: {}, title: toolName(event.target.value) })}>{tools.map((tool) => <option key={tool.name} value={tool.name}>{toolName(tool.name)} ({tool.name})</option>)}</select></label><p className="mt-1 text-xs leading-4 text-[var(--color-text-secondary)]">{selectedTool ? toolDescription(selectedTool.name, selectedTool.description) : "请选择要执行的电脑工具。"}</p><div className="my-4 border-t border-[var(--color-border)]" /><SchemaForm toolName={selectedTool?.name} schema={selectedTool?.inputSchema} value={selectedNode.data.model.arguments || {}} onChange={(argumentsValue) => updateNode(selectedNode.id, { arguments: argumentsValue })} /><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-medium">超时（秒）<input type="number" min={1} max={600} className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2" value={selectedNode.data.model.timeout_seconds || 60} onChange={(event) => updateNode(selectedNode.id, { timeout_seconds: Number(event.target.value) })} /></label><label className="text-xs font-medium">失败重试<select className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2" value={selectedNode.data.model.retries || 0} onChange={(event) => updateNode(selectedNode.id, { retries: Number(event.target.value) })}>{[0, 1, 2, 3].map((value) => <option key={value} value={value}>{value} 次</option>)}</select></label></div><label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs"><span><span className="block font-medium">AI 自适应恢复</span><span className="text-[var(--color-text-secondary)]">界面变化时尝试重新定位</span></span><input type="checkbox" checked={selectedNode.data.model.adaptive !== false} onChange={(event) => updateNode(selectedNode.id, { adaptive: event.target.checked })} /></label></div>}{selectedNode.data.model.type === "condition" && <label className="mt-4 block text-xs font-medium">判断条件<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={selectedNode.data.model.condition || ""} onChange={(event) => updateNode(selectedNode.id, { condition: event.target.value })} /></label>}</div> : <div><h2 className="text-sm font-semibold">流程设置</h2><p className="mt-1 text-xs text-[var(--color-text-secondary)]">选择画布中的步骤后可编辑属性。</p><label className="mt-5 block text-xs font-medium">流程名称<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={definition.name} onChange={(event) => setDefinition((value) => ({ ...value, name: event.target.value }))} /></label><label className="mt-4 block text-xs font-medium">说明<textarea className="mt-1 min-h-20 w-full resize-y rounded-md border border-[var(--color-border)] bg-transparent p-2.5 text-sm" value={definition.description} onChange={(event) => setDefinition((value) => ({ ...value, description: event.target.value }))} /></label><label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs"><span>保存关键截图</span><input type="checkbox" checked={definition.save_screenshots} onChange={(event) => setDefinition((value) => ({ ...value, save_screenshots: event.target.checked }))} /></label></div>}
+        </aside>
+
+        {section === "runs" && <section className="block min-h-[420px] md:hidden">{runsPanel}</section>}
+      </div>
+
+      {trustDialogOpen && selectedManifest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="信任电脑控制工作流">
+          <div className="w-full max-w-lg rounded-md bg-[var(--color-bg-primary)] p-5 shadow-2xl">
+            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 shrink-0 text-emerald-600" size={20} /><div><h2 className="text-base font-semibold">信任“{selectedManifest.name}”当前版本</h2><p className="mt-1 text-sm text-[var(--color-text-secondary)]">信任后，该版本和已启用的自动触发器可以使用 Windows-MCP 的全部电脑权限。</p></div></div>
+            <div className="mt-4 border-y border-[var(--color-border)] py-3 text-sm">
+              <div className="font-medium">包含的高风险权限</div>
+              <ul className="mt-2 space-y-1 text-[var(--color-text-secondary)]"><li>运行 PowerShell 和系统命令</li><li>写入、移动和删除文件</li><li>启动或结束进程</li><li>修改 Windows 注册表</li><li>控制鼠标、键盘、窗口和剪贴板</li></ul>
+              <p className="mt-3 text-red-700 dark:text-red-300">部分操作不可撤销。工作流或 Windows-MCP 工具指纹变化后，信任会自动失效。</p>
+            </div>
+            <div className="mt-4 flex justify-end gap-2"><button className="h-9 rounded-md border border-[var(--color-border)] px-3 text-sm" onClick={() => setTrustDialogOpen(false)}>取消</button><button className="h-9 rounded-md bg-emerald-600 px-3 text-sm text-white" onClick={() => { setTrustDialogOpen(false); void trust(); }}>确认信任当前版本</button></div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}

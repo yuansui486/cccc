@@ -1296,6 +1296,43 @@ MCP_TOOLS = [
             required=["key"],
         ),
     },
+    {
+        "name": "onecolleague_computer_control_catalog",
+        "description": "Inspect the verified Windows-MCP computer-control tool catalog and health state.",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": _obj({**_COMMON_GROUP}),
+    },
+    {
+        "name": "onecolleague_computer_workflow",
+        "description": "List or inspect group-isolated computer-control workflow definitions and immutable versions.",
+        "inputSchema": _obj({
+            **_COMMON_GROUP,
+            "workflow_id": {"type": "string"},
+            "action": {"type": "string", "enum": ["list", "get", "validate", "create", "update", "propose", "publish", "trust", "update_triggers"], "default": "list"},
+            "version": {"type": "integer", "minimum": 1},
+            "request_id": {"type": "string", "description": "电脑控制请求 ID；AI 创建或更新草稿时必填。"},
+            "definition": {"type": "object", "additionalProperties": True, "description": "完整工作流定义。"},
+            "expected_revision": {"type": "integer", "minimum": 1},
+            "change_note": {"type": "string"},
+        }),
+    },
+    {
+        "name": "onecolleague_computer_run",
+        "description": "Start a trusted computer-control workflow for one actor; global desktop lease rules still apply.",
+        "inputSchema": _obj({
+            **_COMMON_GROUP,
+            **_COMMON_ACTOR,
+            "action": {"type": "string", "enum": ["start", "status", "recover"], "default": "start"},
+            "workflow_id": {"type": "string"},
+            "version": {"type": "integer", "minimum": 1},
+            "inputs": {"type": "object", "additionalProperties": True},
+            "request_id": {"type": "string", "description": "运行 AI 新建的未受信草稿时必填。"},
+            "run_id": {"type": "string"},
+            "recovery_id": {"type": "string"},
+            "tool": {"type": "string"},
+            "arguments": {"type": "object", "additionalProperties": True},
+        }),
+    },
 ]
 
 CANONICAL_MCP_TOOLS = MCP_TOOLS

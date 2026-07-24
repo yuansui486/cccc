@@ -10,6 +10,9 @@ import { useTranslation } from 'react-i18next';
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem, type SlashSkillScope } from "../../utils/slashCommands";
 import { getRecipientDisplayLabel } from "../../utils/displayText";
+import type { ComputerControlPermissions } from "../../stores/useComposerStore";
+import { Laptop, ExternalLink } from "lucide-react";
+import { computerControlApi, type WorkflowManifest } from "../../services/api/computerControl";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
 
@@ -50,9 +53,17 @@ export interface ChatComposerProps {
   priority: "normal" | "attention";
   replyRequired: boolean;
   collaborationRequired: boolean;
+  computerControlEnabled: boolean;
+  computerControlWorkflowId: string;
+  computerControlActorId: string;
+  computerControlPermissions: ComputerControlPermissions;
   setPriority: (priority: "normal" | "attention") => void;
   setReplyRequired: (value: boolean) => void;
   setCollaborationRequired: (value: boolean) => void;
+  setComputerControlEnabled: (value: boolean) => void;
+  setComputerControlWorkflowId: (workflowId: string) => void;
+  setComputerControlActorId: (actorId: string) => void;
+  setComputerControlPermission: (permission: keyof ComputerControlPermissions, value: boolean) => void;
   onSendMessage: () => void;
 
   // Mention menu
@@ -99,9 +110,17 @@ export function ChatComposer({
   priority,
   replyRequired,
   collaborationRequired,
+  computerControlEnabled,
+  computerControlWorkflowId,
+  computerControlActorId,
+  computerControlPermissions,
   setPriority,
   setReplyRequired,
   setCollaborationRequired,
+  setComputerControlEnabled,
+  setComputerControlWorkflowId,
+  setComputerControlActorId,
+  setComputerControlPermission,
   onSendMessage,
   showMentionMenu,
   setShowMentionMenu,
@@ -122,8 +141,20 @@ export function ChatComposer({
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [slashVisibleCount, setSlashVisibleCount] = useState(SLASH_COMMAND_PAGE_SIZE);
+  const [computerWorkflows, setComputerWorkflows] = useState<WorkflowManifest[]>([]);
   const skillMenuRef = useRef<HTMLDivElement | null>(null);
   const { t } = useTranslation('chat');
+
+  useEffect(() => {
+    if (!computerControlEnabled || !selectedGroupId) return;
+    let cancelled = false;
+    void computerControlApi.workflows(selectedGroupId).then((response) => {
+      if (!cancelled && response.ok) {
+        setComputerWorkflows((response.result.workflows || []).filter((item) => !item.archived));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [computerControlEnabled, selectedGroupId]);
 
   const readRootFontScale = () => {
     if (typeof document === "undefined") return 1;
@@ -797,6 +828,30 @@ export function ChatComposer({
                 )}
               </div>
 
+              <button
+                type="button"
+                className={classNames(
+                  chipBaseClass,
+                  "hidden gap-1.5 px-2.5 sm:inline-flex",
+                  computerControlEnabled ? "border-emerald-500 bg-emerald-600 text-white shadow-sm" : chipInactiveClass,
+                )}
+                onClick={() => {
+                  const next = !computerControlEnabled;
+                  setComputerControlEnabled(next);
+                  if (next) {
+                    setSelectedSkillCommand("");
+                    const foreman = actors.find((actor) => actor.role === "foreman") || actors[0];
+                    if (foreman?.id) setComputerControlActorId(foreman.id);
+                  }
+                }}
+                disabled={busy === "send" || !selectedGroupId || isCrossGroup}
+                aria-pressed={computerControlEnabled}
+                title="让智能体编排或运行电脑控制工作流"
+              >
+                <Laptop size={13} />
+                <span>电脑控制</span>
+              </button>
+
               <div className="flex flex-shrink-0 items-center gap-1.5">
                 <span className={classNames("text-[10px] font-medium tracking-[0.08em]", isDark ? "text-[var(--color-text-tertiary)]" : "text-gray-400")}>
                   {t("messageModeLabel", { defaultValue: "重要度" })}
@@ -930,6 +985,75 @@ export function ChatComposer({
                 </button>
               )}
             </div>
+
+            {computerControlEnabled && (
+              <div className={classNames(
+                "hidden items-center gap-2 border-b px-2.5 py-1.5 text-xs sm:flex",
+                isDark ? "border-white/[0.05] bg-emerald-400/[0.04]" : "border-black/[0.05] bg-emerald-50/55",
+              )}>
+                <span className="shrink-0 font-medium text-emerald-700 dark:text-emerald-300">执行方式</span>
+                <select
+                  className={classNames(
+                    "h-8 min-w-0 max-w-[18rem] flex-1 rounded-md border px-2 outline-none",
+                    isDark ? "border-white/10 bg-slate-900 text-slate-100" : "border-gray-200 bg-white text-gray-800",
+                  )}
+                  value={computerControlWorkflowId}
+                  onChange={(event) => setComputerControlWorkflowId(event.target.value)}
+                  aria-label="选择电脑控制工作流"
+                >
+                  <option value="">根据当前需求新建并运行</option>
+                  {computerWorkflows.map((workflow) => (
+                    <option key={workflow.workflow_id} value={workflow.workflow_id}>
+                      {workflow.name}{workflow.published_version ? " · 已发布" : " · 草稿"}
+                    </option>
+                  ))}
+                </select>
+                <span className="shrink-0 text-[var(--color-text-tertiary)]">执行智能体</span>
+                <select
+                  className={classNames(
+                    "h-8 max-w-[11rem] rounded-md border px-2 outline-none",
+                    isDark ? "border-white/10 bg-slate-900 text-slate-100" : "border-gray-200 bg-white text-gray-800",
+                  )}
+                  value={computerControlActorId}
+                  onChange={(event) => setComputerControlActorId(event.target.value)}
+                  aria-label="选择执行智能体"
+                >
+                  {actors.map((actor) => (
+                    <option key={actor.id} value={actor.id}>{actor.title || actor.id}{actor.role === "foreman" ? "（领队）" : ""}</option>
+                  ))}
+                </select>
+                <span className="shrink-0 rounded-md border border-amber-500/25 bg-amber-500/8 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300" title="当前请求可直接使用全部 Windows-MCP 工具">本次授权：完整电脑权限</span>
+                <details className="relative shrink-0">
+                  <summary className="flex h-8 cursor-pointer list-none items-center gap-1 rounded-md border border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">高级授权<ChevronDownIcon size={12} /></summary>
+                  <div className={classNames(
+                    "absolute bottom-full right-0 z-50 mb-2 w-64 rounded-md border p-3 shadow-xl",
+                    isDark ? "border-white/10 bg-slate-950 text-slate-100" : "border-gray-200 bg-white text-gray-900",
+                  )}>
+                    <div className="mb-2 font-semibold">允许 AI 管理长期运行</div>
+                    {([
+                      ["publish", "发布工作流版本"],
+                      ["trust", "授予长期信任"],
+                      ["unattendedTriggers", "开启无人值守触发"],
+                    ] as Array<[keyof ComputerControlPermissions, string]>).map(([permission, label]) => (
+                      <label key={permission} className="flex items-center justify-between gap-3 py-1.5">
+                        <span>{label}</span>
+                        <input type="checkbox" checked={computerControlPermissions[permission]} onChange={(event) => setComputerControlPermission(permission, event.target.checked)} />
+                      </label>
+                    ))}
+                    <p className="mt-2 border-t border-[var(--color-border)] pt-2 leading-4 text-[10px] text-[var(--color-text-tertiary)]">仅对当前请求生效。开启无人值守仍需要同时允许发布和长期信任。</p>
+                  </div>
+                </details>
+                <button
+                  type="button"
+                  className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-[var(--color-text-primary)] dark:hover:bg-white/10"
+                  onClick={() => window.location.assign(`/computer-control/${encodeURIComponent(selectedGroupId)}`)}
+                  title="打开电脑控制工作流编辑器"
+                >
+                  <ExternalLink size={13} />
+                  <span>管理流程</span>
+                </button>
+              </div>
+            )}
 
             {/* Row 2 — Textarea */}
             <div className="relative min-w-0 flex-1">

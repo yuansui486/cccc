@@ -42,6 +42,7 @@ class ChatMessageData(BaseModel):
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
     collaboration_required: bool = False
+    computer_control_request: Optional[Dict[str, Any]] = None
 
     # IM semantics
     to: List[str] = Field(default_factory=list)  # @mentions (empty = broadcast)

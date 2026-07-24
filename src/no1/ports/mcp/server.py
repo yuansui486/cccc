@@ -333,6 +333,202 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
 
 
 def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if name == "onecolleague_computer_control_catalog":
+        from ...computer_control.services import get_services
+        from ...paths import ensure_home
+        from ...computer_control.risk import annotate_catalog
+
+        service = get_services(ensure_home())
+        try:
+            tools = annotate_catalog(service.session.catalog_sync())
+        except Exception as exc:
+            raise MCPError(code="windows_mcp_unavailable", message=str(exc)) from exc
+        return {"ok": True, "result": {"setup": service.setup.status(), "lease": service.lease.status(), "tools": tools}}
+
+    if name == "onecolleague_computer_workflow":
+        from ...computer_control.services import get_services
+        from ...paths import ensure_home
+
+        gid = _resolve_group_id(arguments)
+        service = get_services(ensure_home())
+        action = str(arguments.get("action") or "list").strip().lower()
+        if action == "list":
+            return {"ok": True, "result": {"workflows": service.store.list(gid)}}
+        workflow_id = str(arguments.get("workflow_id") or "").strip()
+        if action == "get":
+            if not workflow_id:
+                raise MCPError(code="invalid_request", message="workflow_id is required for action=get")
+            return {"ok": True, "result": service.store.get(gid, workflow_id, version=arguments.get("version"))}
+        if action == "validate":
+            from ...computer_control.models import WorkflowDefinition
+            from ...computer_control.risk import workflow_risk
+
+            try:
+                definition = WorkflowDefinition.model_validate(arguments.get("definition") or {})
+            except Exception as exc:
+                raise MCPError(code="workflow_invalid", message=str(exc)) from exc
+            return {"ok": True, "result": {"valid": True, "risk": workflow_risk(definition.model_dump(mode="json"))}}
+        if action in {"publish", "trust", "update_triggers"}:
+            from ...computer_control.models import WorkflowDefinition
+
+            aid = _resolve_self_actor_id(arguments)
+            request_id = str(arguments.get("request_id") or "").strip()
+            if not workflow_id:
+                raise MCPError(code="invalid_request", message=f"workflow_id is required for action={action}")
+            try:
+                request = service.requests.require_authorized(gid, request_id, aid)
+            except (KeyError, PermissionError) as exc:
+                raise MCPError(code="computer_control_request_required", message=str(exc)) from exc
+            bound_workflow = str(request.get("workflow_id") or "")
+            if bound_workflow and bound_workflow != workflow_id:
+                raise MCPError(code="permission_denied", message="request is bound to another workflow")
+            current = service.store.get(gid, workflow_id)
+            if action == "publish":
+                if not bool(request.get("allow_publish")):
+                    raise MCPError(code="permission_denied", message="用户未授权 AI 发布工作流")
+                value = service.store.publish(gid, workflow_id, int(arguments.get("version") or current["version"]))
+            elif action == "trust":
+                if not bool(request.get("allow_trust")):
+                    raise MCPError(code="permission_denied", message="用户未授权 AI 授予长期信任")
+                fingerprint = str(service.setup.status().get("fingerprint") or "")
+                if not fingerprint:
+                    raise MCPError(code="windows_mcp_not_ready", message="Windows-MCP 尚未完成验证")
+                value = service.store.trust(gid, workflow_id, int(arguments.get("version") or current["version"]), fingerprint=fingerprint, permissions=["all_windows_mcp_tools"])
+            else:
+                if not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
+                    raise MCPError(code="permission_denied", message="开启无人值守触发需要同时授权发布、长期信任和无人值守触发")
+                definition = WorkflowDefinition.model_validate(arguments.get("definition") or {})
+                value = service.store.update(
+                    gid,
+                    workflow_id,
+                    definition,
+                    expected_revision=int(arguments.get("expected_revision") or current["manifest"].get("revision") or 0),
+                    changed_by=aid,
+                    change_note=str(arguments.get("change_note") or "AI 开启无人值守触发"),
+                )
+            return {"ok": True, "result": value}
+        if action in {"create", "update", "propose"}:
+            from ...computer_control.models import WorkflowDefinition
+            from ...computer_control.storage import RevisionConflict
+
+            aid = _resolve_self_actor_id(arguments)
+            request_id = str(arguments.get("request_id") or "").strip()
+            try:
+                request = service.requests.require_authorized(gid, request_id, aid)
+            except (KeyError, PermissionError) as exc:
+                raise MCPError(code="computer_control_request_required", message=str(exc)) from exc
+            if str(request.get("mode") or "") != "create_and_run":
+                raise MCPError(code="permission_denied", message="this request does not authorize workflow editing")
+            try:
+                definition = WorkflowDefinition.model_validate(arguments.get("definition") or {})
+                has_enabled_triggers = any(trigger.enabled for trigger in definition.triggers)
+                if has_enabled_triggers and not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
+                    raise MCPError(code="permission_denied", message="启用无人值守触发需要用户同时授权发布、长期信任和无人值守触发")
+                if action == "create":
+                    value = service.store.create(gid, definition, created_by=aid)
+                    workflow_id = str(value["manifest"]["workflow_id"])
+                    service.requests.update(gid, request_id, workflow_id=workflow_id, status="draft_created")
+                elif action == "update":
+                    if not workflow_id:
+                        raise MCPError(code="invalid_request", message="workflow_id is required for action=update")
+                    bound_workflow = str(request.get("workflow_id") or "")
+                    if bound_workflow and bound_workflow != workflow_id:
+                        raise MCPError(code="permission_denied", message="request is bound to another workflow")
+                    value = service.store.update(
+                        gid,
+                        workflow_id,
+                        definition,
+                        expected_revision=int(arguments.get("expected_revision") or 0),
+                        changed_by=aid,
+                        change_note=str(arguments.get("change_note") or "AI 编排更新"),
+                    )
+                    service.requests.update(gid, request_id, workflow_id=workflow_id, status="draft_updated")
+                else:
+                    if not workflow_id:
+                        raise MCPError(code="invalid_request", message="workflow_id is required for action=propose")
+                    current = service.store.get(gid, workflow_id)
+                    value = service.store.create_proposal(
+                        gid,
+                        workflow_id,
+                        definition,
+                        base_version=int(arguments.get("version") or current["version"]),
+                        created_by=aid,
+                        summary=str(arguments.get("change_note") or "AI 自适应优化建议"),
+                    )
+            except RevisionConflict as exc:
+                raise MCPError(code="revision_conflict", message=str(exc), details={"current_revision": exc.current_revision}) from exc
+            except MCPError:
+                raise
+            except Exception as exc:
+                raise MCPError(code="workflow_invalid", message=str(exc)) from exc
+            return {"ok": True, "result": value}
+        raise MCPError(code="invalid_request", message=f"unsupported workflow action: {action}")
+
+    if name == "onecolleague_computer_run":
+        from ...computer_control.services import get_services
+        from ...paths import ensure_home
+
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        action = str(arguments.get("action") or "start").strip().lower()
+        service = get_services(ensure_home())
+        if action in {"status", "recover"}:
+            run_id = str(arguments.get("run_id") or "").strip()
+            if not run_id:
+                raise MCPError(code="invalid_request", message="run_id is required")
+            try:
+                current_run = service.runner.get(gid, run_id)
+            except KeyError as exc:
+                raise MCPError(code="run_not_found", message=run_id) from exc
+            if str(current_run.get("actor_id") or "") != aid:
+                raise MCPError(code="permission_denied", message="run belongs to another actor")
+            if action == "status":
+                return {"ok": True, "result": current_run}
+            recovery_id = str(arguments.get("recovery_id") or "").strip()
+            try:
+                result = service.runner.submit_recovery(
+                    gid,
+                    run_id,
+                    recovery_id,
+                    actor_id=aid,
+                    tool=str(arguments.get("tool") or ""),
+                    arguments=arguments.get("arguments") if isinstance(arguments.get("arguments"), dict) else {},
+                )
+            except (ValueError, PermissionError) as exc:
+                raise MCPError(code="recovery_not_pending", message=str(exc)) from exc
+            return {"ok": True, "result": result}
+        if action != "start":
+            raise MCPError(code="invalid_request", message=f"unsupported run action: {action}")
+        workflow_id = str(arguments.get("workflow_id") or "").strip()
+        if not workflow_id:
+            raise MCPError(code="invalid_request", message="workflow_id is required")
+        manifest = service.store.get(gid, workflow_id)["manifest"]
+        version = int(arguments.get("version") or manifest.get("published_version") or 0)
+        trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
+        fingerprint = str(service.setup.status().get("fingerprint") or "")
+        is_trusted = isinstance(trusted.get(str(version)), dict) and trusted[str(version)].get("fingerprint") == fingerprint
+        request_id = str(arguments.get("request_id") or "").strip()
+        if not is_trusted:
+            from ...computer_control.risk import workflow_risk
+
+            try:
+                request = service.requests.require_authorized(gid, request_id, aid)
+            except (KeyError, PermissionError) as exc:
+                raise MCPError(code="workflow_not_trusted", message="workflow version is not trusted and no valid one-time request was supplied") from exc
+            if str(request.get("mode") or "") != "create_and_run" or str(request.get("workflow_id") or "") != workflow_id:
+                raise MCPError(code="permission_denied", message="request does not authorize this workflow")
+            risk = workflow_risk(service.store.get(gid, workflow_id, version=version)["definition"])
+            if risk["level"] == "high" and not bool(request.get("allow_high_risk")) and str(request.get("status") or "") != "approved":
+                service.requests.update(gid, request_id, status="pending_approval", risk=risk)
+                raise MCPError(code="approval_required", message="工作流包含高风险电脑操作，需要用户批准后才能运行", details={"request_id": request_id, "risk": risk})
+        run = service.runner.start_sync(gid, workflow_id, actor_id=aid, version=version, inputs=arguments.get("inputs") or {})
+        if request_id:
+            try:
+                service.requests.update(gid, request_id, status="running", run_id=run.get("run_id"), workflow_id=workflow_id)
+            except KeyError:
+                pass
+        return {"ok": True, "result": run}
+
     if name == "onecolleague_code_exec":
         gid = _resolve_group_id(arguments)
         aid = _resolve_self_actor_id(arguments)
