@@ -22,6 +22,7 @@ dependencies = [
   "lark-oapi>=1.0.0",
   "pydantic>=2.0,<3.0",
   "pywinpty>=2.0; platform_system == 'Windows'",
+  "comtypes>=1.4; platform_system == 'Windows'",
   "python-multipart>=0.0.7,<1.0",
   "uvicorn[standard]>=0.27,<1.0",
   "wechatbot-sdk>=0.2.0",

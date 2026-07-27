@@ -1471,6 +1471,7 @@ export function useChatTab({
             allow_publish: computerControlPermissionsSnapshot.publish,
             allow_trust: computerControlPermissionsSnapshot.trust,
             allow_unattended_triggers: computerControlPermissionsSnapshot.unattendedTriggers,
+            allow_workflow_edit: true,
           } : undefined,
           client_id: localId,
           reply_to: replyTargetSnapshot?.eventId || null,
@@ -1526,6 +1527,7 @@ export function useChatTab({
               allow_publish: computerControlPermissionsSnapshot.publish,
               allow_trust: computerControlPermissionsSnapshot.trust,
               allow_unattended_triggers: computerControlPermissionsSnapshot.unattendedTriggers,
+              allow_workflow_edit: true,
             } : undefined,
           );
         }

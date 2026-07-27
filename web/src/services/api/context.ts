@@ -597,6 +597,7 @@ export async function sendMessage(
     allow_publish?: boolean;
     allow_trust?: boolean;
     allow_unattended_triggers?: boolean;
+    allow_workflow_edit?: boolean;
   },
 ) {
   if (files && files.length > 0) {

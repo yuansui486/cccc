@@ -509,12 +509,14 @@ class RecordingStore:
                     self.workflows.archive(group_id, str(manifest["workflow_id"]))
             created = self.workflows.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
             workflow_id = str(created["manifest"]["workflow_id"])
-            created = self.workflows.auto_finalize(
-                group_id,
-                workflow_id,
-                int(created["version"]),
-                fingerprint=str(self.fingerprint_provider() or ""),
-            )
+            request = self.requests.require_authorized(group_id, request_id, actor_id)
+            if request.get("allow_publish") is not False and request.get("allow_trust") is not False:
+                created = self.workflows.auto_finalize(
+                    group_id,
+                    workflow_id,
+                    int(created["version"]),
+                    fingerprint=str(self.fingerprint_provider() or ""),
+                )
             value.update({"status": "committed", "workflow_id": workflow_id, "committed_at": time.time(), "updated_at": time.time()})
             self._write(group_id, value)
             self.lease.release(run_id=recording_id)

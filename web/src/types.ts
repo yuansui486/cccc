@@ -159,6 +159,7 @@ export type ChatMessageData = {
     allow_publish?: boolean;
     allow_trust?: boolean;
     allow_unattended_triggers?: boolean;
+    allow_workflow_edit?: boolean;
     status?: string;
   };
   sender_title?: string;

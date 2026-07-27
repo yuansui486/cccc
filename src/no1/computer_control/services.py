@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from .lease import ComputerControlLease
 from .mcp import WindowsMCPSetup, WindowsMCPSession
@@ -11,6 +11,7 @@ from .recording import RecordingStore
 from .requests import ComputerRequestStore
 from .scheduler import ComputerControlScheduler
 from .storage import WorkflowStore
+from .picker import ElementPickerManager
 
 
 class ComputerControlServices:
@@ -21,6 +22,11 @@ class ComputerControlServices:
         self.lease = ComputerControlLease(home)
         self.session = WindowsMCPSession()
         self.setup = WindowsMCPSetup(home, self.session, self.store)
+        self.picker = ElementPickerManager(
+            home,
+            self.lease,
+            snapshot_provider=self._snapshot_for_picker,
+        )
         self.recordings = RecordingStore(
             home,
             self.store,
@@ -37,6 +43,20 @@ class ComputerControlServices:
             fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),
         )
         self.scheduler = ComputerControlScheduler(self)
+
+    def _snapshot_for_picker(self) -> Any:
+        """Return one MCP snapshot for picker fallback integrations.
+
+        Native UIA is preferred by :class:`ElementPickerManager`; keeping this
+        callback here allows a future helper or a browser DOM adapter to use
+        the existing supervised MCP session without importing MCP code into
+        the picker module.
+        """
+        tools = self.session.catalog_sync()
+        name = next((str(item.get("name") or "") for item in tools if str(item.get("name") or "").casefold() == "snapshot"), "")
+        if not name:
+            raise RuntimeError("Windows-MCP Snapshot tool is unavailable")
+        return self.session.call_tool_sync(name, {})
 
 
 _services: Dict[str, ComputerControlServices] = {}

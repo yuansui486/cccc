@@ -110,7 +110,7 @@ def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str)
 def _run(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
     action = str(args.get("action") or "start").strip().lower()
     run_id = str(args.get("run_id") or "").strip()
-    if action in {"status", "recover", "verify", "cancel"}:
+    if action in {"status", "recover", "verify", "cancel", "recovery"}:
         if not run_id:
             raise ValueError("run_id is required")
         run = service.runner.get(group_id, run_id)
@@ -118,6 +118,8 @@ def _run(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> An
             raise PermissionError("run belongs to another actor")
         if action == "status":
             return run
+        if action == "recovery":
+            return service.runner.recovery_context(group_id, run_id)
         if action == "cancel":
             return service.runner.cancel_sync(group_id, run_id, emergency=bool(args.get("emergency")))
         if action == "verify":
@@ -146,7 +148,11 @@ def _run(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> An
             str(args.get("recovery_id") or "").strip(),
             actor_id=actor_id,
             tool=str(args.get("tool") or ""),
-            arguments=args.get("arguments") if isinstance(args.get("arguments"), dict) else {},
+            arguments=args.get("arguments") if isinstance(args.get("arguments"), dict) else None,
+            resolution=str(args.get("resolution") or "retry"),
+            node_id=str(args.get("node_id") or ""),
+            target=args.get("target") if isinstance(args.get("target"), dict) else None,
+            idempotency_key=str(args.get("idempotency_key") or ""),
         )
     if action != "start":
         raise ValueError(f"unsupported run action: {action}")
@@ -189,6 +195,50 @@ def _run(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> An
     return run
 
 
+def _picker(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
+    """Handle the daemon-owned native element picker lifecycle."""
+    action = str(args.get("action") or "status").strip().lower()
+    session_id = str(args.get("session_id") or "").strip()
+    picker = service.picker
+    if action == "start":
+        return picker.start(
+            group_id,
+            actor_id or "user",
+            hotkey=str(args.get("hotkey") or "Ctrl+Shift+L"),
+            session_id=session_id,
+        )
+    if not session_id:
+        raise ValueError("session_id is required")
+    if action in {"status", "get"}:
+        return picker.status(session_id)
+    if action == "events":
+        try:
+            after_seq = int(args.get("after_seq") or 0)
+        except (TypeError, ValueError):
+            after_seq = 0
+        return picker.events(session_id, after_seq=after_seq)
+    if action == "lock":
+        raw_point = args.get("point")
+        point = None
+        if isinstance(raw_point, (list, tuple)) and len(raw_point) >= 2:
+            try:
+                point = [int(float(raw_point[0])), int(float(raw_point[1]))]
+            except (TypeError, ValueError):
+                point = None
+        candidate = args.get("element") if isinstance(args.get("element"), dict) else None
+        value = picker.lock(session_id, point=point, element=candidate)
+        session = value.get("session") if isinstance(value, dict) and isinstance(value.get("session"), dict) else {}
+        return {**session, "element": value.get("element"), "stable": value.get("stable")}
+    if action == "confirm":
+        locator = args.get("locator") if isinstance(args.get("locator"), dict) else None
+        value = picker.confirm(session_id, locator=locator)
+        session = value.get("session") if isinstance(value, dict) and isinstance(value.get("session"), dict) else {}
+        return {**session, "element": value.get("element"), "locator": value.get("locator")}
+    if action in {"cancel", "end", "stop"}:
+        return picker.cancel(session_id, reason=str(args.get("reason") or "cancelled"))
+    raise ValueError(f"unsupported picker action: {action}")
+
+
 def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
     action = str(args.get("action") or "list").strip().lower()
     workflow_id = str(args.get("workflow_id") or "").strip()
@@ -210,13 +260,21 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
     request = service.requests.require_authorized(group_id, request_id, actor_id)
     if str(request.get("mode") or "") != "create_and_run":
         raise PermissionError("该请求未授权 AI 编辑电脑控制工作流")
+    if action in {"create", "update", "update_triggers", "propose", "repair"} and request.get("allow_workflow_edit") is False:
+        raise PermissionError("用户未授权 AI 修改电脑控制工作流")
     if workflow_id and str(request.get("workflow_id") or "") not in {"", workflow_id}:
         raise PermissionError("该请求已绑定其他工作流")
+
+    def finalize(value: Dict[str, Any]) -> Dict[str, Any]:
+        version = int(value["version"])
+        if request.get("allow_publish") is False or request.get("allow_trust") is False:
+            return value
+        return service.store.auto_finalize(group_id, str(value["manifest"]["workflow_id"]), version, fingerprint=fingerprint)
 
     if action == "create" and definition is not None:
         value = service.store.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
         workflow_id = str(value["manifest"]["workflow_id"])
-        value = service.store.auto_finalize(group_id, workflow_id, int(value["version"]), fingerprint=fingerprint)
+        value = finalize(value)
         service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_created")
         return value
     if not workflow_id:
@@ -233,7 +291,7 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
             changed_by=actor_id,
             change_note=str(args.get("change_note") or "AI 编排更新"),
         )
-        value = service.store.auto_finalize(group_id, workflow_id, int(value["version"]), fingerprint=fingerprint)
+        value = finalize(value)
         service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_updated")
         return value
     if action == "propose" and definition is not None:
@@ -245,6 +303,31 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
             created_by=actor_id,
             summary=str(args.get("change_note") or "AI 自适应优化建议"),
         )
+    if action == "repair":
+        patch = args.get("patch") if isinstance(args.get("patch"), dict) else {}
+        payload = current["definition"]
+        nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
+        node_id = str(args.get("node_id") or "")
+        updated = False
+        for node in nodes:
+            if isinstance(node, dict) and str(node.get("id") or "") == node_id:
+                node.update({key: value for key, value in patch.items() if key in {"tool", "arguments", "target", "title", "success_condition", "timeout_seconds", "retries", "adaptive"}})
+                updated = True
+                break
+        if not updated:
+            raise ValueError("repair node not found")
+        repaired = WorkflowDefinition.model_validate({key: value for key, value in payload.items() if key != "change_note"})
+        value = service.store.update(
+            group_id,
+            workflow_id,
+            repaired,
+            expected_revision=int(args.get("expected_revision") or current["manifest"].get("revision") or 0),
+            changed_by=actor_id,
+            change_note=str(args.get("change_note") or "AI 修复失败步骤"),
+        )
+        value = finalize(value)
+        service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_updated")
+        return value
     if action == "publish":
         if request.get("allow_publish") is False:
             raise PermissionError("用户未授权 AI 发布工作流")
@@ -313,6 +396,8 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             return _ok(_workflow(service, args, group_id, actor_id))
         if command == "run":
             return _ok(_run(service, args, group_id, actor_id))
+        if command == "picker":
+            return _ok(_picker(service, args, group_id, actor_id))
         if command == "element_snapshot":
             capture_id = str(args.get("capture_id") or "capture")
             service.lease.acquire(group_id=group_id, actor_id="element-picker", run_id=capture_id, observe_only=True)
@@ -334,4 +419,10 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
     except LeaseConflict as exc:
         return _error("computer_control_busy", str(exc), details=exc.lease)
     except Exception as exc:
-        return _error(str(getattr(exc, "code", "computer_control_failed")), str(exc))
+        details = {
+            "layer": str(getattr(exc, "layer", "computer_control")),
+            "next_action": str(getattr(exc, "next_action", "") or ""),
+            "field_errors": getattr(exc, "field_errors", {}) if isinstance(getattr(exc, "field_errors", {}), dict) else {},
+            "retryable": bool(getattr(exc, "retryable", False)),
+        }
+        return _error(str(getattr(exc, "code", "computer_control_failed")), str(exc), details=details)

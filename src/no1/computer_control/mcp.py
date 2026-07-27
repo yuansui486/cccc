@@ -47,6 +47,19 @@ class MCPToolExecutionError(RuntimeError):
         self.status_code = status_code
 
 
+class ComputerControlArgumentError(ValueError):
+    """A user-facing argument error with enough context for recovery UIs."""
+
+    code = "invalid_argument_shape"
+    layer = "validation"
+    retryable = False
+
+    def __init__(self, message: str, *, field_errors: Optional[Dict[str, str]] = None, next_action: str = "修正参数后重试"):
+        super().__init__(message)
+        self.field_errors = field_errors or {}
+        self.next_action = next_action
+
+
 _STATUS_CODE_RE = re.compile(r"(?im)^\s*Status\s+Code\s*:\s*(-?\d+)\s*$")
 
 
@@ -93,6 +106,30 @@ def normalize_tool_result(tool: str, result: Dict[str, Any]) -> Dict[str, Any]:
 def validate_arguments_against_schema(tool: str, arguments: Dict[str, Any], schema: Dict[str, Any]) -> None:
     """Validate the useful JSON Schema subset exposed by Windows-MCP."""
     errors: List[str] = []
+
+    # Windows-MCP uses a numeric UI-tree label or a two-number coordinate
+    # array. A common AI mistake is putting an element name in ``loc`` or a
+    # string name in ``label``; fail before the RPC reaches the desktop.
+    if isinstance(arguments, dict):
+        if "loc" in arguments:
+            loc = arguments.get("loc")
+            if isinstance(loc, str):
+                try:
+                    decoded_loc = json.loads(loc)
+                except (TypeError, ValueError):
+                    decoded_loc = None
+                if isinstance(decoded_loc, list):
+                    loc = decoded_loc
+                    arguments = {**arguments, "loc": decoded_loc}
+            valid_loc = isinstance(loc, (list, tuple)) and len(loc) == 2 and all(
+                isinstance(item, (int, float)) and not isinstance(item, bool) for item in loc
+            )
+            if not valid_loc:
+                errors.append("参数.loc 必须是 [x, y] 数字坐标，不能填写元素名称")
+        if "label" in arguments:
+            label = arguments.get("label")
+            if not (isinstance(label, int) and not isinstance(label, bool)):
+                errors.append("参数.label 必须是 Snapshot 返回的整数元素编号，不能填写元素名称")
 
     def matches_type(value: Any, expected: str) -> bool:
         return {
@@ -147,7 +184,11 @@ def validate_arguments_against_schema(tool: str, arguments: Dict[str, Any], sche
 
     visit(arguments, schema, "参数")
     if errors:
-        raise ValueError(f"工具“{tool}”参数无效：" + "；".join(errors[:10]))
+        raise ComputerControlArgumentError(
+            f"工具“{tool}”参数无效：" + "；".join(errors[:10]),
+            field_errors={f"arguments.{key}": value for key, value in (("loc", "参数.loc 必须是 [x, y] 数字坐标，不能填写元素名称"), ("label", "参数.label 必须是 Snapshot 返回的整数元素编号，不能填写元素名称")) if key in arguments and any(key in error for error in errors)},
+            next_action="重新观察桌面并选择元素；只有明确开启位置兜底时才允许坐标",
+        )
 
 
 def validate_workflow_tools(definition: Any, catalog: Sequence[Dict[str, Any]]) -> None:
@@ -167,13 +208,7 @@ def validate_workflow_tools(definition: Any, catalog: Sequence[Dict[str, Any]]) 
         if tool.lower() in {"click", "type"}:
             has_semantic_target = any(key in arguments for key in ("label", "element_id"))
             has_coordinate_target = any(key in arguments for key in ("loc", "x", "y"))
-            if target is not None and not has_semantic_target and not has_coordinate_target:
-                # The runner resolves the locator against a fresh Snapshot and
-                # supplies the tool-specific argument at execution time.
-                label = str(getattr(target, "name", "") or getattr(target, "text", "") or "")
-                if label:
-                    arguments["label"] = label
-            elif not has_semantic_target and has_coordinate_target and target is None:
+            if not has_semantic_target and has_coordinate_target and target is None:
                 # Coordinates are retained only for explicitly opted-in legacy
                 # workflows. New recordings always persist a locator instead.
                 if arguments.get("coordinate_fallback") is not True:
@@ -181,6 +216,9 @@ def validate_workflow_tools(definition: Any, catalog: Sequence[Dict[str, Any]]) 
                     continue
             elif not has_semantic_target and not has_coordinate_target and target is None:
                 errors.append(f"步骤“{title}”缺少操作目标，请设置稳定元素或受控坐标兜底")
+                continue
+            elif target is not None and has_coordinate_target and getattr(target, "fallback_policy", "never") != "controlled":
+                errors.append(f"步骤“{title}”同时保存了元素和坐标；请删除坐标或明确开启一次性位置兜底")
                 continue
         schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {}
         try:

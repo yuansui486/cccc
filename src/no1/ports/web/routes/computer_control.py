@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from ....daemon.server import DaemonPaths, call_daemon
 
 from ....computer_control.models import (
@@ -25,6 +25,7 @@ from ....computer_control.models import WorkflowDefinition
 from ....computer_control.audit import audit
 from ....computer_control.risk import annotate_catalog
 from ....computer_control.mcp import validate_workflow_tools
+from ....computer_control.compiler import compile_workflow, compile_or_raise
 from ....computer_control.elements import normalize_snapshot, resolve_locator
 from ..schemas import RouteContext, require_admin, require_group, require_user
 
@@ -120,7 +121,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     async def validate_definition(definition: WorkflowDefinition) -> None:
         catalog_result = await daemon_control("catalog", group_id="_global", include_schema=True)
-        validate_workflow_tools(definition, catalog_result.get("tools") if isinstance(catalog_result, dict) else [])
+        compile_or_raise(definition, catalog_result.get("tools") if isinstance(catalog_result, dict) else [])
 
     async def validate_and_finalize(group_id: str, value: Dict[str, Any]) -> Dict[str, Any]:
         definition = WorkflowDefinition.model_validate({key: child for key, child in value["definition"].items() if key != "change_note"})
@@ -263,6 +264,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         except ValueError as exc:
             raise _error("workflow_invalid", str(exc), 422) from exc
         return {"ok": True, "result": value}
+
+    @group_router.post("/workflows/compile")
+    async def compile_workflow_route(group_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Return field-level diagnostics without creating a workflow version."""
+        del group_id
+        catalog_result = await daemon_control("catalog", group_id="_global", include_schema=True)
+        result = compile_workflow(payload.get("definition") if isinstance(payload.get("definition"), dict) else payload, catalog_result.get("tools") if isinstance(catalog_result, dict) else [])
+        return {"ok": True, "result": result}
 
     @group_router.get("/workflows/{workflow_id}")
     async def get_workflow(group_id: str, workflow_id: str, version: Optional[int] = None) -> Dict[str, Any]:
@@ -552,6 +561,37 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         except (ValueError, PermissionError) as exc:
             raise _error("verification_failed", str(exc), 409) from exc
 
+    @group_router.get("/runs/{run_id}/recovery")
+    async def recovery_context(group_id: str, run_id: str) -> Dict[str, Any]:
+        try:
+            return {"ok": True, "result": service.runner.recovery_context(group_id, run_id)}
+        except KeyError as exc:
+            raise _error("run_not_found", run_id, 404) from exc
+
+    @group_router.post("/runs/{run_id}/recovery/resolve")
+    async def resolve_recovery(group_id: str, run_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            run = service.runner.get(group_id, run_id)
+            actor_id = str(payload.get("actor_id") or run.get("actor_id") or "foreman")
+            result = service.runner.submit_recovery(
+                group_id,
+                run_id,
+                str(payload.get("recovery_id") or ""),
+                actor_id=actor_id,
+                tool=str(payload.get("tool") or ""),
+                arguments=payload.get("arguments") if isinstance(payload.get("arguments"), dict) else None,
+                resolution=str(payload.get("resolution") or "retry"),
+                node_id=str(payload.get("node_id") or ""),
+                target=payload.get("target") if isinstance(payload.get("target"), dict) else None,
+                idempotency_key=str(payload.get("idempotency_key") or ""),
+            )
+            audit(ctx.home, "computer_control.recovery_resolved", group_id=group_id, actor_id=actor_id, details={"run_id": run_id, "resolution": payload.get("resolution")})
+            return {"ok": True, "result": result}
+        except KeyError as exc:
+            raise _error("run_not_found", run_id, 404) from exc
+        except (ValueError, PermissionError) as exc:
+            raise _error("recovery_invalid", str(exc), 409) from exc
+
     @group_router.post("/runs/{run_id}/approvals/{node_id}")
     async def decide_run_approval(group_id: str, run_id: str, node_id: str, approved: bool = Body(..., embed=True)) -> Dict[str, Any]:
         try:
@@ -562,6 +602,105 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             raise _error("approval_not_pending", str(exc), 409) from exc
         audit(ctx.home, "computer_control.run_approval", group_id=group_id, details={"run_id": run_id, "node_id": node_id, "approved": approved})
         _emit("run.approval", group_id=group_id, run_id=run_id, node_id=node_id, approved=approved)
+        return {"ok": True, "result": result}
+
+    # Native picker sessions are daemon-owned.  Keeping these routes ahead of
+    # the legacy ``/{capture_id}`` routes prevents "sessions" from being
+    # interpreted as a temporary snapshot id.
+    @group_router.post("/element-picker/sessions")
+    async def picker_start(group_id: str, payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+        actor_id = str(payload.get("actor_id") or "user").strip() or "user"
+        try:
+            result = await daemon_control(
+                "picker",
+                group_id=group_id,
+                actor_id=actor_id,
+                action="start",
+                session_id=str(payload.get("session_id") or ""),
+                hotkey=str(payload.get("hotkey") or "Ctrl+Shift+L"),
+            )
+        except HTTPException:
+            raise
+        audit(ctx.home, "computer_control.picker_started", group_id=group_id, actor_id=actor_id, details={"session_id": result.get("session_id")})
+        _emit("picker.started", group_id=group_id, actor_id=actor_id, session_id=result.get("session_id"))
+        return {"ok": True, "result": result}
+
+    @group_router.get("/element-picker/sessions/{session_id}")
+    async def picker_status(group_id: str, session_id: str) -> Dict[str, Any]:
+        result = await daemon_control("picker", group_id=group_id, actor_id="user", action="status", session_id=session_id)
+        return {"ok": True, "result": result}
+
+    @group_router.get("/element-picker/sessions/{session_id}/events")
+    async def picker_events(group_id: str, session_id: str, request: Request, after_seq: int = Query(0, ge=0)) -> StreamingResponse:
+        async def stream() -> Any:
+            cursor = int(after_seq or 0)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        try:
+                            await daemon_control("picker", group_id=group_id, actor_id="user", action="cancel", session_id=session_id, reason="browser_disconnected")
+                        except Exception:
+                            pass
+                        break
+                    try:
+                        value = await daemon_control("picker", group_id=group_id, actor_id="user", action="events", session_id=session_id, after_seq=cursor)
+                    except HTTPException as exc:
+                        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                        yield f"event: error\ndata: {json.dumps(detail, ensure_ascii=False)}\n\n"
+                        break
+                    events = value.get("events") if isinstance(value, dict) else []
+                    if isinstance(events, list):
+                        for event in events:
+                            if not isinstance(event, dict):
+                                continue
+                            cursor = max(cursor, int(event.get("seq") or 0))
+                            yield f"id: {cursor}\nevent: {event.get('type') or 'picker'}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    session = value.get("session") if isinstance(value, dict) else {}
+                    if isinstance(session, dict) and str(session.get("status") or "") not in {"active", "locked"}:
+                        break
+                    # The stream has no operation deadline.  The browser may
+                    # disconnect or call DELETE to end it explicitly.
+                    await asyncio.sleep(0.25)
+            finally:
+                # Do not release confirmed sessions; cancellation is handled by
+                # the explicit endpoint or the disconnect path above.
+                pass
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @group_router.post("/element-picker/sessions/{session_id}/lock")
+    async def picker_lock(group_id: str, session_id: str, payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+        result = await daemon_control(
+            "picker",
+            group_id=group_id,
+            actor_id=str(payload.get("actor_id") or "user"),
+            action="lock",
+            session_id=session_id,
+            point=payload.get("point"),
+            element=payload.get("element") if isinstance(payload.get("element"), dict) else None,
+        )
+        _emit("picker.locked", group_id=group_id, session_id=session_id, stable=result.get("stable"))
+        return {"ok": True, "result": result}
+
+    @group_router.post("/element-picker/sessions/{session_id}/confirm")
+    async def picker_confirm(group_id: str, session_id: str, payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+        result = await daemon_control(
+            "picker",
+            group_id=group_id,
+            actor_id=str(payload.get("actor_id") or "user"),
+            action="confirm",
+            session_id=session_id,
+            locator=payload.get("locator") if isinstance(payload.get("locator"), dict) else None,
+        )
+        audit(ctx.home, "computer_control.picker_confirmed", group_id=group_id, details={"session_id": session_id})
+        _emit("picker.confirmed", group_id=group_id, session_id=session_id)
+        return {"ok": True, "result": result}
+
+    @group_router.delete("/element-picker/sessions/{session_id}")
+    async def picker_cancel(group_id: str, session_id: str, reason: str = Query("cancelled")) -> Dict[str, Any]:
+        result = await daemon_control("picker", group_id=group_id, actor_id="user", action="cancel", session_id=session_id, reason=reason)
+        audit(ctx.home, "computer_control.picker_cancelled", group_id=group_id, details={"session_id": session_id, "reason": reason})
+        _emit("picker.ended", group_id=group_id, session_id=session_id, reason=reason)
         return {"ok": True, "result": result}
 
     @group_router.post("/element-picker/capture")

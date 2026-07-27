@@ -36,6 +36,8 @@ import {
   type ComputerControlLease,
   type ComputerControlSettings,
   type ComputerSetup,
+  type ElementPickerElement,
+  type ElementPickerSession,
   type OptimizationProposal,
   type WorkflowManifest,
   type WorkflowRecord,
@@ -260,6 +262,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const [pickerElements, setPickerElements] = useState<Array<Record<string, unknown>>>([]);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [pickerStatus, setPickerStatus] = useState("");
+  const [pickerSession, setPickerSession] = useState<ElementPickerSession | null>(null);
 
   const refresh = useCallback(async () => {
     if (!groupId || refreshInFlight.current) return;
@@ -395,6 +398,74 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setPickerStatus(response.result.elements?.length ? "请选择一个稳定元素" : "当前界面没有可解析元素");
   }
 
+  async function startPicker() {
+    if (!groupId || pickerBusy || pickerSession) return;
+    setPickerBusy(true);
+    setPickerStatus("正在启动桌面元素拾取器。请把鼠标移动到目标控件上，再按 Ctrl+Shift+L 锁定。\u2026");
+    const response = await computerControlApi.pickerStart(groupId, { node_id: selectedNode?.id });
+    setPickerBusy(false);
+    if (!response.ok) {
+      // Keep the snapshot picker available on older daemons.
+      setPickerStatus(`${friendlyError(response.error.message)} 可改用“读取当前快照”。`);
+      return;
+    }
+    setPickerSession(response.result);
+    setPickerStatus("拾取器已启动：移动鼠标观察元素，按 Ctrl+Shift+L 锁定。");
+  }
+
+  async function lockPicker() {
+    if (!groupId || !pickerSession || pickerBusy) return;
+    setPickerBusy(true);
+    const response = await computerControlApi.pickerLock(groupId, pickerSession.session_id);
+    setPickerBusy(false);
+    if (!response.ok) {
+      setPickerStatus(friendlyError(response.error.message));
+      return;
+    }
+    setPickerSession(response.result);
+    if (response.result.element) {
+      await chooseElement(response.result.element);
+      setPickerStatus("元素已锁定，正在进行稳定性采样。请确认属性后保存。");
+    } else setPickerStatus("未锁定到唯一元素，请移动到控件中心后重试。");
+  }
+
+  async function confirmPicker() {
+    if (!groupId || !pickerSession || pickerBusy) return;
+    setPickerBusy(true);
+    const response = await computerControlApi.pickerConfirm(groupId, pickerSession.session_id, pickerSession.element?.locator);
+    setPickerBusy(false);
+    if (!response.ok) {
+      setPickerStatus(friendlyError(response.error.message));
+      return;
+    }
+    setPickerSession(response.result);
+    if (response.result.element) await chooseElement(response.result.element);
+    setPickerStatus("元素定位已确认。运行时会重新观察并匹配该元素。");
+  }
+
+  async function stopPicker() {
+    if (!groupId || !pickerSession) return;
+    setPickerBusy(true);
+    await computerControlApi.pickerStop(groupId, pickerSession.session_id);
+    setPickerBusy(false);
+    setPickerSession(null);
+    setPickerStatus("元素拾取器已关闭。");
+  }
+
+  useEffect(() => {
+    if (!groupId || !pickerSession || ["ended", "confirmed", "failed"].includes(pickerSession.status)) return undefined;
+    const timer = window.setInterval(() => {
+      void computerControlApi.pickerSession(groupId, pickerSession.session_id).then((response) => {
+        if (!response.ok) return;
+        setPickerSession(response.result);
+        if (response.result.element && (response.result.status === "locked" || response.result.status === "confirmed")) {
+          setPickerElements((items) => items.length ? items : [response.result.element as ElementPickerElement]);
+        }
+      });
+    }, 850);
+    return () => window.clearInterval(timer);
+  }, [groupId, pickerSession]);
+
   async function chooseElement(element: Record<string, unknown>) {
     if (!selectedNode) return;
     const target = {
@@ -408,7 +479,13 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       framework_id: String(element.framework_id || ""),
       parent_name: String(element.parent_name || ""),
       monitor: typeof element.monitor === "number" ? element.monitor : undefined,
-      fallback_policy: "controlled" as const,
+      fallback_policy: "never" as const,
+      strategy: String(element.strategy || "uia"),
+      selector_version: typeof element.selector_version === "number" ? element.selector_version : 1,
+      observed_bounds: element.bounds as Record<string, number> | undefined,
+      stability: String(element.stability || element.stability_level || "normal"),
+      capture_fingerprint: String(element.capture_fingerprint || ""),
+      mcp_label: typeof element.mcp_label === "number" ? element.mcp_label : undefined,
     };
     updateNode(selectedNode.id, {
       target,
@@ -844,6 +921,17 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setBusy("");
   }
 
+  async function resolveRunRecovery(runId: string, resolution: "reobserve" | "retry" | "skip" | "cancel") {
+    setBusy(`recovery-${runId}`);
+    const response = await computerControlApi.resolveRecovery(groupId, runId, {
+      resolution,
+      idempotency_key: `${runId}-${resolution}-${Date.now()}`,
+    });
+    setMessage(response.ok ? (resolution === "cancel" ? "已停止恢复并取消运行。" : "已提交恢复意图，运行器会自动重新观察并继续。") : friendlyError(response.error.message));
+    await refresh();
+    setBusy("");
+  }
+
   async function decideRunApproval(
     runId: string,
     nodeId: string,
@@ -1001,6 +1089,15 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                       : recovery.delivery_status === "failed"
                         ? "通知投递失败"
                         : "正在准备恢复信息"}
+                  </div>
+                )}
+                {run.status === "recovering" && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded bg-sky-500/8 px-2 py-1.5">
+                    <span className="mr-auto text-sky-800 dark:text-sky-200">请选择处理方式</span>
+                    <button className="rounded border border-sky-500/40 px-2 py-1 text-sky-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "reobserve")}>重新观察</button>
+                    <button className="rounded border border-[var(--color-border)] px-2 py-1 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "retry")}>重试</button>
+                    <button className="rounded border border-amber-500/40 px-2 py-1 text-amber-700 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "skip")}>跳过</button>
+                    <button className="rounded border border-red-500/40 px-2 py-1 text-red-600 disabled:opacity-40" disabled={Boolean(busy)} onClick={() => void resolveRunRecovery(String(run.run_id), "cancel")}>停止</button>
                   </div>
                 )}
                 {run.status === "waiting_approval" &&
@@ -1618,15 +1715,53 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                               : "尚未选择元素，运行时不会优先使用坐标"}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          className="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs"
-                          onClick={() => void captureElements()}
-                          disabled={pickerBusy}
-                        >
-                          {pickerBusy ? "读取中…" : "选择界面元素"}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            title="启动桌面拾取器"
+                            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-accent-primary)]/50 px-2 py-1 text-xs text-[var(--color-accent-primary)]"
+                            onClick={() => void startPicker()}
+                            disabled={pickerBusy || Boolean(pickerSession)}
+                          >
+                            <MousePointer2 size={13} />
+                            {pickerBusy ? "启动中…" : "实时捕获元素"}
+                          </button>
+                          <button
+                            type="button"
+                            title="读取一次 Windows-MCP 快照"
+                            className="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs"
+                            onClick={() => void captureElements()}
+                            disabled={pickerBusy}
+                          >
+                            读取快照
+                          </button>
+                        </div>
                       </div>
+                      {pickerSession && (
+                        <div className="mt-3 rounded-md border border-sky-500/30 bg-sky-500/5 p-2.5 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-sky-900 dark:text-sky-100">
+                              桌面拾取中 · {pickerSession.hotkey || "Ctrl+Shift+L"}
+                            </span>
+                            <button type="button" className="text-[var(--color-text-secondary)] underline" onClick={() => void stopPicker()}>结束拾取</button>
+                          </div>
+                          <div className="mt-1 text-[var(--color-text-secondary)]">
+                            将鼠标移到目标元素上，按快捷键锁定；也可以使用下方按钮。
+                          </div>
+                          {pickerSession.element && (
+                            <div className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-2">
+                              <div className="font-medium">{String(pickerSession.element.name || pickerSession.element.text || "未命名元素")}</div>
+                              <div className="mt-0.5 text-[var(--color-text-secondary)]">{String(pickerSession.element.control_type || "控件")} · {String(pickerSession.element.window_name || "当前窗口")}</div>
+                              <div className="mt-0.5 text-[var(--color-text-secondary)]">稳定性：{String(pickerSession.element.stability || pickerSession.stability || "检测中")}</div>
+                            </div>
+                          )}
+                          <div className="mt-2 flex gap-2">
+                            <button type="button" className="rounded border border-[var(--color-border)] px-2 py-1" onClick={() => void lockPicker()} disabled={pickerBusy}>锁定当前元素</button>
+                            <button type="button" className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-700" onClick={() => void confirmPicker()} disabled={pickerBusy || !pickerSession.element}>确认定位</button>
+                          </div>
+                          {pickerSession.warning && <div className="mt-2 text-amber-700">{pickerSession.warning}</div>}
+                        </div>
+                      )}
                       {pickerElements.length > 0 && (
                         <select
                           className="mt-3 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2 text-xs"
@@ -1643,6 +1778,21 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                             </option>
                           ))}
                         </select>
+                      )}
+                      {selectedNode.data.model.target && (
+                        <label className="mt-2 flex items-center justify-between rounded border border-[var(--color-border)] px-2.5 py-2 text-xs">
+                          <span>
+                            <span className="block font-medium">只允许元素定位</span>
+                            <span className="text-[var(--color-text-secondary)]">关闭后才允许本次运行使用一次性位置兜底</span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={selectedNode.data.model.target.fallback_policy !== "controlled"}
+                            onChange={(event) => updateNode(selectedNode.id, {
+                              target: { ...selectedNode.data.model.target, fallback_policy: event.target.checked ? "never" : "controlled" },
+                            })}
+                          />
+                        </label>
                       )}
                       {pickerStatus && <div className="mt-2 text-xs text-[var(--color-text-secondary)]">{pickerStatus}</div>}
                     </div>

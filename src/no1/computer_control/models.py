@@ -12,12 +12,18 @@ TEMPLATE_REF_RE = re.compile(r"^\$\{(?:inputs|steps)\.[A-Za-z0-9_.-]+\}$")
 
 
 def computer_control_permissions(value: Dict[str, Any]) -> Dict[str, bool]:
-    return {
+    result = {
         "allow_high_risk": value.get("allow_high_risk") is not False,
         "allow_publish": value.get("allow_publish") is not False,
         "allow_trust": value.get("allow_trust") is not False,
         "allow_unattended_triggers": value.get("allow_unattended_triggers") is not False,
     }
+    # Keep the legacy helper's exact shape for callers that do not know the
+    # newer permission. Request payloads that include the switch get the
+    # explicit value; omission remains permissive for backward compatibility.
+    if "allow_workflow_edit" in value:
+        result["allow_workflow_edit"] = value.get("allow_workflow_edit") is not False
+    return result
 
 
 class SuccessAssertion(BaseModel):
@@ -30,6 +36,15 @@ class SuccessAssertion(BaseModel):
 
 
 class ElementLocator(BaseModel):
+    """Durable identity for a desktop element.
+
+    Snapshot labels and coordinates are observations, not durable selectors.
+    ``mcp_label`` is deliberately excluded from this model so it can never be
+    persisted by a workflow version.
+    """
+
+    selector_version: int = Field(default=1, ge=1, le=10)
+    strategy: Literal["uia", "dom", "semantic", "position"] = "uia"
     window_name: str = Field(default="", max_length=500)
     control_type: str = Field(default="", max_length=100)
     name: str = Field(default="", max_length=500)
@@ -42,13 +57,24 @@ class ElementLocator(BaseModel):
     match: Literal["exact", "contains", "regex"] = "exact"
     dom: bool = False
     monitor: Optional[int] = Field(default=None, ge=0, le=32)
+    observed_bounds: Optional[Dict[str, float]] = None
+    dpi: Optional[float] = Field(default=None, gt=0, le=1000)
+    capture_fingerprint: str = Field(default="", max_length=200)
+    stability: Literal["high", "normal", "low", "unknown"] = "unknown"
+    diagnostics: List[str] = Field(default_factory=list, max_length=20)
     position_anchor: Optional[Dict[str, float]] = None
-    fallback_policy: Literal["never", "controlled"] = "controlled"
+    # New selectors are element-only by default. Legacy workflows can opt in
+    # to a one-shot position fallback explicitly.
+    fallback_policy: Literal["never", "controlled"] = "never"
 
     @model_validator(mode="after")
     def require_identity(self) -> "ElementLocator":
+        if self.strategy == "position" and self.position_anchor:
+            return self
         if not any((self.window_name, self.control_type, self.name, self.text, self.automation_id, self.class_name, self.process_name)):
             raise ValueError("locator requires at least one stable attribute")
+        if self.fallback_policy == "controlled" and not self.position_anchor:
+            raise ValueError("controlled coordinate fallback requires a position_anchor")
         return self
 
 

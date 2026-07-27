@@ -16,6 +16,14 @@ export type WorkflowNodeModel = {
   tool?: string;
   arguments?: Record<string, unknown>;
   target?: {
+    selector_version?: number;
+    strategy?: "uia" | "dom" | "semantic" | "position" | string;
+    observed_bounds?: Record<string, number>;
+    dpi?: number;
+    stability?: string;
+    stability_score?: number;
+    capture_fingerprint?: string;
+    mcp_label?: number;
     window_name?: string;
     control_type?: string;
     name?: string;
@@ -69,6 +77,7 @@ export type WorkflowDefinition = {
 
 export type ToolSchema = {
   type?: string;
+  format?: string;
   title?: string;
   description?: string;
   properties?: Record<string, ToolSchema>;
