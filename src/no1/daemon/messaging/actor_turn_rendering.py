@@ -53,7 +53,8 @@ def render_computer_control_contract(request: dict[str, Any]) -> str:
     lines.extend([
         "- 先分析观察点、动作、副作用和成功信号，再读取精简 catalog；需要参数时按工具名查询完整 schema。",
         "- 新建模式必须先 onecolleague_computer_recording(action=\"start\")，用 call(record=false) 观察桌面。",
-        "- 每次只执行一个动作；成功后立即录入，失败不入稿，并再次观察确认后再推进。Click/Type 前必须确认目标窗口和焦点。",
+        "- 每次只执行一个动作；成功后立即录入，失败不入稿，并再次观察确认后再推进。Click/Type 必须先 Snapshot 解析唯一 UI 元素并确认前台窗口，禁止直接猜坐标。",
+        "- 元素暂时无法解析时，只允许在重新观察并校验窗口后使用一次受控位置锚点；该步骤标记低稳定性，不能把坐标当作长期定位器。",
         "- 优先使用 App、Process、Screenshot/Snapshot、Click、Type；仅在原生工具已证实不足时使用 PowerShell。",
         "- 所有正式观察和动作都必须经过 OneColleague 电脑控制工具；禁止用裸 windows-mcp.* 绕过录制、租约或审计。",
         "- 将用于确认最终结果的 Snapshot 以 record=true 录为最后一个动作，确保完整回放产生可验证截图。",

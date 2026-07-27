@@ -1,6 +1,13 @@
 import type { Edge, Node } from "@xyflow/react";
 
-export type WorkflowNodeKind = "start" | "action" | "condition" | "wait" | "loop" | "approval" | "end";
+export type WorkflowNodeKind =
+  | "start"
+  | "action"
+  | "condition"
+  | "wait"
+  | "loop"
+  | "approval"
+  | "end";
 
 export type WorkflowNodeModel = {
   id: string;
@@ -13,20 +20,28 @@ export type WorkflowNodeModel = {
     control_type?: string;
     name?: string;
     text?: string;
+    automation_id?: string;
+    class_name?: string;
+    process_name?: string;
+    framework_id?: string;
+    parent_name?: string;
+    fallback_policy?: "never" | "controlled";
     match?: "exact" | "contains" | "regex";
     dom?: boolean;
     monitor?: number;
     position_anchor?: { x?: number; y?: number };
   };
-  success_condition?: string | {
-    source: string;
-    path?: string;
-    operator: "exists" | "truthy" | "equals" | "contains";
-    expected?: unknown;
-  };
+  success_condition?:
+    | string
+    | {
+        source: string;
+        path?: string;
+        operator: "exists" | "truthy" | "equals" | "contains";
+        expected?: unknown;
+      };
   condition?: string;
-  timeout_seconds?: number;
-  duration_seconds?: number;
+  timeout_seconds?: number | null;
+  duration_seconds?: number | null;
   retries?: number;
   adaptive?: boolean;
   max_iterations?: number;
@@ -48,7 +63,8 @@ export type WorkflowDefinition = {
   triggers: Record<string, unknown>[];
   inputs: Record<string, unknown>;
   save_screenshots: boolean;
-  max_run_seconds: number;
+  max_run_seconds: number | null;
+  auto_verify?: boolean;
 };
 
 export type ToolSchema = {
@@ -77,14 +93,23 @@ export type ToolCatalogItem = {
 export type CanvasNode = Node<{ model: WorkflowNodeModel }>;
 export type CanvasEdge = Edge<{ branch?: string }>;
 
-export function isValidNodePosition(value: unknown): value is { x: number; y: number } {
+export function isValidNodePosition(
+  value: unknown,
+): value is { x: number; y: number } {
   if (!value || typeof value !== "object") return false;
   const position = value as { x?: unknown; y?: unknown };
-  return typeof position.x === "number" && Number.isFinite(position.x)
-    && typeof position.y === "number" && Number.isFinite(position.y);
+  return (
+    typeof position.x === "number" &&
+    Number.isFinite(position.x) &&
+    typeof position.y === "number" &&
+    Number.isFinite(position.y)
+  );
 }
 
-export function layoutWorkflowNodes(nodes: WorkflowNodeModel[], edges: WorkflowEdgeModel[]): WorkflowNodeModel[] {
+export function layoutWorkflowNodes(
+  nodes: WorkflowNodeModel[],
+  edges: WorkflowEdgeModel[],
+): WorkflowNodeModel[] {
   if (nodes.length === 0) return nodes;
   const ids = new Set(nodes.map((node) => node.id));
   const incoming = new Map<string, number>();
@@ -99,13 +124,18 @@ export function layoutWorkflowNodes(nodes: WorkflowNodeModel[], edges: WorkflowE
     incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1);
   }
   const depth = new Map<string, number>();
-  const queue = nodes.filter((node) => (incoming.get(node.id) || 0) === 0).map((node) => node.id);
+  const queue = nodes
+    .filter((node) => (incoming.get(node.id) || 0) === 0)
+    .map((node) => node.id);
   if (queue.length === 0) queue.push(nodes[0].id);
   for (const id of queue) depth.set(id, 0);
   for (let index = 0; index < queue.length; index += 1) {
     const source = queue[index];
     for (const target of outgoing.get(source) || []) {
-      depth.set(target, Math.max(depth.get(target) || 0, (depth.get(source) || 0) + 1));
+      depth.set(
+        target,
+        Math.max(depth.get(target) || 0, (depth.get(source) || 0) + 1),
+      );
       const nextIncoming = (incoming.get(target) || 0) - 1;
       incoming.set(target, nextIncoming);
       if (nextIncoming === 0) queue.push(target);
@@ -125,22 +155,31 @@ export function layoutWorkflowNodes(nodes: WorkflowNodeModel[], edges: WorkflowE
   });
 }
 
-export function normalizeDefinition(value: Record<string, unknown>): WorkflowDefinition {
+export function normalizeDefinition(
+  value: Record<string, unknown>,
+): WorkflowDefinition {
   const rawNodes = Array.isArray(value.nodes) ? value.nodes : [];
   const rawEdges = Array.isArray(value.edges) ? value.edges : [];
   const nodes = rawNodes.map((item, index) => {
-    const node = (item && typeof item === "object" ? item : {}) as Partial<WorkflowNodeModel>;
+    const node = (
+      item && typeof item === "object" ? item : {}
+    ) as Partial<WorkflowNodeModel>;
     return {
       ...node,
       id: String(node.id || `step-${index + 1}`),
       type: node.type || "action",
       title: String(node.title || node.tool || "未命名步骤"),
-      arguments: node.arguments && typeof node.arguments === "object" ? node.arguments : {},
+      arguments:
+        node.arguments && typeof node.arguments === "object"
+          ? node.arguments
+          : {},
       position: isValidNodePosition(node.position) ? node.position : undefined,
     } as WorkflowNodeModel;
   });
   const edges = rawEdges.map((item, index) => {
-    const edge = (item && typeof item === "object" ? item : {}) as Partial<WorkflowEdgeModel>;
+    const edge = (
+      item && typeof item === "object" ? item : {}
+    ) as Partial<WorkflowEdgeModel>;
     return {
       id: String(edge.id || `edge-${index + 1}`),
       source: String(edge.source || ""),
@@ -148,19 +187,33 @@ export function normalizeDefinition(value: Record<string, unknown>): WorkflowDef
       branch: edge.branch || "next",
     };
   });
-  const laidOutNodes = nodes.every((node) => isValidNodePosition(node.position)) ? nodes : layoutWorkflowNodes(nodes, edges);
+  const laidOutNodes = nodes.every((node) => isValidNodePosition(node.position))
+    ? nodes
+    : layoutWorkflowNodes(nodes, edges);
   return {
-    name: typeof value.name === "string" && value.name.trim() ? value.name : "未命名流程",
+    name:
+      typeof value.name === "string" && value.name.trim()
+        ? value.name
+        : "未命名流程",
     description: typeof value.description === "string" ? value.description : "",
     nodes: laidOutNodes,
     edges,
-    triggers: Array.isArray(value.triggers) ? (value.triggers as Record<string, unknown>[]) : [],
-    inputs: value.inputs && typeof value.inputs === "object" ? (value.inputs as Record<string, unknown>) : {},
+    triggers: Array.isArray(value.triggers)
+      ? (value.triggers as Record<string, unknown>[])
+      : [],
+    inputs:
+      value.inputs && typeof value.inputs === "object"
+        ? (value.inputs as Record<string, unknown>)
+        : {},
     save_screenshots: value.save_screenshots !== false,
-    max_run_seconds: typeof value.max_run_seconds === "number" ? value.max_run_seconds : 1800,
+    max_run_seconds:
+      typeof value.max_run_seconds === "number" ? value.max_run_seconds : null,
+    auto_verify: value.auto_verify !== false,
   };
 }
-export function serializeDefinition(definition: WorkflowDefinition): Record<string, unknown> {
+export function serializeDefinition(
+  definition: WorkflowDefinition,
+): Record<string, unknown> {
   return {
     ...definition,
     nodes: definition.nodes.map((node) => {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import socket
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class DaemonClientError(RuntimeError):
@@ -19,7 +19,7 @@ class DaemonClientError(RuntimeError):
         transport: str,
         endpoint: Dict[str, Any],
         op: str,
-        timeout_s: float,
+        timeout_s: Optional[float],
         cause: BaseException | None = None,
     ) -> None:
         self.phase = str(phase or "").strip() or "unknown"
@@ -27,7 +27,7 @@ class DaemonClientError(RuntimeError):
         self.transport = str(transport or "").strip() or "unknown"
         self.endpoint = dict(endpoint) if isinstance(endpoint, dict) else {}
         self.op = str(op or "").strip() or "unknown"
-        self.timeout_s = float(timeout_s or 0.0)
+        self.timeout_s = None if timeout_s is None else float(timeout_s)
         self.cause = cause
         self.error_type = type(cause).__name__ if cause is not None else ""
         self.error = str(cause or "").strip()
@@ -76,7 +76,7 @@ def _raise_client_error(
     transport: str,
     endpoint: Dict[str, Any],
     op: str,
-    timeout_s: float,
+    timeout_s: Optional[float],
     cause: BaseException | None = None,
 ) -> None:
     raise DaemonClientError(
@@ -96,7 +96,7 @@ def _read_response_line(
     transport: str,
     endpoint: Dict[str, Any],
     op: str,
-    timeout_s: float,
+    timeout_s: Optional[float],
 ) -> bytes:
     try:
         with sock.makefile("rb") as handle:
@@ -137,7 +137,7 @@ def send_daemon_request(
     endpoint: Dict[str, Any],
     request_payload: Dict[str, Any],
     *,
-    timeout_s: float,
+    timeout_s: Optional[float],
     sock_path_default: Path,
 ) -> Dict[str, Any]:
     transport = str(endpoint.get("transport") or "").strip().lower()

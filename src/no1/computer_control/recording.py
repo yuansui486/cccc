@@ -17,11 +17,10 @@ from .requests import ComputerRequestStore
 from .risk import classify_tool
 from .runtime import WorkflowRunner
 from .storage import WorkflowStore
+from .elements import element_at_point, element_center, locator_from_element, normalize_snapshot, resolve_locator
 
 
 class RecordingStore:
-    IDLE_TIMEOUT_SECONDS = 5 * 60
-    TOTAL_TIMEOUT_SECONDS = 30 * 60
     MAX_TOOL_CALLS = 100
     MAX_CONSECUTIVE_FAILURES = 3
 
@@ -92,19 +91,12 @@ class RecordingStore:
     def _watch(self) -> None:
         while True:
             time.sleep(5)
-            now = time.time()
             with self._lock:
                 active = list(self._active.items())
             for recording_id, (group_id, actor_id, request_id) in active:
                 try:
                     value = self.get(group_id, recording_id, actor_id=actor_id)
-                    hard_expired = now - float(value.get("created_at") or 0) > self.TOTAL_TIMEOUT_SECONDS
-                    idle = now - float(value.get("last_activity_at") or value.get("updated_at") or 0) > self.IDLE_TIMEOUT_SECONDS
-                    if hard_expired:
-                        self.abort(group_id, recording_id, actor_id=actor_id, reason="recording_expired")
-                    elif idle and recording_id not in self._inflight:
-                        self.suspend(group_id, recording_id, actor_id=actor_id, reason="recording_idle")
-                    else:
+                    if value.get("status") == "exploring":
                         self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=recording_id)
                 except Exception:
                     with self._lock:
@@ -217,10 +209,6 @@ class RecordingStore:
             raise ValueError("recording is not active")
         self.requests.require_authorized(group_id, str(value["request_id"]), actor_id)
         self.lease.require(group_id=group_id, actor_id=actor_id, run_id=recording_id)
-        now = time.time()
-        if now - float(value["created_at"]) > self.TOTAL_TIMEOUT_SECONDS:
-            self.abort(group_id, recording_id, actor_id=actor_id, reason="recording_expired")
-            raise TimeoutError("recording has expired")
         return value
 
     def resume(self, group_id: str, recording_id: str, *, actor_id: str) -> Dict[str, Any]:
@@ -229,10 +217,6 @@ class RecordingStore:
             if value.get("status") != "suspended":
                 raise ValueError("只有已暂停的录制可以继续")
             self.requests.require_authorized(group_id, str(value["request_id"]), actor_id)
-            if time.time() - float(value.get("created_at") or 0) > self.TOTAL_TIMEOUT_SECONDS:
-                value.update({"status": "aborted", "abort_reason": "recording_expired", "updated_at": time.time()})
-                self._write(group_id, value)
-                raise TimeoutError("录制已超过 30 分钟，不能继续")
             self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=recording_id)
             now = time.time()
             value.update({"status": "exploring", "requires_snapshot_baseline": True, "resumed_at": now, "last_activity_at": now, "updated_at": now})
@@ -252,7 +236,9 @@ class RecordingStore:
         workflow_arguments: Optional[Dict[str, Any]] = None,
         title: str = "",
         success_condition: Any = "",
-        timeout_seconds: int = 60,
+        timeout_seconds: Optional[float] = None,
+        target: Optional[Dict[str, Any]] = None,
+        element_id: str = "",
     ) -> Dict[str, Any]:
         signature = json.dumps({"tool": tool, "arguments": arguments}, ensure_ascii=False, sort_keys=True, default=str)
         with self._lock:
@@ -276,7 +262,6 @@ class RecordingStore:
             if catalog_item is None:
                 raise ValueError(f"找不到 Windows-MCP 工具：{tool}")
             schema = catalog_item.get("inputSchema") if isinstance(catalog_item.get("inputSchema"), dict) else {}
-            validate_arguments_against_schema(tool, arguments, schema)
             with self._lock:
                 value = self._active_recording(group_id, recording_id, actor_id)
             request = self.requests.require_authorized(group_id, str(value["request_id"]), actor_id)
@@ -287,10 +272,68 @@ class RecordingStore:
             resolved = WorkflowRunner._resolve(template_args, WorkflowRunner._effective_input_values(value["inputs"]), {})
             if resolved != arguments:
                 raise ValueError("workflow_arguments do not resolve to the actual arguments")
+            # Resolve every pointer/coordinate action against a fresh UI tree
+            # before it is recorded. The original coordinates remain available
+            # for this one call, but the durable step prefers a locator.
+            resolved_target: Optional[Dict[str, Any]] = dict(target) if isinstance(target, dict) else ({"element_id": element_id} if element_id else None)
+            resolution: Dict[str, Any] = {"strategy": "none", "confidence": "none", "match_count": 0}
+            after_snapshot: Optional[Dict[str, Any]] = None
+            action_tool = str(tool or "").lower()
+            if action_tool in {"click", "type"}:
+                snapshot_result = self.session.call_tool_sync("Snapshot", {}, timeout=None)
+                snapshot = normalize_snapshot(snapshot_result)
+                if resolved_target is not None:
+                    if element_id:
+                        resolved_target = next((item for item in snapshot.get("elements", []) if str(item.get("element_id")) == element_id), None)
+                    if resolved_target is not None and "element_id" in resolved_target:
+                        resolved_target = next((item for item in snapshot.get("elements", []) if str(item.get("element_id")) == str(resolved_target.get("element_id"))), None)
+                    if resolved_target is not None and "window_name" in resolved_target and "fallback_policy" in resolved_target:
+                        match = resolve_locator(snapshot, resolved_target)
+                        resolution.update({"strategy": "element", "confidence": match.get("confidence"), "match_count": match.get("match_count", 0)})
+                        resolved_target = match["matches"][0] if match.get("status") == "unique" else None
+                if resolved_target is None and any(key in arguments for key in ("loc", "x", "y")):
+                    point = arguments.get("loc")
+                    if point is None and "x" in arguments and "y" in arguments:
+                        point = [arguments.get("x"), arguments.get("y")]
+                    hit = element_at_point(snapshot, point)
+                    if hit is not None:
+                        resolved_target = hit
+                        resolution.update({"strategy": "element_from_coordinate", "confidence": "normal", "match_count": 1})
+                    else:
+                        resolution.update({"strategy": "controlled_coordinate_fallback", "confidence": "low", "match_count": 0, "reason": "Snapshot 未找到坐标对应元素"})
+                if resolved_target is None and "label" in arguments:
+                    match = resolve_locator(snapshot, {"name": arguments.get("label"), "text": arguments.get("label"), "match": "exact"})
+                    if match.get("status") == "unique":
+                        resolved_target = match["matches"][0]
+                        resolution.update({"strategy": "element_label", "confidence": match.get("confidence"), "match_count": match.get("match_count", 0)})
+                if resolved_target is not None:
+                    matched_element = resolved_target
+                    resolved_target = locator_from_element(resolved_target)
+                    label = str(resolved_target.get("name") or resolved_target.get("text") or "").strip()
+                    if label and not any(key in arguments for key in ("loc", "label")):
+                        arguments = {**arguments, "label": label}
+                    elif not any(key in arguments for key in ("loc", "label")):
+                        # A nameless control can still be acted on by its
+                        # current center, but this is explicitly recorded as
+                        # an element-derived coordinate rather than a raw one.
+                        center = element_center(matched_element)
+                        if center is not None:
+                            arguments = {**arguments, "loc": center}
+                    resolution["strategy"] = resolution.get("strategy") or "element"
+                elif isinstance(target, dict) and str(target.get("fallback_policy") or "controlled") == "never":
+                    raise ValueError("录制前未能唯一找到目标元素，已按‘禁止坐标兜底’停止")
+                validate_arguments_against_schema(tool, arguments, schema)
+            else:
+                validate_arguments_against_schema(tool, arguments, schema)
             before_restarts = self.session.transport_restarts
             started = time.time()
             try:
-                result = normalize_tool_result(tool, self.session.call_tool_sync(tool, arguments, timeout=float(timeout_seconds)))
+                result = normalize_tool_result(tool, self.session.call_tool_sync(tool, arguments, timeout=timeout_seconds))
+                if action_tool in {"click", "type"}:
+                    try:
+                        after_snapshot = normalize_snapshot(self.session.call_tool_sync("Snapshot", {}, timeout=None))
+                    except Exception:
+                        after_snapshot = None
             except Exception as exc:
                 with self._lock:
                     value = self.get(group_id, recording_id, actor_id=actor_id)
@@ -327,26 +370,32 @@ class RecordingStore:
                 "elapsed_ms": round((time.time() - started) * 1000),
                 "created_at": time.time(),
             }
+            if after_snapshot is not None:
+                evidence["observation_after"] = {"element_count": after_snapshot.get("count", 0), "warnings": after_snapshot.get("warnings", [])}
             value["evidence"].append(evidence)
             if record:
                 step_id = f"step_{len(value['steps']) + 1}"
-                stability = (
-                    "low"
-                    if tool.lower() in {"click", "type"} and any(key in arguments for key in ("loc", "x", "y"))
-                    else "normal"
-                )
+                stability = "low" if resolution.get("strategy") == "controlled_coordinate_fallback" else "normal"
+                durable_arguments = dict(template_args)
+                if resolved_target is not None:
+                    for key in ("loc", "x", "y", "coordinate_fallback"):
+                        durable_arguments.pop(key, None)
+                elif resolution.get("strategy") == "controlled_coordinate_fallback":
+                    durable_arguments["coordinate_fallback"] = True
                 value["steps"].append({
                     "id": step_id,
                     "type": "action",
                     "title": str(title or tool)[:200],
                     "tool": tool,
-                    "arguments": template_args,
+                    "arguments": durable_arguments,
+                    "target": resolved_target,
                     "success_condition": success_condition,
-                    "timeout_seconds": max(1, min(int(timeout_seconds), 600)),
+                    "timeout_seconds": None if timeout_seconds is None or float(timeout_seconds) <= 0 else float(timeout_seconds),
                     "retries": 0,
                     "adaptive": True,
                     "stability": stability,
                     "evidence_id": evidence_id,
+                    "resolution": resolution,
                 })
                 value["metrics"]["successful_calls"] += 1
             value["metrics"]["tool_calls"] = int(value["metrics"].get("tool_calls") or 0) + 1
@@ -370,6 +419,7 @@ class RecordingStore:
                     "risk": risk,
                     "recorded": bool(record),
                     "arguments": self._argument_summary(arguments),
+                    "resolution": resolution,
                     "evidence_id": evidence_id,
                     "step_count": len(value["steps"]),
                 },
@@ -385,7 +435,7 @@ class RecordingStore:
             if recording_id in self._inflight:
                 raise RuntimeError("该录制正在执行另一个电脑操作")
             self._inflight.add(recording_id)
-        duration = max(0.0, min(float(duration_seconds), 600.0))
+        duration = max(0.0, float(duration_seconds))
         try:
             time.sleep(duration)
             with self._lock:

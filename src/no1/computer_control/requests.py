@@ -50,9 +50,14 @@ class ComputerRequestStore:
             raise PermissionError("computer control request was not found")
         if str(request.get("actor_id") or "") != actor_id:
             raise PermissionError("computer control request belongs to another actor")
-        created_ts = float(request.get("created_ts") or request.get("updated_ts") or 0)
-        if created_ts <= 0 or time.time() - created_ts > self.AUTHORIZATION_TTL_SECONDS:
-            raise PermissionError("computer control request authorization has expired")
-        if str(request.get("status") or "") in {"rejected", "cancelled", "completed"}:
+        status = str(request.get("status") or "")
+        if status in {"rejected", "cancelled", "completed"}:
             raise PermissionError("computer control request is no longer active")
+        # Once a recording has acquired the global lease, its authorization
+        # follows that recording. The pre-start TTL prevents stale requests
+        # from being used, but must not interrupt an intentionally long task.
+        if not str(request.get("recording_id") or "").strip():
+            created_ts = float(request.get("created_ts") or request.get("updated_ts") or 0)
+            if created_ts <= 0 or time.time() - created_ts > self.AUTHORIZATION_TTL_SECONDS:
+                raise PermissionError("computer control request authorization has expired")
         return request

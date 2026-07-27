@@ -1255,7 +1255,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
     return 0
 
 
-def call_daemon(req: Dict[str, Any], *, paths: Optional[DaemonPaths] = None, timeout_s: float = 60.0) -> Dict[str, Any]:
+def call_daemon(req: Dict[str, Any], *, paths: Optional[DaemonPaths] = None, timeout_s: Optional[float] = 60.0) -> Dict[str, Any]:
     p = paths or default_paths()
     try:
         request = DaemonRequest.model_validate(req)

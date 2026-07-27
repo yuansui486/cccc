@@ -34,14 +34,20 @@ class ElementLocator(BaseModel):
     control_type: str = Field(default="", max_length=100)
     name: str = Field(default="", max_length=500)
     text: str = Field(default="", max_length=500)
+    automation_id: str = Field(default="", max_length=300)
+    class_name: str = Field(default="", max_length=300)
+    process_name: str = Field(default="", max_length=300)
+    framework_id: str = Field(default="", max_length=100)
+    parent_name: str = Field(default="", max_length=500)
     match: Literal["exact", "contains", "regex"] = "exact"
     dom: bool = False
     monitor: Optional[int] = Field(default=None, ge=0, le=32)
     position_anchor: Optional[Dict[str, float]] = None
+    fallback_policy: Literal["never", "controlled"] = "controlled"
 
     @model_validator(mode="after")
     def require_identity(self) -> "ElementLocator":
-        if not any((self.window_name, self.control_type, self.name, self.text)):
+        if not any((self.window_name, self.control_type, self.name, self.text, self.automation_id, self.class_name, self.process_name)):
             raise ValueError("locator requires at least one stable attribute")
         return self
 
@@ -57,8 +63,9 @@ class WorkflowNode(BaseModel):
     target: Optional[ElementLocator] = None
     success_condition: Union[str, SuccessAssertion] = ""
     condition: str = Field(default="", max_length=1000)
-    timeout_seconds: int = Field(default=60, ge=1, le=600)
-    duration_seconds: Optional[float] = Field(default=None, ge=0, le=600)
+    # None means wait until the MCP tool returns or the user cancels the run.
+    timeout_seconds: Optional[float] = Field(default=None, ge=0)
+    duration_seconds: Optional[float] = Field(default=None, ge=0)
     retries: int = Field(default=0, ge=0, le=3)
     adaptive: bool = True
     max_iterations: Optional[int] = Field(default=None, ge=1, le=100)
@@ -127,7 +134,10 @@ class WorkflowDefinition(BaseModel):
     )
     triggers: List[WorkflowTrigger] = Field(default_factory=list, max_length=50)
     save_screenshots: bool = True
-    max_run_seconds: int = Field(default=1800, ge=10, le=1800)
+    auto_verify: bool = True
+    # Computer-control workflows are intentionally unbounded by default. A
+    # user may still opt into a safety limit by setting this field explicitly.
+    max_run_seconds: Optional[int] = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_graph(self) -> "WorkflowDefinition":

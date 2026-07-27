@@ -414,7 +414,9 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         }[name]
         if name != "onecolleague_computer_control_catalog":
             payload["actor_id"] = _resolve_self_actor_id(arguments)
-        timeout = float(arguments.get("timeout_seconds") or 60) + 30 if name == "onecolleague_computer_recording" else 150.0
+        # Computer-control calls are cancellable but intentionally unbounded;
+        # large recordings and runs must not be cut off by the IPC bridge.
+        timeout = None
         value = _call_daemon_or_raise({"op": "computer_control", "args": payload}, timeout_s=timeout)
         bucket = "recordings" if name == "onecolleague_computer_recording" else "runs"
         return _attach_computer_artifacts(value, group_id=payload["group_id"], bucket=bucket)
@@ -482,7 +484,13 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                     record=arguments.get("record") is not False,
                     title=str(arguments.get("title") or ""),
                     success_condition=arguments.get("success_condition") or "",
-                    timeout_seconds=int(arguments.get("timeout_seconds") or 60),
+                    target=arguments.get("target") if isinstance(arguments.get("target"), dict) else None,
+                    element_id=str(arguments.get("element_id") or ""),
+                    timeout_seconds=(
+                        float(arguments["timeout_seconds"])
+                        if arguments.get("timeout_seconds") is not None
+                        else None
+                    ),
                 )
             elif action == "wait":
                 value = service.recordings.wait(

@@ -23,22 +23,59 @@ from .mcp import (
 )
 from .models import WorkflowDefinition
 from .storage import WorkflowStore
+from .elements import element_center, locator_from_element, normalize_snapshot, resolve_locator
 
 REF_RE = re.compile(r"^\$\{(inputs|steps)\.([A-Za-z0-9_.-]+)\}$")
 SECRET_RE = re.compile(r"^\$\{secret:([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
 class WorkflowRunner:
-    def __init__(self, home: Path, store: WorkflowStore, lease: ComputerControlLease, session: WindowsMCPSession):
+    def __init__(self, home: Path, store: WorkflowStore, lease: ComputerControlLease, session: WindowsMCPSession, fingerprint_provider: Optional[Any] = None):
         self.home = home
         self.store = store
         self.lease = lease
         self.session = session
+        self.fingerprint_provider = fingerprint_provider or (lambda: "")
         self._tasks: Dict[str, asyncio.Task[None]] = {}
         self._cancelled: set[str] = set()
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self._sync_thread: threading.Thread | None = None
         self._sync_lock = threading.Lock()
+
+    class _ExternalLeaseLost(RuntimeError):
+        def __init__(self, lease: Optional[Dict[str, Any]] = None):
+            super().__init__("computer control is now occupied by another group")
+            self.lease = lease or {}
+
+    async def _heartbeat_loop(self, run: Dict[str, Any], lost: asyncio.Event) -> None:
+        group_id, actor_id, run_id = str(run["group_id"]), str(run["actor_id"]), str(run["run_id"])
+        while not lost.is_set():
+            try:
+                await asyncio.sleep(max(1.0, float(self.lease.HEARTBEAT_SECONDS) / 2))
+                if lost.is_set():
+                    return
+                self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=run_id)
+                run["lease"] = {"last_heartbeat_at": time.time(), "status": "owned"}
+            except asyncio.CancelledError:
+                raise
+            except PermissionError:
+                current = self.lease.status().get("lease")
+                if not isinstance(current, dict) or str(current.get("run_id") or "") == run_id:
+                    try:
+                        self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=run_id)
+                        metrics = run.setdefault("metrics", {})
+                        metrics["lease_recoveries"] = int(metrics.get("lease_recoveries") or 0) + 1
+                        run["lease"] = {"last_recovered_at": time.time(), "status": "recovered"}
+                        self._emit("lease.recovered", group_id=group_id, run_id=run_id)
+                        continue
+                    except LeaseConflict:
+                        current = self.lease.status().get("lease")
+                run["lease"] = {"status": "lost", "owner": current or {}}
+                run["status"] = "external_blocked"
+                run["external_blocked"] = {"reason": "computer_control_busy", "lease": current or {}, "at": time.time()}
+                self._emit("run.external_blocked", group_id=group_id, run_id=run_id, lease=current or {})
+                lost.set()
+                return
 
     def _ensure_sync_loop(self) -> asyncio.AbstractEventLoop:
         with self._sync_lock:
@@ -64,6 +101,80 @@ class WorkflowRunner:
         if inspect.isawaitable(value):
             value = await value
         return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    async def _resolve_element_action(
+        self,
+        node: Any,
+        arguments: Dict[str, Any],
+        event: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Resolve an action target from a fresh UI tree before mutating input."""
+        tool = str(getattr(node, "tool", "") or "").lower()
+        if tool not in {"click", "type"}:
+            return arguments
+        if getattr(node, "target", None) is None and not any(key in arguments for key in ("label", "loc", "x", "y")):
+            # Preserve compatibility with synthetic/test tools that do not
+            # expose a UI target (real Windows-MCP Click/Type schemas reject
+            # such calls during the normal workflow validation).
+            return arguments
+        snapshot_result = await self.session.call_tool("Snapshot", {}, timeout=None)
+        snapshot = normalize_snapshot(snapshot_result)
+        target = getattr(node, "target", None)
+        locator = target.model_dump(mode="json") if target is not None else None
+        match: Dict[str, Any] = {"status": "not_found", "matches": [], "match_count": 0, "confidence": "none"}
+        if locator:
+            match = resolve_locator(snapshot, locator)
+        elif arguments.get("label"):
+            label = str(arguments.get("label"))
+            match = resolve_locator(snapshot, {"name": label, "text": label, "match": "exact"})
+        selected = match.get("matches", [])[0] if match.get("status") == "unique" else None
+        resolution: Dict[str, Any] = {
+            "strategy": "element" if selected is not None else "unresolved",
+            "status": match.get("status"),
+            "confidence": match.get("confidence"),
+            "candidate_count": int(match.get("match_count") or 0),
+        }
+        if selected is None:
+            fallback_policy = str((locator or {}).get("fallback_policy") or "controlled")
+            has_coordinate = any(key in arguments for key in ("loc", "x", "y"))
+            anchor = (locator or {}).get("position_anchor") if isinstance((locator or {}).get("position_anchor"), dict) else {}
+            if fallback_policy == "controlled" and not has_coordinate and isinstance(anchor, dict) and isinstance(anchor.get("x"), (int, float)) and isinstance(anchor.get("y"), (int, float)):
+                arguments = {**arguments, "loc": [round(float(anchor["x"])), round(float(anchor["y"]))]}
+                resolution.update({"strategy": "controlled_coordinate_fallback", "stability": "low", "reason": "元素暂时未找到，使用已验证位置锚点一次"})
+                event["target_resolution"] = resolution
+                return {key: value for key, value in arguments.items() if key != "coordinate_fallback"}
+            if fallback_policy == "never" or not has_coordinate:
+                event["target_resolution"] = resolution
+                raise ValueError("未能在最新桌面快照中唯一找到操作元素；已停止，避免误点")
+            resolution.update({"strategy": "controlled_coordinate_fallback", "stability": "low", "reason": "元素未找到，使用原始坐标一次"})
+            event["target_resolution"] = resolution
+            return {key: value for key, value in arguments.items() if key != "coordinate_fallback"}
+
+        if not bool(selected.get("visible", True)) or not bool(selected.get("enabled", True)):
+            event["target_resolution"] = {**resolution, "reason": "元素不可见或不可用"}
+            raise ValueError("目标元素当前不可见或不可用")
+        event["target_resolution"] = {**resolution, "element": locator_from_element(selected)}
+        output = dict(arguments)
+        catalog = await self._catalog()
+        item = next((item for item in catalog if str(item.get("name") or "") == str(getattr(node, "tool", ""))), {})
+        schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {}
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        label = str(selected.get("name") or selected.get("text") or "").strip()
+        center = element_center(selected)
+        # Prefer semantic arguments. Coordinates are only generated for a
+        # matched element when the live tool has no usable label parameter.
+        if label and (not props or "label" in props):
+            output["label"] = label
+            output.pop("loc", None)
+            output.pop("x", None)
+            output.pop("y", None)
+        elif center is not None and (not props or "loc" in props):
+            output["loc"] = center
+            output.pop("x", None)
+            output.pop("y", None)
+        elif center is not None and "x" in props and "y" in props:
+            output["x"], output["y"] = center
+        return output
 
     def start_sync(
         self,
@@ -114,10 +225,23 @@ class WorkflowRunner:
             pass
 
     def get(self, group_id: str, run_id: str) -> Dict[str, Any]:
-        try:
-            value = json.loads(self._run_path(group_id, run_id).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise KeyError(run_id) from exc
+        error: BaseException | None = None
+        value: Any = None
+        for attempt in range(3):
+            try:
+                value = json.loads(self._run_path(group_id, run_id).read_text(encoding="utf-8"))
+                break
+            except PermissionError as exc:
+                error = exc
+                if attempt < 2:
+                    time.sleep(0.01)
+            except (OSError, ValueError) as exc:
+                error = exc
+                break
+        else:
+            value = None
+        if error is not None and value is None:
+            raise KeyError(run_id) from error
         if not isinstance(value, dict):
             raise KeyError(run_id)
         return value
@@ -172,7 +296,7 @@ class WorkflowRunner:
         recovery_id = "recovery_" + uuid.uuid4().hex[:12]
         observation: Any = None
         try:
-            observation = normalize_tool_result("Snapshot", await self.session.call_tool("Snapshot", {}, timeout=60))
+            observation = normalize_tool_result("Snapshot", await self.session.call_tool("Snapshot", {}, timeout=None))
             observation = self._redact_result(observation)
         except Exception as observation_error:
             observation = {"error": str(observation_error)[:1000]}
@@ -199,7 +323,6 @@ class WorkflowRunner:
         self._write(group_id, run)
         self._emit("recovery.required", group_id=group_id, run_id=run_id, actor_id=run.get("actor_id"), **recovery)
         delivered = False
-        delivery_deadline = time.monotonic() + 60
         try:
             from ..contracts.v1 import SystemNotifyData
             from ..daemon.messaging.delivery import dispatch_system_notify_event_to_actor
@@ -229,7 +352,7 @@ class WorkflowRunner:
                 by="system",
                 data=notify.model_dump(mode="json"),
             )
-            while time.monotonic() < delivery_deadline and not delivered:
+            while not delivered:
                 delivered = bool(dispatch_system_notify_event_to_actor(group, event=notify_event, actor_id=str(run.get("actor_id") or ""), async_flush=True))
                 if not delivered:
                     await asyncio.sleep(2)
@@ -242,8 +365,7 @@ class WorkflowRunner:
         if not delivered:
             raise RuntimeError("AI 自适应恢复通知无法投递：执行智能体未运行或当前不可接收消息")
         path = self._recovery_path(group_id, run_id, recovery_id)
-        deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
+        while True:
             if run_id in self._cancelled:
                 raise asyncio.CancelledError()
             if path.exists():
@@ -257,18 +379,15 @@ class WorkflowRunner:
                     event["status"] = "running"
                     self._write(group_id, run)
                     return patch
-            self.lease.heartbeat(group_id=group_id, actor_id=str(run["actor_id"]), run_id=run_id)
             await asyncio.sleep(0.5)
-        raise TimeoutError("AI 自适应恢复等待超时")
 
-    async def _wait_for_approval(self, run: Dict[str, Any], node_id: str, *, timeout: float = 600) -> None:
+    async def _wait_for_approval(self, run: Dict[str, Any], node_id: str, *, timeout: Optional[float] = None) -> None:
         group_id, run_id = str(run["group_id"]), str(run["run_id"])
         path = self._approval_path(group_id, run_id, node_id)
-        deadline = time.monotonic() + timeout
         run["status"] = "waiting_approval"
         self._write(group_id, run)
         self._emit("run.approval_required", group_id=group_id, run_id=run_id, node_id=node_id)
-        while time.monotonic() < deadline:
+        while True:
             if run_id in self._cancelled:
                 raise asyncio.CancelledError()
             if path.exists():
@@ -281,9 +400,7 @@ class WorkflowRunner:
                     self._write(group_id, run)
                     return
                 raise PermissionError("用户已拒绝该电脑操作")
-            self.lease.heartbeat(group_id=group_id, actor_id=str(run["actor_id"]), run_id=run_id)
             await asyncio.sleep(0.5)
-        raise TimeoutError("等待用户确认超时")
 
     async def start(
         self,
@@ -450,17 +567,21 @@ class WorkflowRunner:
         current = next(node.id for node in definition.nodes if node.type == "start")
         steps: Dict[str, Any] = {}
         loop_counts: Dict[str, int] = {}
-        deadline = time.monotonic() + definition.max_run_seconds
-        heartbeat_at = 0.0
+        deadline = (
+            time.monotonic() + float(definition.max_run_seconds)
+            if definition.max_run_seconds is not None
+            else None
+        )
+        lease_lost = asyncio.Event()
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop(run, lease_lost))
         try:
             while True:
                 if run_id in self._cancelled:
                     raise asyncio.CancelledError()
-                if time.monotonic() > deadline:
-                    raise TimeoutError("workflow run exceeded its time limit")
-                if time.monotonic() - heartbeat_at >= self.lease.HEARTBEAT_SECONDS:
-                    self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=run_id)
-                    heartbeat_at = time.monotonic()
+                if deadline is not None and time.monotonic() > deadline:
+                    raise TimeoutError("workflow run exceeded its configured safety limit")
+                if lease_lost.is_set():
+                    raise self._ExternalLeaseLost(run.get("lease", {}).get("owner"))
                 node = nodes[current]
                 run["current_node_id"] = current
                 event = {"node_id": current, "type": node.type, "status": "running", "started_at": time.time()}
@@ -473,9 +594,7 @@ class WorkflowRunner:
                 if node.type == "action":
                     self.lease.require(group_id=group_id, actor_id=actor_id, run_id=run_id, allow_observe=False)
                     arguments = self._resolve(node.arguments, inputs, steps)
-                    if node.target is not None and node.tool.lower() in {"click", "type"} and not any(key in arguments for key in ("loc", "label")):
-                        await self.session.call_tool("Snapshot", {}, timeout=min(node.timeout_seconds, 60))
-                        arguments["label"] = node.target.name or node.target.text
+                    arguments = await self._resolve_element_action(node, arguments, event)
                     live_catalog = await self._catalog()
                     catalog_item = next((item for item in live_catalog if str(item.get("name") or "") == node.tool), {})
                     if catalog_item:
@@ -525,6 +644,17 @@ class WorkflowRunner:
                             last_error = exc
                     if last_error is not None:
                         raise last_error
+                    if lease_lost.is_set():
+                        raise self._ExternalLeaseLost(run.get("lease", {}).get("owner"))
+                    if node.tool.lower() in {"click", "type"}:
+                        try:
+                            after_snapshot = normalize_snapshot(await self.session.call_tool("Snapshot", {}, timeout=None))
+                            event["post_action_observation"] = {
+                                "element_count": after_snapshot.get("count", 0),
+                                "warnings": after_snapshot.get("warnings", []),
+                            }
+                        except Exception as exc:
+                            event["post_action_observation"] = {"status": "unavailable", "message": str(exc)[:300]}
                     steps[current] = result
                     self._assert_success(node.success_condition, result, steps)
                     if recovered_arguments is not None:
@@ -550,8 +680,11 @@ class WorkflowRunner:
                         except Exception:
                             pass
                 elif node.type == "wait":
-                    duration = node.duration_seconds if node.duration_seconds is not None else node.timeout_seconds
-                    await asyncio.sleep(min(float(duration), 600.0))
+                    duration = node.duration_seconds
+                    if duration is None:
+                        await asyncio.Event().wait()
+                    else:
+                        await asyncio.sleep(float(duration))
                 elif node.type == "condition":
                     resolved = self._resolve(node.condition, inputs, steps)
                     branch = "true" if bool(resolved) else "false"
@@ -578,11 +711,79 @@ class WorkflowRunner:
                 if not choices:
                     raise RuntimeError(f"node {current} has no {branch} transition")
                 current = choices[0].target
-            run.update({"status": "awaiting_verification", "current_node_id": None, "finished_at": time.time(), "updated_at": time.time()})
+            run.update({"current_node_id": None, "finished_at": time.time(), "updated_at": time.time()})
             run["metrics"]["replay_success"] = True
+            final_evidence_ok = True
+            if definition.save_screenshots:
+                try:
+                    screenshot = normalize_tool_result(
+                        "Screenshot",
+                        await self.session.call_tool(
+                            "Screenshot",
+                            {"display": [0], "use_annotation": False},
+                            timeout=None,
+                        ),
+                    )
+                    stored_screenshot = self._store_artifacts(group_id, run_id, "final_evidence", screenshot)
+                    run["evidence"] = {
+                        "tool": "Screenshot",
+                        "captured_at": time.time(),
+                        "result": self._redact_result(stored_screenshot),
+                    }
+                    self._emit("final_evidence_captured", group_id=group_id, run_id=run_id)
+                except Exception as evidence_error:
+                    final_evidence_ok = False
+                    run["evidence_error"] = {"code": "final_evidence_failed", "message": str(evidence_error)[:1000]}
+            if not final_evidence_ok:
+                run["status"] = "awaiting_verification"
+                return
+            if definition.auto_verify:
+                authorization = run.get("authorization") if isinstance(run.get("authorization"), dict) else {}
+                has_request_authorization = bool(str(authorization.get("request_id") or "").strip())
+                finalized: Dict[str, Any] = {}
+                if has_request_authorization and authorization.get("allow_publish") is not False:
+                    finalized["published"] = self.store.publish(group_id, str(run["workflow_id"]), int(run["version"]))
+                fingerprint = str(self.fingerprint_provider() or "")
+                if has_request_authorization and authorization.get("allow_trust") is not False and fingerprint:
+                    finalized["trusted"] = self.store.trust(
+                        group_id,
+                        str(run["workflow_id"]),
+                        int(run["version"]),
+                        fingerprint=fingerprint,
+                        permissions=["all_windows_mcp_tools"],
+                    )
+                run["verification"] = {
+                    "passed": True,
+                    "summary": "所有步骤和最终证据已完成",
+                    "verified_by": actor_id,
+                    "verified_at": time.time(),
+                    "automatic": True,
+                }
+                run["finalization"] = {
+                    "published": "published" in finalized,
+                    "trusted": "trusted" in finalized,
+                    "unattended_triggers_authorized": has_request_authorization and authorization.get("allow_unattended_triggers") is not False,
+                }
+                run["status"] = "published" if finalized else "verified"
+            else:
+                run["status"] = "awaiting_verification"
+        except self._ExternalLeaseLost as exc:
+            run.update({"status": "external_blocked", "error": {"code": "computer_control_busy", "message": str(exc)}, "finished_at": time.time(), "updated_at": time.time()})
         except asyncio.CancelledError:
             run.update({"status": "cancelled", "finished_at": time.time(), "updated_at": time.time()})
         except Exception as exc:
+            if run.get("status") == "external_blocked" or (
+                isinstance(exc, PermissionError) and "computer_control_lease_required" in str(exc)
+            ):
+                run.update(
+                    {
+                        "status": "external_blocked",
+                        "error": {"code": "computer_control_busy", "message": str(exc)[:2000]},
+                        "finished_at": time.time(),
+                        "updated_at": time.time(),
+                    }
+                )
+                return
             if run.get("events") and isinstance(run["events"][-1], dict):
                 failed_event = run["events"][-1]
                 if str(failed_event.get("status") or "") in {"running", "recovering"}:
@@ -593,6 +794,11 @@ class WorkflowRunner:
                     })
             run.update({"status": "failed", "error": {"code": "run_failed", "message": str(exc)}, "finished_at": time.time(), "updated_at": time.time()})
         finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except BaseException:
+                pass
             metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
             metrics["elapsed_seconds"] = round(time.time() - float(run.get("started_at") or time.time()), 3)
             metrics["transport_restarts"] = max(

@@ -1352,7 +1352,8 @@ MCP_TOOLS = [
         "name": "onecolleague_computer_recording",
         "description": (
             "Interactively explore and record a computer task. Start a recording, observe with call(record=false), "
-            "execute and append only successful actions, then commit once before replaying the permanent workflow."
+            "resolve Click/Type targets from a fresh Snapshot before each action, execute and append only successful actions, "
+            "then commit once before replaying the permanent workflow. Coordinates are a controlled, low-stability fallback only."
         ),
         "inputSchema": _obj({
             **_COMMON_GROUP,
@@ -1372,6 +1373,12 @@ MCP_TOOLS = [
             "triggers": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
             "tool": {"type": "string"},
             "arguments": {"type": "object", "additionalProperties": True},
+            "target": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "优先使用稳定 UI 元素定位器；录制会在最新 Snapshot 上验证并保存它。",
+            },
+            "element_id": {"type": "string", "description": "本次 Snapshot 返回的临时元素编号。"},
             "workflow_arguments": {
                 "type": "object",
                 "additionalProperties": True,
@@ -1394,8 +1401,8 @@ MCP_TOOLS = [
                     },
                 ]
             },
-            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600},
-            "duration_seconds": {"type": "number", "minimum": 0, "maximum": 600},
+            "timeout_seconds": {"type": ["number", "null"], "minimum": 0, "description": "可选的单次工具等待上限；null 表示持续等待直到完成或取消。"},
+            "duration_seconds": {"type": ["number", "null"], "minimum": 0, "description": "Optional wait duration; null means wait until cancelled."},
             "step_id": {"type": "string"},
             "patch": {"type": "object", "additionalProperties": True},
             "reason": {"type": "string"},

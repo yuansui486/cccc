@@ -55,6 +55,9 @@ class TestComputerControl(unittest.TestCase):
         definition = WorkflowDefinition.model_validate(self._message_workflow())
         self.assertEqual(WorkflowRunner._effective_inputs(definition, {}), {"message": "测试"})
         self.assertEqual(WorkflowRunner._effective_inputs(definition, {"message": "override"}), {"message": "override"})
+        self.assertIsNone(definition.max_run_seconds)
+        self.assertIsNone(definition.nodes[1].timeout_seconds)
+        self.assertTrue(definition.auto_verify)
 
         spec = next(item for item in MCP_TOOLS if item.get("name") == "onecolleague_computer_workflow")
         schema = spec["inputSchema"]
@@ -93,6 +96,23 @@ class TestComputerControl(unittest.TestCase):
             },
         )
         self.assertFalse(computer_control_permissions({"allow_trust": False})["allow_trust"])
+
+    def test_active_recording_authorization_does_not_expire(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = WorkflowStore(Path(td))
+            group = create_group(load_registry(), title="long recording auth")
+            requests = ComputerRequestStore(store)
+            requests.append(group.group_id, {
+                "request_id": "req-long",
+                "actor_id": "foreman",
+                "status": "exploring",
+                "recording_id": "rec_long",
+                "created_ts": time.time() - 7200,
+            })
+            self.assertEqual(
+                requests.require_authorized(group.group_id, "req-long", "foreman")["recording_id"],
+                "rec_long",
+            )
 
     def test_workflow_graph_and_secret_constraints(self):
         with self.assertRaises(ValueError):
@@ -487,7 +507,7 @@ class TestComputerControl(unittest.TestCase):
                 if run["status"] != "running":
                     break
                 time.sleep(0.02)
-            self.assertEqual(run["status"], "awaiting_verification")
+            self.assertEqual(run["status"], "published")
             self.assertEqual(session.successful_calls.count("Type"), 2)
         if old is None:
             os.environ.pop("CCCC_HOME", None)
@@ -507,6 +527,7 @@ class TestComputerControl(unittest.TestCase):
             definition = WorkflowDefinition.model_validate({
                 "name": "send",
                 "inputs": {"message": "hello"},
+                "auto_verify": False,
                 "nodes": [
                     {"id": "s", "type": "start"},
                     {

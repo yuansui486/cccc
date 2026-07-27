@@ -510,15 +510,15 @@ def _resolve_caller_actor_id(arguments: Dict[str, Any]) -> str:
     return _validate_self_actor_id(aid)
 
 
-def _call_daemon_or_raise(req: Dict[str, Any], *, timeout_s: float = 60.0) -> Dict[str, Any]:
+def _call_daemon_or_raise(req: Dict[str, Any], *, timeout_s: Optional[float] = 60.0) -> Dict[str, Any]:
     """Call daemon, raise MCPError on failure."""
     ctx = _runtime_context()
     paths = DaemonPaths(Path(ctx.home)) if str(ctx.home or "").strip() else None
     attempts = []
     if paths is not None:
-        attempts.append({"paths": paths, "timeout_s": float(timeout_s)})
+        attempts.append({"paths": paths, "timeout_s": timeout_s})
         attempts.append({"paths": paths})
-    attempts.append({"timeout_s": float(timeout_s)})
+    attempts.append({"timeout_s": timeout_s})
     attempts.append({})
     resp = None
     last_type_error: Optional[TypeError] = None

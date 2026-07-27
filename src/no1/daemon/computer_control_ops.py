@@ -68,7 +68,13 @@ def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str)
             record=args.get("record") is not False,
             title=str(args.get("title") or ""),
             success_condition=args.get("success_condition") or "",
-            timeout_seconds=int(args.get("timeout_seconds") or 60),
+            target=args.get("target") if isinstance(args.get("target"), dict) else None,
+            element_id=str(args.get("element_id") or ""),
+            timeout_seconds=(
+                float(args["timeout_seconds"])
+                if args.get("timeout_seconds") is not None
+                else None
+            ),
         )
     if action == "wait":
         return service.recordings.wait(

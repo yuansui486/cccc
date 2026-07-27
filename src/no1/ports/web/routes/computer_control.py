@@ -25,6 +25,7 @@ from ....computer_control.models import WorkflowDefinition
 from ....computer_control.audit import audit
 from ....computer_control.risk import annotate_catalog
 from ....computer_control.mcp import validate_workflow_tools
+from ....computer_control.elements import normalize_snapshot, resolve_locator
 from ..schemas import RouteContext, require_admin, require_group, require_user
 
 
@@ -55,7 +56,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             call_daemon,
             {"op": "computer_control", "args": {"command": command, **payload}},
             paths=DaemonPaths(ctx.home),
-            timeout_s=180.0,
+            # Computer operations and recordings are user-cancellable rather
+            # than wall-clock limited; the MCP call itself owns cancellation.
+            timeout_s=None,
         )
         if not response.get("ok"):
             error = response.get("error") if isinstance(response.get("error"), dict) else {}
@@ -485,7 +488,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             result = await daemon_control("element_snapshot", group_id=group_id, capture_id=capture_id)
         except Exception as exc:
             raise _error("snapshot_failed", str(exc), 503) from exc
-        capture = {"capture_id": capture_id, "created_at": time.time(), "expires_at": time.time() + 300, "result": result, "elements": _extract_elements(result)}
+        normalized = normalize_snapshot(result)
+        capture = {"capture_id": capture_id, "created_at": time.time(), "expires_at": time.time() + 300, "result": result, "elements": normalized.get("elements", []), "warnings": normalized.get("warnings", [])}
         service.store.state_root(group_id).mkdir(parents=True, exist_ok=True)
         path = service.store.state_root(group_id) / "element-captures" / f"{capture_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -529,34 +533,38 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         return FileResponse(str(image_path), media_type="image/png")
 
     @group_router.post("/element-picker/validate")
-    async def validate_locator(locator: ElementLocator) -> Dict[str, Any]:
-        return {"ok": True, "result": {"valid": True, "locator": locator.model_dump(mode="json"), "matches": []}}
+    async def validate_locator(group_id: str, locator: ElementLocator) -> Dict[str, Any]:
+        capture_id = "cap_validate_" + uuid.uuid4().hex[:12]
+        try:
+            snapshot_result = await daemon_control("element_snapshot", group_id=group_id, capture_id=capture_id)
+        except Exception as exc:
+            raise _error("snapshot_failed", str(exc), 503) from exc
+        normalized = normalize_snapshot(snapshot_result)
+        resolved = resolve_locator(normalized, locator.model_dump(mode="json"))
+        return {
+            "ok": True,
+            "result": {
+                "valid": resolved.get("status") == "unique",
+                "status": resolved.get("status"),
+                "confidence": resolved.get("confidence"),
+                "match_count": resolved.get("match_count", 0),
+                "locator": locator.model_dump(mode="json"),
+                "matches": resolved.get("matches", []),
+                "warnings": normalized.get("warnings", []),
+            },
+        }
+
+    @group_router.post("/element-picker/resolve")
+    async def resolve_element_locator(group_id: str, locator: ElementLocator) -> Dict[str, Any]:
+        # Alias with an explicit, UI-friendly status used by the editor's
+        # "测试定位" action.
+        return await validate_locator(group_id, locator)
 
     return [global_router, group_router]
 
 
 def _extract_elements(result: Dict[str, Any]) -> list[Dict[str, Any]]:
-    # MCP text is intentionally parsed server-side; clients only receive normalized items.
-    items: list[Dict[str, Any]] = []
-    for content in result.get("content", []) if isinstance(result, dict) else []:
-        if not isinstance(content, dict) or content.get("type") != "text":
-            continue
-        try:
-            payload = json.loads(str(content.get("text") or ""))
-        except ValueError:
-            continue
-        candidates = payload.get("elements") if isinstance(payload, dict) else payload
-        if isinstance(candidates, list):
-            for item in candidates:
-                if isinstance(item, dict):
-                    items.append({
-                        "id": str(item.get("id") or uuid.uuid4().hex[:8]),
-                        "window_name": str(item.get("window_name") or item.get("window") or ""),
-                        "name": str(item.get("name") or item.get("text") or ""),
-                        "control_type": str(item.get("control_type") or item.get("type") or ""),
-                        "bounds": item.get("bounds") if isinstance(item.get("bounds"), dict) else None,
-                    })
-    return items
+    return normalize_snapshot(result).get("elements", [])
 
 
 def _extract_image(result: Dict[str, Any]) -> str:

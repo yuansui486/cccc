@@ -87,6 +87,8 @@ export const computerControlApi = {
   requests: (groupId: string) => apiJson<{ requests: ComputerControlRequest[] }>(`${groupRoot(groupId)}/requests`),
   approveRequest: (groupId: string, requestId: string) => apiJson<Record<string, unknown>>(`${groupRoot(groupId)}/requests/${encodeURIComponent(requestId)}/approve`, { method: "POST" }),
   rejectRequest: (groupId: string, requestId: string) => apiJson<Record<string, unknown>>(`${groupRoot(groupId)}/requests/${encodeURIComponent(requestId)}/reject`, { method: "POST" }),
+  captureElements: (groupId: string) => apiJson<{ capture_id: string; elements: Array<Record<string, unknown>>; warnings?: string[]; image_url?: string | null }>(`${groupRoot(groupId)}/element-picker/capture`, { method: "POST" }),
+  validateElement: (groupId: string, locator: Record<string, unknown>) => apiJson<{ valid: boolean; status?: string; confidence?: string; match_count?: number; matches?: Array<Record<string, unknown>>; warnings?: string[] }>(`${groupRoot(groupId)}/element-picker/validate`, { method: "POST", body: JSON.stringify(locator) }),
 };
 
 export type ComputerControlApi = typeof computerControlApi;

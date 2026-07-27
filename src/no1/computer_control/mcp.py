@@ -164,18 +164,36 @@ def validate_workflow_tools(definition: Any, catalog: Sequence[Dict[str, Any]]) 
             continue
         arguments = dict(getattr(node, "arguments", {}) or {})
         target = getattr(node, "target", None)
-        if tool.lower() in {"click", "type"} and not any(key in arguments for key in ("loc", "label")):
-            label = str(getattr(target, "name", "") or getattr(target, "text", "") or "") if target is not None else ""
-            if label:
-                arguments["label"] = label
-            else:
-                errors.append(f"步骤“{title}”缺少操作目标，请设置位置、元素标签或稳定目标")
+        if tool.lower() in {"click", "type"}:
+            has_semantic_target = any(key in arguments for key in ("label", "element_id"))
+            has_coordinate_target = any(key in arguments for key in ("loc", "x", "y"))
+            if target is not None and not has_semantic_target and not has_coordinate_target:
+                # The runner resolves the locator against a fresh Snapshot and
+                # supplies the tool-specific argument at execution time.
+                label = str(getattr(target, "name", "") or getattr(target, "text", "") or "")
+                if label:
+                    arguments["label"] = label
+            elif not has_semantic_target and has_coordinate_target and target is None:
+                # Coordinates are retained only for explicitly opted-in legacy
+                # workflows. New recordings always persist a locator instead.
+                if arguments.get("coordinate_fallback") is not True:
+                    errors.append(f"步骤“{title}”仅使用绝对坐标；请先选择稳定元素，或显式开启受控坐标兜底")
+                    continue
+            elif not has_semantic_target and not has_coordinate_target and target is None:
+                errors.append(f"步骤“{title}”缺少操作目标，请设置稳定元素或受控坐标兜底")
                 continue
         schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {}
         try:
-            validate_arguments_against_schema(tool, arguments, schema)
+            schema_arguments = {key: value for key, value in arguments.items() if key != "coordinate_fallback"}
+            validate_arguments_against_schema(tool, schema_arguments, schema)
         except ValueError as exc:
-            errors.append(f"步骤“{title}”：{exc}")
+            message = str(exc)
+            # A locator supplies the required label/loc only after the live
+            # Snapshot is resolved at runtime. Preserve validation for every
+            # other argument/schema error.
+            target_only_requirement = target is not None and not any(key in schema_arguments for key in ("loc", "label")) and any(token in message for token in ("loc 为必填参数", "label 为必填参数", "loc is required", "label is required"))
+            if not target_only_requirement:
+                errors.append(f"步骤“{title}”：{exc}")
     if errors:
         raise ValueError("工作流校验失败：" + "；".join(errors[:20]))
 
@@ -223,10 +241,10 @@ class WindowsMCPSession:
         future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
         return await asyncio.wrap_future(future)
 
-    def _on_owner_sync(self, coroutine: Any, *, timeout: float) -> Any:
+    def _on_owner_sync(self, coroutine: Any, *, timeout: Optional[float]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
         try:
-            return future.result(timeout=timeout)
+            return future.result(timeout=None if timeout is None else max(0.0, float(timeout)))
         except concurrent.futures.TimeoutError:
             future.cancel()
             raise TimeoutError("Windows-MCP owner loop request timed out") from None
@@ -340,7 +358,7 @@ class WindowsMCPSession:
         process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
         await process.stdin.drain()
 
-    async def _request_unlocked(self, method: str, params: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
+    async def _request_unlocked(self, method: str, params: Dict[str, Any], *, timeout: Optional[float]) -> Dict[str, Any]:
         process = self._process
         if process is None or process.stdin is None or process.stdout is None or process.returncode is not None:
             raise MCPUnavailable(self._failure_detail("Windows-MCP is not running"))
@@ -349,13 +367,14 @@ class WindowsMCPSession:
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
         process.stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
         await process.stdin.drain()
-        deadline = asyncio.get_running_loop().time() + timeout
+        deadline = None if timeout is None or float(timeout) <= 0 else asyncio.get_running_loop().time() + float(timeout)
         while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
+            remaining = None if deadline is None else deadline - asyncio.get_running_loop().time()
+            if remaining is not None and remaining <= 0:
                 raise TimeoutError(f"Windows-MCP request timed out: {method}")
             try:
-                line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
+                read = process.stdout.readline()
+                line = await read if remaining is None else await asyncio.wait_for(read, timeout=remaining)
             except ValueError as exc:
                 if "chunk exceed the limit" in str(exc).lower() or "separator is not found" in str(exc).lower():
                     raise MCPResponseTooLarge(
@@ -380,20 +399,20 @@ class WindowsMCPSession:
             result = response.get("result")
             return result if isinstance(result, dict) else {"value": result}
 
-    async def request(self, method: str, params: Dict[str, Any], *, timeout: float = 60) -> Dict[str, Any]:
+    async def request(self, method: str, params: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
         return await self._on_owner(self._request_owned(method, params, timeout=timeout))
 
-    async def _request_owned(self, method: str, params: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
+    async def _request_owned(self, method: str, params: Dict[str, Any], *, timeout: Optional[float]) -> Dict[str, Any]:
         if not self.running:
             await self._start_owned()
         assert self._lock is not None
         async with self._lock:
             return await self._request_unlocked(method, params, timeout=timeout)
 
-    async def call_tool(self, name: str, arguments: Dict[str, Any], *, timeout: float = 60) -> Dict[str, Any]:
+    async def call_tool(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
         return await self._on_owner(self._call_tool_owned(name, arguments, timeout=timeout))
 
-    async def _call_tool_owned(self, name: str, arguments: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
+    async def _call_tool_owned(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float]) -> Dict[str, Any]:
         try:
             return await self._request_owned("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
         except Exception as exc:
@@ -437,8 +456,9 @@ class WindowsMCPSession:
             )
         )
 
-    def call_tool_sync(self, name: str, arguments: Dict[str, Any], *, timeout: float = 60) -> Dict[str, Any]:
-        return self._on_owner_sync(self._call_tool_owned(name, arguments, timeout=timeout), timeout=timeout + 10)
+    def call_tool_sync(self, name: str, arguments: Dict[str, Any], *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        owner_timeout = None if timeout is None or float(timeout) <= 0 else float(timeout) + 10
+        return self._on_owner_sync(self._call_tool_owned(name, arguments, timeout=timeout), timeout=owner_timeout)
 
     async def catalog(self) -> List[Dict[str, Any]]:
         if not self.running or not self._tools:

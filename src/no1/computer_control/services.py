@@ -29,7 +29,13 @@ class ComputerControlServices:
             self.session,
             fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),
         )
-        self.runner = WorkflowRunner(home, self.store, self.lease, self.session)
+        self.runner = WorkflowRunner(
+            home,
+            self.store,
+            self.lease,
+            self.session,
+            fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),
+        )
         self.scheduler = ComputerControlScheduler(self)
 
 
