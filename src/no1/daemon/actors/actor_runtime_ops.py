@@ -276,8 +276,19 @@ def start_actor_process(
     if runtime == "codex":
         try:
             effective_env.update(_prepare_codex_skill_overlay(group, actor_id, effective_env))
+            from ...computer_control.isolation import codex_windows_mcp_disable_args
+
+            disable_args = codex_windows_mcp_disable_args(effective_env)
+            if effective_cmd and disable_args:
+                additions: List[str] = []
+                for index in range(0, len(disable_args), 2):
+                    pair = disable_args[index : index + 2]
+                    if len(pair) == 2 and pair[1] not in effective_cmd:
+                        additions.extend(pair)
+                effective_cmd = [effective_cmd[0], *additions, *effective_cmd[1:]]
+            effective_env["ONECOLLEAGUE_CODEX_WINDOWS_MCP_DISABLED"] = "1"
         except Exception as e:
-            return {"success": False, "error": f"failed to prepare Codex skill package overlay: {e}"}
+            return {"success": False, "error": f"failed to prepare Codex computer-control isolation: {e}"}
 
     if effective_runner != "headless":
         if not bool(getattr(pty_runner, "PTY_SUPPORTED", False)):

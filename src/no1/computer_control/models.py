@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -9,6 +9,41 @@ NODE_TYPES = frozenset({"start", "action", "condition", "wait", "loop", "approva
 TRIGGER_TYPES = frozenset({"cron", "interval", "event", "file", "element"})
 SECRET_REF_RE = re.compile(r"^\$\{secret:[A-Za-z_][A-Za-z0-9_]*\}$")
 TEMPLATE_REF_RE = re.compile(r"^\$\{(?:inputs|steps)\.[A-Za-z0-9_.-]+\}$")
+
+
+def computer_control_permissions(value: Dict[str, Any]) -> Dict[str, bool]:
+    return {
+        "allow_high_risk": value.get("allow_high_risk") is not False,
+        "allow_publish": value.get("allow_publish") is not False,
+        "allow_trust": value.get("allow_trust") is not False,
+        "allow_unattended_triggers": value.get("allow_unattended_triggers") is not False,
+    }
+
+
+class SuccessAssertion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(default="result", pattern=r"^(result|steps\.[A-Za-z0-9_.-]+)$")
+    path: str = Field(default="", max_length=500)
+    operator: Literal["exists", "truthy", "equals", "contains"] = "truthy"
+    expected: Any = None
+
+
+class ElementLocator(BaseModel):
+    window_name: str = Field(default="", max_length=500)
+    control_type: str = Field(default="", max_length=100)
+    name: str = Field(default="", max_length=500)
+    text: str = Field(default="", max_length=500)
+    match: Literal["exact", "contains", "regex"] = "exact"
+    dom: bool = False
+    monitor: Optional[int] = Field(default=None, ge=0, le=32)
+    position_anchor: Optional[Dict[str, float]] = None
+
+    @model_validator(mode="after")
+    def require_identity(self) -> "ElementLocator":
+        if not any((self.window_name, self.control_type, self.name, self.text)):
+            raise ValueError("locator requires at least one stable attribute")
+        return self
 
 
 class WorkflowNode(BaseModel):
@@ -19,9 +54,11 @@ class WorkflowNode(BaseModel):
     title: str = Field(default="", max_length=200)
     tool: str = Field(default="", max_length=200)
     arguments: Dict[str, Any] = Field(default_factory=dict)
-    success_condition: str = Field(default="", max_length=1000)
+    target: Optional[ElementLocator] = None
+    success_condition: Union[str, SuccessAssertion] = ""
     condition: str = Field(default="", max_length=1000)
     timeout_seconds: int = Field(default=60, ge=1, le=600)
+    duration_seconds: Optional[float] = Field(default=None, ge=0, le=600)
     retries: int = Field(default=0, ge=0, le=3)
     adaptive: bool = True
     max_iterations: Optional[int] = Field(default=None, ge=1, le=100)
@@ -36,6 +73,17 @@ class WorkflowNode(BaseModel):
         if self.type == "loop" and self.max_iterations is None:
             raise ValueError("loop nodes require max_iterations")
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_common_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        if "next" in value:
+            raise ValueError("node.next is not supported; declare routing in top-level edges with source and target")
+        if str(value.get("type") or "") == "wait" and "duration" in value:
+            raise ValueError("wait nodes use duration_seconds, not duration")
+        return value
 
 
 class WorkflowEdge(BaseModel):
@@ -63,9 +111,20 @@ class WorkflowDefinition(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
-    inputs: Dict[str, Any] = Field(default_factory=dict)
-    nodes: List[WorkflowNode] = Field(min_length=2, max_length=200)
-    edges: List[WorkflowEdge] = Field(default_factory=list, max_length=800)
+    inputs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Default run inputs. Action arguments reference them with exact ${inputs.name} strings.",
+    )
+    nodes: List[WorkflowNode] = Field(
+        min_length=2,
+        max_length=200,
+        description="Workflow steps. Routing is declared only in the top-level edges array.",
+    )
+    edges: List[WorkflowEdge] = Field(
+        default_factory=list,
+        max_length=800,
+        description="Directed routes between nodes using source, target, and an optional branch.",
+    )
     triggers: List[WorkflowTrigger] = Field(default_factory=list, max_length=50)
     save_screenshots: bool = True
     max_run_seconds: int = Field(default=1800, ge=10, le=1800)
@@ -82,6 +141,8 @@ class WorkflowDefinition(BaseModel):
         if not ends:
             raise ValueError("workflow requires at least one end node")
         known = set(ids)
+        if len(known) > 1 and not self.edges:
+            raise ValueError("workflow requires top-level edges with source and target; node.next is not supported")
         outgoing: Dict[str, List[str]] = {node_id: [] for node_id in ids}
         for edge in self.edges:
             if edge.source not in known or edge.target not in known:
@@ -110,8 +171,21 @@ class WorkflowDefinition(BaseModel):
             stack.extend(reverse[node_id])
         if known - can_end:
             raise ValueError("every node must be able to reach an end node")
+        self._reject_mustache_references(self.model_dump())
         self._reject_plain_secrets(self.model_dump())
         return self
+
+    @classmethod
+    def _reject_mustache_references(cls, value: Any, path: str = "") -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                cls._reject_mustache_references(child, child_path)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                cls._reject_mustache_references(child, f"{path}[{index}]")
+        elif isinstance(value, str) and re.search(r"\{\{\s*(?:inputs|steps)\.", value):
+            raise ValueError(f"template reference at {path} must use ${{inputs.name}} or ${{steps.node.field}}, not mustache syntax")
 
     @classmethod
     def _reject_plain_secrets(cls, value: Any, path: str = "") -> None:
@@ -147,20 +221,3 @@ class WorkflowRunRequest(BaseModel):
 class TrustRequest(BaseModel):
     version: int = Field(ge=1)
     permissions: List[str] = Field(default_factory=lambda: ["all_windows_mcp_tools"])
-
-
-class ElementLocator(BaseModel):
-    window_name: str = Field(default="", max_length=500)
-    control_type: str = Field(default="", max_length=100)
-    name: str = Field(default="", max_length=500)
-    text: str = Field(default="", max_length=500)
-    match: Literal["exact", "contains", "regex"] = "exact"
-    dom: bool = False
-    monitor: Optional[int] = Field(default=None, ge=0, le=32)
-    position_anchor: Optional[Dict[str, float]] = None
-
-    @model_validator(mode="after")
-    def require_identity(self) -> "ElementLocator":
-        if not any((self.window_name, self.control_type, self.name, self.text)):
-            raise ValueError("locator requires at least one stable attribute")
-        return self

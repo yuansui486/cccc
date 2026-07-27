@@ -20,10 +20,12 @@ All operations go through daemon IPC to ensure single-writer principle.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Kernel/util imports needed by routing
@@ -72,6 +74,7 @@ from .handlers.onecolleague_core import (  # noqa: F401
     inbox_mark_read,
     project_info,
 )
+
 from .handlers.onecolleague_messaging import (  # noqa: F401
     blob_info,
     blob_path,
@@ -101,6 +104,7 @@ from .handlers.presentation import (  # noqa: F401
     presentation_get,
     presentation_publish,
 )
+
 from .handlers.onecolleague_group_actor import (  # noqa: F401
     _sanitize_actors_for_agent,
     _sanitize_group_doc_for_agent,
@@ -193,6 +197,67 @@ from .handlers.notify import (  # noqa: F401
 )
 from .utils.help_markdown import _select_help_markdown
 from .utils.space_args import _normalize_space_query_options_mcp
+
+_MCP_EXTRA_CONTENT_KEY = "__onecolleague_mcp_extra_content__"
+_COMPUTER_ARTIFACT_MAX_FILES = 4
+_COMPUTER_ARTIFACT_MAX_FILE_BYTES = 16 * 1024 * 1024
+_COMPUTER_ARTIFACT_MAX_TOTAL_BYTES = 32 * 1024 * 1024
+_COMPUTER_ARTIFACT_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+
+def _attach_computer_artifacts(
+    value: Dict[str, Any],
+    *,
+    group_id: str,
+    bucket: str,
+) -> Dict[str, Any]:
+    group = load_group(group_id)
+    if group is None or bucket not in {"recordings", "runs"}:
+        return value
+    root = (group.path / "state" / "computer-control" / bucket).resolve()
+    content: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    total = 0
+
+    def visit(child: Any) -> None:
+        nonlocal total
+        if len(content) >= _COMPUTER_ARTIFACT_MAX_FILES:
+            return
+        if isinstance(child, dict):
+            if str(child.get("type") or "").lower() == "image_artifact":
+                relative = str(child.get("path") or "").strip()
+                mime = str(child.get("mime_type") or "").strip().lower()
+                if not relative or mime not in _COMPUTER_ARTIFACT_MIME_TYPES:
+                    return
+                try:
+                    path = (root / Path(relative)).resolve()
+                    path.relative_to(root)
+                    key = str(path).lower()
+                    if key in seen or not path.is_file():
+                        return
+                    size = path.stat().st_size
+                    if size > _COMPUTER_ARTIFACT_MAX_FILE_BYTES or total + size > _COMPUTER_ARTIFACT_MAX_TOTAL_BYTES:
+                        return
+                    raw = path.read_bytes()
+                except (OSError, ValueError):
+                    return
+                seen.add(key)
+                total += len(raw)
+                content.append({"type": "image", "data": base64.b64encode(raw).decode("ascii"), "mimeType": mime})
+                return
+            for item in child.values():
+                visit(item)
+            return
+        if isinstance(child, list):
+            for item in child:
+                visit(item)
+
+    visit(value)
+    if not content:
+        return value
+    enriched = dict(value)
+    enriched[_MCP_EXTRA_CONTENT_KEY] = content
+    return enriched
 
 
 def _display_tool_name(name: str) -> str:
@@ -333,6 +398,27 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
 
 
 def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if name in {
+        "onecolleague_computer_control_catalog",
+        "onecolleague_computer_recording",
+        "onecolleague_computer_workflow",
+        "onecolleague_computer_run",
+    }:
+        payload = dict(arguments)
+        payload["group_id"] = _resolve_group_id(arguments)
+        payload["command"] = {
+            "onecolleague_computer_control_catalog": "catalog",
+            "onecolleague_computer_recording": "recording",
+            "onecolleague_computer_workflow": "workflow",
+            "onecolleague_computer_run": "run",
+        }[name]
+        if name != "onecolleague_computer_control_catalog":
+            payload["actor_id"] = _resolve_self_actor_id(arguments)
+        timeout = float(arguments.get("timeout_seconds") or 60) + 30 if name == "onecolleague_computer_recording" else 150.0
+        value = _call_daemon_or_raise({"op": "computer_control", "args": payload}, timeout_s=timeout)
+        bucket = "recordings" if name == "onecolleague_computer_recording" else "runs"
+        return _attach_computer_artifacts(value, group_id=payload["group_id"], bucket=bucket)
+
     if name == "onecolleague_computer_control_catalog":
         from ...computer_control.services import get_services
         from ...paths import ensure_home
@@ -343,7 +429,95 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             tools = annotate_catalog(service.session.catalog_sync())
         except Exception as exc:
             raise MCPError(code="windows_mcp_unavailable", message=str(exc)) from exc
-        return {"ok": True, "result": {"setup": service.setup.status(), "lease": service.lease.status(), "tools": tools}}
+        requested_tool = str(arguments.get("tool") or "").strip()
+        if requested_tool:
+            selected = next((tool for tool in tools if str(tool.get("name") or "") == requested_tool), None)
+            if selected is None:
+                raise MCPError(code="tool_not_found", message=f"Windows-MCP tool not found: {requested_tool}")
+            payload = {"tool": selected}
+        else:
+            payload = {
+                "tools": [
+                    {
+                        "name": tool.get("name"),
+                        "title": tool.get("title") or tool.get("name"),
+                        "risk_level": tool.get("risk_level"),
+                        "description": str(tool.get("description") or "")[:240],
+                    }
+                    for tool in tools
+                ]
+            }
+        return {"ok": True, "result": {"setup": service.setup.status(), "lease": service.lease.status(), **payload}}
+
+    if name == "onecolleague_computer_recording":
+        from ...computer_control.services import get_services
+        from ...paths import ensure_home
+
+        gid = _resolve_group_id(arguments)
+        aid = _resolve_self_actor_id(arguments)
+        action = str(arguments.get("action") or "").strip().lower()
+        service = get_services(ensure_home())
+        recording_id = str(arguments.get("recording_id") or "").strip()
+        try:
+            if action == "start":
+                value = service.recordings.start(
+                    gid,
+                    actor_id=aid,
+                    request_id=str(arguments.get("request_id") or "").strip(),
+                    name=str(arguments.get("name") or "电脑控制工作流"),
+                    description=str(arguments.get("description") or ""),
+                    inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
+                    triggers=arguments.get("triggers") if isinstance(arguments.get("triggers"), list) else [],
+                )
+            elif action == "get":
+                value = service.recordings.get(gid, recording_id, actor_id=aid)
+            elif action == "call":
+                value = service.recordings.call(
+                    gid,
+                    recording_id,
+                    actor_id=aid,
+                    tool=str(arguments.get("tool") or "").strip(),
+                    arguments=arguments.get("arguments") if isinstance(arguments.get("arguments"), dict) else {},
+                    workflow_arguments=arguments.get("workflow_arguments") if isinstance(arguments.get("workflow_arguments"), dict) else None,
+                    record=arguments.get("record") is not False,
+                    title=str(arguments.get("title") or ""),
+                    success_condition=arguments.get("success_condition") or "",
+                    timeout_seconds=int(arguments.get("timeout_seconds") or 60),
+                )
+            elif action == "wait":
+                value = service.recordings.wait(
+                    gid,
+                    recording_id,
+                    actor_id=aid,
+                    duration_seconds=float(arguments.get("duration_seconds") or 0),
+                    title=str(arguments.get("title") or ""),
+                )
+            elif action == "update_step":
+                value = service.recordings.update_step(
+                    gid,
+                    recording_id,
+                    actor_id=aid,
+                    step_id=str(arguments.get("step_id") or ""),
+                    patch=arguments.get("patch") if isinstance(arguments.get("patch"), dict) else {},
+                )
+            elif action == "undo":
+                value = service.recordings.undo(gid, recording_id, actor_id=aid)
+            elif action == "commit":
+                value = service.recordings.commit(gid, recording_id, actor_id=aid)
+            elif action == "abort":
+                value = service.recordings.abort(
+                    gid,
+                    recording_id,
+                    actor_id=aid,
+                    reason=str(arguments.get("reason") or "aborted"),
+                )
+            else:
+                raise MCPError(code="invalid_request", message=f"unsupported recording action: {action}")
+        except MCPError:
+            raise
+        except Exception as exc:
+            raise MCPError(code=str(getattr(exc, "code", "recording_failed")), message=str(exc)) from exc
+        return {"ok": True, "result": value}
 
     if name == "onecolleague_computer_workflow":
         from ...computer_control.services import get_services
@@ -472,7 +646,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         aid = _resolve_self_actor_id(arguments)
         action = str(arguments.get("action") or "start").strip().lower()
         service = get_services(ensure_home())
-        if action in {"status", "recover"}:
+        if action in {"status", "recover", "verify"}:
             run_id = str(arguments.get("run_id") or "").strip()
             if not run_id:
                 raise MCPError(code="invalid_request", message="run_id is required")
@@ -484,6 +658,20 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                 raise MCPError(code="permission_denied", message="run belongs to another actor")
             if action == "status":
                 return {"ok": True, "result": current_run}
+            if action == "verify":
+                try:
+                    result = service.runner.verify(
+                        gid,
+                        run_id,
+                        actor_id=aid,
+                        passed=bool(arguments.get("passed")),
+                        summary=str(arguments.get("summary") or ""),
+                        evidence_ids=arguments.get("evidence_ids") if isinstance(arguments.get("evidence_ids"), list) else [],
+                        fingerprint=str(service.setup.status().get("fingerprint") or ""),
+                    )
+                except (ValueError, PermissionError) as exc:
+                    raise MCPError(code="verification_failed", message=str(exc)) from exc
+                return {"ok": True, "result": result}
             recovery_id = str(arguments.get("recovery_id") or "").strip()
             try:
                 result = service.runner.submit_recovery(
@@ -508,6 +696,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         fingerprint = str(service.setup.status().get("fingerprint") or "")
         is_trusted = isinstance(trusted.get(str(version)), dict) and trusted[str(version)].get("fingerprint") == fingerprint
         request_id = str(arguments.get("request_id") or "").strip()
+        request = None
         if not is_trusted:
             from ...computer_control.risk import workflow_risk
 
@@ -521,7 +710,14 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             if risk["level"] == "high" and not bool(request.get("allow_high_risk")) and str(request.get("status") or "") != "approved":
                 service.requests.update(gid, request_id, status="pending_approval", risk=risk)
                 raise MCPError(code="approval_required", message="工作流包含高风险电脑操作，需要用户批准后才能运行", details={"request_id": request_id, "risk": risk})
-        run = service.runner.start_sync(gid, workflow_id, actor_id=aid, version=version, inputs=arguments.get("inputs") or {})
+        run = service.runner.start_sync(
+            gid,
+            workflow_id,
+            actor_id=aid,
+            version=version,
+            inputs=arguments.get("inputs") or {},
+            authorization=request,
+        )
         if request_id:
             try:
                 service.requests.update(gid, request_id, status="running", run_id=run.get("run_id"), workflow_id=workflow_id)

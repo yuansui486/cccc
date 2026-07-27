@@ -9,11 +9,17 @@ def classify_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
     action = str(args.get("action") or args.get("operation") or args.get("mode") or "").lower()
     if any(token in lowered for token in ("powershell", "registry")):
         return "high"
+    if lowered == "app" or lowered.endswith(".app"):
+        return "low" if action in {"list", "get", "inspect", "status", "windows"} else "medium"
     if "filesystem" in lowered or lowered in {"file", "files"}:
         return "low" if action in {"read", "list", "find", "search", "exists", "stat"} else "high"
     if "process" in lowered:
         return "low" if action in {"list", "get", "inspect"} else "high"
-    if any(token in lowered for token in ("click", "type", "keyboard", "mouse", "clipboard", "window")):
+    if "clipboard" in lowered:
+        return "low" if action in {"get", "read"} else "medium"
+    if "move" in lowered:
+        return "medium" if bool(args.get("drag")) else "low"
+    if any(token in lowered for token in ("click", "type", "keyboard", "shortcut", "multiedit", "multiselect", "notification", "mouse", "window")):
         return "medium"
     return "low"
 

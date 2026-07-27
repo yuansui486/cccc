@@ -13,6 +13,8 @@ import { getRecipientDisplayLabel } from "../../utils/displayText";
 import type { ComputerControlPermissions } from "../../stores/useComposerStore";
 import { Laptop, ExternalLink } from "lucide-react";
 import { computerControlApi, type WorkflowManifest } from "../../services/api/computerControl";
+import { useUIStore } from "../../stores";
+import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
 
@@ -144,6 +146,7 @@ export function ChatComposer({
   const [computerWorkflows, setComputerWorkflows] = useState<WorkflowManifest[]>([]);
   const skillMenuRef = useRef<HTMLDivElement | null>(null);
   const { t } = useTranslation('chat');
+  const setActiveTab = useUIStore((state) => state.setActiveTab);
 
   useEffect(() => {
     if (!computerControlEnabled || !selectedGroupId) return;
@@ -1046,7 +1049,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-[var(--color-text-secondary)] hover:bg-black/5 hover:text-[var(--color-text-primary)] dark:hover:bg-white/10"
-                  onClick={() => window.location.assign(`/computer-control/${encodeURIComponent(selectedGroupId)}`)}
+                  onClick={() => setActiveTab(COMPUTER_CONTROL_TAB)}
                   title="打开电脑控制工作流编辑器"
                 >
                   <ExternalLink size={13} />

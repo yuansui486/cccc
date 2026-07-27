@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { computerControlGroupIdFromPath, isComputerControlPath } from "../src/utils/appTabs";
+import { isValidNodePosition, normalizeDefinition } from "../src/pages/computerControl/types";
+
+describe("computer control workspace routing", () => {
+  it("recognizes legacy paths and decodes the group id", () => {
+    expect(isComputerControlPath("/computer-control/g%201")).toBe(true);
+    expect(computerControlGroupIdFromPath("/ui/computer-control/g%201")).toBe("g 1");
+    expect(computerControlGroupIdFromPath("/ui/")).toBe("");
+  });
+});
+
+describe("workflow graph normalization", () => {
+  it("rejects empty and partial positions", () => {
+    expect(isValidNodePosition({})).toBe(false);
+    expect(isValidNodePosition({ x: 10 })).toBe(false);
+    expect(isValidNodePosition({ x: 10, y: 20 })).toBe(true);
+  });
+
+  it("lays out AI nodes with empty positions while preserving edges", () => {
+    const definition = normalizeDefinition({
+      nodes: [
+        { id: "start", type: "start", title: "开始", position: {} },
+        { id: "click", type: "action", title: "点击", position: {} },
+        { id: "end", type: "end", title: "结束", position: {} },
+      ],
+      edges: [
+        { id: "a", source: "start", target: "click" },
+        { id: "b", source: "click", target: "end" },
+      ],
+    });
+    expect(definition.edges.map((edge) => [edge.source, edge.target])).toEqual([
+      ["start", "click"],
+      ["click", "end"],
+    ]);
+    expect(new Set(definition.nodes.map((node) => `${node.position?.x}:${node.position?.y}`)).size).toBe(3);
+    expect(definition.nodes.every((node) => isValidNodePosition(node.position))).toBe(true);
+  });
+
+  it("places branch siblings in separate rows", () => {
+    const definition = normalizeDefinition({
+      nodes: ["start", "left", "right", "end"].map((id) => ({ id, type: "action", title: id, position: {} })),
+      edges: [
+        { id: "a", source: "start", target: "left" },
+        { id: "b", source: "start", target: "right" },
+        { id: "c", source: "left", target: "end" },
+        { id: "d", source: "right", target: "end" },
+      ],
+    });
+    const left = definition.nodes.find((node) => node.id === "left")!;
+    const right = definition.nodes.find((node) => node.id === "right")!;
+    expect(left.position?.x).toBe(right.position?.x);
+    expect(left.position?.y).not.toBe(right.position?.y);
+  });
+});

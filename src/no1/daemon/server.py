@@ -349,6 +349,16 @@ def _normalize_runtime_command(runtime: str, command: list[str]) -> list[str]:
             has_env_inherit = any("shell_environment_policy.inherit" in str(x) for x in cmd)
             if not has_env_inherit:
                 cmd = [cmd[0], "-c", "shell_environment_policy.inherit=all", *cmd[1:]]
+            from ..computer_control.isolation import codex_windows_mcp_disable_args
+
+            disable_args = codex_windows_mcp_disable_args(os.environ)
+            additions: list[str] = []
+            for index in range(0, len(disable_args), 2):
+                pair = disable_args[index : index + 2]
+                if len(pair) == 2 and pair[1] not in cmd:
+                    additions.extend(pair)
+            if additions:
+                cmd = [cmd[0], *additions, *cmd[1:]]
 
     return cmd
 

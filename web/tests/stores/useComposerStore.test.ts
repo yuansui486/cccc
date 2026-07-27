@@ -37,6 +37,10 @@ describe("useComposerStore recipient memory", () => {
       quotedPresentationRef: null,
       priority: "normal",
       replyRequired: false,
+      computerControlEnabled: false,
+      computerControlWorkflowId: "",
+      computerControlActorId: "foreman",
+      computerControlPermissions: { publish: true, trust: true, unattendedTriggers: true },
       destGroupId: "",
       drafts: {},
       normalToTextByGroup: {},
@@ -54,6 +58,25 @@ describe("useComposerStore recipient memory", () => {
     expect(useComposerStore.getState().composerText).toBe("");
     expect(useComposerStore.getState().toText).toBe("@foreman");
     expect(useComposerStore.getState().replyTarget).toBe(null);
+  });
+
+  it("defaults computer-control publishing, trust, and unattended permissions on", () => {
+    useComposerStore.getState().setComputerControlPermission("publish", false);
+    useComposerStore.getState().setComputerControlPermission("trust", false);
+    useComposerStore.getState().setComputerControlPermission("unattendedTriggers", false);
+
+    useComposerStore.getState().clearComposer();
+
+    expect(useComposerStore.getState().computerControlPermissions).toEqual({
+      publish: true,
+      trust: true,
+      unattendedTriggers: true,
+    });
+  });
+
+  it("preserves an explicit permission opt-out until the composer is cleared", () => {
+    useComposerStore.getState().setComputerControlPermission("trust", false);
+    expect(useComposerStore.getState().computerControlPermissions.trust).toBe(false);
   });
 
   it("restores the normal recipient after a reply is canceled", () => {

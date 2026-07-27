@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from ...computer_control.models import computer_control_permissions
 from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, DaemonResponse, SystemNotifyData
 from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
@@ -332,10 +333,7 @@ def handle_send(
         actor_id = str(computer_control_request_raw.get("actor_id") or "").strip()
         workflow_id = str(computer_control_request_raw.get("workflow_id") or "").strip()
         inputs = computer_control_request_raw.get("inputs") if isinstance(computer_control_request_raw.get("inputs"), dict) else {}
-        allow_high_risk = computer_control_request_raw.get("allow_high_risk") is not False
-        allow_publish = computer_control_request_raw.get("allow_publish") is True
-        allow_trust = computer_control_request_raw.get("allow_trust") is True
-        allow_unattended_triggers = computer_control_request_raw.get("allow_unattended_triggers") is True
+        permissions = computer_control_permissions(computer_control_request_raw)
         if mode not in {"create_and_run", "run_existing"}:
             return _error("invalid_computer_control_request", "computer control mode must be create_and_run or run_existing")
         if not actor_id:
@@ -354,10 +352,7 @@ def handle_send(
             "workflow_id": workflow_id,
             "actor_id": actor_id,
             "inputs": inputs,
-            "allow_high_risk": allow_high_risk,
-            "allow_publish": allow_publish,
-            "allow_trust": allow_trust,
-            "allow_unattended_triggers": allow_unattended_triggers,
+            **permissions,
             "status": "accepted",
         }
     quote_text = str(args.get("quote_text") or "").strip()

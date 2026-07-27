@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from "react";
+import React, { memo, useCallback, useEffect, useState } from "react";
 import {
   Background,
   Controls,
@@ -54,10 +54,16 @@ type Props = {
   onConnect: (connection: Connection) => void;
   onSelect: (nodeId: string) => void;
   onToolDrop: (tool: ToolCatalogItem, position: { x: number; y: number }) => void;
+  fitViewKey?: string;
 };
 
-export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onSelect, onToolDrop }: Props) {
+export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onSelect, onToolDrop, fitViewKey }: Props) {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null);
+
+  useEffect(() => {
+    if (!flowInstance || !fitViewKey) return;
+    requestAnimationFrame(() => flowInstance.fitView({ padding: 0.25, duration: 160 }));
+  }, [fitViewKey, flowInstance]);
   const handleDrop = useCallback((event: React.DragEvent, screenToFlowPosition: (point: { x: number; y: number }) => { x: number; y: number }) => {
     event.preventDefault();
     const raw = event.dataTransfer.getData("application/onecolleague-windows-mcp-tool");
@@ -72,7 +78,7 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
   return (
     <ReactFlow<CanvasNode, CanvasEdge>
       nodes={nodes}
-      edges={edges.map((edge) => ({ ...edge, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 } }))}
+      edges={edges.map((edge) => ({ ...edge, style: { stroke: "var(--color-accent-primary)", strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "var(--color-accent-primary)" } }))}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}

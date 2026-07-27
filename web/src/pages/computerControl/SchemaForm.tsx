@@ -13,6 +13,11 @@ function inputClass(): string {
   return "mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm outline-none focus:border-[var(--color-accent-primary)]";
 }
 
+function isComplexSchema(field: ToolSchema): boolean {
+  return field.type === "object" || Boolean(field.oneOf?.length || field.anyOf?.length)
+    || (field.type === "array" && field.items?.type === "object");
+}
+
 export function SchemaForm({ schema, value, onChange }: Props) {
   const properties = schema?.properties || {};
   const required = new Set(schema?.required || []);
@@ -53,8 +58,18 @@ export function SchemaForm({ schema, value, onChange }: Props) {
               </span>
             ) : field.type === "number" || field.type === "integer" ? (
               <input className={inputClass()} type="number" min={field.minimum} max={field.maximum} value={String(current)} onChange={(event) => setField(name, event.target.value === "" ? "" : Number(event.target.value))} />
+            ) : isComplexSchema(field) ? (
+              <textarea
+                className={`${inputClass()} min-h-20 resize-y py-2 font-mono text-xs`}
+                value={typeof current === "string" ? current : JSON.stringify(current, null, 2)}
+                onChange={(event) => {
+                  const raw = event.target.value;
+                  try { setField(name, JSON.parse(raw)); } catch { setField(name, raw); }
+                }}
+                placeholder="请输入 JSON 参数"
+              />
             ) : field.type === "array" ? (
-              <input className={inputClass()} value={Array.isArray(current) ? current.join(", ") : String(current)} onChange={(event) => setField(name, event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} placeholder="多个值用逗号分隔" />
+              <input className={inputClass()} value={Array.isArray(current) ? current.join(", ") : String(current)} onChange={(event) => setField(name, event.target.value.split(",").map((item) => { const itemValue = item.trim(); if (!itemValue) return ""; if (field.items?.type === "number" || field.items?.type === "integer") return Number(itemValue); return itemValue; }).filter((item) => item !== ""))} placeholder="多个值用逗号分隔" />
             ) : (
               <input className={inputClass()} value={String(current)} onChange={(event) => setField(name, event.target.value)} placeholder={`请输入${label}`} />
             )}

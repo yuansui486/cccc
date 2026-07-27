@@ -17,7 +17,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from ... import __version__
-from .server import MCPError, handle_tool_call, list_tools_for_caller
+from .server import MCPError, _MCP_EXTRA_CONTENT_KEY, handle_tool_call, list_tools_for_caller
 from .toolspecs import canonical_mcp_tool_name
 
 _SESSION_SUPPORTS_TOOLS_LIST_CHANGED = False
@@ -192,6 +192,15 @@ def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             result = handle_tool_call(tool_name, arguments)
+            extra_content: List[Dict[str, Any]] = []
+            if isinstance(result, dict) and isinstance(result.get(_MCP_EXTRA_CONTENT_KEY), list):
+                result = dict(result)
+                raw_extra = result.pop(_MCP_EXTRA_CONTENT_KEY, [])
+                extra_content = [
+                    item
+                    for item in raw_extra
+                    if isinstance(item, dict) and str(item.get("type") or "") in {"image", "audio", "resource", "resource_link"}
+                ]
             refresh_required = False
             if isinstance(result, dict):
                 if bool(result.get("refresh_required")):
@@ -212,7 +221,8 @@ def handle_request(req: Dict[str, Any]) -> Dict[str, Any]:
                     {
                         "type": "text",
                         "text": json.dumps(result, ensure_ascii=False, indent=2),
-                    }
+                    },
+                    *extra_content,
                 ],
             })
         except MCPError as e:

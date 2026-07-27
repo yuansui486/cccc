@@ -43,6 +43,7 @@ from .actors.runner_ops import try_handle_headless_op
 from .actors.web_model_runtime_ops import try_handle_web_model_runtime_op
 from .actors.web_model_browser_ops import try_handle_web_model_browser_op
 from .memory.memory_ops import try_handle_memory_op
+from .computer_control_ops import try_handle_computer_control_op
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,10 @@ def dispatch_request(
 ) -> tuple[DaemonResponse, bool]:
     op = str(req.op or "").strip()
     args = req.args or {}
+
+    computer_control_resp = try_handle_computer_control_op(op, args)
+    if computer_control_resp is not None:
+        return computer_control_resp
 
     daemon_core_resp = try_handle_daemon_core_op(
         op,

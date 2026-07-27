@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 
+from ...computer_control.models import WorkflowDefinition
 from .task_types import TASK_TYPE_IDS
 
 ONECOLLEAGUE_MCP_TOOL_PREFIX = "onecolleague_"
@@ -70,6 +71,48 @@ _COMMON_ACTOR = {
 _COMMON_BY = {
     "by": {"type": "string", "description": "Caller actor id override (normally auto-resolved)"},
 }
+
+
+def _computer_workflow_input_schema() -> dict:
+    definition = WorkflowDefinition.model_json_schema(ref_template="#/$defs/{model}")
+    definitions = definition.pop("$defs", {})
+    definition["description"] = (
+        "Complete workflow definition. Put routing in top-level edges; do not use node.next. "
+        "Wait nodes use duration_seconds. Exact argument references use ${inputs.name} or ${steps.node.field}."
+    )
+    definition["examples"] = [
+        {
+            "name": "snapshot",
+            "inputs": {},
+            "nodes": [
+                {"id": "start", "type": "start"},
+                {"id": "snapshot", "type": "action", "tool": "Snapshot", "arguments": {}},
+                {"id": "end", "type": "end"},
+            ],
+            "edges": [
+                {"source": "start", "target": "snapshot"},
+                {"source": "snapshot", "target": "end"},
+            ],
+        }
+    ]
+    schema = _obj(
+        {
+            **_COMMON_GROUP,
+            "workflow_id": {"type": "string"},
+            "action": {
+                "type": "string",
+                "enum": ["list", "get", "validate", "create", "update", "propose", "publish", "trust", "update_triggers"],
+                "default": "list",
+            },
+            "version": {"type": "integer", "minimum": 1},
+            "request_id": {"type": "string", "description": "电脑控制请求 ID；AI 创建或更新草稿时必填。"},
+            "definition": definition,
+            "expected_revision": {"type": "integer", "minimum": 1},
+            "change_note": {"type": "string"},
+        }
+    )
+    schema["$defs"] = definitions
+    return schema
 
 
 MCP_TOOLS = [
@@ -1298,23 +1341,73 @@ MCP_TOOLS = [
     },
     {
         "name": "onecolleague_computer_control_catalog",
-        "description": "Inspect the verified Windows-MCP computer-control tool catalog and health state.",
+        "description": "Inspect a compact Windows-MCP catalog, or request one tool's complete live schema by name.",
         "annotations": {"readOnlyHint": True},
-        "inputSchema": _obj({**_COMMON_GROUP}),
+        "inputSchema": _obj({
+            **_COMMON_GROUP,
+            "tool": {"type": "string", "description": "Optional exact tool name. Returns its complete schema."},
+        }),
+    },
+    {
+        "name": "onecolleague_computer_recording",
+        "description": (
+            "Interactively explore and record a computer task. Start a recording, observe with call(record=false), "
+            "execute and append only successful actions, then commit once before replaying the permanent workflow."
+        ),
+        "inputSchema": _obj({
+            **_COMMON_GROUP,
+            **_COMMON_ACTOR,
+            "action": {
+                "type": "string",
+                "enum": ["start", "call", "wait", "get", "resume", "update_step", "undo", "commit", "abort"],
+            },
+            "request_id": {"type": "string"},
+            "recording_id": {"type": "string"},
+            "full": {"type": "boolean", "default": False, "description": "Get 时返回完整录制详情；默认返回紧凑摘要。"},
+            "evidence_offset": {"type": "integer", "minimum": 0, "default": 0},
+            "evidence_limit": {"type": "integer", "minimum": 0, "maximum": 100, "default": 20},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "inputs": {"type": "object", "additionalProperties": True},
+            "triggers": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+            "tool": {"type": "string"},
+            "arguments": {"type": "object", "additionalProperties": True},
+            "workflow_arguments": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "Optional reusable arguments. Resolved values must exactly equal arguments.",
+            },
+            "record": {"type": "boolean", "default": True},
+            "title": {"type": "string"},
+            "success_condition": {
+                "oneOf": [
+                    {"type": "string"},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "path": {"type": "string"},
+                            "operator": {"type": "string", "enum": ["exists", "truthy", "equals", "contains"]},
+                            "expected": {},
+                        },
+                        "additionalProperties": False,
+                    },
+                ]
+            },
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600},
+            "duration_seconds": {"type": "number", "minimum": 0, "maximum": 600},
+            "step_id": {"type": "string"},
+            "patch": {"type": "object", "additionalProperties": True},
+            "reason": {"type": "string"},
+        }, required=["action"]),
     },
     {
         "name": "onecolleague_computer_workflow",
-        "description": "List or inspect group-isolated computer-control workflow definitions and immutable versions.",
-        "inputSchema": _obj({
-            **_COMMON_GROUP,
-            "workflow_id": {"type": "string"},
-            "action": {"type": "string", "enum": ["list", "get", "validate", "create", "update", "propose", "publish", "trust", "update_triggers"], "default": "list"},
-            "version": {"type": "integer", "minimum": 1},
-            "request_id": {"type": "string", "description": "电脑控制请求 ID；AI 创建或更新草稿时必填。"},
-            "definition": {"type": "object", "additionalProperties": True, "description": "完整工作流定义。"},
-            "expected_revision": {"type": "integer", "minimum": 1},
-            "change_note": {"type": "string"},
-        }),
+        "description": (
+            "List, inspect, validate, or change group-isolated computer-control workflows. "
+            "For definitions, use nodes plus top-level edges. Inspect the live Windows-MCP catalog before choosing action tools."
+        ),
+        "inputSchema": _computer_workflow_input_schema(),
     },
     {
         "name": "onecolleague_computer_run",
@@ -1322,7 +1415,7 @@ MCP_TOOLS = [
         "inputSchema": _obj({
             **_COMMON_GROUP,
             **_COMMON_ACTOR,
-            "action": {"type": "string", "enum": ["start", "status", "recover"], "default": "start"},
+            "action": {"type": "string", "enum": ["start", "status", "recover", "verify", "cancel"], "default": "start"},
             "workflow_id": {"type": "string"},
             "version": {"type": "integer", "minimum": 1},
             "inputs": {"type": "object", "additionalProperties": True},
@@ -1331,6 +1424,10 @@ MCP_TOOLS = [
             "recovery_id": {"type": "string"},
             "tool": {"type": "string"},
             "arguments": {"type": "object", "additionalProperties": True},
+            "passed": {"type": "boolean"},
+            "summary": {"type": "string"},
+            "evidence_ids": {"type": "array", "items": {"type": "string"}},
+            "emergency": {"type": "boolean", "default": False},
         }),
     },
 ]

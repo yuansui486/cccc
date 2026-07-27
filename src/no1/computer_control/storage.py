@@ -44,6 +44,81 @@ class WorkflowStore:
     def state_root(self, group_id: str) -> Path:
         return self._group(group_id).path / "state" / "computer-control"
 
+    def _settings_path(self, group_id: str) -> Path:
+        return self._group(group_id).path / "computer-control" / "settings.json"
+
+    def settings(self, group_id: str, *, current_fingerprint: str = "") -> Dict[str, Any]:
+        path = self._settings_path(group_id)
+        try:
+            value = self._read_json(path)
+        except WorkflowNotFound:
+            value = {
+                "auto_publish_and_trust": True,
+                "approved_fingerprint": str(current_fingerprint or ""),
+                "created_at": time.time(),
+            }
+            self._write_json(path, value)
+        approved = str(value.get("approved_fingerprint") or "")
+        current = str(current_fingerprint or "")
+        if current and not approved:
+            value["approved_fingerprint"] = current
+            value["migrated_at"] = time.time()
+            self._write_json(path, value)
+            approved = current
+        return {
+            **value,
+            "auto_publish_and_trust": value.get("auto_publish_and_trust") is not False,
+            "current_fingerprint": current,
+            "reauthorization_required": bool(current and approved != current),
+        }
+
+    def update_settings(
+        self,
+        group_id: str,
+        *,
+        auto_publish_and_trust: bool,
+        current_fingerprint: str,
+        authorize_current_fingerprint: bool = False,
+    ) -> Dict[str, Any]:
+        with self._lock:
+            current = self.settings(group_id, current_fingerprint=current_fingerprint)
+            current["auto_publish_and_trust"] = bool(auto_publish_and_trust)
+            if authorize_current_fingerprint:
+                if not current_fingerprint:
+                    raise ValueError("Windows-MCP 尚未就绪，不能授权工具指纹")
+                current["approved_fingerprint"] = current_fingerprint
+                current["authorized_at"] = time.time()
+            current["updated_at"] = time.time()
+            for key in ("current_fingerprint", "reauthorization_required"):
+                current.pop(key, None)
+            self._write_json(self._settings_path(group_id), current)
+            return self.settings(group_id, current_fingerprint=current_fingerprint)
+
+    def auto_finalize(self, group_id: str, workflow_id: str, version: int, *, fingerprint: str) -> Dict[str, Any]:
+        settings = self.settings(group_id, current_fingerprint=fingerprint)
+        if not settings.get("auto_publish_and_trust") or settings.get("reauthorization_required"):
+            return self.get(group_id, workflow_id, version=version)
+        if not fingerprint:
+            return self.get(group_id, workflow_id, version=version)
+        self.publish(group_id, workflow_id, version)
+        self.trust(group_id, workflow_id, version, fingerprint=fingerprint, permissions=["all_windows_mcp_tools"])
+        return self.get(group_id, workflow_id, version=version)
+
+    @staticmethod
+    def effective_version(manifest: Dict[str, Any], fingerprint: str) -> Optional[int]:
+        current = int(manifest.get("current_version") or 0)
+        published = int(manifest.get("published_version") or 0)
+        trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
+        if current and published == current:
+            trust = trusted.get(str(current))
+            if isinstance(trust, dict) and str(trust.get("fingerprint") or "") == fingerprint:
+                return current
+        if published:
+            trust = trusted.get(str(published))
+            if isinstance(trust, dict) and str(trust.get("fingerprint") or "") == fingerprint:
+                return published
+        return None
+
     def _workflow_dir(self, group_id: str, workflow_id: str) -> Path:
         if not workflow_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in workflow_id):
             raise WorkflowNotFound("invalid workflow id")
@@ -88,7 +163,14 @@ class WorkflowStore:
         definition = self._read_json(directory / "versions" / f"{target}.json")
         return {"manifest": manifest, "version": target, "definition": definition}
 
-    def create(self, group_id: str, definition: WorkflowDefinition, *, created_by: str = "user") -> Dict[str, Any]:
+    def create(
+        self,
+        group_id: str,
+        definition: WorkflowDefinition,
+        *,
+        created_by: str = "user",
+        source_request_id: str = "",
+    ) -> Dict[str, Any]:
         with self._lock:
             group = self._group(group_id)
             for trigger in definition.triggers:
@@ -107,6 +189,7 @@ class WorkflowStore:
                 "trusted": {},
                 "archived": False,
                 "created_by": created_by,
+                "source_request_id": source_request_id,
                 "created_at": now,
                 "updated_at": now,
             }

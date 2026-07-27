@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import inspect
 import re
 import threading
 import time
@@ -11,7 +13,14 @@ from typing import Any, Dict, List, Optional
 
 from ..util.fs import atomic_write_text
 from .lease import ComputerControlLease, LeaseConflict
-from .mcp import WindowsMCPSession
+from .mcp import (
+    MCPOutcomeUnknown,
+    MCPUnavailable,
+    WindowsMCPSession,
+    normalize_tool_result,
+    validate_arguments_against_schema,
+    validate_workflow_tools,
+)
 from .models import WorkflowDefinition
 from .storage import WorkflowStore
 
@@ -47,11 +56,37 @@ class WorkflowRunner:
             self._sync_thread = thread
             return loop
 
-    def start_sync(self, group_id: str, workflow_id: str, *, actor_id: str, version: Optional[int], inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def _catalog(self) -> List[Dict[str, Any]]:
+        method = getattr(self.session, "catalog", None)
+        if not callable(method):
+            return []
+        value = method()
+        if inspect.isawaitable(value):
+            value = await value
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    def start_sync(
+        self,
+        group_id: str,
+        workflow_id: str,
+        *,
+        actor_id: str,
+        version: Optional[int],
+        inputs: Dict[str, Any],
+        authorization: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Submit a run from the synchronous MCP tool server."""
         loop = self._ensure_sync_loop()
         future = asyncio.run_coroutine_threadsafe(
-            self.start(group_id, workflow_id, actor_id=actor_id, version=version, inputs=inputs), loop
+            self.start(
+                group_id,
+                workflow_id,
+                actor_id=actor_id,
+                version=version,
+                inputs=inputs,
+                authorization=authorization,
+            ),
+            loop,
         )
         return future.result(timeout=15)
 
@@ -135,11 +170,27 @@ class WorkflowRunner:
     async def _wait_for_recovery(self, run: Dict[str, Any], event: Dict[str, Any], *, error: Exception, attempt: int) -> Dict[str, Any]:
         group_id, run_id = str(run["group_id"]), str(run["run_id"])
         recovery_id = "recovery_" + uuid.uuid4().hex[:12]
+        observation: Any = None
+        try:
+            observation = normalize_tool_result("Snapshot", await self.session.call_tool("Snapshot", {}, timeout=60))
+            observation = self._redact_result(observation)
+        except Exception as observation_error:
+            observation = {"error": str(observation_error)[:1000]}
+        catalog = await self._catalog()
+        active_tool = str(event.get("tool") or "")
+        tool_schema = next(
+            (item.get("inputSchema") for item in catalog if isinstance(item, dict) and str(item.get("name") or "") == active_tool),
+            {},
+        )
         recovery = {
             "recovery_id": recovery_id,
             "node_id": event.get("node_id"),
             "attempt": attempt,
             "error": {"code": "tool_call_failed", "message": str(error)[:1000]},
+            "tool": active_tool,
+            "tool_schema": tool_schema if isinstance(tool_schema, dict) else {},
+            "observation": observation,
+            "delivery_status": "pending",
         }
         run["status"] = "recovering"
         run["recovery"] = recovery
@@ -147,8 +198,51 @@ class WorkflowRunner:
         event["recovery_id"] = recovery_id
         self._write(group_id, run)
         self._emit("recovery.required", group_id=group_id, run_id=run_id, actor_id=run.get("actor_id"), **recovery)
+        delivered = False
+        delivery_deadline = time.monotonic() + 60
+        try:
+            from ..contracts.v1 import SystemNotifyData
+            from ..daemon.messaging.delivery import dispatch_system_notify_event_to_actor
+            from ..kernel.group import load_group
+            from ..kernel.ledger import append_event
+
+            group = load_group(group_id)
+            if group is None:
+                raise RuntimeError("工作组不存在")
+            notify = SystemNotifyData(
+                kind="info",
+                priority="high",
+                title="电脑控制需要自适应恢复",
+                message=(
+                    f"运行 {run_id} 的步骤 {event.get('node_id')} 执行失败。"
+                    f"请根据通知 context 中的 recovery_id、工具 Schema 和桌面观察结果，"
+                    "通过 onecolleague_computer_run action=recover 提交修正参数。"
+                ),
+                target_actor_id=str(run.get("actor_id") or ""),
+                context={"kind": "computer_control_recovery", "group_id": group_id, "run_id": run_id, **recovery},
+            )
+            notify_event = append_event(
+                group.ledger_path,
+                kind="system.notify",
+                group_id=group.group_id,
+                scope_key="",
+                by="system",
+                data=notify.model_dump(mode="json"),
+            )
+            while time.monotonic() < delivery_deadline and not delivered:
+                delivered = bool(dispatch_system_notify_event_to_actor(group, event=notify_event, actor_id=str(run.get("actor_id") or ""), async_flush=True))
+                if not delivered:
+                    await asyncio.sleep(2)
+        except Exception as delivery_error:
+            recovery["delivery_error"] = str(delivery_error)[:1000]
+        recovery["delivery_status"] = "delivered" if delivered else "failed"
+        run["recovery"] = recovery
+        self._write(group_id, run)
+        self._emit("recovery.delivery", group_id=group_id, run_id=run_id, recovery_id=recovery_id, status=recovery["delivery_status"])
+        if not delivered:
+            raise RuntimeError("AI 自适应恢复通知无法投递：执行智能体未运行或当前不可接收消息")
         path = self._recovery_path(group_id, run_id, recovery_id)
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             if run_id in self._cancelled:
                 raise asyncio.CancelledError()
@@ -191,9 +285,22 @@ class WorkflowRunner:
             await asyncio.sleep(0.5)
         raise TimeoutError("等待用户确认超时")
 
-    async def start(self, group_id: str, workflow_id: str, *, actor_id: str, version: Optional[int], inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def start(
+        self,
+        group_id: str,
+        workflow_id: str,
+        *,
+        actor_id: str,
+        version: Optional[int],
+        inputs: Dict[str, Any],
+        authorization: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         selected = self.store.get(group_id, workflow_id, version=version)
         definition = WorkflowDefinition.model_validate({k: v for k, v in selected["definition"].items() if k != "change_note"})
+        start_catalog = await self._catalog()
+        if start_catalog:
+            validate_workflow_tools(definition, start_catalog)
+        effective_inputs = self._effective_inputs(definition, inputs)
         run_id = "run_" + uuid.uuid4().hex[:16]
         self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=run_id)
         now = time.time()
@@ -208,12 +315,39 @@ class WorkflowRunner:
             "started_at": now,
             "updated_at": now,
             "events": [],
+            "metrics": {
+                "replay_success": False,
+                "transport_restarts": 0,
+                "transport_restarts_at_start": int(getattr(self.session, "transport_restarts", 0)),
+            },
+            "authorization": {
+                key: authorization.get(key)
+                for key in (
+                    "request_id",
+                    "allow_publish",
+                    "allow_trust",
+                    "allow_unattended_triggers",
+                    "allow_high_risk",
+                    "created_ts",
+                )
+            } if isinstance(authorization, dict) else {},
         }
         self._write(group_id, run)
-        task = asyncio.create_task(self._execute(run, definition, inputs))
+        task = asyncio.create_task(self._execute(run, definition, effective_inputs))
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
         return run
+
+    @staticmethod
+    def _effective_inputs(definition: WorkflowDefinition, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        return {**WorkflowRunner._effective_input_values(definition.inputs), **inputs}
+
+    @staticmethod
+    def _effective_input_values(inputs: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            key: value.get("default") if isinstance(value, dict) and "default" in value else value
+            for key, value in inputs.items()
+        }
 
     @staticmethod
     def _resolve(value: Any, inputs: Dict[str, Any], steps: Dict[str, Any]) -> Any:
@@ -235,6 +369,77 @@ class WorkflowRunner:
         if isinstance(value, list):
             return [WorkflowRunner._resolve(child, inputs, steps) for child in value]
         return value
+
+    @staticmethod
+    def _path(value: Any, path: str) -> tuple[bool, Any]:
+        current = value
+        if not path:
+            return True, current
+        for part in path.split("."):
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+                current = current[int(part)]
+            else:
+                return False, None
+        return True, current
+
+    @classmethod
+    def _assert_success(cls, condition: Any, result: Any, steps: Dict[str, Any]) -> None:
+        if not condition:
+            return
+        if isinstance(condition, str):
+            resolved = cls._resolve(condition, {}, steps)
+            if not bool(resolved):
+                raise AssertionError(f"success condition was not satisfied: {condition}")
+            return
+        payload = condition.model_dump(mode="json") if hasattr(condition, "model_dump") else condition
+        if not isinstance(payload, dict):
+            raise AssertionError("invalid success condition")
+        source = str(payload.get("source") or "result")
+        root = result
+        if source.startswith("steps."):
+            exists, root = cls._path(steps, source[6:])
+            if not exists:
+                raise AssertionError(f"success condition source was not found: {source}")
+        exists, actual = cls._path(root, str(payload.get("path") or ""))
+        operator = str(payload.get("operator") or "truthy")
+        expected = payload.get("expected")
+        passed = exists if operator == "exists" else (
+            exists and bool(actual) if operator == "truthy" else
+            exists and actual == expected if operator == "equals" else
+            exists and (
+                expected in actual if isinstance(actual, (str, list, dict)) else False
+            )
+        )
+        if not passed:
+            raise AssertionError(f"success assertion failed ({operator})")
+
+    def _store_artifacts(self, group_id: str, run_id: str, node_id: str, value: Any) -> Any:
+        counter = 0
+
+        def visit(child: Any) -> Any:
+            nonlocal counter
+            if isinstance(child, dict):
+                if str(child.get("type") or "").lower() == "image" and isinstance(child.get("data"), str):
+                    try:
+                        raw = base64.b64decode(child["data"], validate=True)
+                    except (ValueError, TypeError):
+                        return {key: visit(item) for key, item in child.items()}
+                    counter += 1
+                    mime = str(child.get("mimeType") or child.get("mime_type") or "image/png")
+                    suffix = ".jpg" if "jpeg" in mime else ".webp" if "webp" in mime else ".png"
+                    relative = Path("artifacts") / run_id / f"{node_id}_{counter}{suffix}"
+                    path = self.store.state_root(group_id) / "runs" / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(raw)
+                    return {"type": "image_artifact", "artifact_id": f"{node_id}_{counter}", "path": str(relative), "mime_type": mime, "size": len(raw)}
+                return {key: visit(item) for key, item in child.items()}
+            if isinstance(child, list):
+                return [visit(item) for item in child]
+            return child
+
+        return visit(value)
 
     async def _execute(self, run: Dict[str, Any], definition: WorkflowDefinition, inputs: Dict[str, Any]) -> None:
         group_id, run_id, actor_id = run["group_id"], run["run_id"], run["actor_id"]
@@ -268,25 +473,39 @@ class WorkflowRunner:
                 if node.type == "action":
                     self.lease.require(group_id=group_id, actor_id=actor_id, run_id=run_id, allow_observe=False)
                     arguments = self._resolve(node.arguments, inputs, steps)
+                    if node.target is not None and node.tool.lower() in {"click", "type"} and not any(key in arguments for key in ("loc", "label")):
+                        await self.session.call_tool("Snapshot", {}, timeout=min(node.timeout_seconds, 60))
+                        arguments["label"] = node.target.name or node.target.text
+                    live_catalog = await self._catalog()
+                    catalog_item = next((item for item in live_catalog if str(item.get("name") or "") == node.tool), {})
+                    if catalog_item:
+                        validate_arguments_against_schema(
+                            node.tool,
+                            arguments,
+                            catalog_item.get("inputSchema") if isinstance(catalog_item.get("inputSchema"), dict) else {},
+                        )
                     last_error: Optional[Exception] = None
                     active_tool = node.tool
+                    event["tool"] = active_tool
                     recovered_arguments: Optional[Dict[str, Any]] = None
                     configured_attempts = node.retries + 1
                     for attempt in range(configured_attempts):
                         try:
-                            result = await self.session.call_tool(active_tool, arguments, timeout=node.timeout_seconds)
+                            result = normalize_tool_result(active_tool, await self.session.call_tool(active_tool, arguments, timeout=node.timeout_seconds))
                             last_error = None
                             break
                         except Exception as exc:
                             last_error = exc
                             event["attempt"] = attempt + 1
+                            if isinstance(exc, (MCPUnavailable, MCPOutcomeUnknown)):
+                                raise
                     recovery_attempt = 0
                     while last_error is not None and node.adaptive and recovery_attempt < 3:
                         recovery_attempt += 1
                         patch = await self._wait_for_recovery(run, event, error=last_error, attempt=recovery_attempt)
                         patched_tool = str(patch.get("tool") or active_tool).strip() or active_tool
-                        catalog_names = {str(item.get("name") or "") for item in await self.session.catalog() if isinstance(item, dict)}
-                        if patched_tool not in catalog_names:
+                        catalog_names = {str(item.get("name") or "") for item in await self._catalog() if isinstance(item, dict)}
+                        if catalog_names and patched_tool not in catalog_names:
                             last_error = ValueError(f"unknown Windows-MCP tool in recovery: {patched_tool}")
                             continue
                         from .risk import classify_tool
@@ -297,8 +516,9 @@ class WorkflowRunner:
                             continue
                         active_tool = patched_tool
                         arguments = self._resolve(patch.get("arguments") or {}, inputs, steps)
+                        event["tool"] = active_tool
                         try:
-                            result = await self.session.call_tool(active_tool, arguments, timeout=node.timeout_seconds)
+                            result = normalize_tool_result(active_tool, await self.session.call_tool(active_tool, arguments, timeout=node.timeout_seconds))
                             recovered_arguments = patch.get("arguments")
                             last_error = None
                         except Exception as exc:
@@ -306,6 +526,7 @@ class WorkflowRunner:
                     if last_error is not None:
                         raise last_error
                     steps[current] = result
+                    self._assert_success(node.success_condition, result, steps)
                     if recovered_arguments is not None:
                         event["adaptive_recovery"] = {"attempts": recovery_attempt, "tool": active_tool}
                         try:
@@ -329,7 +550,8 @@ class WorkflowRunner:
                         except Exception:
                             pass
                 elif node.type == "wait":
-                    await asyncio.sleep(min(float(node.timeout_seconds), 600.0))
+                    duration = node.duration_seconds if node.duration_seconds is not None else node.timeout_seconds
+                    await asyncio.sleep(min(float(duration), 600.0))
                 elif node.type == "condition":
                     resolved = self._resolve(node.condition, inputs, steps)
                     branch = "true" if bool(resolved) else "false"
@@ -345,7 +567,8 @@ class WorkflowRunner:
                     event["message"] = "等待用户确认后继续"
                     self._write(group_id, run)
                     await self._wait_for_approval(run, current)
-                event.update({"status": "completed", "finished_at": time.time(), "result": self._redact_result(result)})
+                stored_result = self._store_artifacts(group_id, run_id, current, result) if definition.save_screenshots else result
+                event.update({"status": "completed", "finished_at": time.time(), "result": self._redact_result(stored_result)})
                 self._emit("node.completed", group_id=group_id, run_id=run_id, workflow_id=run.get("workflow_id"), node_id=current, node_type=node.type)
                 if node.type == "end":
                     break
@@ -355,12 +578,29 @@ class WorkflowRunner:
                 if not choices:
                     raise RuntimeError(f"node {current} has no {branch} transition")
                 current = choices[0].target
-            run.update({"status": "completed", "current_node_id": None, "finished_at": time.time(), "updated_at": time.time()})
+            run.update({"status": "awaiting_verification", "current_node_id": None, "finished_at": time.time(), "updated_at": time.time()})
+            run["metrics"]["replay_success"] = True
         except asyncio.CancelledError:
             run.update({"status": "cancelled", "finished_at": time.time(), "updated_at": time.time()})
         except Exception as exc:
+            if run.get("events") and isinstance(run["events"][-1], dict):
+                failed_event = run["events"][-1]
+                if str(failed_event.get("status") or "") in {"running", "recovering"}:
+                    failed_event.update({
+                        "status": "failed",
+                        "finished_at": time.time(),
+                        "error": {"code": str(getattr(exc, "code", "run_failed")), "message": str(exc)[:2000]},
+                    })
             run.update({"status": "failed", "error": {"code": "run_failed", "message": str(exc)}, "finished_at": time.time(), "updated_at": time.time()})
         finally:
+            metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
+            metrics["elapsed_seconds"] = round(time.time() - float(run.get("started_at") or time.time()), 3)
+            metrics["transport_restarts"] = max(
+                0,
+                int(getattr(self.session, "transport_restarts", 0)) - int(metrics.get("transport_restarts_at_start") or 0),
+            )
+            metrics.pop("transport_restarts_at_start", None)
+            run["metrics"] = metrics
             self._write(group_id, run)
             try:
                 from ..kernel.events import publish_event
@@ -386,6 +626,18 @@ class WorkflowRunner:
             return {"truncated": True, "preview": encoded[:10000]}
         return value
 
+    @staticmethod
+    def _contains_failure_marker(value: Any) -> bool:
+        if isinstance(value, dict):
+            if value.get("isError") is True or value.get("is_error") is True:
+                return True
+            return any(WorkflowRunner._contains_failure_marker(child) for child in value.values())
+        if isinstance(value, list):
+            return any(WorkflowRunner._contains_failure_marker(child) for child in value)
+        if isinstance(value, str):
+            return any(int(code) != 0 for code in re.findall(r"(?im)^\s*Status\s+Code\s*:\s*(-?\d+)\s*$", value))
+        return False
+
     async def cancel(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
         run = self.get(group_id, run_id)
         self._cancelled.add(run_id)
@@ -395,4 +647,72 @@ class WorkflowRunner:
         self.lease.release(run_id=run_id, force=emergency)
         if emergency:
             await self.session.stop()
+        return run
+
+    def cancel_sync(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
+        loop = self._ensure_sync_loop()
+        future = asyncio.run_coroutine_threadsafe(self.cancel(group_id, run_id, emergency=emergency), loop)
+        return future.result(timeout=15)
+
+    def verify(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        actor_id: str,
+        passed: bool,
+        summary: str,
+        evidence_ids: List[str],
+        fingerprint: str,
+    ) -> Dict[str, Any]:
+        run = self.get(group_id, run_id)
+        if str(run.get("actor_id") or "") != actor_id:
+            raise PermissionError("run belongs to another actor")
+        if str(run.get("status") or "") != "awaiting_verification":
+            raise ValueError("run is not awaiting verification")
+        failure_markers = [
+            item for item in (run.get("events") if isinstance(run.get("events"), list) else [])
+            if isinstance(item, dict) and (
+                str(item.get("status") or "") in {"failed", "recovering"}
+                or self._contains_failure_marker(item.get("result"))
+                or self._contains_failure_marker(item.get("error"))
+            )
+        ]
+        if passed and (failure_markers or run.get("error") or not bool((run.get("metrics") or {}).get("replay_success"))):
+            raise ValueError("该运行包含失败步骤，不能验证为成功")
+        run["verification"] = {
+            "passed": bool(passed),
+            "summary": str(summary or "")[:2000],
+            "evidence_ids": [str(item)[:200] for item in evidence_ids[:100]],
+            "verified_by": actor_id,
+            "verified_at": time.time(),
+        }
+        if not passed:
+            run["status"] = "verification_failed"
+        else:
+            authorization = run.get("authorization") if isinstance(run.get("authorization"), dict) else {}
+            workflow_id, version = str(run["workflow_id"]), int(run["version"])
+            finalized: Dict[str, Any] = {}
+            has_request_authorization = bool(str(authorization.get("request_id") or "").strip())
+            if has_request_authorization and authorization.get("allow_publish") is not False:
+                finalized["published"] = self.store.publish(group_id, workflow_id, version)
+            if has_request_authorization and authorization.get("allow_trust") is not False:
+                if not fingerprint:
+                    raise ValueError("Windows-MCP fingerprint is unavailable")
+                finalized["trusted"] = self.store.trust(
+                    group_id,
+                    workflow_id,
+                    version,
+                    fingerprint=fingerprint,
+                    permissions=["all_windows_mcp_tools"],
+                )
+            run["finalization"] = {
+                "published": "published" in finalized,
+                "trusted": "trusted" in finalized,
+                "unattended_triggers_authorized": has_request_authorization and authorization.get("allow_unattended_triggers") is not False,
+            }
+            run["status"] = "published" if finalized else "verified"
+        run["updated_at"] = time.time()
+        self._write(group_id, run)
+        self._emit("run.verified", group_id=group_id, run_id=run_id, workflow_id=run.get("workflow_id"), passed=bool(passed), status=run["status"])
         return run

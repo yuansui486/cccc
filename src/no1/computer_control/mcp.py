@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
 import re
 import shutil
 import site
 import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -17,10 +19,165 @@ from .storage import WorkflowStore
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
 WINDOWS_MCP_PACKAGE = "windows-mcp"
+WINDOWS_MCP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
 
 class MCPUnavailable(RuntimeError):
-    pass
+    code = "windows_mcp_transport_failed"
+
+
+class MCPResponseTooLarge(MCPUnavailable):
+    code = "windows_mcp_response_too_large"
+
+
+class MCPOutcomeUnknown(MCPUnavailable):
+    """A mutating request lost its transport after it may have reached Windows."""
+
+    code = "outcome_unknown"
+
+
+class MCPToolExecutionError(RuntimeError):
+    """Windows-MCP completed the RPC request, but the tool itself failed."""
+
+    code = "windows_mcp_tool_failed"
+
+    def __init__(self, message: str, *, tool: str = "", status_code: Optional[int] = None):
+        super().__init__(message)
+        self.tool = tool
+        self.status_code = status_code
+
+
+_STATUS_CODE_RE = re.compile(r"(?im)^\s*Status\s+Code\s*:\s*(-?\d+)\s*$")
+
+
+def _tool_result_text(value: Any) -> str:
+    parts: List[str] = []
+
+    def visit(child: Any) -> None:
+        if isinstance(child, dict):
+            text = child.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+            for key, item in child.items():
+                if key != "text":
+                    visit(item)
+        elif isinstance(child, list):
+            for item in child:
+                visit(item)
+
+    visit(value)
+    return "\n".join(parts).strip()
+
+
+def normalize_tool_result(tool: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a successful MCP result or raise a structured execution error."""
+    if not isinstance(result, dict):
+        raise MCPToolExecutionError("Windows-MCP 返回了无法识别的结果", tool=tool)
+    text = _tool_result_text(result)
+    if result.get("isError") is True or result.get("is_error") is True:
+        raise MCPToolExecutionError(text or "Windows-MCP 工具执行失败", tool=tool)
+    if str(tool or "").lower() in {"powershell", "shell", "command", "runcommand"}:
+        matches = _STATUS_CODE_RE.findall(text)
+        if matches:
+            status_code = int(matches[-1])
+            if status_code != 0:
+                detail = text[-2000:] if text else f"退出状态码 {status_code}"
+                raise MCPToolExecutionError(
+                    f"{tool} 执行失败（退出状态码 {status_code}）：{detail}",
+                    tool=tool,
+                    status_code=status_code,
+                )
+    return result
+
+
+def validate_arguments_against_schema(tool: str, arguments: Dict[str, Any], schema: Dict[str, Any]) -> None:
+    """Validate the useful JSON Schema subset exposed by Windows-MCP."""
+    errors: List[str] = []
+
+    def matches_type(value: Any, expected: str) -> bool:
+        return {
+            "object": isinstance(value, dict),
+            "array": isinstance(value, list),
+            "string": isinstance(value, str),
+            "integer": isinstance(value, int) and not isinstance(value, bool),
+            "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+            "boolean": isinstance(value, bool),
+            "null": value is None,
+        }.get(expected, True)
+
+    def visit(value: Any, node: Any, path: str) -> None:
+        if not isinstance(node, dict):
+            return
+        alternatives = node.get("oneOf") or node.get("anyOf")
+        if isinstance(alternatives, list) and alternatives:
+            for alternative in alternatives:
+                local: List[str] = []
+                before = len(errors)
+                visit(value, alternative, path)
+                if len(errors) == before:
+                    return
+                local.extend(errors[before:])
+                del errors[before:]
+            errors.append(f"{path} 不符合允许的参数格式")
+            return
+        expected = node.get("type")
+        expected_types = [expected] if isinstance(expected, str) else expected if isinstance(expected, list) else []
+        if expected_types and not any(matches_type(value, item) for item in expected_types if isinstance(item, str)):
+            errors.append(f"{path} 类型不正确，应为 {'/'.join(str(item) for item in expected_types)}")
+            return
+        enum = node.get("enum")
+        if isinstance(enum, list) and value not in enum:
+            errors.append(f"{path} 必须是允许值之一")
+        if isinstance(value, dict):
+            required = node.get("required") if isinstance(node.get("required"), list) else []
+            for key in required:
+                if key not in value:
+                    errors.append(f"{path}.{key} 为必填参数")
+            properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+            if node.get("additionalProperties") is False:
+                for key in value:
+                    if key not in properties:
+                        errors.append(f"{path}.{key} 不是该工具支持的参数")
+            for key, child in value.items():
+                if key in properties:
+                    visit(child, properties[key], f"{path}.{key}")
+        elif isinstance(value, list) and isinstance(node.get("items"), dict):
+            for index, child in enumerate(value):
+                visit(child, node["items"], f"{path}[{index}]")
+
+    visit(arguments, schema, "参数")
+    if errors:
+        raise ValueError(f"工具“{tool}”参数无效：" + "；".join(errors[:10]))
+
+
+def validate_workflow_tools(definition: Any, catalog: Sequence[Dict[str, Any]]) -> None:
+    tools = {str(item.get("name") or ""): item for item in catalog if isinstance(item, dict)}
+    errors: List[str] = []
+    for node in getattr(definition, "nodes", []):
+        if getattr(node, "type", "") != "action":
+            continue
+        tool = str(getattr(node, "tool", "") or "")
+        item = tools.get(tool)
+        title = str(getattr(node, "title", "") or getattr(node, "id", "") or tool)
+        if item is None:
+            errors.append(f"步骤“{title}”使用了不存在的工具“{tool}”")
+            continue
+        arguments = dict(getattr(node, "arguments", {}) or {})
+        target = getattr(node, "target", None)
+        if tool.lower() in {"click", "type"} and not any(key in arguments for key in ("loc", "label")):
+            label = str(getattr(target, "name", "") or getattr(target, "text", "") or "") if target is not None else ""
+            if label:
+                arguments["label"] = label
+            else:
+                errors.append(f"步骤“{title}”缺少操作目标，请设置位置、元素标签或稳定目标")
+                continue
+        schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {}
+        try:
+            validate_arguments_against_schema(tool, arguments, schema)
+        except ValueError as exc:
+            errors.append(f"步骤“{title}”：{exc}")
+    if errors:
+        raise ValueError("工作流校验失败：" + "；".join(errors[:20]))
 
 
 def _redact(value: str) -> str:
@@ -44,13 +201,38 @@ class WindowsMCPSession:
         self.executable = executable
         self.version = ""
         self._process: Optional[asyncio.subprocess.Process] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_owner_loop, name="onecolleague-windows-mcp", daemon=True)
         self._request_id = 0
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
         self._logs: deque[str] = deque(maxlen=200)
         self._tools: List[Dict[str, Any]] = []
         self.started_at: Optional[float] = None
+        self.transport_restarts = 0
+        self._thread.start()
+
+    def _run_owner_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._lock = asyncio.Lock()
+        self._loop.run_forever()
+
+    async def _on_owner(self, coroutine: Any) -> Any:
+        if asyncio.get_running_loop() is self._loop:
+            return await coroutine
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        return await asyncio.wrap_future(future)
+
+    def _on_owner_sync(self, coroutine: Any, *, timeout: float) -> Any:
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise TimeoutError("Windows-MCP owner loop request timed out") from None
+
+    def run_sync(self, coroutine: Any, *, timeout: float = 120) -> Any:
+        return self._on_owner_sync(coroutine, timeout=timeout)
 
     def configure(self, executable: Path, version: str) -> None:
         self.executable = executable
@@ -65,14 +247,10 @@ class WindowsMCPSession:
         return list(self._logs)
 
     async def start(self) -> List[Dict[str, Any]]:
-        current = asyncio.get_running_loop()
-        if self._loop is not None and self._loop is not current and self._loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self._start_owned(), self._loop)
-            return await asyncio.wrap_future(future)
-        return await self._start_owned()
+        return await self._on_owner(self._start_owned())
 
     async def _start_owned(self) -> List[Dict[str, Any]]:
-        self._loop = asyncio.get_running_loop()
+        assert self._lock is not None
         async with self._lock:
             if self.running and self._tools:
                 return list(self._tools)
@@ -108,6 +286,7 @@ class WindowsMCPSession:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=WINDOWS_MCP_STDIO_LIMIT_BYTES,
             env=env,
             creationflags=_creation_flags(),
         )
@@ -175,7 +354,14 @@ class WindowsMCPSession:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise TimeoutError(f"Windows-MCP request timed out: {method}")
-            line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
+            except ValueError as exc:
+                if "chunk exceed the limit" in str(exc).lower() or "separator is not found" in str(exc).lower():
+                    raise MCPResponseTooLarge(
+                        f"Windows-MCP response exceeded the {WINDOWS_MCP_STDIO_LIMIT_BYTES // (1024 * 1024)} MiB stdio limit"
+                    ) from exc
+                raise
             if not line:
                 try:
                     await asyncio.wait_for(process.wait(), timeout=1)
@@ -195,34 +381,64 @@ class WindowsMCPSession:
             return result if isinstance(result, dict) else {"value": result}
 
     async def request(self, method: str, params: Dict[str, Any], *, timeout: float = 60) -> Dict[str, Any]:
-        current = asyncio.get_running_loop()
-        if self._loop is not None and self._loop is not current and self._loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self._request_owned(method, params, timeout=timeout), self._loop)
-            return await asyncio.wrap_future(future)
-        return await self._request_owned(method, params, timeout=timeout)
+        return await self._on_owner(self._request_owned(method, params, timeout=timeout))
 
     async def _request_owned(self, method: str, params: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
         if not self.running:
             await self._start_owned()
+        assert self._lock is not None
         async with self._lock:
             return await self._request_unlocked(method, params, timeout=timeout)
 
     async def call_tool(self, name: str, arguments: Dict[str, Any], *, timeout: float = 60) -> Dict[str, Any]:
+        return await self._on_owner(self._call_tool_owned(name, arguments, timeout=timeout))
+
+    async def _call_tool_owned(self, name: str, arguments: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
         try:
-            return await self.request("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
-        except MCPUnavailable as exc:
+            return await self._request_owned("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
+        except Exception as exc:
+            if not self._is_transport_error(exc):
+                raise
             from .risk import classify_tool
 
             # A mutating call may have reached Windows before the stdio process
             # exited. Replaying it could double-click, type twice, or delete twice.
-            await self.stop()
+            await self._stop_owned()
             try:
-                await self.start()
+                await self._start_owned()
+                self.transport_restarts += 1
             except Exception:
                 raise MCPUnavailable(f"Windows-MCP 连接中断且自动恢复失败：{exc}") from exc
             if classify_tool(name, arguments) == "low":
-                return await self.request("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
-            raise MCPUnavailable("Windows-MCP 连接中断；为避免重复操作，本步骤未自动重试。请确认桌面状态后重新运行。") from exc
+                try:
+                    return await self._request_owned("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
+                except Exception as retry_exc:
+                    if self._is_transport_error(retry_exc):
+                        await self._stop_owned()
+                    raise
+            raise MCPOutcomeUnknown("Windows-MCP 连接中断；操作结果未知。请先观察桌面状态，不要直接重试。") from exc
+
+    @staticmethod
+    def _is_transport_error(exc: BaseException) -> bool:
+        if isinstance(exc, (MCPUnavailable, BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return True
+        message = str(exc).lower()
+        return any(
+            token in message
+            for token in (
+                "nonetype' object has no attribute 'send",
+                "event loop is closed",
+                "pipe is being closed",
+                "broken pipe",
+                "connection reset",
+                "connection lost",
+                "chunk exceed the limit",
+                "separator is not found",
+            )
+        )
+
+    def call_tool_sync(self, name: str, arguments: Dict[str, Any], *, timeout: float = 60) -> Dict[str, Any]:
+        return self._on_owner_sync(self._call_tool_owned(name, arguments, timeout=timeout), timeout=timeout + 10)
 
     async def catalog(self) -> List[Dict[str, Any]]:
         if not self.running or not self._tools:
@@ -230,10 +446,12 @@ class WindowsMCPSession:
         return list(self._tools)
 
     def catalog_sync(self, *, timeout: float = 120) -> List[Dict[str, Any]]:
-        if self._loop is not None and self._loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self.catalog(), self._loop)
-            return future.result(timeout=timeout)
-        return asyncio.run(self.catalog())
+        return self._on_owner_sync(self._catalog_owned(), timeout=timeout)
+
+    async def _catalog_owned(self) -> List[Dict[str, Any]]:
+        if not self.running or not self._tools:
+            return await self._start_owned()
+        return list(self._tools)
 
     async def _stop_unlocked(self) -> None:
         process = self._process
@@ -252,14 +470,13 @@ class WindowsMCPSession:
             task.cancel()
 
     async def stop(self) -> None:
-        current = asyncio.get_running_loop()
-        if self._loop is not None and self._loop is not current and self._loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self._stop_owned(), self._loop)
-            await asyncio.wrap_future(future)
-            return
-        await self._stop_owned()
+        await self._on_owner(self._stop_owned())
+
+    def stop_sync(self, *, timeout: float = 10) -> None:
+        self._on_owner_sync(self._stop_owned(), timeout=timeout)
 
     async def _stop_owned(self) -> None:
+        assert self._lock is not None
         async with self._lock:
             await self._stop_unlocked()
 

@@ -7,6 +7,7 @@ from typing import Dict
 from .lease import ComputerControlLease
 from .mcp import WindowsMCPSetup, WindowsMCPSession
 from .runtime import WorkflowRunner
+from .recording import RecordingStore
 from .requests import ComputerRequestStore
 from .scheduler import ComputerControlScheduler
 from .storage import WorkflowStore
@@ -20,6 +21,14 @@ class ComputerControlServices:
         self.lease = ComputerControlLease(home)
         self.session = WindowsMCPSession()
         self.setup = WindowsMCPSetup(home, self.session, self.store)
+        self.recordings = RecordingStore(
+            home,
+            self.store,
+            self.requests,
+            self.lease,
+            self.session,
+            fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),
+        )
         self.runner = WorkflowRunner(home, self.store, self.lease, self.session)
         self.scheduler = ComputerControlScheduler(self)
 

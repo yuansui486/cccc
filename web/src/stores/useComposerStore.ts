@@ -119,7 +119,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   computerControlEnabled: false,
   computerControlWorkflowId: "",
   computerControlActorId: "foreman",
-  computerControlPermissions: { publish: false, trust: false, unattendedTriggers: false },
+  computerControlPermissions: { publish: true, trust: true, unattendedTriggers: true },
   destGroupId: "",
   drafts: {},
   normalToTextByGroup: {},
@@ -217,7 +217,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
         computerControlEnabled: false,
         computerControlWorkflowId: "",
         computerControlActorId: "foreman",
-        computerControlPermissions: { publish: false, trust: false, unattendedTriggers: false },
+        computerControlPermissions: { publish: true, trust: true, unattendedTriggers: true },
         normalToTextByGroup: activeGroupId
           ? {
               ...state.normalToTextByGroup,
@@ -290,7 +290,7 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
       computerControlEnabled: draft?.computerControlEnabled || false,
       computerControlWorkflowId: draft?.computerControlWorkflowId || "",
       computerControlActorId: draft?.computerControlActorId || "foreman",
-      computerControlPermissions: draft?.computerControlPermissions || { publish: false, trust: false, unattendedTriggers: false },
+      computerControlPermissions: draft?.computerControlPermissions || { publish: true, trust: true, unattendedTriggers: true },
       // After switching groups, return delivery to the current group. Cross-group
       // sends must be selected explicitly so restored drafts do not trigger remote fetches.
       destGroupId: normalizedDestGroupId,

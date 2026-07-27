@@ -27,6 +27,7 @@ import { getChatSession } from "./stores/useUIStore";
 import { buildReplyComposerState } from "./utils/chatReply";
 import { subscribeCapabilityChanged } from "./utils/capabilityEvents";
 import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
+import { CHAT_TAB, COMPUTER_CONTROL_TAB, computerControlGroupIdFromPath, isComputerControlPath } from "./utils/appTabs";
 import {
   useGroupStore,
   useUIStore,
@@ -226,7 +227,17 @@ export default function App() {
   });
 
   React.useEffect(() => {
-    if (activeTab === "chat") return;
+    if (!isComputerControlPath(window.location.pathname)) return;
+    const targetGroupId = computerControlGroupIdFromPath(window.location.pathname);
+    if (targetGroupId && targetGroupId !== selectedGroupId && groups.some((group) => String(group.group_id || "") === targetGroupId)) {
+      setSelectedGroupId(targetGroupId);
+      return;
+    }
+    if (!targetGroupId || targetGroupId === selectedGroupId) setActiveTab(COMPUTER_CONTROL_TAB);
+  }, [groups, selectedGroupId, setActiveTab, setSelectedGroupId]);
+
+  React.useEffect(() => {
+    if (activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB) return;
     if (visibleRuntimeActors.some((actor) => String(actor.id || "") === activeTab)) return;
     setActiveTab("chat");
   }, [activeTab, setActiveTab, visibleRuntimeActors]);
@@ -382,6 +393,7 @@ export default function App() {
 
   useAppGroupLifecycle({
     selectedGroupId,
+    activeTab,
     destGroupId,
     sendGroupId,
     hasReplyTarget,

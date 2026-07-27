@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from ....daemon.server import DaemonPaths, call_daemon
 
 from ....computer_control.models import (
     ElementLocator,
@@ -16,12 +17,14 @@ from ....computer_control.models import (
     WorkflowCreateRequest,
     WorkflowRunRequest,
     WorkflowUpdateRequest,
+    computer_control_permissions,
 )
 from ....computer_control.services import ComputerControlServices, get_services
 from ....computer_control.storage import RevisionConflict, WorkflowNotFound
 from ....computer_control.models import WorkflowDefinition
 from ....computer_control.audit import audit
 from ....computer_control.risk import annotate_catalog
+from ....computer_control.mcp import validate_workflow_tools
 from ..schemas import RouteContext, require_admin, require_group, require_user
 
 
@@ -47,55 +50,93 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     global_router = APIRouter(prefix="/api/v1/computer-control", dependencies=[Depends(require_user)])
     group_router = APIRouter(prefix="/api/v1/groups/{group_id}/computer-control", dependencies=[Depends(require_group)])
 
+    async def daemon_control(command: str, **payload: Any) -> Any:
+        response = await asyncio.to_thread(
+            call_daemon,
+            {"op": "computer_control", "args": {"command": command, **payload}},
+            paths=DaemonPaths(ctx.home),
+            timeout_s=180.0,
+        )
+        if not response.get("ok"):
+            error = response.get("error") if isinstance(response.get("error"), dict) else {}
+            raise _error(str(error.get("code") or "computer_control_failed"), str(error.get("message") or "daemon request failed"), 503, error.get("details"))
+        envelope = response.get("result") if isinstance(response.get("result"), dict) else {}
+        return envelope.get("result")
+
+    def current_fingerprint() -> str:
+        fingerprint = str(service.setup.status().get("fingerprint") or "")
+        if fingerprint:
+            return fingerprint
+        try:
+            setup_doc = json.loads((ctx.home / "state" / "computer-control" / "setup.json").read_text(encoding="utf-8"))
+            return str(setup_doc.get("fingerprint") or "") if isinstance(setup_doc, dict) else ""
+        except (OSError, ValueError):
+            return ""
+
+    def with_effective_version(manifest: Dict[str, Any]) -> Dict[str, Any]:
+        return {**manifest, "effective_version": service.store.effective_version(manifest, current_fingerprint())}
+
+    async def validate_definition(definition: WorkflowDefinition) -> None:
+        catalog_result = await daemon_control("catalog", group_id="_global", include_schema=True)
+        validate_workflow_tools(definition, catalog_result.get("tools") if isinstance(catalog_result, dict) else [])
+
+    async def validate_and_finalize(group_id: str, value: Dict[str, Any]) -> Dict[str, Any]:
+        definition = WorkflowDefinition.model_validate({key: child for key, child in value["definition"].items() if key != "change_note"})
+        await validate_definition(definition)
+        finalized = service.store.auto_finalize(
+            group_id,
+            str(value["manifest"]["workflow_id"]),
+            int(value["version"]),
+            fingerprint=current_fingerprint(),
+        )
+        finalized["manifest"] = with_effective_version(finalized["manifest"])
+        return finalized
+
     @global_router.post("/setup/ensure")
     async def setup_ensure(force: bool = False) -> Dict[str, Any]:
-        result = await service.setup.ensure(force=force)
+        result = await daemon_control("setup", group_id="_global", action="ensure", force=force)
         audit(ctx.home, "computer_control.setup", details={"phase": result.get("phase"), "version": result.get("version")})
         _emit("setup", phase=result.get("phase"), version=result.get("version"))
         return {"ok": True, "result": result}
 
     @global_router.get("/setup/status")
     async def setup_status() -> Dict[str, Any]:
-        return {"ok": True, "result": service.setup.status()}
+        return {"ok": True, "result": await daemon_control("setup", group_id="_global", action="status")}
 
     @global_router.post("/setup/repair")
     async def setup_repair() -> Dict[str, Any]:
-        result = await service.setup.repair()
+        result = await daemon_control("setup", group_id="_global", action="repair")
         audit(ctx.home, "computer_control.setup_repair", details={"phase": result.get("phase")})
         _emit("setup_repair", phase=result.get("phase"))
         return {"ok": True, "result": result}
 
     @global_router.post("/setup/upgrade")
     async def setup_upgrade() -> Dict[str, Any]:
-        result = await service.setup.upgrade()
+        result = await daemon_control("setup", group_id="_global", action="upgrade")
         audit(ctx.home, "computer_control.setup_upgrade", details={"version": result.get("version"), "phase": result.get("phase")})
         return {"ok": True, "result": result}
 
     @global_router.get("/catalog")
-    async def catalog() -> Dict[str, Any]:
+    async def catalog(tool: Optional[str] = Query(None)) -> Dict[str, Any]:
         try:
-            tools = annotate_catalog(await service.session.catalog())
+            result = await daemon_control("catalog", group_id="_global", tool=str(tool or "").strip())
         except Exception as exc:
             raise _error("windows_mcp_unavailable", str(exc), 503) from exc
-        status = service.setup.status()
-        return {
-            "ok": True,
-            "result": {
-                "version": status.get("version"),
-                "fingerprint": status.get("fingerprint"),
-                "tools": tools,
-                "healthy": service.session.running,
-            },
-        }
+        status = result.get("setup") if isinstance(result, dict) and isinstance(result.get("setup"), dict) else {}
+        payload = {"version": status.get("version"), "fingerprint": status.get("fingerprint"), "tools": result.get("tools", []), "healthy": status.get("session_running", False)}
+        if isinstance(result.get("tool"), dict):
+            payload["tool"] = result["tool"]
+        return {"ok": True, "result": payload}
 
     @global_router.get("/lease/status")
     async def lease_status() -> Dict[str, Any]:
-        return {"ok": True, "result": service.lease.status()}
+        result = await daemon_control("catalog", group_id="_global")
+        return {"ok": True, "result": result.get("lease", {"active": False})}
 
     @global_router.post("/lease/force-release", dependencies=[Depends(require_admin)])
     async def force_release() -> Dict[str, Any]:
-        released = service.lease.release(run_id="", force=True)
-        await service.session.stop()
+        result = await daemon_control("setup", group_id="_global", action="force_release")
+        released = bool(result.get("released"))
         audit(ctx.home, "computer_control.force_release", details={"released": released})
         _emit("lease.force_released", released=released)
         return {"ok": True, "result": {"released": released}}
@@ -106,12 +147,32 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             items = service.store.list(group_id, include_archived=include_archived)  # type: ignore[name-defined]
         except WorkflowNotFound as exc:
             raise _error("group_not_found", str(exc), 404) from exc
-        return {"ok": True, "result": {"workflows": items}}
+        return {"ok": True, "result": {"workflows": [with_effective_version(item) for item in items]}}
+
+    @group_router.get("/settings")
+    async def computer_control_settings(group_id: str) -> Dict[str, Any]:
+        return {"ok": True, "result": service.store.settings(group_id, current_fingerprint=current_fingerprint())}
+
+    @group_router.put("/settings")
+    async def update_computer_control_settings(group_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            value = service.store.update_settings(
+                group_id,
+                auto_publish_and_trust=payload.get("auto_publish_and_trust") is not False,
+                current_fingerprint=current_fingerprint(),
+                authorize_current_fingerprint=bool(payload.get("authorize_current_fingerprint")),
+            )
+        except ValueError as exc:
+            raise _error("settings_invalid", str(exc), 409) from exc
+        audit(ctx.home, "computer_control.settings_updated", group_id=group_id, details={"auto_publish_and_trust": value.get("auto_publish_and_trust"), "fingerprint_authorized": bool(payload.get("authorize_current_fingerprint"))})
+        return {"ok": True, "result": value}
 
     @group_router.post("/workflows")
     async def create_workflow(group_id: str, request: WorkflowCreateRequest) -> Dict[str, Any]:
         try:
+            await validate_definition(request.definition)
             value = service.store.create(group_id, request.definition)
+            value = await validate_and_finalize(group_id, value)
         except WorkflowNotFound as exc:
             raise _error("group_not_found", str(exc), 404) from exc
         except ValueError as exc:
@@ -121,14 +182,18 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.get("/workflows/{workflow_id}")
     async def get_workflow(group_id: str, workflow_id: str, version: Optional[int] = None) -> Dict[str, Any]:
         try:
-            return {"ok": True, "result": service.store.get(group_id, workflow_id, version=version)}
+            value = service.store.get(group_id, workflow_id, version=version)
+            value["manifest"] = with_effective_version(value["manifest"])
+            return {"ok": True, "result": value}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
     @group_router.put("/workflows/{workflow_id}")
     async def update_workflow(group_id: str, workflow_id: str, request: WorkflowUpdateRequest) -> Dict[str, Any]:
         try:
+            await validate_definition(request.definition)
             value = service.store.update(group_id, workflow_id, request.definition, expected_revision=request.expected_revision, change_note=request.change_note)
+            value = await validate_and_finalize(group_id, value)
         except RevisionConflict as exc:
             raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
         except WorkflowNotFound as exc:
@@ -154,7 +219,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/versions/{version}/rollback")
     async def rollback_workflow(group_id: str, workflow_id: str, version: int) -> Dict[str, Any]:
         try:
-            return {"ok": True, "result": service.store.rollback(group_id, workflow_id, version)}
+            value = service.store.rollback(group_id, workflow_id, version)
+            return {"ok": True, "result": await validate_and_finalize(group_id, value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
@@ -179,6 +245,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         try:
             definition = WorkflowDefinition.model_validate({k: v for k, v in definition_payload.items() if k != "change_note"})
             value = service.store.update(group_id, workflow_id, definition, expected_revision=expected, change_note="trigger update")
+            value = await validate_and_finalize(group_id, value)
         except RevisionConflict as exc:
             raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
         except (WorkflowNotFound, ValueError) as exc:
@@ -197,6 +264,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def accept_optimization_proposal(group_id: str, workflow_id: str, proposal_id: str) -> Dict[str, Any]:
         try:
             value = service.store.decide_proposal(group_id, workflow_id, proposal_id, accept=True)
+            if value.get("accepted_version"):
+                accepted = service.store.get(group_id, workflow_id, version=int(value["accepted_version"]))
+                await validate_and_finalize(group_id, accepted)
         except WorkflowNotFound as exc:
             raise _error("proposal_not_found", str(exc), 404) from exc
         except (RevisionConflict, ValueError) as exc:
@@ -236,7 +306,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/duplicate")
     async def duplicate_workflow(group_id: str, workflow_id: str) -> Dict[str, Any]:
         try:
-            return {"ok": True, "result": service.store.duplicate(group_id, workflow_id)}
+            value = service.store.duplicate(group_id, workflow_id)
+            return {"ok": True, "result": await validate_and_finalize(group_id, value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
 
@@ -255,14 +326,23 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
         manifest = current["manifest"]
-        version = int(request.version or manifest.get("published_version") or 0)
+        effective_version = service.store.effective_version(manifest, current_fingerprint())
+        version = int(request.version or effective_version or 0)
         trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
         trust = trusted.get(str(version)) if isinstance(trusted, dict) else None
-        fingerprint = str(service.setup.status().get("fingerprint") or "")
+        fingerprint = current_fingerprint()
         if not isinstance(trust, dict) or str(trust.get("fingerprint") or "") != fingerprint:
             raise _error("workflow_not_trusted", "publish and trust this exact workflow version before running", 409)
         try:
-            run = await service.runner.start(group_id, workflow_id, actor_id=request.actor_id, version=version, inputs=request.inputs)
+            run = await daemon_control(
+                "run",
+                group_id=group_id,
+                actor_id=request.actor_id,
+                action="start",
+                workflow_id=workflow_id,
+                version=version,
+                inputs=request.inputs,
+            )
         except Exception as exc:
             from ....computer_control.lease import LeaseConflict
 
@@ -296,10 +376,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             "mode": str(payload.get("mode") or ("run_existing" if payload.get("workflow_id") else "create_and_run")),
             "actor_id": str(payload.get("actor_id") or "foreman").strip() or "foreman",
             "inputs": payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {},
-            "allow_high_risk": payload.get("allow_high_risk") is not False,
-            "allow_publish": payload.get("allow_publish") is True,
-            "allow_trust": payload.get("allow_trust") is True,
-            "allow_unattended_triggers": payload.get("allow_unattended_triggers") is True,
+            **computer_control_permissions(payload),
             "created_at": time.time(),
             "created_ts": time.time(),
             "status": "accepted",
@@ -360,12 +437,33 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/runs/{run_id}/cancel")
     async def cancel_run(group_id: str, run_id: str, emergency: bool = Body(False, embed=True)) -> Dict[str, Any]:
         try:
-            result = await service.runner.cancel(group_id, run_id, emergency=emergency)
+            run = service.runner.get(group_id, run_id)
+            result = await daemon_control("run", group_id=group_id, actor_id=str(run.get("actor_id") or "foreman"), action="cancel", run_id=run_id, emergency=emergency)
             audit(ctx.home, "computer_control.emergency_stop" if emergency else "computer_control.run_cancelled", group_id=group_id, details={"run_id": run_id})
             _emit("run.cancelled", group_id=group_id, run_id=run_id, emergency=emergency)
             return {"ok": True, "result": result}
         except KeyError as exc:
             raise _error("run_not_found", run_id, 404) from exc
+
+    @group_router.post("/runs/{run_id}/verify")
+    async def verify_run(group_id: str, run_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            run = service.runner.get(group_id, run_id)
+            result = service.runner.verify(
+                group_id,
+                run_id,
+                actor_id=str(run.get("actor_id") or "foreman"),
+                passed=bool(payload.get("passed")),
+                summary=str(payload.get("summary") or ""),
+                evidence_ids=payload.get("evidence_ids") if isinstance(payload.get("evidence_ids"), list) else [],
+                fingerprint=str(service.setup.status().get("fingerprint") or ""),
+            )
+            audit(ctx.home, "computer_control.run_verified", group_id=group_id, details={"run_id": run_id, "passed": bool(payload.get("passed"))})
+            return {"ok": True, "result": result}
+        except KeyError as exc:
+            raise _error("run_not_found", run_id, 404) from exc
+        except (ValueError, PermissionError) as exc:
+            raise _error("verification_failed", str(exc), 409) from exc
 
     @group_router.post("/runs/{run_id}/approvals/{node_id}")
     async def decide_run_approval(group_id: str, run_id: str, node_id: str, approved: bool = Body(..., embed=True)) -> Dict[str, Any]:
@@ -384,23 +482,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         del request
         capture_id = "cap_" + uuid.uuid4().hex[:12]
         try:
-            service.lease.acquire(group_id=group_id, actor_id="element-picker", run_id=capture_id, observe_only=True)
+            result = await daemon_control("element_snapshot", group_id=group_id, capture_id=capture_id)
         except Exception as exc:
-            from ....computer_control.lease import LeaseConflict
-
-            if isinstance(exc, LeaseConflict):
-                raise _error("computer_control_busy", "computer control is currently occupied", 409, exc.lease) from exc
-            raise
-        try:
-            tools = await service.session.catalog()
-            snapshot_name = next((str(item.get("name")) for item in tools if str(item.get("name") or "").lower() == "snapshot"), "")
-            if not snapshot_name:
-                raise RuntimeError("Windows-MCP Snapshot tool is unavailable")
-            result = await service.session.call_tool(snapshot_name, {})
-        except Exception as exc:
-            service.lease.release(run_id=capture_id, force=True)
             raise _error("snapshot_failed", str(exc), 503) from exc
-        service.lease.release(run_id=capture_id, force=True)
         capture = {"capture_id": capture_id, "created_at": time.time(), "expires_at": time.time() + 300, "result": result, "elements": _extract_elements(result)}
         service.store.state_root(group_id).mkdir(parents=True, exist_ok=True)
         path = service.store.state_root(group_id) / "element-captures" / f"{capture_id}.json"

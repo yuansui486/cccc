@@ -8,9 +8,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import {
-  AlertTriangle,
-  ArrowLeft,
-  Check,
+  AlertTriangle,  Check,
   ChevronDown,
   ChevronUp,
   CircleStop,
@@ -31,7 +29,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { computerControlApi, type ComputerControlRequest, type ComputerSetup, type OptimizationProposal, type WorkflowManifest, type WorkflowRecord, type WorkflowVersion } from "../../services/api/computerControl";
+import { computerControlApi, type ComputerControlRequest, type ComputerControlSettings, type ComputerSetup, type OptimizationProposal, type WorkflowManifest, type WorkflowRecord, type WorkflowVersion } from "../../services/api/computerControl";
 import { SchemaForm } from "./SchemaForm";
 import { toolDescription, toolName } from "./localization";
 import type { CanvasEdge, CanvasNode, ToolCatalogItem, WorkflowDefinition, WorkflowNodeKind, WorkflowNodeModel } from "./types";
@@ -46,11 +44,6 @@ let generatedId = 0;
 function nextId(prefix: string): string {
   generatedId += 1;
   return `${prefix}-${generatedId}`;
-}
-
-function groupIdFromPath(): string {
-  const match = window.location.pathname.match(/^\/computer-control\/([^/]+)/);
-  return decodeURIComponent(match?.[1] || "");
 }
 
 function initialDefinition(): WorkflowDefinition {
@@ -78,7 +71,19 @@ function nodeLabel(kind: WorkflowNodeKind): string {
 }
 
 function runStatusLabel(status: unknown): string {
-  return ({ running: "正在运行", completed: "运行成功", failed: "运行失败", cancelled: "已停止", recovering: "正在自适应恢复", pending_approval: "等待用户确认" } as Record<string, string>)[String(status || "")] || "状态未知";
+  return ({
+    running: "正在回放",
+    exploring: "正在探路",
+    awaiting_verification: "等待验证",
+    verified: "验证通过",
+    published: "已发布并信任",
+    verification_failed: "验证未通过",
+    completed: "运行成功",
+    failed: "运行失败",
+    cancelled: "已停止",
+    recovering: "正在自适应恢复",
+    pending_approval: "等待用户确认",
+  } as Record<string, string>)[String(status || "")] || "状态未知";
 }
 
 function friendlyError(message: unknown): string {
@@ -89,19 +94,23 @@ function friendlyError(message: unknown): string {
     [/windows-mcp exited/i, "Windows-MCP 连接意外中断，系统已尝试恢复。为避免重复操作，请确认桌面状态后重试。"],
     [/revision conflict|revision_conflict/i, "工作流已被其他操作更新，请刷新后再保存。"],
     [/approval_required|需要用户批准/i, "该流程包含高风险操作，需要用户确认后才能继续。"],
+    [/Either loc or label must be provided|缺少操作目标/i, "该步骤没有设置可用的点击或输入目标，请在步骤属性中设置位置或稳定元素。"],
+    [/Status Code:\s*[1-9]|退出状态码/i, "系统命令执行失败，请查看该步骤的错误说明。"],
+    [/恢复通知无法投递/i, "无法联系执行智能体进行自适应恢复，请确认智能体正在运行。"],
   ];
   return rules.find(([pattern]) => pattern.test(text))?.[1] || text || "操作未完成，请稍后重试。";
 }
 
 function toCanvas(definition: WorkflowDefinition): Snapshot {
+  const nodeIds = new Set(definition.nodes.map((node) => node.id));
   return {
     nodes: definition.nodes.map((model) => ({
       id: model.id,
       type: "workflow",
-      position: model.position || { x: 0, y: 0 },
+      position: model.position || { x: 80, y: 80 },
       data: { model },
     })),
-    edges: definition.edges.map((edge) => ({
+    edges: definition.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)).map((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
@@ -123,8 +132,7 @@ function cloneSnapshot(nodes: CanvasNode[], edges: CanvasEdge[]): Snapshot {
   return { nodes: structuredClone(nodes), edges: structuredClone(edges) };
 }
 
-export function ComputerControlStandaloneApp() {
-  const groupId = groupIdFromPath();
+export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
   const [setup, setSetup] = useState<ComputerSetup>({ phase: "not_started", version: "" });
   const [tools, setTools] = useState<ToolCatalogItem[]>([]);
   const [toolSearch, setToolSearch] = useState("");
@@ -145,14 +153,16 @@ export function ComputerControlStandaloneApp() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [trustDialogOpen, setTrustDialogOpen] = useState(false);
+  const [settings, setSettings] = useState<ComputerControlSettings>({ auto_publish_and_trust: true });
 
   const refresh = useCallback(async () => {
     if (!groupId) return;
-    const [status, workflowResponse, runResponse, requestResponse] = await Promise.all([
+    const [status, workflowResponse, runResponse, requestResponse, settingsResponse] = await Promise.all([
       computerControlApi.status(),
       computerControlApi.workflows(groupId),
       computerControlApi.runs(groupId),
       computerControlApi.requests(groupId),
+      computerControlApi.settings(groupId),
     ]);
     if (status.ok) setSetup(status.result);
     if (workflowResponse.ok) {
@@ -162,6 +172,7 @@ export function ComputerControlStandaloneApp() {
     }
     if (runResponse.ok) setRuns(runResponse.result.runs || []);
     if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
+    if (settingsResponse.ok) setSettings(settingsResponse.result);
   }, [groupId]);
 
   const loadCatalog = useCallback(async () => {
@@ -227,12 +238,28 @@ export function ComputerControlStandaloneApp() {
   const selectedManifest = useMemo(() => workflows.find((item) => item.workflow_id === selectedId), [selectedId, workflows]);
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const selectedTool = useMemo(() => tools.find((tool) => tool.name === selectedNode?.data.model.tool), [selectedNode, tools]);
+  const loadToolSchema = useCallback(async (toolNameValue: string) => {
+    if (!toolNameValue) return;
+    const current = tools.find((tool) => tool.name === toolNameValue);
+    if (current && Object.prototype.hasOwnProperty.call(current, "inputSchema")) return;
+    const response = await computerControlApi.catalog(toolNameValue);
+    if (!response.ok || !response.result.tool) return;
+    const detailed = response.result.tool as ToolCatalogItem;
+    setTools((items) => items.map((tool) => tool.name === toolNameValue ? { ...tool, ...detailed } : tool));
+  }, [tools]);
+
+  useEffect(() => {
+    const toolNameValue = selectedNode?.data.model.tool || "";
+    if (selectedNode?.data.model.type !== "action" || !toolNameValue) return undefined;
+    const timer = window.setTimeout(() => void loadToolSchema(toolNameValue), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadToolSchema, selectedNode]);
   const filteredTools = useMemo(() => {
     const search = toolSearch.trim().toLowerCase();
     return tools.filter((tool) => !search || `${tool.name} ${toolName(tool.name)} ${tool.description || ""}`.toLowerCase().includes(search));
   }, [toolSearch, tools]);
   const setupReady = setup.phase === "ready";
-  const isTrusted = Boolean(selectedManifest?.trusted?.[String(selectedManifest.current_version)]);
+  const isTrusted = Boolean(selectedManifest?.effective_version);
   const canLinearReorder = edges.length === Math.max(0, nodes.length - 1) && edges.every((edge) => !edge.data?.branch || edge.data.branch === "next");
 
   function remember() {
@@ -270,6 +297,7 @@ export function ComputerControlStandaloneApp() {
       model.adaptive = true;
     }
     if (kind === "condition") model.condition = "steps.previous.success";
+    if (kind === "wait") model.duration_seconds = 1;
     if (kind === "loop") model.max_iterations = 3;
     const end = nodes.find((node) => node.data.model.type === "end");
     const incoming = end ? edges.find((edge) => edge.target === end.id) : undefined;
@@ -327,6 +355,34 @@ export function ComputerControlStandaloneApp() {
     setBusy("");
   }
 
+  function resetEditor() {
+    const next = initialDefinition();
+    const canvas = toCanvas(next);
+    setRecord(null);
+    setDefinition(next);
+    setNodes(canvas.nodes);
+    setEdges(canvas.edges);
+    setSelectedNodeId("");
+    setHistory([]);
+    setVersions([]);
+    setProposals([]);
+  }
+
+  async function deleteWorkflow() {
+    if (!selectedManifest || busy) return;
+    if (!window.confirm(`确定删除工作流“${selectedManifest.name}”吗？此操作不可撤销。`)) return;
+    setBusy("delete");
+    const response = await computerControlApi.deleteWorkflow(groupId, selectedManifest.workflow_id);
+    if (response.ok) {
+      setSelectedId("");
+      resetEditor();
+      setMessage("工作流已删除");
+      await refresh();
+    } else {
+      setMessage(friendlyError(response.error.message));
+    }
+    setBusy("");
+  }
   async function createWorkflow() {
     setBusy("create");
     const response = await computerControlApi.createWorkflow(groupId, serializeDefinition(initialDefinition()));
@@ -346,7 +402,7 @@ export function ComputerControlStandaloneApp() {
       const next = normalizeDefinition(response.result.definition);
       setRecord(response.result);
       setDefinition(next);
-      setMessage("已保存为新版本");
+      setMessage(settings.auto_publish_and_trust ? "已保存，并自动发布和信任新版本" : "已保存为新版本");
       setHistory([]);
       await refresh();
     } else setMessage(response.error.message);
@@ -364,8 +420,19 @@ export function ComputerControlStandaloneApp() {
   async function run() {
     if (!selectedManifest) return;
     setBusy("run");
-    const response = await computerControlApi.run(groupId, selectedManifest.workflow_id, "foreman", selectedManifest.published_version || undefined);
+    const response = await computerControlApi.run(groupId, selectedManifest.workflow_id, "foreman", selectedManifest.effective_version || undefined);
     if (response.ok) { setMessage("运行已启动"); await refresh(); setSection("runs"); } else setMessage(response.error.message);
+    setBusy("");
+  }
+
+  async function updateAutoTrust(enabled: boolean, authorizeCurrentFingerprint = false) {
+    setBusy("settings");
+    const response = await computerControlApi.updateSettings(groupId, enabled, authorizeCurrentFingerprint);
+    if (response.ok) {
+      setSettings(response.result);
+      setMessage(authorizeCurrentFingerprint ? "已重新授权当前 Windows-MCP 工具版本" : enabled ? "新版本将自动发布并信任" : "已关闭自动发布和信任");
+      await refresh();
+    } else setMessage(friendlyError(response.error.message));
     setBusy("");
   }
 
@@ -448,6 +515,7 @@ export function ComputerControlStandaloneApp() {
             const events = Array.isArray(run.events) ? run.events.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object")) : [];
             const current = [...events].reverse().find((item) => item.status === "running") || events[events.length - 1];
             const error = run.error && typeof run.error === "object" ? run.error as Record<string, unknown> : null;
+            const recovery = run.recovery && typeof run.recovery === "object" ? run.recovery as Record<string, unknown> : null;
             return (
               <div key={String(run.run_id)} className="rounded-md border border-[var(--color-border)] p-3 text-xs">
                 <div className="flex items-center justify-between gap-3">
@@ -456,6 +524,7 @@ export function ComputerControlStandaloneApp() {
                 </div>
                 <div className="mt-1 text-[var(--color-text-secondary)]">执行智能体：{String(run.actor_id || "未记录")} · 已完成 {events.filter((item) => item.status === "completed").length} 个步骤</div>
                 {error && <div className="mt-2 rounded bg-red-500/8 px-2 py-1.5 text-red-700 dark:text-red-300">{friendlyError(error.message)}</div>}
+                {recovery && <div className="mt-2 rounded bg-amber-500/8 px-2 py-1.5 text-amber-800 dark:text-amber-200">自适应恢复：{recovery.delivery_status === "delivered" ? "已通知执行智能体，等待修正" : recovery.delivery_status === "failed" ? "通知投递失败" : "正在准备恢复信息"}</div>}
                 {run.status === "waiting_approval" && Boolean(run.current_node_id) && (
                   <div className="mt-2 flex items-center gap-2 rounded bg-amber-500/8 px-2 py-1.5">
                     <span className="flex-1 text-amber-800 dark:text-amber-200">此步骤要求人工确认</span>
@@ -473,9 +542,9 @@ export function ComputerControlStandaloneApp() {
   );
 
   return (
-    <main className="flex min-h-screen flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+    <main className="flex h-full min-h-0 flex-col bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
       <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3 md:px-6">
-        <div className="flex min-w-0 items-center gap-3"><button title="返回一号同事主页" aria-label="返回一号同事主页" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] hover:bg-black/5" onClick={() => window.location.assign("/")}><ArrowLeft size={16} /></button><Laptop size={22} /><div className="min-w-0"><div className="truncate text-sm font-semibold">电脑控制</div><div className="truncate text-xs text-[var(--color-text-secondary)]">工作组 {groupId || "未选择"}</div></div></div>
+        <div className="flex min-w-0 items-center gap-3"><Laptop size={22} /><div className="min-w-0"><div className="truncate text-sm font-semibold">电脑控制</div><div className="truncate text-xs text-[var(--color-text-secondary)]">工作组 {groupId || "未选择"}</div></div></div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button title="撤销" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] disabled:opacity-40" onClick={undo} disabled={history.length === 0}><Undo2 size={15} /></button>
           <button className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50" onClick={() => void save()} disabled={!record || Boolean(busy)}><Save size={15} />保存</button>
@@ -491,6 +560,12 @@ export function ComputerControlStandaloneApp() {
         {setup.phase === "ready" ? <Check size={15} className="text-emerald-600" /> : setup.phase === "failed" ? <AlertTriangle size={15} className="text-red-600" /> : <LoaderCircle size={15} className="animate-spin text-amber-600" />}
         <div className="min-w-0 flex-1"><span className="font-medium">Windows-MCP {phaseLabel(setup.phase)}</span>{setup.version && <span className="ml-2 text-[var(--color-text-secondary)]">版本 {setup.version}</span>}<div className="truncate text-[var(--color-text-secondary)]">{setup.error?.message || (setup.phase === "ready" ? `已验证 ${setup.tool_count || 0} 个电脑工具` : "首次准备可能需要一到两分钟，可以继续浏览此页面")}</div></div>
         {setup.phase === "failed" ? <button className="inline-flex items-center gap-1 rounded-md border px-2 py-1" onClick={() => void beginSetup("repair")}><Wrench size={13} />修复</button> : <button title="检查更新" className="inline-flex items-center gap-1 rounded-md border px-2 py-1" onClick={() => void beginSetup("upgrade")} disabled={setup.phase !== "ready"}><RefreshCw size={13} />更新</button>}
+      </div>
+
+      <div className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
+        <ShieldCheck size={15} className="shrink-0 text-emerald-600" />
+        <div className="min-w-0 flex-1"><div className="font-medium">自动发布并信任新版本</div><div className="text-[var(--color-text-secondary)]">保存、回滚或接受 AI 优化后立即可运行；不会自动开启无人值守触发器。</div></div>
+        {settings.reauthorization_required ? <button className="shrink-0 rounded-md border border-amber-500/40 px-2.5 py-1.5 text-amber-700 disabled:opacity-40" disabled={Boolean(busy) || !setupReady} onClick={() => void updateAutoTrust(true, true)}>重新授权工具版本</button> : <input aria-label="自动发布并信任新版本" type="checkbox" checked={settings.auto_publish_and_trust} disabled={Boolean(busy)} onChange={(event) => void updateAutoTrust(event.target.checked)} />}
       </div>
 
       {requests.filter((item) => item.status === "pending_approval").map((request) => (
@@ -510,7 +585,7 @@ export function ComputerControlStandaloneApp() {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)_310px]">
         <aside className={`${section === "tools" ? "block" : "hidden md:block"} min-h-0 border-r border-[var(--color-border)] p-3`}>
-          <div className="mb-4"><div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-semibold text-[var(--color-text-secondary)]">工作流</h2><button title="新建工作流" className="rounded-md p-1.5 hover:bg-black/5" onClick={() => void createWorkflow()}><Copy size={15} /></button></div><div className="relative"><select className="h-9 w-full appearance-none rounded-md border border-[var(--color-border)] bg-transparent px-2.5 pr-8 text-sm" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{workflows.map((item) => <option key={item.workflow_id} value={item.workflow_id}>{item.name}</option>)}</select><ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-3" /></div></div>
+          <div className="mb-4"><div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-semibold text-[var(--color-text-secondary)]">工作流</h2><div className="flex items-center gap-1"><button title="新建工作流" className="rounded-md p-1.5 hover:bg-black/5 disabled:opacity-40" onClick={() => void createWorkflow()} disabled={Boolean(busy)}><Copy size={15} /></button><button title="删除当前工作流" aria-label="删除当前工作流" className="rounded-md p-1.5 text-red-600 hover:bg-red-500/10 disabled:opacity-40" onClick={() => void deleteWorkflow()} disabled={!selectedManifest || Boolean(busy)}><Trash2 size={15} /></button></div></div><div className="relative"><select className="h-9 w-full appearance-none rounded-md border border-[var(--color-border)] bg-transparent px-2.5 pr-8 text-sm" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{workflows.map((item) => <option key={item.workflow_id} value={item.workflow_id}>{item.name}</option>)}</select><ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-3" /></div></div>
           {versions.length > 0 && (
             <div className="mb-4 border-t border-[var(--color-border)] pt-3">
               <h2 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">版本历史</h2>
@@ -578,7 +653,7 @@ export function ComputerControlStandaloneApp() {
         </section>
 
         <aside className={`${section === "properties" ? "block" : "hidden md:block"} min-h-0 overflow-auto p-4`}>
-          {selectedNode ? <div><div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-semibold">步骤属性</h2><p className="mt-1 text-xs text-[var(--color-text-secondary)]">{nodeLabel(selectedNode.data.model.type)}</p></div>{!(["start", "end"] as WorkflowNodeKind[]).includes(selectedNode.data.model.type) && <button title="删除步骤" className="rounded-md p-2 text-red-600 hover:bg-red-500/10" onClick={removeSelectedNode}><Trash2 size={15} /></button>}</div><label className="block text-xs font-medium">步骤名称<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm outline-none" value={selectedNode.data.model.title} onChange={(event) => updateNode(selectedNode.id, { title: event.target.value })} /></label>{selectedNode.data.model.type === "action" && <div className="mt-4"><label className="block text-xs font-medium">执行工具<select className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2 text-sm" value={selectedNode.data.model.tool || ""} onChange={(event) => updateNode(selectedNode.id, { tool: event.target.value, arguments: {}, title: toolName(event.target.value) })}>{tools.map((tool) => <option key={tool.name} value={tool.name}>{toolName(tool.name)} ({tool.name})</option>)}</select></label><p className="mt-1 text-xs leading-4 text-[var(--color-text-secondary)]">{selectedTool ? toolDescription(selectedTool.name, selectedTool.description) : "请选择要执行的电脑工具。"}</p><div className="my-4 border-t border-[var(--color-border)]" /><SchemaForm toolName={selectedTool?.name} schema={selectedTool?.inputSchema} value={selectedNode.data.model.arguments || {}} onChange={(argumentsValue) => updateNode(selectedNode.id, { arguments: argumentsValue })} /><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-medium">超时（秒）<input type="number" min={1} max={600} className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2" value={selectedNode.data.model.timeout_seconds || 60} onChange={(event) => updateNode(selectedNode.id, { timeout_seconds: Number(event.target.value) })} /></label><label className="text-xs font-medium">失败重试<select className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2" value={selectedNode.data.model.retries || 0} onChange={(event) => updateNode(selectedNode.id, { retries: Number(event.target.value) })}>{[0, 1, 2, 3].map((value) => <option key={value} value={value}>{value} 次</option>)}</select></label></div><label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs"><span><span className="block font-medium">AI 自适应恢复</span><span className="text-[var(--color-text-secondary)]">界面变化时尝试重新定位</span></span><input type="checkbox" checked={selectedNode.data.model.adaptive !== false} onChange={(event) => updateNode(selectedNode.id, { adaptive: event.target.checked })} /></label></div>}{selectedNode.data.model.type === "condition" && <label className="mt-4 block text-xs font-medium">判断条件<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={selectedNode.data.model.condition || ""} onChange={(event) => updateNode(selectedNode.id, { condition: event.target.value })} /></label>}</div> : <div><h2 className="text-sm font-semibold">流程设置</h2><p className="mt-1 text-xs text-[var(--color-text-secondary)]">选择画布中的步骤后可编辑属性。</p><label className="mt-5 block text-xs font-medium">流程名称<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={definition.name} onChange={(event) => setDefinition((value) => ({ ...value, name: event.target.value }))} /></label><label className="mt-4 block text-xs font-medium">说明<textarea className="mt-1 min-h-20 w-full resize-y rounded-md border border-[var(--color-border)] bg-transparent p-2.5 text-sm" value={definition.description} onChange={(event) => setDefinition((value) => ({ ...value, description: event.target.value }))} /></label><label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs"><span>保存关键截图</span><input type="checkbox" checked={definition.save_screenshots} onChange={(event) => setDefinition((value) => ({ ...value, save_screenshots: event.target.checked }))} /></label></div>}
+          {selectedNode ? <div><div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-semibold">步骤属性</h2><p className="mt-1 text-xs text-[var(--color-text-secondary)]">{nodeLabel(selectedNode.data.model.type)}</p></div>{!(["start", "end"] as WorkflowNodeKind[]).includes(selectedNode.data.model.type) && <button title="删除步骤" className="rounded-md p-2 text-red-600 hover:bg-red-500/10" onClick={removeSelectedNode}><Trash2 size={15} /></button>}</div><label className="block text-xs font-medium">步骤名称<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm outline-none" value={selectedNode.data.model.title} onChange={(event) => updateNode(selectedNode.id, { title: event.target.value })} /></label>{selectedNode.data.model.type === "action" && <div className="mt-4"><label className="block text-xs font-medium">执行工具<select className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2 text-sm" value={selectedNode.data.model.tool || ""} onChange={(event) => updateNode(selectedNode.id, { tool: event.target.value, arguments: {}, title: toolName(event.target.value) })}>{tools.map((tool) => <option key={tool.name} value={tool.name}>{toolName(tool.name)} ({tool.name})</option>)}</select></label><p className="mt-1 text-xs leading-4 text-[var(--color-text-secondary)]">{selectedTool ? toolDescription(selectedTool.name, selectedTool.description) : "请选择要执行的电脑工具。"}</p><div className="my-4 border-t border-[var(--color-border)]" /><SchemaForm toolName={selectedTool?.name} schema={selectedTool?.inputSchema} value={selectedNode.data.model.arguments || {}} onChange={(argumentsValue) => updateNode(selectedNode.id, { arguments: argumentsValue })} /><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-medium">超时（秒）<input type="number" min={1} max={600} className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2" value={selectedNode.data.model.timeout_seconds || 60} onChange={(event) => updateNode(selectedNode.id, { timeout_seconds: Number(event.target.value) })} /></label><label className="text-xs font-medium">失败重试<select className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2" value={selectedNode.data.model.retries || 0} onChange={(event) => updateNode(selectedNode.id, { retries: Number(event.target.value) })}>{[0, 1, 2, 3].map((value) => <option key={value} value={value}>{value} 次</option>)}</select></label></div><label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs"><span><span className="block font-medium">AI 自适应恢复</span><span className="text-[var(--color-text-secondary)]">界面变化时尝试重新定位</span></span><input type="checkbox" checked={selectedNode.data.model.adaptive !== false} onChange={(event) => updateNode(selectedNode.id, { adaptive: event.target.checked })} /></label></div>}{selectedNode.data.model.type === "wait" && <label className="mt-4 block text-xs font-medium">等待时长（秒）<input type="number" min={0} max={600} step={0.5} className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={selectedNode.data.model.duration_seconds ?? 1} onChange={(event) => updateNode(selectedNode.id, { duration_seconds: Number(event.target.value) })} /></label>}{selectedNode.data.model.type === "condition" && <label className="mt-4 block text-xs font-medium">判断条件<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={selectedNode.data.model.condition || ""} onChange={(event) => updateNode(selectedNode.id, { condition: event.target.value })} /></label>}</div> : <div><h2 className="text-sm font-semibold">流程设置</h2><p className="mt-1 text-xs text-[var(--color-text-secondary)]">选择画布中的步骤后可编辑属性。</p><label className="mt-5 block text-xs font-medium">流程名称<input className="mt-1 h-9 w-full rounded-md border border-[var(--color-border)] bg-transparent px-2.5 text-sm" value={definition.name} onChange={(event) => setDefinition((value) => ({ ...value, name: event.target.value }))} /></label><label className="mt-4 block text-xs font-medium">说明<textarea className="mt-1 min-h-20 w-full resize-y rounded-md border border-[var(--color-border)] bg-transparent p-2.5 text-sm" value={definition.description} onChange={(event) => setDefinition((value) => ({ ...value, description: event.target.value }))} /></label><label className="mt-4 flex items-center justify-between rounded-md border border-[var(--color-border)] px-3 py-2 text-xs"><span>保存关键截图</span><input type="checkbox" checked={definition.save_screenshots} onChange={(event) => setDefinition((value) => ({ ...value, save_screenshots: event.target.checked }))} /></label></div>}
         </aside>
 
         {section === "runs" && <section className="block min-h-[420px] md:hidden">{runsPanel}</section>}

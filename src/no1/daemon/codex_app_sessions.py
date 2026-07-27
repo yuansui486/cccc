@@ -663,7 +663,9 @@ class CodexAppSession:
             env = with_node_deprecation_warnings_suppressed(env)
             if not ensure_mcp_installed("codex", self.cwd, auto_mcp_runtimes=("codex",), env=env):
                 raise RuntimeError("failed to install MCP for runtime: codex")
-            self._runtime_command = ["codex", "app-server", "--listen", self.listen_url]
+            from ..computer_control.isolation import codex_windows_mcp_disable_args
+
+            self._runtime_command = ["codex", *codex_windows_mcp_disable_args(env), "app-server", "--listen", self.listen_url]
             popen_command = resolve_subprocess_argv(self._runtime_command)
             self._proc = subprocess.Popen(
                 popen_command,

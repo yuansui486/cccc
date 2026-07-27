@@ -53,6 +53,7 @@ import { ActorAvatar } from "../ActorAvatar";
 import { SortableGroupItem } from "./SortableGroupItem";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../stores/useUIStore";
 import { Laptop } from "lucide-react";
+import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
 
 export interface GroupSidebarProps {
   orderedGroups: GroupMeta[];
@@ -743,10 +744,10 @@ export function GroupSidebar({
 
           <button
             type="button"
-            onClick={() => window.location.assign(`/computer-control/${encodeURIComponent(selectedGroupId)}`)}
+            onClick={() => handleTabSelect(COMPUTER_CONTROL_TAB)}
             title="电脑控制"
             aria-label="电脑控制"
-            className="glass-group-item relative flex h-11 w-11 items-center justify-center rounded-xl transition-all hover:scale-105"
+            className={classNames("relative flex h-11 w-11 items-center justify-center rounded-xl transition-all", activeTab === COMPUTER_CONTROL_TAB ? "glass-group-item-active glow-pulse" : "glass-group-item hover:scale-105")}
           >
             <Laptop size={18} />
           </button>
@@ -953,8 +954,8 @@ export function GroupSidebar({
 
             <button
               type="button"
-              onClick={() => { if (selectedGroupId) window.location.assign(`/computer-control/${encodeURIComponent(selectedGroupId)}`); }}
-              className={navButtonClass(false)}
+              onClick={() => handleTabSelect(COMPUTER_CONTROL_TAB)}
+              className={navButtonClass(activeTab === COMPUTER_CONTROL_TAB)}
               title="电脑控制"
             >
               <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>

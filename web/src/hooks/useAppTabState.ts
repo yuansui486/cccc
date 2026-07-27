@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Actor } from "../types";
+import { CHAT_TAB, COMPUTER_CONTROL_TAB, isWorkspaceTab } from "../utils/appTabs";
 
 export function isChatViewportAtBottom(scrollHeight: number, scrollTop: number, clientHeight: number, threshold = 100): boolean {
   return scrollHeight - scrollTop - clientHeight < threshold;
@@ -44,16 +45,16 @@ export function useAppTabState({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const eventContainerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const activeTabRef = useRef<string>("chat");
+  const activeTabRef = useRef<string>(CHAT_TAB);
   const chatAtBottomRef = useRef<boolean>(true);
   const actorsRef = useRef<Actor[]>([]);
   const [mountedActorIds, setMountedActorIds] = useState<string[]>([]);
 
-  const allTabs = useMemo(() => ["chat", ...runtimeActors.map((actor) => actor.id)], [runtimeActors]);
+  const allTabs = useMemo(() => [CHAT_TAB, COMPUTER_CONTROL_TAB, ...runtimeActors.map((actor) => actor.id)], [runtimeActors]);
 
   const handleTabChange = React.useCallback(
     (newTab: string) => {
-      if (newTab !== "chat") {
+      if (!isWorkspaceTab(newTab)) {
         setMountedActorIds((prev) => (prev.includes(newTab) ? prev : [...prev, newTab]));
       }
       setActiveTab(newTab);
@@ -63,7 +64,7 @@ export function useAppTabState({
 
   useEffect(() => {
     activeTabRef.current = activeTab;
-    if (activeTab !== "chat") return;
+    if (activeTab !== CHAT_TAB) return;
     if (!selectedGroupId) return;
     const el = eventContainerRef.current;
     if (!el) return;
@@ -85,7 +86,7 @@ export function useAppTabState({
   }, [activeTab, selectedGroupId, chatSessionAtBottom, setChatUnreadCount, setShowScrollButton]);
 
   useEffect(() => {
-    if (activeTab !== "chat") return;
+    if (activeTab !== CHAT_TAB) return;
     if (isSmallScreen) return;
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [activeTab, isSmallScreen]);
@@ -97,7 +98,7 @@ export function useAppTabState({
   const renderedActorIds = useMemo(() => {
     const live = new Set(runtimeActors.map((actor) => String(actor.id || "")).filter((id) => id));
     const mountedLiveIds = mountedActorIds.filter((id) => live.has(id));
-    if (activeTab !== "chat" && live.has(activeTab) && !mountedLiveIds.includes(activeTab)) {
+    if (!isWorkspaceTab(activeTab) && live.has(activeTab) && !mountedLiveIds.includes(activeTab)) {
       return [...mountedLiveIds, activeTab];
     }
     return mountedLiveIds;

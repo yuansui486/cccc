@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, type CSSProperties } from "react";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AppHeader } from "../layout/AppHeader";
 import { GroupSidebar } from "../layout/GroupSidebar";
@@ -6,6 +6,8 @@ import { ActorTab } from "../../pages/ActorTab";
 import { ChatTab } from "../../pages/chat";
 import type { Actor, GroupContext, GroupDoc, GroupMeta, GroupRuntimeStatus, TextScale } from "../../types";
 import { SIDEBAR_COLLAPSED_WIDTH } from "../../stores/useUIStore";
+import { CHAT_TAB, COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+const ComputerControlWorkspace = lazy(() => import("../../pages/computerControl/ComputerControlStandaloneApp").then((module) => ({ default: module.ComputerControlWorkspace })));
 
 type AppShellProps = {
   orderedGroups: GroupMeta[];
@@ -307,10 +309,8 @@ export function AppShell({
           onTouchEnd={onTouchEnd}
         >
           <div
-            className={`absolute inset-0 flex min-h-0 flex-col ${
-              activeTab === "chat" ? "" : "invisible pointer-events-none"
-            }`}
-            aria-hidden={activeTab !== "chat"}
+            className={activeTab === CHAT_TAB ? "absolute inset-0 flex min-h-0 flex-col" : "hidden"}
+            aria-hidden={activeTab !== CHAT_TAB}
           >
             <ErrorBoundary>
               <ChatTab
@@ -339,15 +339,19 @@ export function AppShell({
             </ErrorBoundary>
           </div>
 
+          <div className={activeTab === COMPUTER_CONTROL_TAB ? "absolute inset-0 flex min-h-0 flex-col" : "hidden"} aria-hidden={activeTab !== COMPUTER_CONTROL_TAB}>
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">正在加载电脑控制</div>}>
+              <ComputerControlWorkspace groupId={selectedGroupId} />
+            </Suspense>
+          </div>
+
           <div
-            className={`absolute inset-0 flex min-h-0 flex-col ${
-              activeTab === "chat" ? "invisible pointer-events-none" : ""
-            }`}
-            aria-hidden={activeTab === "chat"}
+            className={activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB ? "hidden" : "absolute inset-0 flex min-h-0 flex-col"}
+            aria-hidden={activeTab === CHAT_TAB || activeTab === COMPUTER_CONTROL_TAB}
           >
             {renderedActorIds.map((actorId) => {
               const actor = runtimeActors.find((item) => item.id === actorId) || null;
-              const isVisible = activeTab === actorId && activeTab !== "chat";
+              const isVisible = activeTab === actorId && activeTab !== CHAT_TAB && activeTab !== COMPUTER_CONTROL_TAB;
               const agentState =
                 (groupContext?.agent_states || []).find((item) => item.id === (actor?.id || "")) || null;
 

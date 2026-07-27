@@ -1,7 +1,9 @@
 import { useEffect } from "react";
+import { COMPUTER_CONTROL_TAB } from "../utils/appTabs";
 
 type UseAppGroupLifecycleOptions = {
   selectedGroupId: string;
+  activeTab: string;
   destGroupId: string;
   sendGroupId: string;
   hasReplyTarget: boolean;
@@ -19,6 +21,7 @@ type UseAppGroupLifecycleOptions = {
 
 export function useAppGroupLifecycle({
   selectedGroupId,
+  activeTab,
   destGroupId,
   sendGroupId,
   hasReplyTarget,
@@ -55,7 +58,7 @@ export function useAppGroupLifecycle({
     if (fileInputRef.current) fileInputRef.current.value = "";
     resetDragDrop();
     resetMountedActorIds();
-    setActiveTab("chat");
+    if (activeTab !== COMPUTER_CONTROL_TAB) setActiveTab("chat");
     closeChatWindow();
 
     if (!selectedGroupId) return;

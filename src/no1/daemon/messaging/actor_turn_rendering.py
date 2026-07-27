@@ -51,12 +51,18 @@ def render_computer_control_contract(request: dict[str, Any]) -> str:
     if elevated:
         lines.append(f"- 用户额外授权：{'、'.join(elevated)}。只能用于本请求创建或指定的工作流。")
     lines.extend([
-        "- 先调用 onecolleague_computer_control_catalog 获取实时 Windows-MCP 工具目录。",
-        "- 新建模式必须用 onecolleague_computer_workflow 创建并校验草稿，不得只在回复中描述步骤。",
-        "- 使用 onecolleague_computer_run(action=\"start\") 启动，并用 action=\"status\" 查询至终态；发布、信任和自动触发必须严格遵守上述额外授权。",
-        "- 运行进入 recovering 时，根据错误和当前界面调用 action=\"recover\" 提交本次运行的工具参数修补。",
+        "- 先分析观察点、动作、副作用和成功信号，再读取精简 catalog；需要参数时按工具名查询完整 schema。",
+        "- 新建模式必须先 onecolleague_computer_recording(action=\"start\")，用 call(record=false) 观察桌面。",
+        "- 每次只执行一个动作；成功后立即录入，失败不入稿，并再次观察确认后再推进。Click/Type 前必须确认目标窗口和焦点。",
+        "- 优先使用 App、Process、Screenshot/Snapshot、Click、Type；仅在原生工具已证实不足时使用 PowerShell。",
+        "- 所有正式观察和动作都必须经过 OneColleague 电脑控制工具；禁止用裸 windows-mcp.* 绕过录制、租约或审计。",
+        "- 将用于确认最终结果的 Snapshot 以 record=true 录为最后一个动作，确保完整回放产生可验证截图。",
+        "- 探路完成后 commit 一次生成永久工作流，再用 onecolleague_computer_run 完整回放。",
+        "- 回放到 awaiting_verification 后检查最终证据并调用 action=\"verify\"；验证通过后系统按授权自动发布和信任。",
+        "- Windows-MCP 传输故障或 outcome_unknown 是基础设施状态：不得修改业务参数盲目重试，也不得改用裸工具执行有副作用动作。",
+        "- 新建模式未完成 commit、完整回放和 verify 时，不得将任务标记 done；基础设施故障应保持任务未完成、waiting_on=external，并明确报告阻塞。",
         "- 遇到需要用户批准的高风险操作时停止调用并说明待批准内容。",
-        "- 用户可见回复使用中文，说明草稿、运行结果或明确的阻塞原因。",
+        "- 用户可见回复使用中文，说明录制步骤数、回放和验证结果或明确阻塞原因。",
     ])
     return "\n".join(lines)
 

@@ -153,6 +153,22 @@ This user is not generic. Learn their bar and dislikes; let that shape your defa
 - If enable or use fails, read `diagnostics` and `resolution_plan` before escalating.
 - Ask the user only for real environment or permission blockers.
 
+### Computer Control Workflows
+
+- Analyze observations, actions, side effects, and success signals first. Read the compact `onecolleague_computer_control_catalog`, then query one tool by name for its full schema only when needed.
+- For create-and-run requests, start `onecolleague_computer_recording`. Observe with `call(record=false)`, execute one action at a time, and record only successful actions.
+- An idle recording is suspended instead of discarded. Use `action="resume"` with the same actor and request, then call `Snapshot` before any action. Recordings expire permanently after 30 minutes.
+- Confirm the target window and focus before Click or Type. Prefer App, Process, Screenshot/Snapshot, Click, and Type; use PowerShell only after native tools are proven insufficient.
+- Route every formal observation and action through OneColleague computer-control tools. Never bypass recording, the desktop lease, or audit with bare `windows-mcp.*` calls.
+- Record the final verification Snapshot with `record=true` as the workflow's last action so replay produces inspectable evidence.
+- Commit the recording once, replay the entire permanent workflow, inspect final evidence, then call `onecolleague_computer_run(action="verify")`.
+- A transport error or `outcome_unknown` is infrastructure state: do not submit speculative parameter recovery and do not bypass the proxy with side-effectful bare tools.
+- A create-and-run task is not done until commit, full replay, and verify succeed. On infrastructure failure keep it incomplete with `waiting_on=external` and report the blocker.
+- A workflow definition uses `nodes` for steps and top-level `edges: [{"source":"start","target":"step"}]` for routing. Never put `next` on a node.
+- Node types are `start|action|condition|wait|loop|approval|end`. Action nodes require `tool`; wait nodes use `duration_seconds`; loop nodes require `max_iterations`.
+- Action argument references must be exact strings such as `${inputs.message}` or `${steps.snapshot.value}`; `{{inputs.message}}` is not supported.
+- Successful replay enters `awaiting_verification`; successful verification automatically publishes and trusts when authorized.
+
 ### Skill Evolution Proposals
 
 - Add/maintain only reusable procedures, recurring pitfalls, user corrections, or stable verification paths.

@@ -1,0 +1,328 @@
+"""Daemon-owned computer-control command handling."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional, Tuple
+
+from ..computer_control.mcp import MCPUnavailable
+from ..computer_control.risk import annotate_catalog, workflow_risk
+from ..computer_control.mcp import validate_workflow_tools
+from ..computer_control.models import WorkflowDefinition
+from ..computer_control.services import get_services
+from ..contracts.v1 import DaemonError, DaemonResponse
+from ..paths import ensure_home
+
+
+def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> Tuple[DaemonResponse, bool]:
+    return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=details or {})), False
+
+
+def _ok(value: Any) -> Tuple[DaemonResponse, bool]:
+    return DaemonResponse(ok=True, result={"ok": True, "result": value}), False
+
+
+def _infrastructure_details(service: Any) -> Dict[str, Any]:
+    setup = service.setup.status()
+    return {
+        "phase": setup.get("phase"),
+        "version": setup.get("version"),
+        "session_running": bool(setup.get("session_running")),
+        "transport_restarts": int(getattr(service.session, "transport_restarts", 0)),
+        "stderr_tail": list(setup.get("logs") or [])[-10:],
+        "lease": service.lease.status(),
+    }
+
+
+def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
+    action = str(args.get("action") or "").strip().lower()
+    recording_id = str(args.get("recording_id") or "").strip()
+    if action == "start":
+        return service.recordings.start(
+            group_id,
+            actor_id=actor_id,
+            request_id=str(args.get("request_id") or "").strip(),
+            name=str(args.get("name") or "电脑控制工作流"),
+            description=str(args.get("description") or ""),
+            inputs=args.get("inputs") if isinstance(args.get("inputs"), dict) else {},
+            triggers=args.get("triggers") if isinstance(args.get("triggers"), list) else [],
+        )
+    if action == "get":
+        return service.recordings.get(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            compact=args.get("full") is not True,
+            evidence_offset=int(args.get("evidence_offset") or 0),
+            evidence_limit=int(args.get("evidence_limit") or 20),
+        )
+    if action == "resume":
+        return service.recordings.resume(group_id, recording_id, actor_id=actor_id)
+    if action == "call":
+        return service.recordings.call(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            tool=str(args.get("tool") or "").strip(),
+            arguments=args.get("arguments") if isinstance(args.get("arguments"), dict) else {},
+            workflow_arguments=args.get("workflow_arguments") if isinstance(args.get("workflow_arguments"), dict) else None,
+            record=args.get("record") is not False,
+            title=str(args.get("title") or ""),
+            success_condition=args.get("success_condition") or "",
+            timeout_seconds=int(args.get("timeout_seconds") or 60),
+        )
+    if action == "wait":
+        return service.recordings.wait(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            duration_seconds=float(args.get("duration_seconds") or 0),
+            title=str(args.get("title") or ""),
+        )
+    if action == "update_step":
+        return service.recordings.update_step(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            step_id=str(args.get("step_id") or ""),
+            patch=args.get("patch") if isinstance(args.get("patch"), dict) else {},
+        )
+    if action == "undo":
+        return service.recordings.undo(group_id, recording_id, actor_id=actor_id)
+    if action == "commit":
+        return service.recordings.commit(group_id, recording_id, actor_id=actor_id)
+    if action == "abort":
+        return service.recordings.abort(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            reason=str(args.get("reason") or "aborted"),
+        )
+    raise ValueError(f"unsupported recording action: {action}")
+
+
+def _run(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
+    action = str(args.get("action") or "start").strip().lower()
+    run_id = str(args.get("run_id") or "").strip()
+    if action in {"status", "recover", "verify", "cancel"}:
+        if not run_id:
+            raise ValueError("run_id is required")
+        run = service.runner.get(group_id, run_id)
+        if str(run.get("actor_id") or "") != actor_id:
+            raise PermissionError("run belongs to another actor")
+        if action == "status":
+            return run
+        if action == "cancel":
+            return service.runner.cancel_sync(group_id, run_id, emergency=bool(args.get("emergency")))
+        if action == "verify":
+            verified = service.runner.verify(
+                group_id,
+                run_id,
+                actor_id=actor_id,
+                passed=bool(args.get("passed")),
+                summary=str(args.get("summary") or ""),
+                evidence_ids=args.get("evidence_ids") if isinstance(args.get("evidence_ids"), list) else [],
+                fingerprint=str(service.setup.status().get("fingerprint") or ""),
+            )
+            authorization = verified.get("authorization") if isinstance(verified.get("authorization"), dict) else {}
+            request_id = str(authorization.get("request_id") or "").strip()
+            if request_id:
+                service.requests.update(
+                    group_id,
+                    request_id,
+                    status="completed" if bool(args.get("passed")) else "verification_failed",
+                    completed_at=verified.get("verification", {}).get("verified_at"),
+                )
+            return verified
+        return service.runner.submit_recovery(
+            group_id,
+            run_id,
+            str(args.get("recovery_id") or "").strip(),
+            actor_id=actor_id,
+            tool=str(args.get("tool") or ""),
+            arguments=args.get("arguments") if isinstance(args.get("arguments"), dict) else {},
+        )
+    if action != "start":
+        raise ValueError(f"unsupported run action: {action}")
+    workflow_id = str(args.get("workflow_id") or "").strip()
+    if not workflow_id:
+        raise ValueError("workflow_id is required")
+    manifest = service.store.get(group_id, workflow_id)["manifest"]
+    fingerprint = str(service.setup.status().get("fingerprint") or "")
+    version = int(args.get("version") or service.store.effective_version(manifest, fingerprint) or 0)
+    if not version:
+        raise PermissionError("工作流没有已发布且受信的可运行版本")
+    trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
+    is_trusted = isinstance(trusted.get(str(version)), dict) and trusted[str(version)].get("fingerprint") == fingerprint
+    request = None
+    if not is_trusted:
+        request_id = str(args.get("request_id") or "").strip()
+        request = service.requests.require_authorized(group_id, request_id, actor_id)
+        if str(request.get("mode") or "") != "create_and_run" or str(request.get("workflow_id") or "") != workflow_id:
+            raise PermissionError("request does not authorize this workflow")
+        risk = workflow_risk(service.store.get(group_id, workflow_id, version=version)["definition"])
+        if risk["level"] == "high" and not bool(request.get("allow_high_risk")) and not bool(request.get("high_risk_approved")):
+            service.requests.update(group_id, request_id, status="pending_approval", risk=risk)
+            raise PermissionError("workflow contains high-risk computer operations and requires approval")
+    run = service.runner.start_sync(
+        group_id,
+        workflow_id,
+        actor_id=actor_id,
+        version=version,
+        inputs=args.get("inputs") if isinstance(args.get("inputs"), dict) else {},
+        authorization=request,
+    )
+    if request is not None:
+        service.requests.update(
+            group_id,
+            str(request["request_id"]),
+            status="running",
+            run_id=run.get("run_id"),
+            workflow_id=workflow_id,
+        )
+    return run
+
+
+def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
+    action = str(args.get("action") or "list").strip().lower()
+    workflow_id = str(args.get("workflow_id") or "").strip()
+    fingerprint = str(service.setup.status().get("fingerprint") or "")
+    if action == "list":
+        return {"workflows": service.store.list(group_id)}
+    if action == "get":
+        if not workflow_id:
+            raise ValueError("workflow_id is required")
+        return service.store.get(group_id, workflow_id, version=args.get("version"))
+    definition = None
+    if action in {"validate", "create", "update", "propose", "update_triggers"}:
+        definition = WorkflowDefinition.model_validate(args.get("definition") or {})
+        validate_workflow_tools(definition, service.session.catalog_sync())
+    if action == "validate":
+        return {"valid": True, "risk": workflow_risk(definition.model_dump(mode="json"))}
+
+    request_id = str(args.get("request_id") or "").strip()
+    request = service.requests.require_authorized(group_id, request_id, actor_id)
+    if str(request.get("mode") or "") != "create_and_run":
+        raise PermissionError("该请求未授权 AI 编辑电脑控制工作流")
+    if workflow_id and str(request.get("workflow_id") or "") not in {"", workflow_id}:
+        raise PermissionError("该请求已绑定其他工作流")
+
+    if action == "create" and definition is not None:
+        value = service.store.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
+        workflow_id = str(value["manifest"]["workflow_id"])
+        value = service.store.auto_finalize(group_id, workflow_id, int(value["version"]), fingerprint=fingerprint)
+        service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_created")
+        return value
+    if not workflow_id:
+        raise ValueError(f"workflow_id is required for action={action}")
+    current = service.store.get(group_id, workflow_id)
+    if action in {"update", "update_triggers"} and definition is not None:
+        if action == "update_triggers" and not all(request.get(key) is not False for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
+            raise PermissionError("开启无人值守触发需要用户授权")
+        value = service.store.update(
+            group_id,
+            workflow_id,
+            definition,
+            expected_revision=int(args.get("expected_revision") or current["manifest"].get("revision") or 0),
+            changed_by=actor_id,
+            change_note=str(args.get("change_note") or "AI 编排更新"),
+        )
+        value = service.store.auto_finalize(group_id, workflow_id, int(value["version"]), fingerprint=fingerprint)
+        service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_updated")
+        return value
+    if action == "propose" and definition is not None:
+        return service.store.create_proposal(
+            group_id,
+            workflow_id,
+            definition,
+            base_version=int(args.get("version") or current["version"]),
+            created_by=actor_id,
+            summary=str(args.get("change_note") or "AI 自适应优化建议"),
+        )
+    if action == "publish":
+        if request.get("allow_publish") is False:
+            raise PermissionError("用户未授权 AI 发布工作流")
+        return service.store.publish(group_id, workflow_id, int(args.get("version") or current["version"]))
+    if action == "trust":
+        if request.get("allow_trust") is False:
+            raise PermissionError("用户未授权 AI 授予长期信任")
+        if not fingerprint:
+            raise RuntimeError("Windows-MCP 尚未完成验证")
+        return service.store.trust(group_id, workflow_id, int(args.get("version") or current["version"]), fingerprint=fingerprint, permissions=["all_windows_mcp_tools"])
+    raise ValueError(f"unsupported workflow action: {action}")
+
+
+def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tuple[DaemonResponse, bool]]:
+    if op != "computer_control":
+        return None
+    command = str(args.get("command") or "").strip()
+    group_id = str(args.get("group_id") or "").strip()
+    actor_id = str(args.get("actor_id") or "").strip()
+    if not group_id:
+        return _error("invalid_request", "group_id is required")
+    service = get_services(ensure_home())
+    try:
+        if command == "catalog":
+            tools = annotate_catalog(service.session.catalog_sync())
+            requested = str(args.get("tool") or "").strip()
+            if requested:
+                selected = next((item for item in tools if str(item.get("name") or "") == requested), None)
+                if selected is None:
+                    return _error("tool_not_found", f"Windows-MCP tool not found: {requested}")
+                value = {"setup": service.setup.status(), "lease": service.lease.status(), "tool": selected}
+            else:
+                include_schema = bool(args.get("include_schema"))
+                value = {
+                    "setup": service.setup.status(),
+                    "lease": service.lease.status(),
+                    "tools": [
+                        ({
+                            "name": item.get("name"),
+                            "title": item.get("title") or item.get("name"),
+                            "risk_level": item.get("risk_level"),
+                            "description": str(item.get("description") or "")[:240],
+                        } if not include_schema else item)
+                        for item in tools
+                    ],
+                }
+            return _ok(value)
+        if command == "setup":
+            action = str(args.get("action") or "status").strip().lower()
+            if action == "status":
+                return _ok(service.setup.status())
+            if action == "ensure":
+                return _ok(service.session.run_sync(service.setup.ensure(force=bool(args.get("force")))))
+            if action == "repair":
+                return _ok(service.session.run_sync(service.setup.repair()))
+            if action == "upgrade":
+                return _ok(service.session.run_sync(service.setup.upgrade()))
+            if action == "force_release":
+                released = service.lease.release(run_id="", force=True)
+                service.session.stop_sync()
+                return _ok({"released": released})
+            return _error("invalid_request", f"unsupported setup action: {action}")
+        if command == "recording":
+            return _ok(_recording(service, args, group_id, actor_id))
+        if command == "workflow":
+            return _ok(_workflow(service, args, group_id, actor_id))
+        if command == "run":
+            return _ok(_run(service, args, group_id, actor_id))
+        if command == "element_snapshot":
+            capture_id = str(args.get("capture_id") or "capture")
+            service.lease.acquire(group_id=group_id, actor_id="element-picker", run_id=capture_id, observe_only=True)
+            try:
+                tools = service.session.catalog_sync()
+                snapshot_name = next((str(item.get("name")) for item in tools if str(item.get("name") or "").lower() == "snapshot"), "")
+                if not snapshot_name:
+                    raise RuntimeError("Windows-MCP Snapshot tool is unavailable")
+                return _ok(service.session.call_tool_sync(snapshot_name, {}))
+            finally:
+                service.lease.release(run_id=capture_id, force=True)
+        return _error("invalid_request", f"unsupported computer-control command: {command}")
+    except MCPUnavailable as exc:
+        return _error(
+            str(getattr(exc, "code", "windows_mcp_transport_failed")),
+            str(exc),
+            details=_infrastructure_details(service),
+        )
+    except Exception as exc:
+        return _error(str(getattr(exc, "code", "computer_control_failed")), str(exc))
