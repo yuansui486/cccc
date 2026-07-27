@@ -208,10 +208,50 @@ def create_app() -> FastAPI:
         except Exception:
             return int(default)
 
+    def _configure_web_logging() -> None:
+        """Configure file logging when the application actually starts.
+
+        Keeping this out of ``create_app`` is important for lightweight
+        ``TestClient(create_app())`` callers: those clients may never enter
+        FastAPI's lifespan, so opening a log file during app construction
+        would leave a Windows handle open through temporary-home cleanup.
+        """
+        try:
+            resp = call_daemon({"op": "observability_get"})
+            obs = (resp.get("result") or {}).get("observability") if resp.get("ok") else None
+            level = "INFO"
+            logger_levels: Dict[str, str] = {}
+            if isinstance(obs, dict):
+                requested_level = str(obs.get("log_level") or "INFO").strip().upper() or "INFO"
+                effective_level = "DEBUG" if obs.get("developer_mode") and requested_level == "INFO" else requested_level
+                level = "INFO" if effective_level == "DEBUG" else effective_level
+                if isinstance(obs.get("logger_levels"), dict):
+                    logger_levels = {
+                        str(name): str(value)
+                        for name, value in obs.get("logger_levels", {}).items()
+                    }
+                if effective_level == "DEBUG":
+                    logger_levels.setdefault("onecolleague", "DEBUG")
+                    for noisy_logger in (
+                        "asyncio",
+                        "httpcore",
+                        "httpx",
+                        "no1.delivery",
+                        "no1.providers.notebooklm._vendor.notebooklm",
+                    ):
+                        logger_levels.setdefault(noisy_logger, "INFO")
+            _apply_web_logging(home=home, level=level, logger_levels=logger_levels)
+        except Exception:
+            try:
+                _apply_web_logging(home=home, level="INFO", logger_levels={})
+            except Exception:
+                pass
+
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
         from ...computer_control.services import get_services as get_computer_control_services
 
+        _configure_web_logging()
         computer_control_services = get_computer_control_services(home)
         await computer_control_services.scheduler.start()
         restart_supported = str(os.environ.get("CCCC_WEB_SUPERVISED") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -344,38 +384,6 @@ def create_app() -> FastAPI:
 
     # Some environments don't register the standard PWA manifest extension.
     mimetypes.add_type("application/manifest+json", ".webmanifest")
-
-    # Configure web logging (best-effort) based on daemon observability settings.
-    try:
-        resp = call_daemon({"op": "observability_get"})
-        obs = (resp.get("result") or {}).get("observability") if resp.get("ok") else None
-        level = "INFO"
-        logger_levels: Dict[str, str] = {}
-        if isinstance(obs, dict):
-            requested_level = str(obs.get("log_level") or "INFO").strip().upper() or "INFO"
-            effective_level = "DEBUG" if obs.get("developer_mode") and requested_level == "INFO" else requested_level
-            level = "INFO" if effective_level == "DEBUG" else effective_level
-            if isinstance(obs.get("logger_levels"), dict):
-                logger_levels = {
-                    str(name): str(value)
-                    for name, value in obs.get("logger_levels", {}).items()
-                }
-            if effective_level == "DEBUG":
-                logger_levels.setdefault("onecolleague", "DEBUG")
-                for noisy_logger in (
-                    "asyncio",
-                    "httpcore",
-                    "httpx",
-                    "no1.delivery",
-                    "no1.providers.notebooklm._vendor.notebooklm",
-                ):
-                    logger_levels.setdefault(noisy_logger, "INFO")
-        _apply_web_logging(home=home, level=level, logger_levels=logger_levels)
-    except Exception:
-        try:
-            _apply_web_logging(home=home, level="INFO", logger_levels={})
-        except Exception:
-            pass
 
     dist = str(os.environ.get("CCCC_WEB_DIST") or "").strip()
     dist_dir: Optional[Path] = None
