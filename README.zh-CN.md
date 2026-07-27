@@ -393,6 +393,8 @@ uv run cccc --help
 - 如果 `cccc doctor` 显示 `Windows PTY: NOT READY`，先执行 `python -m pip install pywinpty`；如果已经安装但仍报 DLL 缺失，执行 `python -m pip install --force-reinstall pywinpty` 修复 native DLL。
 - 标准 wheel 安装（`python -m pip install dist/no1-*.whl`）会自动解析 Windows 的 `pywinpty` 依赖；离线安装或使用 `--no-deps` 时，必须单独提供匹配的 `pywinpty` wheel。
 - Web 打包可用 `scripts/build_web.ps1`，完整打包可用 `scripts/build_package.ps1`。
+- Nuitka Windows standalone 可用 `scripts/build_nuitka_standalone.ps1`；macOS arm64 standalone 需在 macOS 原生环境执行 `bash scripts/build_nuitka_standalone.sh`。Windows 不能直接交叉编译出可运行的 macOS 二进制。
+- GitHub Actions 的 `Nuitka Standalone Builds` workflow 会在 `macos-15` Apple Silicon runner 上构建并上传 `onecolleague-*-macos-arm64.zip` artifact；当前不包含 `.app`、DMG、签名或公证。
 
 ### Docker
 

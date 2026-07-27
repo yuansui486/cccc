@@ -73,6 +73,35 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "SkipSmokeTests" in script
 
 
+def test_build_nuitka_macos_script_uses_native_standalone_and_smoke_checks() -> None:
+    script = Path("scripts/build_nuitka_standalone.sh").read_text(encoding="utf-8")
+
+    assert '[[ "$(uname -s)" == "Darwin" ]]' in script
+    assert "--standalone" in script
+    assert "--output-filename=onecolleague" in script
+    assert "--main=\"$ROOT_DIR/src/no1/frozen_entry.py\"" in script
+    assert '--include-data-dir="$WEB_DIST_DIR=no1/ports/web/dist"' in script
+    assert '--include-data-dir="$RESOURCES_DIR=no1/resources"' in script
+    assert "onecolleague-nuitka-smoke" in script
+    assert 'export ONECOLLEAGUE_HOME="$SMOKE_HOME"' in script
+    assert 'export CCCC_HOME="$SMOKE_HOME"' in script
+    assert '"$BIN_PATH" daemon start' in script
+    assert '"$BIN_PATH" daemon status' in script
+    assert 'if [[ "$SKIP_SMOKE_TESTS" == 0 ]]; then' in script
+    assert 'ditto -c -k' in script
+    assert "macos-arm64.zip" in script
+
+
+def test_nuitka_workflow_targets_native_macos_arm64_and_uploads_zip() -> None:
+    workflow = Path(".github/workflows/nuitka-standalone.yml").read_text(encoding="utf-8")
+
+    assert "runs-on: macos-15" in workflow
+    assert 'test "$(uname -m)" = arm64' in workflow
+    assert "bash scripts/build_nuitka_standalone.sh" in workflow
+    assert "onecolleague-nuitka-macos-arm64" in workflow
+    assert "macos-arm64.zip" in workflow
+
+
 def test_install_smoke_ps1_verifies_wheel_and_editable_with_temp_home() -> None:
     script = Path("scripts/test_install_smoke.ps1").read_text(encoding="utf-8-sig")
 
