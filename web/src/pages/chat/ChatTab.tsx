@@ -155,14 +155,12 @@ export function ChatTab({
     computerControlEnabled,
     computerControlWorkflowId,
     computerControlActorId,
-    computerControlPermissions,
     setPriority,
     setReplyRequired,
     setCollaborationRequired,
     setComputerControlEnabled,
     setComputerControlWorkflowId,
     setComputerControlActorId,
-    setComputerControlPermission,
     destGroupId,
     composerGroupSettled,
     mentionSuggestions,
@@ -867,14 +865,12 @@ export function ChatTab({
             computerControlEnabled={computerControlEnabled}
             computerControlWorkflowId={computerControlWorkflowId}
             computerControlActorId={computerControlActorId}
-            computerControlPermissions={computerControlPermissions}
             setPriority={setPriority}
             setReplyRequired={setReplyRequired}
             setCollaborationRequired={setCollaborationRequired}
             setComputerControlEnabled={setComputerControlEnabled}
             setComputerControlWorkflowId={setComputerControlWorkflowId}
             setComputerControlActorId={setComputerControlActorId}
-            setComputerControlPermission={setComputerControlPermission}
             onSendMessage={sendMessage}
             showMentionMenu={showMentionMenu}
             setShowMentionMenu={setShowMentionMenu}

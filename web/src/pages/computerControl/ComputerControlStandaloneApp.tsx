@@ -33,6 +33,7 @@ import {
 import {
   computerControlApi,
   type ComputerControlRequest,
+  type ComputerControlLease,
   type ComputerControlSettings,
   type ComputerSetup,
   type OptimizationProposal,
@@ -52,6 +53,7 @@ import type {
 } from "./types";
 import { normalizeDefinition, serializeDefinition } from "./types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
+import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
 
 type Section = "tools" | "steps" | "properties" | "runs";
 type Snapshot = { nodes: CanvasNode[]; edges: CanvasEdge[] };
@@ -145,8 +147,8 @@ function friendlyError(message: unknown): string {
       "当前工作流版本尚未发布并信任。",
     ],
     [
-      /computer control is currently occupied|computer_control_busy/i,
-      "另一项电脑控制任务正在运行，请稍后再试。",
+      /computer control is currently occupied|computer control is already in use|computer_control_busy/i,
+      "另一项电脑控制任务正在运行，请先停止当前占用后再试。",
     ],
     [
       /windows-mcp exited/i,
@@ -225,7 +227,7 @@ function cloneSnapshot(nodes: CanvasNode[], edges: CanvasEdge[]): Snapshot {
   return { nodes: structuredClone(nodes), edges: structuredClone(edges) };
 }
 
-export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
+export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }: { groupId: string; activeTab: string; groupLabelById?: Record<string, string> }) {
   const [setup, setSetup] = useState<ComputerSetup>({
     phase: "not_started",
     version: "",
@@ -253,34 +255,44 @@ export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
   const [settings, setSettings] = useState<ComputerControlSettings>({
     auto_publish_and_trust: true,
   });
+  const [lease, setLease] = useState<ComputerControlLease>({ active: false });
+  const refreshInFlight = React.useRef(false);
   const [pickerElements, setPickerElements] = useState<Array<Record<string, unknown>>>([]);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [pickerStatus, setPickerStatus] = useState("");
 
   const refresh = useCallback(async () => {
-    if (!groupId) return;
-    const [
-      status,
-      workflowResponse,
-      runResponse,
-      requestResponse,
-      settingsResponse,
-    ] = await Promise.all([
-      computerControlApi.status(),
-      computerControlApi.workflows(groupId),
-      computerControlApi.runs(groupId),
-      computerControlApi.requests(groupId),
-      computerControlApi.settings(groupId),
-    ]);
-    if (status.ok) setSetup(status.result);
-    if (workflowResponse.ok) {
-      setWorkflows(workflowResponse.result.workflows || []);
-      const first = workflowResponse.result.workflows?.[0];
-      if (first) setSelectedId((current) => current || first.workflow_id);
+    if (!groupId || refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    try {
+      const [
+        status,
+        workflowResponse,
+        runResponse,
+        requestResponse,
+        settingsResponse,
+        leaseResponse,
+      ] = await Promise.all([
+        computerControlApi.status(),
+        computerControlApi.workflows(groupId),
+        computerControlApi.runs(groupId),
+        computerControlApi.requests(groupId),
+        computerControlApi.settings(groupId),
+        computerControlApi.leaseStatus(),
+      ]);
+      if (status.ok) setSetup(status.result);
+      if (workflowResponse.ok) {
+        setWorkflows(workflowResponse.result.workflows || []);
+        const first = workflowResponse.result.workflows?.[0];
+        if (first) setSelectedId((current) => current || first.workflow_id);
+      }
+      if (runResponse.ok) setRuns(runResponse.result.runs || []);
+      if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
+      if (settingsResponse.ok) setSettings(settingsResponse.result);
+      if (leaseResponse.ok) setLease(leaseResponse.result);
+    } finally {
+      refreshInFlight.current = false;
     }
-    if (runResponse.ok) setRuns(runResponse.result.runs || []);
-    if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
-    if (settingsResponse.ok) setSettings(settingsResponse.result);
   }, [groupId]);
 
   const loadCatalog = useCallback(async () => {
@@ -348,6 +360,13 @@ export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
       setHistory([]);
     });
   }, [groupId, selectedId]);
+
+  useEffect(() => {
+    if (activeTab !== COMPUTER_CONTROL_TAB || !groupId) return;
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, groupId, refresh]);
 
   const selectedManifest = useMemo(
     () => workflows.find((item) => item.workflow_id === selectedId),
@@ -704,6 +723,11 @@ export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
 
   async function run() {
     if (!selectedManifest) return;
+    if (lease.active) {
+      setSection("runs");
+      setMessage("电脑当前正在执行其他任务，请先在运行面板中停止占用。");
+      return;
+    }
     setBusy("run");
     const response = await computerControlApi.run(
       groupId,
@@ -808,10 +832,14 @@ export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
     setBusy("");
   }
 
-  async function emergency(runId?: string) {
+  async function interruptLease(emergency = false) {
+    const runId = String(lease.lease?.run_id || "");
     if (!runId) return;
+    if (emergency && !window.confirm("紧急停止会立即终止当前 Windows-MCP 会话，可能使正在进行的操作结果未知。确定继续吗？")) return;
+    if (!emergency && !window.confirm("确定停止当前电脑控制任务吗？")) return;
     setBusy("stop");
-    await computerControlApi.cancel(groupId, runId, true);
+    const response = await computerControlApi.interruptLease(runId, emergency);
+    setMessage(response.ok ? (emergency ? "已紧急停止当前电脑控制任务。" : "已停止当前电脑控制任务。") : friendlyError(response.error.message));
     await refresh();
     setBusy("");
   }
@@ -877,6 +905,38 @@ export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
 
   const runsPanel = (
     <div className="h-full overflow-auto p-4">
+      {lease.active && lease.lease && (
+        <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/8 p-3 text-xs">
+          <div className="flex items-start gap-2">
+            <CircleStop size={16} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-amber-800 dark:text-amber-200">电脑正在被占用</div>
+              <div className="mt-1 text-amber-900/80 dark:text-amber-100/80">
+                工作组：{groupLabelById?.[String(lease.lease.group_id || "")] || String(lease.lease.group_id || "未知")} · 智能体：{String(lease.run?.actor_id || lease.lease.actor_id || "未知")}
+              </div>
+              <div className="mt-0.5 truncate text-amber-900/80 dark:text-amber-100/80">
+                工作流：{String(lease.workflow?.name || lease.run?.workflow_id || "控制层任务")} · 当前步骤：{String(lease.run?.current_node_id || "准备中")}
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-1.5">
+              <button
+                className="rounded border border-amber-600/40 px-2 py-1 text-amber-800 disabled:opacity-40 dark:text-amber-200"
+                disabled={Boolean(busy)}
+                onClick={() => void interruptLease(false)}
+              >
+                停止
+              </button>
+              <button
+                className="rounded border border-red-500/50 px-2 py-1 text-red-700 disabled:opacity-40 dark:text-red-300"
+                disabled={Boolean(busy)}
+                onClick={() => void interruptLease(true)}
+              >
+                紧急停止
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">运行时间线</h2>
         <button
@@ -977,10 +1037,10 @@ export function ComputerControlWorkspace({ groupId }: { groupId: string }) {
                       </button>
                     </div>
                   )}
-                {run.status === "running" && (
+                {run.status === "running" && String(lease.lease?.run_id || "") === String(run.run_id || "") && (
                   <button
                     className="mt-2 inline-flex items-center gap-1 rounded border border-red-500/40 px-2 py-1 text-red-600"
-                    onClick={() => void emergency(String(run.run_id))}
+                    onClick={() => void interruptLease(true)}
                   >
                     <CircleStop size={13} />
                     紧急停止

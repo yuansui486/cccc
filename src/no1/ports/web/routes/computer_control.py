@@ -62,7 +62,9 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
         if not response.get("ok"):
             error = response.get("error") if isinstance(response.get("error"), dict) else {}
-            raise _error(str(error.get("code") or "computer_control_failed"), str(error.get("message") or "daemon request failed"), 503, error.get("details"))
+            code = str(error.get("code") or "computer_control_failed")
+            status = 409 if code == "computer_control_busy" else 503
+            raise _error(code, str(error.get("message") or "daemon request failed"), status, error.get("details"))
         envelope = response.get("result") if isinstance(response.get("result"), dict) else {}
         return envelope.get("result")
 
@@ -78,6 +80,43 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     def with_effective_version(manifest: Dict[str, Any]) -> Dict[str, Any]:
         return {**manifest, "effective_version": service.store.effective_version(manifest, current_fingerprint())}
+
+    def enrich_lease(value: Any) -> Dict[str, Any]:
+        raw = value if isinstance(value, dict) else {}
+        lease = raw.get("lease") if isinstance(raw.get("lease"), dict) else raw
+        if raw.get("active") is False:
+            lease = {}
+        if not lease:
+            return {"active": False}
+        result: Dict[str, Any] = {"active": True, "lease": lease}
+        group_id = str(lease.get("group_id") or "")
+        run_id = str(lease.get("run_id") or "")
+        if group_id and run_id:
+            try:
+                run = service.runner.get(group_id, run_id)
+            except (KeyError, ValueError):
+                run = None
+            if isinstance(run, dict):
+                result["run"] = {
+                    "run_id": run.get("run_id"),
+                    "group_id": run.get("group_id"),
+                    "workflow_id": run.get("workflow_id"),
+                    "actor_id": run.get("actor_id"),
+                    "status": run.get("status"),
+                    "current_node_id": run.get("current_node_id"),
+                    "started_at": run.get("started_at"),
+                    "updated_at": run.get("updated_at"),
+                }
+                try:
+                    workflow = service.store.get(group_id, str(run.get("workflow_id") or ""))
+                    result["workflow"] = {
+                        "workflow_id": run.get("workflow_id"),
+                        "name": workflow.get("manifest", {}).get("name") or workflow.get("definition", {}).get("name"),
+                        "version": run.get("version"),
+                    }
+                except (KeyError, ValueError):
+                    pass
+        return result
 
     async def validate_definition(definition: WorkflowDefinition) -> None:
         catalog_result = await daemon_control("catalog", group_id="_global", include_schema=True)
@@ -134,7 +173,50 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @global_router.get("/lease/status")
     async def lease_status() -> Dict[str, Any]:
         result = await daemon_control("catalog", group_id="_global")
-        return {"ok": True, "result": result.get("lease", {"active": False})}
+        return {"ok": True, "result": enrich_lease(result.get("lease") if isinstance(result, dict) else None)}
+
+    @global_router.post("/lease/interrupt", dependencies=[Depends(require_admin)])
+    async def interrupt_lease(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        lease_result = await daemon_control("catalog", group_id="_global")
+        lease_status = lease_result.get("lease") if isinstance(lease_result, dict) else None
+        lease = lease_status.get("lease") if isinstance(lease_status, dict) and isinstance(lease_status.get("lease"), dict) else lease_status
+        if isinstance(lease_status, dict) and lease_status.get("active") is False:
+            lease = None
+        if not isinstance(lease, dict) or not lease.get("run_id"):
+            return {"ok": True, "result": {"interrupted": False, "active": False}}
+        requested_run_id = str(payload.get("run_id") or "").strip()
+        run_id = str(lease.get("run_id") or "")
+        if requested_run_id and requested_run_id != run_id:
+            raise _error("lease_mismatch", "当前电脑占用已发生变化，请刷新后重试", 409, enrich_lease(lease))
+        emergency = bool(payload.get("emergency"))
+        group_id = str(lease.get("group_id") or "")
+        actor_id = str(lease.get("actor_id") or "")
+        try:
+            if run_id.startswith("rec_"):
+                result = await daemon_control(
+                    "recording",
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    action="abort",
+                    recording_id=run_id,
+                    reason="user_interrupt",
+                )
+                if emergency:
+                    await daemon_control("setup", group_id="_global", action="force_release")
+            else:
+                result = await daemon_control(
+                    "run",
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    action="cancel",
+                    run_id=run_id,
+                    emergency=emergency,
+                )
+        except HTTPException:
+            raise
+        audit(ctx.home, "computer_control.lease_interrupted", group_id=group_id, actor_id=actor_id, details={"run_id": run_id, "emergency": emergency})
+        _emit("lease.interrupted", group_id=group_id, run_id=run_id, emergency=emergency)
+        return {"ok": True, "result": {"interrupted": True, "emergency": emergency, "run": result}}
 
     @global_router.post("/lease/force-release", dependencies=[Depends(require_admin)])
     async def force_release() -> Dict[str, Any]:
@@ -349,6 +431,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         except Exception as exc:
             from ....computer_control.lease import LeaseConflict
 
+            if isinstance(exc, HTTPException):
+                raise
             if isinstance(exc, LeaseConflict):
                 raise _error("computer_control_busy", "computer control is currently occupied", 409, exc.lease) from exc
             raise _error("run_failed", str(exc), 409) from exc

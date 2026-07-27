@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 from ..computer_control.mcp import MCPUnavailable
 from ..computer_control.risk import annotate_catalog, workflow_risk
 from ..computer_control.mcp import validate_workflow_tools
+from ..computer_control.lease import LeaseConflict
 from ..computer_control.models import WorkflowDefinition
 from ..computer_control.services import get_services
 from ..contracts.v1 import DaemonError, DaemonResponse
@@ -330,5 +331,7 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             str(exc),
             details=_infrastructure_details(service),
         )
+    except LeaseConflict as exc:
+        return _error("computer_control_busy", str(exc), details=exc.lease)
     except Exception as exc:
         return _error(str(getattr(exc, "code", "computer_control_failed")), str(exc))

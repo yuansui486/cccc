@@ -55,6 +55,12 @@ export type ComputerControlRequest = {
   status?: string;
   risk?: { level?: string; high_risk_nodes?: Array<{ title?: string; tool?: string }> };
 };
+export type ComputerControlLease = {
+  active: boolean;
+  lease?: { group_id?: string; actor_id?: string; run_id?: string; acquired_at?: number; heartbeat_at?: number; expires_at?: number; observe_only?: boolean };
+  run?: { run_id?: string; group_id?: string; workflow_id?: string; actor_id?: string; status?: string; current_node_id?: string | null; started_at?: number; updated_at?: number };
+  workflow?: { workflow_id?: string; name?: string; version?: number };
+};
 
 const root = "/api/v1/computer-control";
 const groupRoot = (groupId: string) => `/api/v1/groups/${encodeURIComponent(groupId)}/computer-control`;
@@ -65,6 +71,8 @@ export const computerControlApi = {
   repair: () => apiJson<ComputerSetup>(`${root}/setup/repair`, { method: "POST" }),
   upgrade: () => apiJson<ComputerSetup>(`${root}/setup/upgrade`, { method: "POST" }),
   catalog: (tool?: string) => apiJson<{ version?: string; fingerprint?: string; healthy?: boolean; tools?: Record<string, unknown>[]; tool?: Record<string, unknown> }>(`${root}/catalog${tool ? `?tool=${encodeURIComponent(tool)}` : ""}`),
+  leaseStatus: () => apiJson<ComputerControlLease>(`${root}/lease/status`),
+  interruptLease: (runId: string, emergency = false) => apiJson<{ interrupted: boolean; emergency?: boolean; run?: Record<string, unknown> }>(`${root}/lease/interrupt`, { method: "POST", body: JSON.stringify({ run_id: runId, emergency }) }),
   workflows: (groupId: string) => apiJson<{ workflows: WorkflowManifest[] }>(`${groupRoot(groupId)}/workflows`),
   settings: (groupId: string) => apiJson<ComputerControlSettings>(`${groupRoot(groupId)}/settings`),
   updateSettings: (groupId: string, autoPublishAndTrust: boolean, authorizeCurrentFingerprint = false) => apiJson<ComputerControlSettings>(`${groupRoot(groupId)}/settings`, { method: "PUT", body: JSON.stringify({ auto_publish_and_trust: autoPublishAndTrust, authorize_current_fingerprint: authorizeCurrentFingerprint }) }),

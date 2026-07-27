@@ -341,7 +341,7 @@ export function AppShell({
 
           <div className={activeTab === COMPUTER_CONTROL_TAB ? "absolute inset-0 flex min-h-0 flex-col" : "hidden"} aria-hidden={activeTab !== COMPUTER_CONTROL_TAB}>
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">正在加载电脑控制</div>}>
-              <ComputerControlWorkspace groupId={selectedGroupId} />
+              <ComputerControlWorkspace activeTab={activeTab} groupId={selectedGroupId} groupLabelById={groupLabelById} />
             </Suspense>
           </div>
 
