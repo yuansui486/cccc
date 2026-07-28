@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from no1.computer_control.lease import ComputerControlLease, LeaseConflict
 from no1.computer_control.mcp import (
+    MCPOutcomeUnknown,
     MCPToolExecutionError,
+    MCPUnavailable,
     WINDOWS_MCP_STDIO_LIMIT_BYTES,
     WindowsMCPSetup,
     WindowsMCPSession,
@@ -30,6 +32,7 @@ from no1.kernel.registry import load_registry
 from no1.ports.mcp.toolspecs import MCP_TOOLS
 from no1.ports.mcp.server import _MCP_EXTRA_CONTENT_KEY, _attach_computer_artifacts
 from no1.ports.mcp import main as mcp_main
+from no1.daemon.computer_control_ops import try_handle_computer_control_op
 
 
 class TestComputerControl(unittest.TestCase):
@@ -260,6 +263,122 @@ class TestComputerControl(unittest.TestCase):
         self.assertEqual(seen[0][1], seen[1][1])
         self.assertTrue(WindowsMCPSession._is_transport_error(AttributeError("'NoneType' object has no attribute 'send'")))
         self.assertTrue(WindowsMCPSession._is_transport_error(ValueError("Separator is not found, and chunk exceed the limit")))
+
+    def test_session_only_replays_snapshot_after_transport_restart(self):
+        async def exercise(tool):
+            session = WindowsMCPSession()
+            calls = []
+
+            async def request_owned(method, params, *, timeout):
+                calls.append((method, params))
+                if len(calls) == 1:
+                    raise MCPUnavailable("broken pipe")
+                return {"content": [{"type": "text", "text": "ok"}]}
+
+            async def stop_owned():
+                return None
+
+            async def start_owned():
+                return [{"name": "Snapshot"}, {"name": "Click"}, {"name": "Type"}]
+
+            session._request_owned = request_owned
+            session._stop_owned = stop_owned
+            session._start_owned = start_owned
+            try:
+                result = await session.call_tool(tool, {"loc": [10, 20]} if tool != "Snapshot" else {})
+                return result, calls, session.transport_restarts, None
+            except Exception as exc:
+                return None, calls, session.transport_restarts, exc
+
+        result, calls, restarts, error = asyncio.run(exercise("Snapshot"))
+        self.assertIsNone(error)
+        self.assertEqual(result["content"][0]["text"], "ok")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(restarts, 1)
+
+        for tool in ("Click", "Type"):
+            result, calls, restarts, error = asyncio.run(exercise(tool))
+            self.assertIsNone(result)
+            self.assertIsInstance(error, MCPOutcomeUnknown)
+            self.assertEqual(len(calls), 1, f"{tool} must never be replayed")
+            self.assertEqual(restarts, 1)
+
+    def test_session_restart_is_stop_start_only_and_returns_diagnostics(self):
+        session = WindowsMCPSession()
+        session.configure(Path("C:/fake/windows-mcp.exe"), "test-version")
+        session.started_at = 100.0
+        calls = []
+
+        async def stop_unlocked():
+            calls.append("stop")
+            session._process = None
+            session._tools = []
+
+        async def start_unlocked():
+            calls.append("start")
+            process = Mock()
+            process.returncode = None
+            session._process = process
+            session._tools = [{"name": "Snapshot"}]
+            session.started_at = 200.0
+            return list(session._tools)
+
+        session._stop_unlocked = stop_unlocked
+        session._start_unlocked = start_unlocked
+        result = session.restart_sync()
+        self.assertEqual(calls, ["stop", "start"])
+        self.assertEqual(result["previous_started_at"], 100.0)
+        self.assertEqual(result["started_at"], 200.0)
+        self.assertEqual(result["transport_restarts"], 1)
+        self.assertTrue(result["session_running"])
+        self.assertEqual(result["tool_count"], 1)
+
+    def test_daemon_session_restart_rejects_active_lease(self):
+        with tempfile.TemporaryDirectory() as td:
+            lease = ComputerControlLease(Path(td))
+            lease.acquire(group_id="group", actor_id="actor", run_id="rec_active", observe_only=False)
+            fake = Mock()
+            fake.lease = lease
+            fake.setup.status.return_value = {"phase": "ready", "in_progress": False}
+            with patch("no1.daemon.computer_control_ops.get_services", return_value=fake), patch(
+                "no1.daemon.computer_control_ops.ensure_home", return_value=Path(td)
+            ):
+                response, _ = try_handle_computer_control_op(
+                    "computer_control",
+                    {"command": "setup", "action": "restart_session", "group_id": "_global"},
+                )
+            self.assertFalse(response.ok)
+            self.assertEqual(response.error.code, "computer_control_busy")
+            fake.session.restart_sync.assert_not_called()
+
+    def test_daemon_session_restart_uses_temporary_lease_and_releases_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            lease = ComputerControlLease(Path(td))
+            fake = Mock()
+            fake.lease = lease
+            fake.setup.status.return_value = {"phase": "ready", "in_progress": False, "fingerprint": "fp"}
+            fake.session.restart_sync.return_value = {
+                "started_at": 123.0,
+                "transport_restarts": 2,
+                "session_running": True,
+                "tool_count": 19,
+                "version": "latest",
+            }
+            fake.session.catalog_sync.return_value = [{"name": "Snapshot"}]
+            fake.setup.refresh_catalog.return_value = {"phase": "ready", "fingerprint": "fp"}
+            with patch("no1.daemon.computer_control_ops.get_services", return_value=fake), patch(
+                "no1.daemon.computer_control_ops.ensure_home", return_value=Path(td)
+            ):
+                response, _ = try_handle_computer_control_op(
+                    "computer_control",
+                    {"command": "setup", "action": "restart_session", "group_id": "_global"},
+                )
+            self.assertTrue(response.ok)
+            self.assertTrue(response.result["result"]["session_running"])
+            self.assertEqual(response.result["result"]["fingerprint"], "fp")
+            self.assertFalse(lease.status()["active"])
+            fake.session.restart_sync.assert_called_once_with(timeout=None)
+            fake.setup.refresh_catalog.assert_called_once_with([{"name": "Snapshot"}])
 
     def test_session_parses_json_rpc_lines_larger_than_the_default_asyncio_limit(self):
         class FakeStdin:

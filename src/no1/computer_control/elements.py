@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
 
@@ -116,6 +117,51 @@ def _focused_from_text(text: str) -> str:
     return title or row
 
 
+def _tree_depth(prefix: str) -> int:
+    """Return a best-effort depth for common Windows-MCP tree prefixes."""
+    branch_positions = [position for token in ("├", "└") if (position := prefix.rfind(token)) >= 0]
+    if branch_positions:
+        branch = max(branch_positions)
+        # Windows-MCP normally renders four columns per tree level. Counting
+        # visible vertical guides also handles fonts that collapse spaces.
+        guides = prefix[:branch].count("│") + prefix[:branch].count("|")
+        return max(guides + 1, branch // 4 + 1)
+    return max(0, len(prefix.expandtabs(4)) // 4)
+
+
+def _context_at_level(context: Dict[int, str], level: int) -> str:
+    applicable = [depth for depth in context if depth < level]
+    return context[max(applicable)] if applicable else ""
+
+
+def _prune_context(context: Dict[int, str], level: int) -> None:
+    for depth in list(context):
+        if depth >= level:
+            context.pop(depth, None)
+
+
+def _provider_name(result: Any) -> str:
+    """Identify the source without trusting provider-specific result shapes."""
+    queue = [result]
+    seen: Set[int] = set()
+    while queue:
+        value = queue.pop(0)
+        if isinstance(value, (dict, list)):
+            marker = id(value)
+            if marker in seen:
+                continue
+            seen.add(marker)
+        if isinstance(value, dict):
+            for key in ("provider", "provider_name", "server", "server_name"):
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            queue.extend(value.values())
+        elif isinstance(value, list):
+            queue.extend(value)
+    return "windows-mcp"
+
+
 def _parse_ui_tree(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Parse the textual tree printed by Windows-MCP.
 
@@ -124,22 +170,45 @@ def _parse_ui_tree(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     elements: List[Dict[str, Any]] = []
     focused_window = _focused_from_text(text)
-    current_window = focused_window
+    explicit_window = ""
     current_process = ""
     current_framework = ""
     parent_by_level: Dict[int, str] = {}
+    window_by_level: Dict[int, str] = {}
+    desktop_by_level: Dict[int, str] = {}
+    desktops: Set[str] = set()
+    windows: Set[str] = set()
     coordinate_re = re.compile(r"\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)")
     quoted_re = re.compile(r'[\"“](.*?)[\"”]')
     metadata_re = re.compile(r"\[\s*([A-Za-z][\w -]*)\s*:\s*([^\]]*)\]")
+    tree_context_re = re.compile(
+        r'^(?P<prefix>[\s│|├└─-]*)(?P<kind>desktop|window|桌面|窗口)(?:\s*[\"“](?P<name>.*?)[\"”])?\s*$',
+        re.I,
+    )
+    if not any(tree_context_re.match(line) for line in text.splitlines()):
+        # Legacy Windows-MCP output contains only the focused window's tree.
+        # Explicit desktop/window trees never use this fallback, preventing
+        # desktop/taskbar elements from inheriting focused_window.
+        explicit_window = focused_window
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         stripped = line.strip()
         if not stripped:
             continue
-        # Header context is useful when a tree omits window/process on each row.
+        # Explicit table/header context remains supported for older providers,
+        # but focused_window is metadata only and is never used as ownership.
         context_match = re.match(r"(?:Window|窗口)\s*:\s*(.+)$", stripped, re.I)
         if context_match:
-            current_window = context_match.group(1).strip()
+            explicit_window = context_match.group(1).strip().strip('"“”')
+            if explicit_window:
+                windows.add(explicit_window)
+            continue
+        context_match = re.match(r"(?:Desktop|桌面)\s*:\s*(.+)$", stripped, re.I)
+        if context_match:
+            explicit_window = ""
+            desktop_name = context_match.group(1).strip().strip('"“”')
+            if desktop_name:
+                desktops.add(desktop_name)
             continue
         context_match = re.match(r"(?:Process|进程)\s*:\s*(.+)$", stripped, re.I)
         if context_match:
@@ -149,10 +218,39 @@ def _parse_ui_tree(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         if context_match:
             current_framework = context_match.group(1).strip()
             continue
+
+        tree_context = tree_context_re.match(line)
+        if tree_context:
+            level = _tree_depth(tree_context.group("prefix"))
+            name = str(tree_context.group("name") or "").strip()
+            kind = tree_context.group("kind").casefold()
+            if kind in {"desktop", "桌面"} and not name:
+                name = "Desktop"
+            _prune_context(parent_by_level, level)
+            parent_name = _context_at_level(parent_by_level, level)
+            parent_by_level[level] = name
+            if kind in {"desktop", "桌面"}:
+                _prune_context(desktop_by_level, level)
+                _prune_context(window_by_level, level)
+                desktop_by_level[level] = name
+                explicit_window = ""
+                desktops.add(name)
+            else:
+                _prune_context(window_by_level, level)
+                window_by_level[level] = name
+                windows.add(name)
+            # A context line carries hierarchy only; elements appear below it.
+            continue
+
         coordinate = coordinate_re.search(stripped)
         if coordinate is None:
             continue
         x, y = float(coordinate.group(1)), float(coordinate.group(2))
+        prefix = line[: line.find(coordinate.group(0))]
+        level = min(_tree_depth(prefix), 64)
+        _prune_context(parent_by_level, level)
+        _prune_context(window_by_level, level)
+        _prune_context(desktop_by_level, level)
         body = stripped[coordinate.end():].strip(" │├└─-\t")
         # Ignore cursor/screenshot metadata that happens to contain coordinates.
         if body.lower().startswith(("cursor position", "screenshot size", "screenshot region")):
@@ -162,24 +260,28 @@ def _parse_ui_tree(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         quoted = quoted_re.search(body_without_metadata)
         name = quoted.group(1).strip() if quoted else ""
         before_name = body_without_metadata[: quoted.start()].strip() if quoted else body_without_metadata
-        # Control type is the visible role before the quoted label. Keep the
-        # source language; matching is case-insensitive and consumers can show it.
-        control_type = before_name.strip(" :/\\")
-        if not control_type:
-            control_type = metadata.get("control_type", metadata.get("role", ""))
+        control_type = before_name.strip(" :/\\") or metadata.get("control_type", metadata.get("role", ""))
         action = str(metadata.get("action") or "").strip().casefold()
         if not name and not control_type and not metadata:
             continue
-        prefix = line[: coordinate.start()]
-        level = len(re.match(r"^[\s│|]*", prefix).group(0)) if re.match(r"^[\s│|]*", prefix) else 0
-        level = min(level // 2, 64)
-        parent_name = parent_by_level.get(max((item for item in parent_by_level if item < level), default=-1), "")
-        parent_by_level[level] = name or control_type
-        for old_level in list(parent_by_level):
-            if old_level > level:
-                parent_by_level.pop(old_level, None)
+        parent_name = _context_at_level(parent_by_level, level)
+        active_desktop = _context_at_level(desktop_by_level, level)
+        active_window = _context_at_level(window_by_level, level) or explicit_window
+        lowered_type = control_type.casefold()
+        if lowered_type in {"window", "窗口"} and name:
+            active_window = name
+            window_by_level[level] = name
+            windows.add(name)
+        elif lowered_type in {"desktop", "桌面"}:
+            active_window = ""
+            active_desktop = name or active_desktop
+            desktop_by_level[level] = active_desktop
+            if active_desktop:
+                desktops.add(active_desktop)
         item: Dict[str, Any] = {
-            "window_name": current_window,
+            "provider": "windows-mcp",
+            "desktop_name": active_desktop,
+            "window_name": active_window,
             "parent_name": parent_name,
             "name": name,
             "text": metadata.get("value", name),
@@ -196,25 +298,30 @@ def _parse_ui_tree(text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
             or control_type.casefold().replace(" ", "") in _INTERACTIVE_CONTROL_TYPES,
             "action": action,
         }
-        for source, target in (("automation_id", "automation_id"), ("automationid", "automation_id"), ("class", "class_name"), ("class_name", "class_name"), ("framework_id", "framework_id"), ("process", "process_name")):
+        for source, target in (("automation_id", "automation_id"), ("automationid", "automation_id"), ("class", "class_name"), ("class_name", "class_name"), ("framework_id", "framework_id"), ("process", "process_name"), ("handle", "handle"), ("hwnd", "handle")):
             if source in metadata and not item.get(target):
                 item[target] = metadata[source]
         for key in ("checked", "selected", "expanded", "toggle_state", "password"):
             if key in metadata:
                 item[key] = metadata[key]
         elements.append(item)
-    return elements, {"focused_window": focused_window, "source": "ui_tree"}
+        parent_by_level[level] = name or control_type
+    return elements, {
+        "focused_window": focused_window,
+        "source": "ui_tree",
+        "desktops": sorted(desktops),
+        "windows": sorted(windows),
+    }
 
 
-def _walk(value: Any, *, window_name: str = "", parent_name: str = "", process_name: str = "", framework_id: str = "", dom: bool = False) -> Iterable[Dict[str, Any]]:
+def _walk(value: Any, *, desktop_name: str = "", window_name: str = "", parent_name: str = "", process_name: str = "", framework_id: str = "", dom: bool = False) -> Iterable[Dict[str, Any]]:
     if isinstance(value, dict):
         # MCP content blocks are envelopes, not UI elements. Their text is
         # parsed separately by ``_payloads``.
-        if str(value.get("type") or "").casefold() in {"text", "image", "resource", "resource_link"}:
+        if str(value.get("type") or "").casefold() in {"text", "image", "image_artifact", "resource", "resource_link"}:
             return
         current_window = _first(value, "window_name", "window", "windowTitle", "title_bar") or window_name
-        if not current_window and isinstance(value.get("focused_window"), str):
-            current_window = str(value["focused_window"]).strip()
+        current_desktop = _first(value, "desktop_name", "desktopName") or desktop_name
         current_process = _first(value, "process_name", "processName", "process", "exe") or process_name
         current_framework = _first(value, "framework_id", "frameworkId") or framework_id
         current_dom = bool(value.get("dom") or value.get("is_dom") or dom)
@@ -222,6 +329,12 @@ def _walk(value: Any, *, window_name: str = "", parent_name: str = "", process_n
         control_type = _first(value, "control_type", "controlType", "type", "role", "localized_control_type")
         automation_id = _first(value, "automation_id", "automationId", "automationID", "id")
         bounds = _bounds(value)
+        lowered_control = control_type.casefold()
+        if lowered_control in {"desktop", "桌面"}:
+            current_desktop = name or current_desktop
+            current_window = ""
+        elif lowered_control in {"window", "窗口"} and name:
+            current_window = name
         has_identity = bool(
             name
             or control_type
@@ -234,6 +347,8 @@ def _walk(value: Any, *, window_name: str = "", parent_name: str = "", process_n
         if has_identity:
             action = _first(value, "action", "default_action", "pattern")
             yield {
+                "provider": _first(value, "provider", "provider_name") or "windows-mcp",
+                "desktop_name": current_desktop,
                 "window_name": current_window,
                 "parent_name": parent_name,
                 "name": _first(value, "name", "label", "title"),
@@ -254,6 +369,7 @@ def _walk(value: Any, *, window_name: str = "", parent_name: str = "", process_n
                 "action": action,
                 "value": value.get("value"),
                 "toggle_state": value.get("toggle_state", value.get("toggleState")),
+                "handle": value.get("handle", value.get("hwnd", value.get("native_handle"))),
                 "_interactive": bool(action)
                 or bool(value.get("interactive", value.get("is_interactive", False)))
                 or control_type.casefold().replace(" ", "") in _INTERACTIVE_CONTROL_TYPES,
@@ -263,10 +379,10 @@ def _walk(value: Any, *, window_name: str = "", parent_name: str = "", process_n
         for key, child in value.items():
             if key in skip:
                 continue
-            yield from _walk(child, window_name=current_window, parent_name=next_parent, process_name=current_process, framework_id=current_framework, dom=current_dom)
+            yield from _walk(child, desktop_name=current_desktop, window_name=current_window, parent_name=next_parent, process_name=current_process, framework_id=current_framework, dom=current_dom)
     elif isinstance(value, list):
         for child in value:
-            yield from _walk(child, window_name=window_name, parent_name=parent_name, process_name=process_name, framework_id=framework_id, dom=dom)
+            yield from _walk(child, desktop_name=desktop_name, window_name=window_name, parent_name=parent_name, process_name=process_name, framework_id=framework_id, dom=dom)
 
 
 def _payloads(result: Any) -> Iterable[Any]:
@@ -309,11 +425,16 @@ def _payloads(result: Any) -> Iterable[Any]:
 
 
 def normalize_snapshot(result: Any) -> Dict[str, Any]:
+    if isinstance(result, dict) and isinstance(result.get("_onecolleague_observation"), dict):
+        return dict(result["_onecolleague_observation"])
     elements: List[Dict[str, Any]] = []
     seen: Set[Tuple[Any, ...]] = set()
+    provider = _provider_name(result)
     focused_window = ""
     warnings: List[str] = []
     source_kinds: Set[str] = set()
+    desktops: Set[str] = set()
+    windows: Set[str] = set()
     for payload in _payloads(result):
         decoded = _decode(payload)
         if isinstance(decoded, str):
@@ -321,8 +442,11 @@ def normalize_snapshot(result: Any) -> Dict[str, Any]:
             source_kinds.add("ui_tree")
             if metadata.get("focused_window"):
                 focused_window = str(metadata["focused_window"])
+            desktops.update(str(item) for item in metadata.get("desktops", []) if str(item).strip())
+            windows.update(str(item) for item in metadata.get("windows", []) if str(item).strip())
             candidates: Iterable[Dict[str, Any]] = parsed
         else:
+            source_kinds.add("structured")
             if isinstance(decoded, dict):
                 focused = decoded.get("focused_window") or decoded.get("active_window") or decoded.get("foreground_window")
                 if isinstance(focused, dict):
@@ -334,8 +458,13 @@ def normalize_snapshot(result: Any) -> Dict[str, Any]:
             if not isinstance(item, dict):
                 continue
             normalized = dict(item)
+            normalized["provider"] = str(normalized.get("provider") or provider)
+            if normalized.get("desktop_name"):
+                desktops.add(str(normalized["desktop_name"]))
+            if normalized.get("window_name"):
+                windows.add(str(normalized["window_name"]))
             bounds = normalized.get("bounds") if isinstance(normalized.get("bounds"), dict) else None
-            key = tuple(str(normalized.get(field) or "") for field in ("window_name", "parent_name", "name", "text", "control_type", "automation_id", "process_name"))
+            key = tuple(str(normalized.get(field) or "") for field in ("desktop_name", "window_name", "parent_name", "name", "text", "control_type", "automation_id", "process_name"))
             key += tuple(sorted((bounds or {}).items()))
             if key in seen:
                 continue
@@ -352,19 +481,34 @@ def normalize_snapshot(result: Any) -> Dict[str, Any]:
             if bool(item.get("_interactive")):
                 normalized["mcp_label"] = sum(1 for previous in elements if previous.get("mcp_label") is not None)
             elements.append(normalized)
+    window_element_counts = dict(sorted(Counter(
+        str(item.get("window_name")) for item in elements if str(item.get("window_name") or "").strip()
+    ).items()))
+    desktop_element_count = sum(1 for item in elements if item.get("desktop_name") and not item.get("window_name"))
+    unassigned_element_count = sum(1 for item in elements if not item.get("desktop_name") and not item.get("window_name"))
     if not elements:
         warnings.append("Snapshot 未返回可解析的 UI 元素")
         if source_kinds:
             warnings.append("已收到 UI Tree 文本，但其中没有带坐标或控件信息的元素行")
     return {
+        "provider": provider,
         "elements": elements,
         "count": len(elements),
         "focused_window": focused_window,
+        "desktops": sorted(desktops),
+        "windows": sorted(windows),
+        "window_element_counts": window_element_counts,
+        "desktop_element_count": desktop_element_count,
+        "unassigned_element_count": unassigned_element_count,
         "warnings": warnings,
         "diagnostics": {
+            "provider": provider,
             "source": sorted(source_kinds) or ["structured"],
             "element_count": len(elements),
             "focused_window": focused_window,
+            "window_element_counts": window_element_counts,
+            "desktop_element_count": desktop_element_count,
+            "unassigned_element_count": unassigned_element_count,
             "message": warnings[0] if warnings else "已解析当前桌面元素",
         },
     }
@@ -385,12 +529,13 @@ def _match(value: str, expected: str, mode: str) -> bool:
 
 
 def resolve_locator(snapshot: Dict[str, Any], locator: Dict[str, Any]) -> Dict[str, Any]:
-    candidates = snapshot.get("elements") if isinstance(snapshot, dict) else []
+    snapshot_metadata = snapshot if isinstance(snapshot, dict) else {}
+    candidates = snapshot_metadata.get("elements")
     if not isinstance(candidates, list):
         candidates = []
     locator = locator if isinstance(locator, dict) else {}
     mode = str(locator.get("match") or "exact")
-    focused_window = str(snapshot.get("focused_window") or "").strip() if isinstance(snapshot, dict) else ""
+    focused_window = str(snapshot_metadata.get("focused_window") or "").strip()
     if isinstance(locator.get("mcp_label"), int):
         matches = [item for item in candidates if isinstance(item, dict) and item.get("mcp_label") == locator.get("mcp_label")]
     else:
@@ -407,8 +552,6 @@ def resolve_locator(snapshot: Dict[str, Any], locator: Dict[str, Any]) -> Dict[s
         def apply_context(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             result: List[Dict[str, Any]] = []
             for item in items:
-                if focused_window and locator.get("window_name") and not _match(focused_window, str(locator.get("window_name")), mode):
-                    continue
                 if locator.get("monitor") is not None and item.get("monitor") not in {None, locator.get("monitor")}:
                     continue
                 if locator.get("dom") is True and item.get("dom") is not True:
@@ -446,13 +589,27 @@ def resolve_locator(snapshot: Dict[str, Any], locator: Dict[str, Any]) -> Dict[s
         "target_ambiguous": "补充窗口、控件类型、父级或 AutomationId 约束后重新观察",
         "target_not_found": "重新观察桌面并确认目标窗口/元素仍然存在",
     }[code]
+    requested_window = str(locator.get("window_name") or "").strip()
+    focus_matches_target = None if not requested_window or not focused_window else _match(focused_window, requested_window, mode)
+    base_diagnostics = snapshot_metadata.get("diagnostics") if isinstance(snapshot_metadata.get("diagnostics"), dict) else {}
     return {
         "status": status,
         "matches": matches,
         "match_count": len(matches),
         "candidate_count": len(matches),
         "confidence": confidence,
-        "diagnostics": {"code": code, "message": next_action, "next_action": next_action, "retryable": True},
+        "diagnostics": {
+            "code": code,
+            "message": next_action,
+            "next_action": next_action,
+            "retryable": True,
+            "provider": snapshot_metadata.get("provider") or base_diagnostics.get("provider") or "windows-mcp",
+            "focused_window": focused_window,
+            "requested_window": requested_window,
+            "focused_window_matches_target": focus_matches_target,
+            "window_element_counts": snapshot_metadata.get("window_element_counts") or base_diagnostics.get("window_element_counts") or {},
+            "searched_element_count": len(candidates),
+        },
     }
 
 

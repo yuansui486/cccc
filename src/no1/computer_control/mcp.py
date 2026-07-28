@@ -10,11 +10,13 @@ import site
 import sys
 import threading
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..util.fs import atomic_write_text
+from .lease import ComputerControlLease
 from .storage import WorkflowStore
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
@@ -315,6 +317,9 @@ class WindowsMCPSession:
                 await self._stop_unlocked()
                 try:
                     return await self._start_unlocked()
+                except asyncio.CancelledError:
+                    await asyncio.shield(self._stop_unlocked())
+                    raise
                 except Exception as exc:
                     last_error = exc
                     self._logs.append(f"Windows-MCP startup attempt {attempt + 1} failed: {_redact(str(exc))}")
@@ -466,13 +471,19 @@ class WindowsMCPSession:
                 self.transport_restarts += 1
             except Exception:
                 raise MCPUnavailable(f"Windows-MCP 连接中断且自动恢复失败：{exc}") from exc
-            if classify_tool(name, arguments) == "low":
+            risk = classify_tool(name, arguments)
+            # Only the canonical Snapshot observation is replay-safe.  Other
+            # tools classified as low risk may still have adapter-specific
+            # effects, so they are not silently invoked a second time.
+            if str(name or "").strip().casefold() == "snapshot":
                 try:
                     return await self._request_owned("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
                 except Exception as retry_exc:
                     if self._is_transport_error(retry_exc):
                         await self._stop_owned()
                     raise
+            if risk == "low":
+                raise MCPUnavailable("Windows-MCP 连接已恢复；只读调用未自动重放，请重新观察后继续。") from exc
             raise MCPOutcomeUnknown("Windows-MCP 连接中断；操作结果未知。请先观察桌面状态，不要直接重试。") from exc
 
     @staticmethod
@@ -511,10 +522,42 @@ class WindowsMCPSession:
             return await self._start_owned()
         return list(self._tools)
 
+    async def restart(self) -> Dict[str, Any]:
+        """Restart only the supervised stdio session and repeat the handshake.
+
+        This method never installs, repairs, upgrades, or otherwise writes to
+        the Windows-MCP tool environment.
+        """
+        return await self._on_owner(self._restart_owned())
+
+    def restart_sync(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        return self._on_owner_sync(self._restart_owned(), timeout=timeout)
+
+    async def _restart_owned(self) -> Dict[str, Any]:
+        assert self._lock is not None
+        async with self._lock:
+            previous_started_at = self.started_at
+            await self._stop_unlocked()
+            try:
+                tools = await self._start_unlocked()
+            except BaseException:
+                await asyncio.shield(self._stop_unlocked())
+                raise
+            self.transport_restarts += 1
+            return {
+                "previous_started_at": previous_started_at,
+                "started_at": self.started_at,
+                "transport_restarts": int(self.transport_restarts),
+                "session_running": bool(self.running),
+                "tool_count": len(tools),
+                "version": self.version,
+            }
+
     async def _stop_unlocked(self) -> None:
         process = self._process
         self._process = None
         self._tools = []
+        self.started_at = None
         if process is not None and process.returncode is None:
             process.terminate()
             try:
@@ -540,10 +583,17 @@ class WindowsMCPSession:
 
 
 class WindowsMCPSetup:
-    def __init__(self, home: Path, session: WindowsMCPSession, store: WorkflowStore):
+    def __init__(
+        self,
+        home: Path,
+        session: WindowsMCPSession,
+        store: WorkflowStore,
+        lease: Optional[ComputerControlLease] = None,
+    ):
         self.home = home
         self.session = session
         self.store = store
+        self.lease = lease or ComputerControlLease(home)
         self.state_root = home / "state" / "computer-control"
         self.path = self.state_root / "setup.json"
         self.uv_root = self.state_root / "uv-tools"
@@ -577,6 +627,8 @@ class WindowsMCPSetup:
     def status(self) -> Dict[str, Any]:
         result = dict(self._status or {"phase": "not_started", "version": ""})
         result["session_running"] = self.session.running
+        result["session_started_at"] = getattr(self.session, "started_at", None)
+        result["transport_restarts"] = int(getattr(self.session, "transport_restarts", 0))
         result["in_progress"] = bool(self._task and not self._task.done())
         result["logs"] = (list(self._setup_logs) + self.session.logs)[-50:]
         return result
@@ -599,42 +651,41 @@ class WindowsMCPSetup:
     async def _run(self, *, force: bool, upgrade: bool) -> None:
         async with self._lock:
             try:
-                self._set("checking", error=None, failure=None)
-                if os.name != "nt":
-                    raise MCPUnavailable("Computer control requires Windows")
-                uv = await self._ensure_uv()
-                env = self._uv_environment()
-                executable = self._windows_mcp_executable()
-                if upgrade and executable.is_file():
-                    self._set("downloading", detail="upgrading_windows_mcp")
-                    await self._run_command([str(uv), "tool", "upgrade", WINDOWS_MCP_PACKAGE], env=env, timeout=900)
-                elif force or not executable.is_file():
-                    self._set("downloading", detail="installing_windows_mcp")
-                    command = [str(uv), "tool", "install", "--python", "3.13"]
-                    if force:
-                        command.append("--force")
-                    command.append(WINDOWS_MCP_PACKAGE)
-                    await self._run_command(command, env=env, timeout=900)
-                if not executable.is_file():
-                    raise MCPUnavailable(f"Windows-MCP installation finished but {executable.name} was not created")
-                version = self._installed_version()
-                self.session.configure(executable, version)
-                await self.session.stop()
-                self._set("initializing", version=version, detail="starting_mcp_session")
-                tools = await self.session.start()
-                self._set("verifying", version=version, tool_count=len(tools), detail="checking_tool_catalog")
-                fingerprint = self.store.fingerprint(version, tools)
-                revoked = self.store.revoke_stale_trust(fingerprint)
-                self._set(
-                    "ready",
-                    version=version,
-                    fingerprint=fingerprint,
-                    tool_count=len(tools),
-                    revoked_trust_count=revoked,
-                    detail=None,
-                    error=None,
-                    failure=None,
-                )
+                setup_id = "setup_" + uuid.uuid4().hex[:16]
+                with self.lease.hold(
+                    group_id="_global",
+                    actor_id="setup",
+                    run_id=setup_id,
+                    observe_only=False,
+                ) as lease_guard:
+                    self._set("checking", error=None, failure=None)
+                    if os.name != "nt":
+                        raise MCPUnavailable("Computer control requires Windows")
+                    uv = await self._ensure_uv()
+                    env = self._uv_environment()
+                    executable = self._windows_mcp_executable()
+                    if (force or upgrade) and self.session.running:
+                        await self.session.stop()
+                    if upgrade and executable.is_file():
+                        self._set("downloading", detail="upgrading_windows_mcp")
+                        await self._run_command([str(uv), "tool", "upgrade", WINDOWS_MCP_PACKAGE], env=env, timeout=900)
+                    elif force or not executable.is_file():
+                        self._set("downloading", detail="installing_windows_mcp")
+                        command = [str(uv), "tool", "install", "--python", "3.13"]
+                        if force:
+                            command.append("--force")
+                        command.append(WINDOWS_MCP_PACKAGE)
+                        await self._run_command(command, env=env, timeout=900)
+                    if lease_guard["lost"].is_set():
+                        raise PermissionError("computer_control_lease_required")
+                    if not executable.is_file():
+                        raise MCPUnavailable(f"Windows-MCP installation finished but {executable.name} was not created")
+                    version = self._installed_version()
+                    self.session.configure(executable, version)
+                    await self.session.stop()
+                    self._set("initializing", version=version, detail="starting_mcp_session")
+                    tools = await self.session.start()
+                    self.refresh_catalog(tools, version=version)
             except Exception as exc:
                 process = self.session._process
                 failure = {
@@ -649,11 +700,27 @@ class WindowsMCPSetup:
                 )
 
     async def repair(self) -> Dict[str, Any]:
-        await self.session.stop()
         return await self.ensure(force=True)
 
     async def upgrade(self) -> Dict[str, Any]:
         return await self.ensure(upgrade=True)
+
+    def refresh_catalog(self, tools: Sequence[Dict[str, Any]], *, version: Optional[str] = None) -> Dict[str, Any]:
+        current_version = str(version or self.session.version or self._status.get("version") or "")
+        self._set("verifying", version=current_version, tool_count=len(tools), detail="checking_tool_catalog")
+        fingerprint = self.store.fingerprint(current_version, list(tools))
+        revoked = self.store.revoke_stale_trust(fingerprint)
+        self._set(
+            "ready",
+            version=current_version,
+            fingerprint=fingerprint,
+            tool_count=len(tools),
+            revoked_trust_count=revoked,
+            detail=None,
+            error=None,
+            failure=None,
+        )
+        return self.status()
 
     def _uv_environment(self) -> Dict[str, str]:
         self.tool_dir.mkdir(parents=True, exist_ok=True)

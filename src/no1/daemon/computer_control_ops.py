@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Dict, Optional, Tuple
 
 from ..computer_control.mcp import MCPUnavailable
 from ..computer_control.risk import annotate_catalog, workflow_risk
 from ..computer_control.mcp import validate_workflow_tools
 from ..computer_control.lease import LeaseConflict
+from ..computer_control.elements import normalize_snapshot
 from ..computer_control.models import WorkflowDefinition
 from ..computer_control.services import get_services
 from ..contracts.v1 import DaemonError, DaemonResponse
@@ -20,6 +22,15 @@ def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None)
 
 def _ok(value: Any) -> Tuple[DaemonResponse, bool]:
     return DaemonResponse(ok=True, result={"ok": True, "result": value}), False
+
+
+def _observation_status(service: Any) -> Dict[str, Any]:
+    observation = getattr(service, "observation", None)
+    status = getattr(observation, "status", None)
+    if not callable(status):
+        return {}
+    value = status()
+    return value if isinstance(value, dict) else {}
 
 
 def _infrastructure_details(service: Any) -> Dict[str, Any]:
@@ -375,16 +386,77 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                     ],
                 }
             return _ok(value)
+        if command == "lease":
+            action = str(args.get("action") or "status").strip().lower()
+            if action == "status":
+                return _ok(service.lease.status())
+            return _error("invalid_request", f"unsupported lease action: {action}")
         if command == "setup":
             action = str(args.get("action") or "status").strip().lower()
             if action == "status":
-                return _ok(service.setup.status())
+                return _ok({**service.setup.status(), **_observation_status(service)})
             if action == "ensure":
+                setup_status = service.setup.status()
+                needs_change = bool(args.get("force")) or not (
+                    setup_status.get("phase") == "ready" and bool(setup_status.get("session_running"))
+                )
+                lease_status = service.lease.status()
+                if needs_change and lease_status.get("active"):
+                    return _error(
+                        "computer_control_busy",
+                        "computer control is already in use",
+                        details=lease_status.get("lease") if isinstance(lease_status.get("lease"), dict) else {},
+                    )
                 return _ok(service.session.run_sync(service.setup.ensure(force=bool(args.get("force")))))
             if action == "repair":
+                lease_status = service.lease.status()
+                if lease_status.get("active"):
+                    return _error(
+                        "computer_control_busy",
+                        "computer control is already in use",
+                        details=lease_status.get("lease") if isinstance(lease_status.get("lease"), dict) else {},
+                    )
                 return _ok(service.session.run_sync(service.setup.repair()))
             if action == "upgrade":
+                lease_status = service.lease.status()
+                if lease_status.get("active"):
+                    return _error(
+                        "computer_control_busy",
+                        "computer control is already in use",
+                        details=lease_status.get("lease") if isinstance(lease_status.get("lease"), dict) else {},
+                    )
                 return _ok(service.session.run_sync(service.setup.upgrade()))
+            if action == "restart_session":
+                setup_status = service.setup.status()
+                if bool(setup_status.get("in_progress")):
+                    return _error(
+                        "computer_control_setup_in_progress",
+                        "Windows-MCP 正在安装或更新，会话暂时不能重启",
+                        details={"phase": setup_status.get("phase")},
+                    )
+                restart_id = "session_restart_" + uuid.uuid4().hex[:14]
+                with service.lease.hold(
+                    group_id="_global",
+                    actor_id="session-restart",
+                    run_id=restart_id,
+                    observe_only=False,
+                ) as lease_guard:
+                    restarted = service.session.restart_sync(timeout=None)
+                    if lease_guard["lost"].is_set():
+                        raise PermissionError("computer_control_lease_required")
+                    tools = service.session.catalog_sync()
+                    refreshed_setup = service.setup.refresh_catalog(tools)
+                    invalidate = getattr(service.observation, "invalidate", None)
+                    if callable(invalidate):
+                        invalidate()
+                    return _ok(
+                        {
+                            **restarted,
+                            "setup_phase": refreshed_setup.get("phase"),
+                            "fingerprint": refreshed_setup.get("fingerprint"),
+                            **_observation_status(service),
+                        }
+                    )
             if action == "force_release":
                 released = service.lease.release(run_id="", force=True)
                 service.session.stop_sync()
@@ -400,15 +472,24 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             return _ok(_picker(service, args, group_id, actor_id))
         if command == "element_snapshot":
             capture_id = str(args.get("capture_id") or "capture")
-            service.lease.acquire(group_id=group_id, actor_id="element-picker", run_id=capture_id, observe_only=True)
-            try:
+            with service.lease.hold(
+                group_id=group_id,
+                actor_id="element-picker",
+                run_id=capture_id,
+                observe_only=True,
+            ) as lease_guard:
                 tools = service.session.catalog_sync()
                 snapshot_name = next((str(item.get("name")) for item in tools if str(item.get("name") or "").lower() == "snapshot"), "")
                 if not snapshot_name:
                     raise RuntimeError("Windows-MCP Snapshot tool is unavailable")
-                return _ok(service.session.call_tool_sync(snapshot_name, {}))
-            finally:
-                service.lease.release(run_id=capture_id, force=True)
+                raw_snapshot = service.session.call_tool_sync(snapshot_name, {})
+                if lease_guard["lost"].is_set():
+                    raise PermissionError("computer_control_lease_required")
+                locator = args.get("locator") if isinstance(args.get("locator"), dict) else None
+                if locator is not None:
+                    observation = service.observation.enhance_sync(normalize_snapshot(raw_snapshot), locator)
+                    raw_snapshot = {**raw_snapshot, "_onecolleague_observation": observation}
+                return _ok(raw_snapshot)
         return _error("invalid_request", f"unsupported computer-control command: {command}")
     except MCPUnavailable as exc:
         return _error(
@@ -418,6 +499,11 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
         )
     except LeaseConflict as exc:
         return _error("computer_control_busy", str(exc), details=exc.lease)
+    except PermissionError as exc:
+        code = str(exc).strip()
+        if code.startswith("computer_control_"):
+            return _error(code, code, details={"lease": service.lease.status(), "retryable": True})
+        return _error("permission_denied", str(exc), details={"retryable": False})
     except Exception as exc:
         details = {
             "layer": str(getattr(exc, "layer", "computer_control")),

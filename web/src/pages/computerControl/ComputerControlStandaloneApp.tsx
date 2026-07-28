@@ -56,6 +56,8 @@ import type {
 import { normalizeDefinition, serializeDefinition } from "./types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
 import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import { useUIStore } from "../../stores";
+import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, latestComputerControlObservation, newestComputerControlObservation, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
 
 type Section = "tools" | "steps" | "properties" | "runs";
 type Snapshot = { nodes: CanvasNode[]; edges: CanvasEdge[] };
@@ -230,6 +232,8 @@ function cloneSnapshot(nodes: CanvasNode[], edges: CanvasEdge[]): Snapshot {
 }
 
 export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }: { groupId: string; activeTab: string; groupLabelById?: Record<string, string> }) {
+  const sseStatus = useUIStore((state) => state.sseStatus);
+  const sseDisconnectedSinceRefresh = React.useRef(sseStatus === "disconnected");
   const [setup, setSetup] = useState<ComputerSetup>({
     phase: "not_started",
     version: "",
@@ -258,45 +262,61 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     auto_publish_and_trust: true,
   });
   const [lease, setLease] = useState<ComputerControlLease>({ active: false });
-  const refreshInFlight = React.useRef(false);
+  const activeGroupIdRef = React.useRef(groupId);
+  activeGroupIdRef.current = groupId;
+  const refreshInFlight = React.useRef<Promise<void> | null>(null);
+  const refreshQueued = React.useRef(false);
   const [pickerElements, setPickerElements] = useState<Array<Record<string, unknown>>>([]);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [pickerStatus, setPickerStatus] = useState("");
   const [pickerSession, setPickerSession] = useState<ElementPickerSession | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!groupId || refreshInFlight.current) return;
-    refreshInFlight.current = true;
-    try {
-      const [
-        status,
-        workflowResponse,
-        runResponse,
-        requestResponse,
-        settingsResponse,
-        leaseResponse,
-      ] = await Promise.all([
-        computerControlApi.status(),
-        computerControlApi.workflows(groupId),
-        computerControlApi.runs(groupId),
-        computerControlApi.requests(groupId),
-        computerControlApi.settings(groupId),
-        computerControlApi.leaseStatus(),
-      ]);
-      if (status.ok) setSetup(status.result);
-      if (workflowResponse.ok) {
-        setWorkflows(workflowResponse.result.workflows || []);
-        const first = workflowResponse.result.workflows?.[0];
-        if (first) setSelectedId((current) => current || first.workflow_id);
+    refreshQueued.current = true;
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const task = (async () => {
+      while (refreshQueued.current) {
+        refreshQueued.current = false;
+        const requestedGroupId = activeGroupIdRef.current;
+        if (!requestedGroupId) continue;
+        const [
+          status,
+          workflowResponse,
+          runResponse,
+          requestResponse,
+          settingsResponse,
+          leaseResponse,
+        ] = await Promise.all([
+          computerControlApi.status(),
+          computerControlApi.workflows(requestedGroupId),
+          computerControlApi.runs(requestedGroupId),
+          computerControlApi.requests(requestedGroupId),
+          computerControlApi.settings(requestedGroupId),
+          computerControlApi.leaseStatus(),
+        ]);
+        if (activeGroupIdRef.current !== requestedGroupId) {
+          refreshQueued.current = true;
+          continue;
+        }
+        if (status.ok) setSetup(status.result);
+        if (workflowResponse.ok) {
+          setWorkflows(workflowResponse.result.workflows || []);
+          const first = workflowResponse.result.workflows?.[0];
+          if (first) setSelectedId((current) => current || first.workflow_id);
+        }
+        if (runResponse.ok) setRuns(runResponse.result.runs || []);
+        if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
+        if (settingsResponse.ok) setSettings(settingsResponse.result);
+        if (leaseResponse.ok) setLease(leaseResponse.result);
       }
-      if (runResponse.ok) setRuns(runResponse.result.runs || []);
-      if (requestResponse.ok) setRequests(requestResponse.result.requests || []);
-      if (settingsResponse.ok) setSettings(settingsResponse.result);
-      if (leaseResponse.ok) setLease(leaseResponse.result);
+    })();
+    refreshInFlight.current = task;
+    try {
+      await task;
     } finally {
-      refreshInFlight.current = false;
+      if (refreshInFlight.current === task) refreshInFlight.current = null;
     }
-  }, [groupId]);
+  }, []);
 
   const loadCatalog = useCallback(async () => {
     const response = await computerControlApi.catalog();
@@ -339,12 +359,24 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   }, [loadCatalog, setup.phase, tools.length]);
 
   useEffect(() => {
-    if (!groupId || !selectedId) return;
+    setSelectedId("");
+    setRecord(null);
+    setWorkflows([]);
+    setRuns([]);
+    setRequests([]);
+    setVersions([]);
+    setProposals([]);
+  }, [groupId]);
+
+  useEffect(() => {
+    if (!groupId || !selectedId) return undefined;
+    let cancelled = false;
     void Promise.all([
       computerControlApi.workflow(groupId, selectedId),
       computerControlApi.versions(groupId, selectedId),
       computerControlApi.proposals(groupId, selectedId),
     ]).then(([response, versionResponse, proposalResponse]) => {
+      if (cancelled) return;
       if (!response.ok) {
         setMessage(friendlyError(response.error.message));
         return;
@@ -362,6 +394,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       setSelectedNodeId("");
       setHistory([]);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [groupId, selectedId]);
 
   useEffect(() => {
@@ -370,6 +405,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     const timer = window.setInterval(() => void refresh(), 2000);
     return () => window.clearInterval(timer);
   }, [activeTab, groupId, refresh]);
+
+  useEffect(() => {
+    if (sseStatus === "disconnected") sseDisconnectedSinceRefresh.current = true;
+    if (groupId && shouldRefreshComputerControlAfterSseTransition(sseDisconnectedSinceRefresh.current, sseStatus, activeTab === COMPUTER_CONTROL_TAB)) {
+      sseDisconnectedSinceRefresh.current = false;
+      void refresh();
+    }
+  }, [activeTab, groupId, refresh, sseStatus]);
 
   const selectedManifest = useMemo(
     () => workflows.find((item) => item.workflow_id === selectedId),
@@ -382,6 +425,12 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const selectedTool = useMemo(
     () => tools.find((tool) => tool.name === selectedNode?.data.model.tool),
     [selectedNode, tools],
+  );
+  const sessionDetails = useMemo(() => computerControlSessionDetails(setup), [setup]);
+  const runObservation = useMemo(() => latestComputerControlObservation(runs), [runs]);
+  const currentObservation = useMemo(
+    () => newestComputerControlObservation(sessionDetails.observation, runObservation),
+    [runObservation, sessionDetails.observation],
   );
 
   async function captureElements() {
@@ -690,22 +739,38 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     );
   }
 
-  async function beginSetup(kind: "ensure" | "repair" | "upgrade") {
-    setBusy("ensure");
+  async function beginSetup(kind: "ensure" | "repair" | "upgrade" | "restart") {
+    if (lease.active) {
+      setSection("runs");
+      setMessage("电脑控制任务正在运行，请先停止当前运行再管理 Windows-MCP。");
+      return;
+    }
+    setBusy(kind);
     const response =
       kind === "repair"
         ? await computerControlApi.repair()
         : kind === "upgrade"
           ? await computerControlApi.upgrade()
+          : kind === "restart"
+            ? await computerControlApi.restartSession()
           : await computerControlApi.ensure();
     if (response.ok) {
-      setSetup(response.result);
+      setSetup((current) => ({
+        ...current,
+        ...response.result,
+        phase: response.result.phase || response.result.setup_phase || current.phase,
+        session_started_at: response.result.session_started_at || response.result.started_at || current.session_started_at,
+      }));
       setMessage(
-        kind === "upgrade"
-          ? "正在检查 Windows-MCP 更新"
-          : "正在准备 Windows-MCP",
+        kind === "upgrade" ? "正在检查 Windows-MCP 更新"
+          : kind === "restart" ? "Windows-MCP 会话已重启，正在刷新工具和运行状态"
+            : kind === "repair" ? "正在修复 Windows-MCP 安装"
+              : "正在准备 Windows-MCP",
       );
-    } else setMessage(response.error.message);
+      if (kind === "restart") {
+        await Promise.all([loadCatalog(), refresh()]);
+      }
+    } else setMessage(friendlyError(response.error.message));
     setBusy("");
   }
 
@@ -1233,31 +1298,57 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
               版本 {setup.version}
             </span>
           )}
-          <div className="truncate text-[var(--color-text-secondary)]">
+          <div className="text-[var(--color-text-secondary)]">
             {setup.error?.message ||
               (setup.phase === "ready"
                 ? `已验证 ${setup.tool_count || 0} 个电脑工具`
                 : "首次准备可能需要一到两分钟，可以继续浏览此页面")}
           </div>
+          {(sessionDetails.startedAt || sessionDetails.transportRestarts !== null) && (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+              {sessionDetails.startedAt && <span>会话启动：{formatComputerControlTime(sessionDetails.startedAt)}</span>}
+              {sessionDetails.transportRestarts !== null && <span>会话恢复/重启：{sessionDetails.transportRestarts} 次</span>}
+            </div>
+          )}
+          {currentObservation && (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+              {currentObservation.updatedAt && <span>最近观察：{formatComputerControlTime(currentObservation.updatedAt)}</span>}
+              {currentObservation.provider && <span>提供者：{computerControlProviderLabel(currentObservation.provider)}</span>}
+              {currentObservation.targetWindow && <span className="max-w-72 truncate">目标窗口：{currentObservation.targetWindow}</span>}
+              {currentObservation.elementCount !== null && <span>元素：{currentObservation.elementCount} 个</span>}
+            </div>
+          )}
         </div>
         {setup.phase === "failed" ? (
           <button
             className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
             onClick={() => void beginSetup("repair")}
+            disabled={Boolean(busy) || lease.active}
           >
             <Wrench size={13} />
             修复
           </button>
         ) : (
-          <button
-            title="检查更新"
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-            onClick={() => void beginSetup("upgrade")}
-            disabled={setup.phase !== "ready"}
-          >
-            <RefreshCw size={13} />
-            更新
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              title="仅重启 Windows-MCP 连接，不会重新安装或升级"
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+              onClick={() => void beginSetup("restart")}
+              disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+            >
+              <RefreshCw size={13} />
+              重启会话
+            </button>
+            <button
+              title="检查并安装最新版 Windows-MCP"
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+              onClick={() => void beginSetup("upgrade")}
+              disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+            >
+              <Upload size={13} />
+              更新组件
+            </button>
+          </div>
         )}
       </div>
 

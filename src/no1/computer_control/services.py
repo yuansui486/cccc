@@ -12,6 +12,7 @@ from .requests import ComputerRequestStore
 from .scheduler import ComputerControlScheduler
 from .storage import WorkflowStore
 from .picker import ElementPickerManager
+from .observation import ElementObservationService
 
 
 class ComputerControlServices:
@@ -21,7 +22,8 @@ class ComputerControlServices:
         self.requests = ComputerRequestStore(self.store)
         self.lease = ComputerControlLease(home)
         self.session = WindowsMCPSession()
-        self.setup = WindowsMCPSetup(home, self.session, self.store)
+        self.setup = WindowsMCPSetup(home, self.session, self.store, self.lease)
+        self.observation = ElementObservationService()
         self.picker = ElementPickerManager(
             home,
             self.lease,
@@ -34,6 +36,7 @@ class ComputerControlServices:
             self.lease,
             self.session,
             fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),
+            observation_provider=self.observation,
         )
         self.runner = WorkflowRunner(
             home,
@@ -41,6 +44,7 @@ class ComputerControlServices:
             self.lease,
             self.session,
             fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),
+            observation_provider=self.observation,
         )
         self.scheduler = ComputerControlScheduler(self)
 

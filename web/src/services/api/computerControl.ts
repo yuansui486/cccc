@@ -2,15 +2,41 @@ import { apiJson, type ApiResponse } from "./base";
 
 export type ComputerSetup = {
   phase: string;
+  setup_phase?: string;
   version: string;
   fingerprint?: string;
   tool_count?: number;
   error?: { code?: string; message?: string } | null;
   logs?: string[];
   session_running?: boolean;
+  session_started_at?: number | string | null;
+  started_at?: number | string | null;
+  transport_restarts?: number;
+  session?: {
+    running?: boolean;
+    started_at?: number | string | null;
+    transport_restarts?: number;
+  } | null;
+  observation?: ComputerObservation | null;
+  last_observation?: ComputerObservation | null;
+  observation_updated_at?: number | string | null;
+  observation_provider?: string;
+  observation_target_window?: string;
+  observation_element_count?: number;
   in_progress?: boolean;
   detail?: string | null;
   failure?: { phase?: string; exit_code?: number | null; stderr_tail?: string[] } | null;
+};
+
+export type ComputerObservation = {
+  updated_at?: number | string | null;
+  captured_at?: number | string | null;
+  provider?: string;
+  source?: string;
+  target_window?: string;
+  window_name?: string;
+  element_count?: number;
+  count?: number;
 };
 
 export type WorkflowManifest = {
@@ -125,6 +151,7 @@ export const computerControlApi = {
   status: () => apiJson<ComputerSetup>(`${root}/setup/status`),
   repair: () => apiJson<ComputerSetup>(`${root}/setup/repair`, { method: "POST" }),
   upgrade: () => apiJson<ComputerSetup>(`${root}/setup/upgrade`, { method: "POST" }),
+  restartSession: () => apiJson<ComputerSetup>(`${root}/setup/restart-session`, { method: "POST" }),
   catalog: (tool?: string) => apiJson<{ version?: string; fingerprint?: string; healthy?: boolean; tools?: Record<string, unknown>[]; tool?: Record<string, unknown> }>(`${root}/catalog${tool ? `?tool=${encodeURIComponent(tool)}` : ""}`),
   leaseStatus: () => apiJson<ComputerControlLease>(`${root}/lease/status`),
   interruptLease: (runId: string, emergency = false) => apiJson<{ interrupted: boolean; emergency?: boolean; run?: Record<string, unknown> }>(`${root}/lease/interrupt`, { method: "POST", body: JSON.stringify({ run_id: runId, emergency }) }),

@@ -32,6 +32,7 @@ class RecordingStore:
         lease: ComputerControlLease,
         session: WindowsMCPSession,
         fingerprint_provider: Optional[Callable[[], str]] = None,
+        observation_provider: Optional[Any] = None,
     ):
         self.home = home
         self.workflows = workflows
@@ -39,11 +40,36 @@ class RecordingStore:
         self.lease = lease
         self.session = session
         self.fingerprint_provider = fingerprint_provider or (lambda: "")
+        self.observation_provider = observation_provider
         self._lock = threading.RLock()
         self._active: Dict[str, tuple[str, str, str]] = {}
         self._inflight: set[str] = set()
         self._watchdog = threading.Thread(target=self._watch, name="onecolleague-recording-watchdog", daemon=True)
         self._watchdog.start()
+
+    def _enhance_snapshot(self, snapshot: Dict[str, Any], locator: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        method = getattr(self.observation_provider, "enhance_sync", None)
+        if not callable(method):
+            return snapshot
+        value = method(snapshot, locator)
+        return value if isinstance(value, dict) else snapshot
+
+    def _validate_fresh_foreground(self, snapshot: Dict[str, Any], target: Optional[Dict[str, Any]], tool: str) -> None:
+        method = getattr(self.observation_provider, "current_foreground_window", None)
+        if not callable(method):
+            raise ValueError("无法读取实时前台窗口，已停止避免误操作")
+        current = method()
+        if isinstance(current, dict):
+            current_name = str(current.get("focused_window") or current.get("name") or "")
+        else:
+            current_name = str(current or "")
+        focused = str(snapshot.get("focused_window") or "")
+        target_window = str((target or {}).get("window_name") or "")
+        expected = target_window or focused
+        if not current_name or not expected:
+            raise ValueError("无法确认目标窗口处于前台，已停止避免误操作")
+        if not WorkflowRunner._window_matches(current_name, expected):
+            raise ValueError(f"观察后前台窗口已从“{expected}”变为“{current_name}”，请重新观察后再执行")
 
     def _path(self, group_id: str, recording_id: str) -> Path:
         if not recording_id.startswith("rec_") or not recording_id[4:].isalnum():
@@ -275,13 +301,18 @@ class RecordingStore:
             # Resolve every pointer/coordinate action against a fresh UI tree
             # before it is recorded. The original coordinates remain available
             # for this one call, but the durable step prefers a locator.
-            resolved_target: Optional[Dict[str, Any]] = dict(target) if isinstance(target, dict) else ({"element_id": element_id} if element_id else None)
+            requested_target: Optional[Dict[str, Any]] = dict(target) if isinstance(target, dict) else ({"element_id": element_id} if element_id else None)
+            resolved_target: Optional[Dict[str, Any]] = dict(requested_target) if requested_target is not None else None
+            coordinate_fallback_argument = arguments.get("coordinate_fallback") is True
+            controlled_target_fallback = isinstance(target, dict) and str(target.get("fallback_policy") or "").casefold() == "controlled"
+            coordinate_fallback_allowed = coordinate_fallback_argument or controlled_target_fallback
             resolution: Dict[str, Any] = {"strategy": "none", "confidence": "none", "match_count": 0}
             after_snapshot: Optional[Dict[str, Any]] = None
             action_tool = str(tool or "").lower()
             if action_tool in {"click", "type"}:
                 snapshot_result = self.session.call_tool_sync("Snapshot", {}, timeout=None)
                 snapshot = normalize_snapshot(snapshot_result)
+                snapshot = self._enhance_snapshot(snapshot, resolved_target)
                 if resolved_target is not None:
                     if element_id:
                         resolved_target = next((item for item in snapshot.get("elements", []) if str(item.get("element_id")) == element_id), None)
@@ -291,6 +322,18 @@ class RecordingStore:
                         match = resolve_locator(snapshot, resolved_target)
                         resolution.update({"strategy": "element", "confidence": match.get("confidence"), "match_count": match.get("match_count", 0)})
                         resolved_target = match["matches"][0] if match.get("status") == "unique" else None
+                if resolved_target is None and "label" in arguments:
+                    label = arguments.get("label")
+                    label_locator = (
+                        {"mcp_label": int(label)}
+                        if isinstance(label, int) and not isinstance(label, bool)
+                        else {"name": label, "text": label, "match": "exact"}
+                    )
+                    match = resolve_locator(snapshot, label_locator)
+                    if match.get("status") != "unique":
+                        raise ValueError("当前 Snapshot 中未能唯一解析临时元素 label，请重新观察并选择目标元素")
+                    resolved_target = match["matches"][0]
+                    resolution.update({"strategy": "element_label", "confidence": match.get("confidence"), "match_count": match.get("match_count", 0)})
                 if resolved_target is None and any(key in arguments for key in ("loc", "x", "y")):
                     point = arguments.get("loc")
                     if point is None and "x" in arguments and "y" in arguments:
@@ -300,29 +343,34 @@ class RecordingStore:
                         resolved_target = hit
                         resolution.update({"strategy": "element_from_coordinate", "confidence": "normal", "match_count": 1})
                     else:
+                        if not coordinate_fallback_allowed:
+                            raise ValueError("坐标未解析到元素；只有显式启用 coordinate_fallback 或 target.fallback_policy=controlled 才能使用位置兜底")
                         resolution.update({"strategy": "controlled_coordinate_fallback", "confidence": "low", "match_count": 0, "reason": "Snapshot 未找到坐标对应元素"})
-                if resolved_target is None and "label" in arguments:
-                    match = resolve_locator(snapshot, {"name": arguments.get("label"), "text": arguments.get("label"), "match": "exact"})
-                    if match.get("status") == "unique":
-                        resolved_target = match["matches"][0]
-                        resolution.update({"strategy": "element_label", "confidence": match.get("confidence"), "match_count": match.get("match_count", 0)})
                 if resolved_target is not None:
                     matched_element = resolved_target
                     resolved_target = locator_from_element(resolved_target)
-                    label = str(resolved_target.get("name") or resolved_target.get("text") or "").strip()
-                    if label and not any(key in arguments for key in ("loc", "label")):
-                        arguments = {**arguments, "label": label}
-                    elif not any(key in arguments for key in ("loc", "label")):
-                        # A nameless control can still be acted on by its
-                        # current center, but this is explicitly recorded as
-                        # an element-derived coordinate rather than a raw one.
-                        center = element_center(matched_element)
-                        if center is not None:
-                            arguments = {**arguments, "loc": center}
+                    action_arguments = {key: child for key, child in arguments.items() if key not in {"loc", "label", "x", "y"}}
+                    mcp_label = matched_element.get("mcp_label")
+                    center = element_center(matched_element)
+                    if isinstance(mcp_label, int) and not isinstance(mcp_label, bool) and WorkflowRunner._schema_supports(schema, "label"):
+                        action_arguments["label"] = mcp_label
+                    elif center is not None and WorkflowRunner._schema_supports(schema, "loc"):
+                        action_arguments["loc"] = center
+                        resolution.update({"strategy": "element_derived_position", "stability": "low"})
+                    elif center is not None and WorkflowRunner._schema_supports(schema, "x") and WorkflowRunner._schema_supports(schema, "y"):
+                        action_arguments["x"], action_arguments["y"] = center
+                        resolution.update({"strategy": "element_derived_position", "stability": "low"})
+                    else:
+                        raise ValueError("当前元素没有可用于本次操作的临时编号或边界，请重新观察")
+                    arguments = action_arguments
                     resolution["strategy"] = resolution.get("strategy") or "element"
-                elif isinstance(target, dict) and str(target.get("fallback_policy") or "controlled") == "never":
+                elif isinstance(target, dict) and str(target.get("fallback_policy") or "never") == "never":
                     raise ValueError("录制前未能唯一找到目标元素，已按‘禁止坐标兜底’停止")
+                arguments = {key: child for key, child in arguments.items() if key != "coordinate_fallback"}
                 validate_arguments_against_schema(tool, arguments, schema)
+                has_ui_target = requested_target is not None or any(key in template_args for key in ("label", "loc", "x", "y"))
+                if has_ui_target:
+                    self._validate_fresh_foreground(snapshot, resolved_target or requested_target, action_tool)
             else:
                 validate_arguments_against_schema(tool, arguments, schema)
             before_restarts = self.session.transport_restarts
@@ -332,6 +380,7 @@ class RecordingStore:
                 if action_tool in {"click", "type"}:
                     try:
                         after_snapshot = normalize_snapshot(self.session.call_tool_sync("Snapshot", {}, timeout=None))
+                        after_snapshot = self._enhance_snapshot(after_snapshot, resolved_target)
                     except Exception:
                         after_snapshot = None
             except Exception as exc:
@@ -371,24 +420,50 @@ class RecordingStore:
                 "created_at": time.time(),
             }
             if after_snapshot is not None:
-                evidence["observation_after"] = {"element_count": after_snapshot.get("count", 0), "warnings": after_snapshot.get("warnings", [])}
+                evidence["observation_after"] = {
+                    "observation_id": after_snapshot.get("observation_id"),
+                    "captured_at": after_snapshot.get("captured_at"),
+                    "provider": after_snapshot.get("provider"),
+                    "focused_window": after_snapshot.get("focused_window"),
+                    "target_window": after_snapshot.get("target_window"),
+                    "target_window_element_count": after_snapshot.get("target_window_element_count"),
+                    "element_count": after_snapshot.get("count", 0),
+                    "window_element_counts": after_snapshot.get("window_element_counts", {}),
+                    "warnings": after_snapshot.get("warnings", []),
+                }
             value["evidence"].append(evidence)
             if record:
                 step_id = f"step_{len(value['steps']) + 1}"
                 stability = "low" if resolution.get("strategy") == "controlled_coordinate_fallback" else "normal"
                 durable_arguments = dict(template_args)
+                if action_tool in {"click", "type"}:
+                    # Snapshot labels are valid for one observation only and
+                    # must never enter a durable workflow definition.
+                    durable_arguments.pop("label", None)
                 if resolved_target is not None:
-                    for key in ("loc", "x", "y", "coordinate_fallback"):
+                    for key in ("loc", "label", "x", "y", "coordinate_fallback"):
                         durable_arguments.pop(key, None)
                 elif resolution.get("strategy") == "controlled_coordinate_fallback":
-                    durable_arguments["coordinate_fallback"] = True
+                    if coordinate_fallback_argument:
+                        durable_arguments["coordinate_fallback"] = True
+                    elif controlled_target_fallback:
+                        durable_arguments.pop("coordinate_fallback", None)
+                    position_anchor = requested_target.get("position_anchor") if isinstance(requested_target, dict) else None
+                    if controlled_target_fallback and isinstance(position_anchor, dict):
+                        anchor_x, anchor_y = position_anchor.get("x"), position_anchor.get("y")
+                        if all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (anchor_x, anchor_y)):
+                            for key in ("loc", "x", "y"):
+                                durable_arguments.pop(key, None)
+                durable_target = resolved_target
+                if durable_target is None and resolution.get("strategy") == "controlled_coordinate_fallback" and requested_target is not None:
+                    durable_target = requested_target
                 value["steps"].append({
                     "id": step_id,
                     "type": "action",
                     "title": str(title or tool)[:200],
                     "tool": tool,
                     "arguments": durable_arguments,
-                    "target": resolved_target,
+                    "target": durable_target,
                     "success_condition": success_condition,
                     "timeout_seconds": None if timeout_seconds is None or float(timeout_seconds) <= 0 else float(timeout_seconds),
                     "retries": 0,

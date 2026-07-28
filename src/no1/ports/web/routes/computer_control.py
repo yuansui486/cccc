@@ -64,7 +64,19 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         if not response.get("ok"):
             error = response.get("error") if isinstance(response.get("error"), dict) else {}
             code = str(error.get("code") or "computer_control_failed")
-            status = 409 if code == "computer_control_busy" else 503
+            if code in {
+                "computer_control_busy",
+                "computer_control_lease_required",
+                "computer_control_write_lease_required",
+                "computer_control_setup_in_progress",
+            }:
+                status = 409
+            elif code == "permission_denied":
+                status = 403
+            elif code in {"invalid_request", "invalid_argument_shape"}:
+                status = 400
+            else:
+                status = 503
             raise _error(code, str(error.get("message") or "daemon request failed"), status, error.get("details"))
         envelope = response.get("result") if isinstance(response.get("result"), dict) else {}
         return envelope.get("result")
@@ -146,6 +158,52 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def setup_status() -> Dict[str, Any]:
         return {"ok": True, "result": await daemon_control("setup", group_id="_global", action="status")}
 
+    @global_router.post("/setup/restart-session")
+    async def setup_restart_session() -> Dict[str, Any]:
+        try:
+            result = await daemon_control("setup", group_id="_global", action="restart_session")
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            audit(
+                ctx.home,
+                "computer_control.setup_session_restart",
+                details={
+                    "success": False,
+                    "code": detail.get("code"),
+                    "status_code": exc.status_code,
+                },
+            )
+            raise
+        except Exception as exc:
+            audit(
+                ctx.home,
+                "computer_control.setup_session_restart",
+                details={
+                    "success": False,
+                    "code": "daemon_unavailable",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
+        audit(
+            ctx.home,
+            "computer_control.setup_session_restart",
+            details={
+                "success": True,
+                "started_at": result.get("started_at"),
+                "transport_restarts": result.get("transport_restarts"),
+                "session_running": result.get("session_running"),
+                "tool_count": result.get("tool_count"),
+            },
+        )
+        _emit(
+            "setup_session_restarted",
+            started_at=result.get("started_at"),
+            transport_restarts=result.get("transport_restarts"),
+            session_running=result.get("session_running"),
+        )
+        return {"ok": True, "result": result}
+
     @global_router.post("/setup/repair")
     async def setup_repair() -> Dict[str, Any]:
         result = await daemon_control("setup", group_id="_global", action="repair")
@@ -173,13 +231,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @global_router.get("/lease/status")
     async def lease_status() -> Dict[str, Any]:
-        result = await daemon_control("catalog", group_id="_global")
-        return {"ok": True, "result": enrich_lease(result.get("lease") if isinstance(result, dict) else None)}
+        result = await daemon_control("lease", group_id="_global", action="status")
+        return {"ok": True, "result": enrich_lease(result)}
 
     @global_router.post("/lease/interrupt", dependencies=[Depends(require_admin)])
     async def interrupt_lease(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        lease_result = await daemon_control("catalog", group_id="_global")
-        lease_status = lease_result.get("lease") if isinstance(lease_result, dict) else None
+        lease_status = await daemon_control("lease", group_id="_global", action="status")
         lease = lease_status.get("lease") if isinstance(lease_status, dict) and isinstance(lease_status.get("lease"), dict) else lease_status
         if isinstance(lease_status, dict) and lease_status.get("active") is False:
             lease = None
@@ -707,10 +764,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     async def element_capture(group_id: str, request: Request) -> Dict[str, Any]:
         del request
         capture_id = "cap_" + uuid.uuid4().hex[:12]
-        try:
-            result = await daemon_control("element_snapshot", group_id=group_id, capture_id=capture_id)
-        except Exception as exc:
-            raise _error("snapshot_failed", str(exc), 503) from exc
+        result = await daemon_control("element_snapshot", group_id=group_id, capture_id=capture_id)
         normalized = normalize_snapshot(result)
         capture = {"capture_id": capture_id, "created_at": time.time(), "expires_at": time.time() + 300, "result": result, "elements": normalized.get("elements", []), "warnings": normalized.get("warnings", [])}
         service.store.state_root(group_id).mkdir(parents=True, exist_ok=True)
@@ -758,10 +812,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/element-picker/validate")
     async def validate_locator(group_id: str, locator: ElementLocator) -> Dict[str, Any]:
         capture_id = "cap_validate_" + uuid.uuid4().hex[:12]
-        try:
-            snapshot_result = await daemon_control("element_snapshot", group_id=group_id, capture_id=capture_id)
-        except Exception as exc:
-            raise _error("snapshot_failed", str(exc), 503) from exc
+        snapshot_result = await daemon_control(
+            "element_snapshot",
+            group_id=group_id,
+            capture_id=capture_id,
+            locator=locator.model_dump(mode="json"),
+        )
         normalized = normalize_snapshot(snapshot_result)
         resolved = resolve_locator(normalized, locator.model_dump(mode="json"))
         return {

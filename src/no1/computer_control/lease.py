@@ -64,8 +64,21 @@ class ComputerControlLease:
         now = time.time()
         with self._locked():
             current = self._read_unlocked()
-            if self._active(current, now) and str(current.get("run_id")) != run_id:
-                raise LeaseConflict(current or {})
+            if self._active(current, now):
+                same_owner = isinstance(current, dict) and all(
+                    str(current.get(key) or "") == expected
+                    for key, expected in (
+                        ("group_id", group_id),
+                        ("actor_id", actor_id),
+                        ("run_id", run_id),
+                    )
+                )
+                same_mode = (
+                    isinstance(current, dict)
+                    and bool(current.get("observe_only")) == bool(observe_only)
+                )
+                if not same_owner or not same_mode:
+                    raise LeaseConflict(current or {})
             lease = {
                 "group_id": group_id,
                 "actor_id": actor_id,
@@ -113,3 +126,60 @@ class ComputerControlLease:
                 raise PermissionError("computer_control_lease_owner_required")
             self.path.unlink(missing_ok=True)
             return True
+
+    @contextmanager
+    def hold(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+        observe_only: bool = False,
+    ) -> Iterator[Dict[str, Any]]:
+        """Acquire a lease and keep it alive for one synchronous operation.
+
+        Setup, session restart, and snapshot calls can legitimately take
+        longer than the lease TTL.  Their heartbeat must not depend on the
+        blocked caller thread, and cleanup must never force-release a newer
+        owner that acquired the machine after this operation lost its lease.
+        """
+
+        lease = self.acquire(
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=run_id,
+            observe_only=observe_only,
+        )
+        stopped = threading.Event()
+        lost = threading.Event()
+
+        def heartbeat_loop() -> None:
+            interval = max(0.01, float(self.HEARTBEAT_SECONDS) / 2.0)
+            while not stopped.wait(interval):
+                try:
+                    self.heartbeat(group_id=group_id, actor_id=actor_id, run_id=run_id)
+                except Exception:
+                    lost.set()
+                    return
+
+        thread = threading.Thread(
+            target=heartbeat_loop,
+            name=f"computer-control-lease-{run_id[:24]}",
+            daemon=True,
+        )
+        try:
+            thread.start()
+        except Exception:
+            self.release(run_id=run_id, force=False)
+            raise
+        try:
+            yield {**lease, "lost": lost}
+        finally:
+            stopped.set()
+            thread.join(timeout=max(1.0, float(self.HEARTBEAT_SECONDS)))
+            try:
+                self.release(run_id=run_id, force=False)
+            except (OSError, PermissionError):
+                # Ownership changed after expiry.  The new lease belongs to a
+                # different operation and must remain untouched.
+                pass
