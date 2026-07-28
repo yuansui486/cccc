@@ -168,6 +168,12 @@ class ProjectMdUpdateRequest(BaseModel):
     by: str = Field(default="user")
 
 
+class ExperienceUpdateRequest(BaseModel):
+    content: str = Field(default="")
+    expected_revision: str
+    by: str = Field(default="user")
+
+
 class RepoPromptUpdateRequest(BaseModel):
     content: str = Field(default="")
     by: str = Field(default="user")
@@ -232,6 +238,8 @@ class GroupSettingsRequest(BaseModel):
     task_planned_unassigned_milestones_seconds: Optional[list[int]] = None
     min_interval_seconds: Optional[int] = None  # delivery throttle
     auto_mark_on_delivery: Optional[bool] = None  # auto-mark messages as read after delivery
+    experience_reminder_enabled: Optional[bool] = None
+    experience_reminder_every_user_messages: Optional[int] = None
 
     # Terminal transcript (group-scoped policy)
     terminal_transcript_visibility: Optional[Literal["off", "foreman", "all"]] = None

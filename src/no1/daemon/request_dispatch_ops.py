@@ -44,6 +44,7 @@ from .actors.web_model_runtime_ops import try_handle_web_model_runtime_op
 from .actors.web_model_browser_ops import try_handle_web_model_browser_op
 from .memory.memory_ops import try_handle_memory_op
 from .computer_control_ops import try_handle_computer_control_op
+from .experience_ops import try_handle_experience_op
 
 
 @dataclass(frozen=True)
@@ -424,6 +425,10 @@ def dispatch_request(
     memory_resp = try_handle_memory_op(op, args)
     if memory_resp is not None:
         return memory_resp, False
+
+    experience_resp = try_handle_experience_op(op, args)
+    if experience_resp is not None:
+        return experience_resp, False
 
     im_resp = try_handle_im_op(op, args)
     if im_resp is not None:

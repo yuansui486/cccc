@@ -190,6 +190,7 @@ from .handlers.headless import (  # noqa: F401
     headless_status,
 )
 from .handlers.memory import _handle_memory_namespace as _handle_memory_namespace_impl  # noqa: F401
+from .handlers.experience import _handle_experience_namespace as _handle_experience_namespace_impl  # noqa: F401
 from .handlers.notify import (  # noqa: F401
     _handle_notify_namespace as _handle_notify_namespace_impl,
     notify_ack,
@@ -1784,6 +1785,17 @@ def _handle_memory_namespace(name: str, arguments: Dict[str, Any]) -> Optional[D
     )
 
 
+def _handle_experience_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    return _handle_experience_namespace_impl(
+        name,
+        arguments,
+        resolve_group_id=_resolve_group_id,
+        resolve_actor_id=_resolve_self_actor_id,
+        call_daemon_or_raise=_call_daemon_or_raise,
+        mcp_error_cls=MCPError,
+    )
+
+
 def _handle_debug_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return _handle_debug_namespace_impl(
         name,
@@ -1809,6 +1821,7 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         _handle_onecolleague_namespace,
         _handle_context_namespace,
         _handle_memory_namespace,
+        _handle_experience_namespace,
         _handle_headless_namespace,
         _handle_notify_namespace,
         _handle_terminal_namespace,

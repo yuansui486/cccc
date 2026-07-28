@@ -102,6 +102,7 @@ from ..schemas import (
     AssistantVoiceTranscriptSegmentRequest,
     AssistantVoiceTranscriptionRequest,
     CreateGroupRequest,
+    ExperienceUpdateRequest,
     GroupAutomationManageRequest,
     GroupAutomationRequest,
     GroupAutomationResetBaselineRequest,
@@ -1984,6 +1985,26 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         except Exception as e:
             return {"ok": False, "error": {"code": "WRITE_FAILED", "message": f"Failed to write PROJECT.md: {e}"}}
 
+    @group_router.get("/experience")
+    async def experience_get(group_id: str) -> Dict[str, Any]:
+        """Read or initialize EXPERIENCE.md for the active project scope."""
+        return await ctx.daemon({"op": "experience_read", "args": {"group_id": group_id, "by": "user"}})
+
+    @group_router.put("/experience")
+    async def experience_put(group_id: str, req: ExperienceUpdateRequest) -> Dict[str, Any]:
+        """Replace EXPERIENCE.md using an optimistic revision guard."""
+        return await ctx.daemon(
+            {
+                "op": "experience_replace",
+                "args": {
+                    "group_id": group_id,
+                    "content": req.content,
+                    "expected_revision": req.expected_revision,
+                    "by": req.by,
+                },
+            }
+        )
+
     def _prompt_kind_to_filename(kind: str) -> str:
         k = str(kind or "").strip().lower()
         if k == "preamble":
@@ -2399,6 +2420,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
         automation = group.doc.get("automation") if isinstance(group.doc.get("automation"), dict) else {}
         delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
+        experience = group.doc.get("experience") if isinstance(group.doc.get("experience"), dict) else {}
         features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
         from ....kernel.terminal_transcript import get_terminal_transcript_settings
         from ....kernel.messaging import get_default_send_to
@@ -2428,6 +2450,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     "task_planned_unassigned_milestones_seconds": _safe_int_list(automation.get("task_planned_unassigned_milestones_seconds"), default=[900, 1800, 3600, 7200, 10800, 21600]),
                     "min_interval_seconds": _safe_int(delivery.get("min_interval_seconds", 0), default=0, min_value=0),
                     "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
+                    "experience_reminder_enabled": coerce_bool(experience.get("reminder_enabled"), default=True),
+                    "experience_reminder_every_user_messages": _safe_int(
+                        experience.get("reminder_every_user_messages", 10),
+                        default=10,
+                        min_value=1,
+                        max_value=1000,
+                    ),
                     "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
                     "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
                     "terminal_transcript_notify_lines": _safe_int(tt.get("notify_lines", 20), default=20, min_value=1, max_value=80),
@@ -3438,6 +3467,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch["min_interval_seconds"] = max(0, req.min_interval_seconds)
         if req.auto_mark_on_delivery is not None:
             patch["auto_mark_on_delivery"] = bool(req.auto_mark_on_delivery)
+        if req.experience_reminder_enabled is not None:
+            patch["experience_reminder_enabled"] = bool(req.experience_reminder_enabled)
+        if req.experience_reminder_every_user_messages is not None:
+            patch["experience_reminder_every_user_messages"] = max(
+                1,
+                min(1000, int(req.experience_reminder_every_user_messages)),
+            )
 
         # Terminal transcript policy (group-scoped)
         if req.terminal_transcript_visibility is not None:

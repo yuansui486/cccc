@@ -1234,6 +1234,25 @@ MCP_TOOLS = [
         ),
     },
     {
+        "name": "onecolleague_experience",
+        "description": (
+            "Read and maintain the active project's shared EXPERIENCE.md. "
+            "Read before high-impact work or when reminded. Append only verified reusable lessons; "
+            "use replace with expected_revision to deduplicate or reorganize without overwriting concurrent edits."
+        ),
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                "action": {"type": "string", "enum": ["read", "append", "replace"], "default": "read"},
+                "content": {"type": "string"},
+                "expected_revision": {
+                    "type": "string",
+                    "description": "Revision returned by read; required for replace.",
+                },
+            }
+        ),
+    },
+    {
         "name": "onecolleague_memory_admin",
         "description": "Maintenance-only ReMe file-memory ops: index_sync|context_check|compact|daily_flush. Use onecolleague_memory for normal memory search/read/write.",
         "inputSchema": _obj(

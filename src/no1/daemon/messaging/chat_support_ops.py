@@ -176,6 +176,7 @@ def schedule_headless_post_wake_delivery(
     codex_submit_user_message: Callable[..., bool],
     claude_submit_user_message: Callable[..., bool],
     logger: logging.Logger,
+    on_delivered: Optional[Callable[[], None]] = None,
     timeout_seconds: float = 30.0,
     poll_seconds: float = 0.2,
 ) -> bool:
@@ -243,6 +244,11 @@ def schedule_headless_post_wake_delivery(
         try:
             while time.monotonic() < deadline:
                 if _actor_running() and _submit():
+                    if on_delivered is not None:
+                        try:
+                            on_delivered()
+                        except Exception:
+                            _safe_log(logger, "exception", "[headless-post-wake] delivery callback failed")
                     return
                 time.sleep(max(0.05, float(poll_seconds)))
             _safe_log(

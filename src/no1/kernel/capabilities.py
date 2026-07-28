@@ -38,6 +38,7 @@ CORE_BASIC_TOOLS: Tuple[str, ...] = (
     "onecolleague_task",
     "onecolleague_agent_state",
     "onecolleague_memory",
+    "onecolleague_experience",
     "onecolleague_computer_control_catalog",
     "onecolleague_computer_recording",
     "onecolleague_computer_workflow",

@@ -749,6 +749,14 @@ export type ProjectMdInfo = {
   error?: string | null;
 };
 
+export type ExperienceDocument = {
+  found: boolean;
+  path: string;
+  content: string;
+  revision: string;
+  created?: boolean;
+};
+
 export type GroupSettings = {
   default_send_to: "foreman" | "broadcast";
   nudge_after_seconds: number;
@@ -770,6 +778,8 @@ export type GroupSettings = {
   task_planned_unassigned_milestones_seconds: number[];
   min_interval_seconds: number;
   auto_mark_on_delivery: boolean;
+  experience_reminder_enabled: boolean;
+  experience_reminder_every_user_messages: number;
 
   terminal_transcript_visibility: "off" | "foreman" | "all";
   terminal_transcript_notify_tail: boolean;

@@ -43,6 +43,12 @@ from ...util.fs import atomic_write_text, read_json
 from ...util.time import parse_utc_iso, utc_now_iso
 from ...util.conv import coerce_bool
 from .inbound_rendering import ActorInboundEnvelope, render_actor_inbound_message
+from .experience_reminder import (
+    ExperienceReminderDecision,
+    append_experience_reminder,
+    commit_experience_reminder,
+    plan_experience_reminder,
+)
 
 
 _ASYNC_FLUSH_LOCK = threading.Lock()
@@ -252,6 +258,7 @@ class PendingMessage:
     notify_title: str = ""
     notify_message: str = ""
     collaboration_required: bool = False
+    scope_key: str = ""
 
 
 @dataclass
@@ -306,6 +313,7 @@ class DeliveryThrottle:
         notify_title: str = "",
         notify_message: str = "",
         collaboration_required: bool = False,
+        scope_key: str = "",
     ) -> None:
         """Queue a message for delivery."""
         with self._lock:
@@ -327,6 +335,7 @@ class DeliveryThrottle:
                 notify_title=notify_title,
                 notify_message=notify_message,
                 collaboration_required=collaboration_required,
+                scope_key=str(scope_key or ""),
             ))
     
     def should_deliver(self, group_id: str, actor_id: str, min_interval_seconds: int) -> bool:
@@ -883,6 +892,7 @@ def queue_chat_message(
     source_user_name: Optional[str] = None,
     source_user_id: Optional[str] = None,
     collaboration_required: bool = False,
+    scope_key: str = "",
     ts: str = "",
 ) -> None:
     """Queue a chat message for throttled delivery."""
@@ -899,6 +909,7 @@ def queue_chat_message(
         source_user_name=source_user_name,
         source_user_id=source_user_id,
         collaboration_required=collaboration_required,
+        scope_key=scope_key,
         ts=ts,
         kind="chat.message",
     )
@@ -1074,12 +1085,15 @@ def _finalize_delivery_success(
     chat_total: int,
     deliverable: List[PendingMessage],
     requeue: List[PendingMessage],
+    experience_decision: Optional[ExperienceReminderDecision] = None,
 ) -> None:
     """Record a successful delivery attempt and preserve blocked messages."""
     gid = str(group.group_id or "").strip()
     aid = str(actor_id or "").strip()
     if chat_total > 0:
         THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
+    if experience_decision is not None:
+        commit_experience_reminder(group, experience_decision)
     THROTTLE.mark_delivered(gid, aid)
     if _get_auto_mark_on_delivery(group) and deliverable:
         last_msg = deliverable[-1]
@@ -1190,6 +1204,7 @@ def _start_async_first_delivery(
     message_text: str,
     chat_total: int,
     actor: Dict[str, Any],
+    experience_decision: ExperienceReminderDecision,
 ) -> None:
     """Run the first PTY delivery chain in the background.
 
@@ -1219,6 +1234,7 @@ def _start_async_first_delivery(
                     chat_total=chat_total,
                     deliverable=deliverable,
                     requeue=requeue,
+                    experience_decision=experience_decision,
                 )
                 return
 
@@ -1237,6 +1253,7 @@ def _start_async_first_delivery(
                     chat_total=chat_total,
                     deliverable=deliverable,
                     requeue=requeue,
+                    experience_decision=experience_decision,
                 )
             else:
                 THROTTLE.requeue_front(gid, aid, messages)
@@ -1341,6 +1358,8 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
                 reminder_after_index = len(deliverable)
 
         message_text = render_batched_messages(deliverable, reminder_after_index=reminder_after_index)
+        experience_decision = plan_experience_reminder(group, actor_id=aid, messages=deliverable)
+        message_text = append_experience_reminder(message_text, experience_decision)
 
         # First PTY delivery is fully backgrounded so HTTP only observes durable append + enqueue.
         # The in-flight gate above preserves ordering while that background chain owns the actor.
@@ -1355,6 +1374,7 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
                 message_text=message_text,
                 chat_total=chat_total,
                 actor=actor,
+                experience_decision=experience_decision,
             )
             return True
 
@@ -1369,6 +1389,7 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
                     chat_total=chat_total,
                     deliverable=deliverable,
                     requeue=requeue,
+                    experience_decision=experience_decision,
                 )
             else:
                 # Delivery failed: keep everything queued for retry.

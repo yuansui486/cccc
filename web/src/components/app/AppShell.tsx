@@ -71,6 +71,7 @@ type AppShellProps = {
   onOpenSkillManagement: () => void;
   onOpenScheduledReminder: () => void;
   onOpenRemoteLink: () => void;
+  onOpenExperience: () => void;
   onStartGroup: () => void;
   onStopGroup: () => void;
   onSetGroupState: (state: "active" | "idle" | "paused") => void;
@@ -150,6 +151,7 @@ export function AppShell({
   onOpenSkillManagement,
   onOpenScheduledReminder,
   onOpenRemoteLink,
+  onOpenExperience,
   onStartGroup,
   onStopGroup,
   onSetGroupState,
@@ -259,6 +261,7 @@ export function AppShell({
         onOpenSkillManagement={onOpenSkillManagement}
         onOpenScheduledReminder={onOpenScheduledReminder}
         onOpenRemoteLink={onOpenRemoteLink}
+        onOpenExperience={onOpenExperience}
         onOpenSettings={onOpenSettings}
         onOpenGroupEdit={onOpenGroupEdit}
         onStartGroup={onStartGroup}

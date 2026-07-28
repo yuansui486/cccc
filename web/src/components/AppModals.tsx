@@ -19,6 +19,7 @@ import { PresentationPinModal } from "./presentation/PresentationPinModal";
 import { RelayMessageModal } from "./modals/RelayMessageModal";
 import { RecipientsModal } from "./modals/RecipientsModal";
 import { RemoteLinkModal } from "./modals/RemoteLinkModal";
+import { ExperienceModal } from "./modals/ExperienceModal";
 import { ScheduledReminderModal } from "./modals/ScheduledReminderModal";
 import {
   openContextModalData,
@@ -1827,6 +1828,16 @@ export function AppModals({
         onClose={() => closeModal("remoteLink")}
         isDark={isDark}
         groupId={selectedGroupId}
+      />
+
+      <ExperienceModal
+        isOpen={modals.experience}
+        onClose={() => closeModal("experience")}
+        isDark={isDark}
+        groupId={selectedGroupId}
+        settings={groupSettings}
+        readOnly={readOnly}
+        onUpdateSettings={handleUpdateSettings}
       />
 
       <RecipientsModal

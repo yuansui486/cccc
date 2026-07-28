@@ -82,6 +82,7 @@ def _settings_payload(group: Any) -> Dict[str, Any]:
     delivery = group.doc.get("delivery") if isinstance(group.doc.get("delivery"), dict) else {}
     features = group.doc.get("features") if isinstance(group.doc.get("features"), dict) else {}
     tt = get_terminal_transcript_settings(group.doc)
+    experience = group.doc.get("experience") if isinstance(group.doc.get("experience"), dict) else {}
     return {
         "default_send_to": get_default_send_to(group.doc),
         "nudge_after_seconds": _safe_int(automation.get("nudge_after_seconds", 300), default=300, min_value=0),
@@ -141,6 +142,13 @@ def _settings_payload(group: Any) -> Dict[str, Any]:
         ),
         "min_interval_seconds": _safe_int(delivery.get("min_interval_seconds", 0), default=0, min_value=0),
         "auto_mark_on_delivery": coerce_bool(delivery.get("auto_mark_on_delivery"), default=False),
+        "experience_reminder_enabled": coerce_bool(experience.get("reminder_enabled"), default=True),
+        "experience_reminder_every_user_messages": _safe_int(
+            experience.get("reminder_every_user_messages", 10),
+            default=10,
+            min_value=1,
+            max_value=1000,
+        ),
         "terminal_transcript_visibility": str(tt.get("visibility") or "foreman"),
         "terminal_transcript_notify_tail": coerce_bool(tt.get("notify_tail"), default=False),
         "terminal_transcript_notify_lines": _safe_int(
@@ -179,6 +187,7 @@ def handle_group_settings_update(
 
     messaging_keys = {"default_send_to"}
     delivery_keys = {"min_interval_seconds", "auto_mark_on_delivery"}
+    experience_keys = {"experience_reminder_enabled", "experience_reminder_every_user_messages"}
     automation_int_keys = {
         "nudge_after_seconds",
         "reply_required_nudge_after_seconds",
@@ -205,7 +214,7 @@ def handle_group_settings_update(
     }
     feature_keys = {"panorama_enabled", "desktop_pet_enabled"}
     capability_keys = {"capability_defaults"}
-    allowed = messaging_keys | delivery_keys | automation_keys | terminal_transcript_keys | feature_keys | capability_keys
+    allowed = messaging_keys | delivery_keys | experience_keys | automation_keys | terminal_transcript_keys | feature_keys | capability_keys
 
     unknown = set(patch.keys()) - allowed
     if unknown:
@@ -239,6 +248,23 @@ def handle_group_settings_update(
                 else:
                     delivery[key] = int(value)
             group.doc["delivery"] = delivery
+
+        experience_patch = {k: v for k, v in patch.items() if k in experience_keys}
+        if experience_patch:
+            experience = group.doc.get("experience") if isinstance(group.doc.get("experience"), dict) else {}
+            if "experience_reminder_enabled" in experience_patch:
+                experience["reminder_enabled"] = coerce_bool(
+                    experience_patch.get("experience_reminder_enabled"),
+                    default=True,
+                )
+            if "experience_reminder_every_user_messages" in experience_patch:
+                experience["reminder_every_user_messages"] = _safe_int(
+                    experience_patch.get("experience_reminder_every_user_messages"),
+                    default=10,
+                    min_value=1,
+                    max_value=1000,
+                )
+            group.doc["experience"] = experience
 
         automation_patch = {k: v for k, v in patch.items() if k in automation_keys}
         if automation_patch:

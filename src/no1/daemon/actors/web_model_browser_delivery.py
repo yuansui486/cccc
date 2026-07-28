@@ -30,6 +30,7 @@ from ...ports.web_model_browser_sidecar import (
 )
 from ..messaging.actor_turn_rendering import render_actor_event_batch_for_delivery
 from ..messaging.delivery import MCP_REMINDER_LINE
+from ..messaging.experience_reminder import append_experience_reminder, commit_experience_reminder, plan_experience_reminder
 from ..runner_state_ops import read_headless_state, update_headless_state
 from .web_model_runtime_ops import commit_web_model_delivered_turn
 
@@ -511,6 +512,7 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
     if not turn.get("event_ids"):
         update_headless_state(group.group_id, aid, status="waiting", active_turn_id="", latest_event_id="")
         return {"ok": True, "status": "idle"}
+    experience_decision = plan_experience_reminder(group, actor_id=aid, messages=turn.get("messages") or [])
 
     provider = _provider_from_actor_or_connector(group.group_id, actor) or "chatgpt_web"
     candidate_seed_text = _build_web_model_bootstrap_seed(group, actor)
@@ -545,6 +547,7 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
         turn,
         bootstrap_seed_text=bootstrap_seed_text,
     )
+    prompt = append_experience_reminder(prompt, experience_decision)
     browser_surface: Dict[str, Any] = {}
     try:
         from .web_model_browser_session import close_web_model_chatgpt_browser_session, submit_prompt_via_web_model_chatgpt_browser_session
@@ -635,6 +638,8 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
     if pending_conversation_url:
         pending_delivery_id = str(delivery_result.get("delivery_id") or turn.get("delivery_id") or "")
         commit = commit_web_model_delivered_turn(group, actor_id=aid, turn=turn, by=aid)
+        if bool(commit.get("ok")) and bool(commit.get("cursor_committed")):
+            commit_experience_reminder(group, experience_decision)
         pending_seed_state = (
             {
                 "bootstrap_seed_delivered_at": utc_now_iso(),
@@ -748,6 +753,8 @@ def submit_next_web_model_browser_turn(group_id: str, actor_id: str, *, trigger_
         except Exception:
             pass
         commit = commit_web_model_delivered_turn(group, actor_id=aid, turn=turn, by=aid)
+        if bool(commit.get("ok")) and bool(commit.get("cursor_committed")):
+            commit_experience_reminder(group, experience_decision)
         update_headless_state(
             group.group_id,
             aid,

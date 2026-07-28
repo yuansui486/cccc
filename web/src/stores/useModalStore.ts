@@ -39,6 +39,7 @@ interface ModalState {
     doneHubAuth: boolean;
     scheduledReminder: boolean;
     remoteLink: boolean;
+    experience: boolean;
   };
   recipientsEventId: string | null;
   relayEventId: string | null;
@@ -82,6 +83,7 @@ export const useModalStore = create<ModalState>((set) => ({
     doneHubAuth: false,
     scheduledReminder: false,
     remoteLink: false,
+    experience: false,
   },
   recipientsEventId: null,
   relayEventId: null,

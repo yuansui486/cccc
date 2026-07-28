@@ -350,6 +350,12 @@ def attach_scope_to_group(reg: Registry, group: Group, scope: ScopeIdentity, *, 
         meta["default_scope_key"] = group.doc.get("active_scope_key") or meta.get("default_scope_key") or ""
         meta["updated_at"] = now
     reg.save()
+    try:
+        from .experience import ensure_experience_file
+
+        ensure_experience_file(Path(scope.url))
+    except Exception as exc:
+        LOGGER.warning("failed to initialize project experience file: scope=%s path=%s err=%s", scope.scope_key, scope.url, exc)
     return group
 
 

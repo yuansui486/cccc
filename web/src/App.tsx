@@ -544,6 +544,9 @@ export default function App() {
         onOpenRemoteLink={() => {
           openModal("remoteLink");
         }}
+        onOpenExperience={() => {
+          openModal("experience");
+        }}
         onStartGroup={handleStartGroup}
         onStopGroup={handleStopGroup}
         onSetGroupState={handleSetGroupState}

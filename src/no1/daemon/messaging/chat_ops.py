@@ -38,6 +38,7 @@ from .delivery import (
     queue_chat_message,
     request_flush_pending_messages,
 )
+from .experience_reminder import append_experience_reminder, commit_experience_reminder, plan_experience_reminder
 from .actor_delivery_planner import (
     TRANSPORT_CLAUDE_HEADLESS,
     TRANSPORT_CODEX_APP_SERVER,
@@ -589,27 +590,36 @@ def handle_send(
             web_model_browser_delivery_enabled=web_model_browser_delivery_enabled,
         )
         actor_id = decision.actor_id
+        experience_decision = plan_experience_reminder(
+            group,
+            actor_id=actor_id,
+            messages=[{"id": event_id, "kind": "chat.message", "by": by, "scope_key": scope_key}],
+            scope_key=scope_key,
+        )
+        actor_headless_delivery_text = append_experience_reminder(headless_delivery_text, experience_decision)
         if decision.transport in {TRANSPORT_CODEX_HEADLESS, TRANSPORT_CODEX_APP_SERVER}:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
-                text=headless_delivery_text,
+                text=actor_headless_delivery_text,
                 event_id=event_id,
                 ts=event_ts,
                 attachments=attachments,
             ))
             if delivered:
+                commit_experience_reminder(group, experience_decision)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
-                text=headless_delivery_text,
+                text=actor_headless_delivery_text,
                 event_id=event_id,
                 ts=event_ts,
                 attachments=attachments,
             ))
             if delivered:
+                commit_experience_reminder(group, experience_decision)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
@@ -623,6 +633,7 @@ def handle_send(
                 source_user_name=source_user_name or None,
                 source_user_id=source_user_id or None,
                 collaboration_required=collaboration_required,
+                scope_key=scope_key,
                 ts=event_ts,
             )
             request_flush_pending_messages(group, actor_id=actor_id)
@@ -640,7 +651,7 @@ def handle_send(
                     group_id=group.group_id,
                     actor_id=actor_id,
                     runtime=decision.runtime,
-                    text=headless_delivery_text,
+                    text=actor_headless_delivery_text,
                     event_id=event_id,
                     ts=event_ts,
                     attachments=attachments,
@@ -649,6 +660,7 @@ def handle_send(
                     codex_submit_user_message=codex_app_supervisor.submit_user_message,
                     claude_submit_user_message=claude_app_supervisor.submit_user_message,
                     logger=logger,
+                    on_delivered=lambda g=group, d=experience_decision: commit_experience_reminder(g, d),
                 ):
                     skip_headless_notify_actor_ids.add(actor_id)
             logger.debug(f"[SEND] skip actor={actor_id} ({decision.reason})")
@@ -1083,29 +1095,38 @@ def handle_reply(
             web_model_browser_delivery_enabled=web_model_browser_delivery_enabled,
         )
         actor_id = decision.actor_id
+        experience_decision = plan_experience_reminder(
+            group,
+            actor_id=actor_id,
+            messages=[{"id": event_id, "kind": "chat.message", "by": by, "scope_key": scope_key}],
+            scope_key=scope_key,
+        )
+        actor_headless_delivery_text = append_experience_reminder(headless_delivery_text, experience_decision)
         if decision.transport in {TRANSPORT_CODEX_HEADLESS, TRANSPORT_CODEX_APP_SERVER}:
             delivered = bool(codex_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
-                text=headless_delivery_text,
+                text=actor_headless_delivery_text,
                 event_id=event_id,
                 ts=event_ts,
                 reply_to=target_event_id or reply_to,
                 attachments=attachments,
             ))
             if delivered:
+                commit_experience_reminder(group, experience_decision)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
                 group_id=group.group_id,
                 actor_id=actor_id,
-                text=headless_delivery_text,
+                text=actor_headless_delivery_text,
                 event_id=event_id,
                 ts=event_ts,
                 reply_to=target_event_id or reply_to,
                 attachments=attachments,
             ))
             if delivered:
+                commit_experience_reminder(group, experience_decision)
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
@@ -1118,6 +1139,7 @@ def handle_reply(
                 reply_to=target_event_id or reply_to,
                 quote_text=quote_text,
                 collaboration_required=collaboration_required,
+                scope_key=scope_key,
                 ts=event_ts,
             )
             request_flush_pending_messages(group, actor_id=actor_id)
@@ -1134,7 +1156,7 @@ def handle_reply(
                 group_id=group.group_id,
                 actor_id=actor_id,
                 runtime=decision.runtime,
-                text=headless_delivery_text,
+                text=actor_headless_delivery_text,
                 event_id=event_id,
                 ts=event_ts,
                 reply_to=target_event_id or reply_to,
@@ -1144,6 +1166,7 @@ def handle_reply(
                 codex_submit_user_message=codex_app_supervisor.submit_user_message,
                 claude_submit_user_message=claude_app_supervisor.submit_user_message,
                 logger=logger,
+                on_delivered=lambda g=group, d=experience_decision: commit_experience_reminder(g, d),
             ):
                 skip_headless_notify_actor_ids.add(actor_id)
 

@@ -4,6 +4,7 @@ import {
   Archive,
   ArrowDown,
   Bookmark,
+  BookOpen,
   Bell,
   Camera,
   ChevronDown,
@@ -141,6 +142,7 @@ export const SunIcon = createIcon(Sun);
 export const MoonIcon = createIcon(Moon);
 export const TerminalIcon = createIcon(SquareTerminal);
 export const BookmarkIcon = createIcon(Bookmark, 1.9);
+export const BookOpenIcon = createIcon(BookOpen, 1.9);
 export const InboxIcon = createIcon(Inbox);
 export const RefreshIcon = createIcon(RefreshCw);
 export const TrashIcon = createIcon(Trash2);

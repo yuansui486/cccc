@@ -61,6 +61,7 @@ def render_role_system_prompt(
 
     # PROJECT.md hint (don't inline file content into the prompt by default)
     project_md_line = ""
+    experience_line = ""
     project_root = ""
     for sc in scopes:
         if not isinstance(sc, dict):
@@ -86,10 +87,17 @@ def render_role_system_prompt(
                 project_md_line = f"project: PROJECT.md found ({project_md_lower})"
             else:
                 project_md_line = f"project: PROJECT.md missing (expected at {project_md_path})"
+            experience_path = project_root_path / "EXPERIENCE.md"
+            if experience_path.exists():
+                experience_line = f"experience: EXPERIENCE.md found ({experience_path})"
+            else:
+                experience_line = f"experience: EXPERIENCE.md missing (expected at {experience_path})"
         except Exception:
             project_md_line = "project: PROJECT.md status unknown"
+            experience_line = "experience: EXPERIENCE.md status unknown"
     else:
         project_md_line = "project: PROJECT.md missing (no scope attached)"
+        experience_line = "experience: EXPERIENCE.md missing (no scope attached)"
 
     # Build minimal prompt
     lines = [
@@ -120,6 +128,8 @@ def render_role_system_prompt(
 
     if project_md_line:
         lines.append(project_md_line)
+    if experience_line:
+        lines.append(experience_line)
     
     # Scopes
     if scope_lines:

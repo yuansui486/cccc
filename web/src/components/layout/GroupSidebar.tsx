@@ -36,6 +36,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardIcon,
+  BookOpenIcon,
   ClockIcon,
   PauseIcon,
   PlayIcon,
@@ -99,6 +100,7 @@ export interface GroupSidebarProps {
   onOpenSkillManagement: () => void;
   onOpenScheduledReminder: () => void;
   onOpenRemoteLink: () => void;
+  onOpenExperience: () => void;
   onOpenSettings: () => void;
   onOpenGroupEdit?: (groupId?: string) => void;
   onStartGroup: () => void;
@@ -143,6 +145,7 @@ export function GroupSidebar({
   onOpenSkillManagement,
   onOpenScheduledReminder,
   onOpenRemoteLink,
+  onOpenExperience,
   onOpenSettings,
   onOpenGroupEdit,
   onStartGroup,
@@ -1087,6 +1090,17 @@ export function GroupSidebar({
               </span>
               <span className="min-w-0 flex-1 truncate">{t("remoteLink")}</span>
             </button>
+            <button
+              type="button"
+              onClick={onOpenExperience}
+              disabled={!selectedGroupId}
+              className={navButtonClass(false)}
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]">
+                <BookOpenIcon size={24} strokeWidth={1.8} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t("experience")}</span>
+            </button>
           </div>
         </section>
       </div>
@@ -1109,6 +1123,7 @@ export function GroupSidebar({
     onOpenSkillManagement,
     onOpenScheduledReminder,
     onOpenRemoteLink,
+    onOpenExperience,
     readOnly,
     renderCountBadge,
     selectedGroup,
