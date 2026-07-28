@@ -133,11 +133,12 @@ def is_frozen_executable() -> bool:
 
 def current_frozen_executable() -> str:
     """Return the public OneColleague executable for frozen self re-entry."""
+    public_names = ("onecolleague.exe", "onecolleague") if os.name == "nt" else ("onecolleague", "onecolleague.exe")
     argv0 = str((sys.argv or [""])[0] or "").strip()
     if argv0:
         try:
             argv0_path = Path(argv0)
-            if argv0_path.name.lower() == "onecolleague.exe":
+            if argv0_path.name.lower() in public_names:
                 return str(argv0_path.resolve())
         except Exception:
             pass
@@ -145,9 +146,10 @@ def current_frozen_executable() -> str:
     executable = str(sys.executable or "").strip()
     try:
         exe_path = Path(executable)
-        sibling = exe_path.with_name("onecolleague.exe")
-        if sibling.exists():
-            return str(sibling.resolve())
+        for public_name in public_names:
+            sibling = exe_path.with_name(public_name)
+            if sibling.exists():
+                return str(sibling.resolve())
     except Exception:
         pass
     return executable

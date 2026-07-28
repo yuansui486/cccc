@@ -107,7 +107,14 @@ if [[ "$SKIP_SMOKE_TESTS" == 0 ]]; then
   export ONECOLLEAGUE_HOME="$SMOKE_HOME"
   export CCCC_HOME="$SMOKE_HOME"
   "$BIN_PATH" doctor
-  "$BIN_PATH" daemon start
+  if ! "$BIN_PATH" daemon start; then
+    DAEMON_LOG="$SMOKE_HOME/daemon/onecolleagued.log"
+    if [[ -f "$DAEMON_LOG" ]]; then
+      echo "==> Daemon startup log" >&2
+      tail -n 100 "$DAEMON_LOG" >&2
+    fi
+    die "packaged daemon failed to start"
+  fi
   "$BIN_PATH" daemon status
 fi
 

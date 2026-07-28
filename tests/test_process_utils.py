@@ -127,6 +127,58 @@ class TestProcessUtils(unittest.TestCase):
             ):
                 self.assertEqual(process_utils.current_frozen_executable(), str(onecolleague_exe.resolve()))
 
+    def test_current_frozen_executable_prefers_macos_onecolleague_sibling_over_python(self) -> None:
+        from no1.util import process as process_utils
+
+        with tempfile.TemporaryDirectory() as td:
+            dist = Path(td)
+            python = dist / "python"
+            onecolleague = dist / "onecolleague"
+            python.write_text("", encoding="utf-8")
+            onecolleague.write_text("", encoding="utf-8")
+
+            with patch.object(
+                process_utils.sys,
+                "executable",
+                str(python),
+            ), patch.object(
+                process_utils.sys,
+                "argv",
+                [str(python)],
+            ):
+                self.assertEqual(process_utils.current_frozen_executable(), str(onecolleague.resolve()))
+
+    def test_resolve_python_module_argv_uses_macos_frozen_executable(self) -> None:
+        from no1.util import process as process_utils
+
+        with tempfile.TemporaryDirectory() as td:
+            dist = Path(td)
+            python = dist / "python"
+            onecolleague = dist / "onecolleague"
+            python.write_text("", encoding="utf-8")
+            onecolleague.write_text("", encoding="utf-8")
+
+            with patch.object(
+                process_utils.sys,
+                "frozen",
+                True,
+                create=True,
+            ), patch.object(
+                process_utils.sys,
+                "executable",
+                str(python),
+            ), patch.object(
+                process_utils.sys,
+                "argv",
+                [str(python)],
+            ):
+                argv = process_utils.resolve_python_module_argv([str(python), "-m", "no1.daemon_main", "run"])
+
+            self.assertEqual(
+                argv,
+                [str(onecolleague.resolve()), "--internal-module", "no1.daemon_main", "--", "run"],
+            )
+
     def test_resolve_python_module_argv_preserves_source_mode_invocation(self) -> None:
         from no1.util import process as process_utils
 
