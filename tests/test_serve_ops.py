@@ -10,6 +10,48 @@ from unittest.mock import patch
 
 
 class TestServeOps(unittest.TestCase):
+    def test_bind_server_socket_falls_back_to_tcp_when_unix_path_is_too_long(self) -> None:
+        import socket
+
+        from no1.daemon import serve_ops
+
+        real_socket = socket.socket
+        fake_af_unix = 9001
+
+        class _TooLongUnixSocket:
+            closed = False
+
+            def bind(self, _path: str) -> None:
+                raise OSError("AF_UNIX path too long")
+
+            def close(self) -> None:
+                self.closed = True
+
+        unix_socket = _TooLongUnixSocket()
+
+        def _socket_factory(family: int, kind: int):
+            if family == fake_af_unix:
+                return unix_socket
+            return real_socket(family, kind)
+
+        with patch.object(socket, "AF_UNIX", fake_af_unix, create=True), patch(
+            "no1.daemon.serve_ops.socket.socket",
+            side_effect=_socket_factory,
+        ):
+            bound_socket, endpoint = serve_ops.bind_server_socket(
+                transport="unix",
+                sock_path=Path("/private/var/folders") / ("deep" * 40) / "onecolleagued.sock",
+                daemon_tcp_bind_host=lambda: "127.0.0.1",
+                daemon_tcp_port=lambda: 0,
+            )
+        try:
+            self.assertTrue(unix_socket.closed)
+            self.assertEqual(endpoint.get("transport"), "tcp")
+            self.assertEqual(endpoint.get("host"), "127.0.0.1")
+            self.assertGreater(int(endpoint.get("port") or 0), 0)
+        finally:
+            bound_socket.close()
+
     def test_start_supervisor_watchdog_sets_stop_event_when_supervisor_exits(self) -> None:
         from no1.daemon import serve_ops
 

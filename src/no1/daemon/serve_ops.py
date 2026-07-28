@@ -199,8 +199,23 @@ def bind_server_socket(
         assert af_unix is not None
         s = socket.socket(af_unix, socket.SOCK_STREAM)
         endpoint = {"transport": "unix", "path": str(sock_path)}
-        s.bind(str(sock_path))
-        return s, endpoint
+        try:
+            s.bind(str(sock_path))
+            return s, endpoint
+        except OSError as exc:
+            try:
+                s.close()
+            except Exception:
+                pass
+            message = str(exc).lower()
+            if exc.errno != errno.ENAMETOOLONG and not (
+                "af_unix" in message and "path too long" in message
+            ):
+                raise
+            _LOG.warning(
+                "Unix socket path is too long (%s); falling back to loopback TCP",
+                sock_path,
+            )
 
     host = daemon_tcp_bind_host()
     port = daemon_tcp_port()
