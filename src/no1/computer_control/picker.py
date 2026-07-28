@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes
+import gc
 import os
 import queue
 import sys
@@ -109,6 +110,11 @@ class NativeUIAProbe:
             self.available = self._automation is not None
         except Exception:
             self._automation = None
+
+    def close(self) -> None:
+        """Release COM references while the owner apartment is still active."""
+        self.available = False
+        self._automation = None
 
     @staticmethod
     def _value(element: Any, property_id: int) -> Any:
@@ -245,6 +251,22 @@ def _initialize_com() -> Any:
     return comtypes
 
 
+def _prepare_com_runtime() -> None:
+    """Import comtypes on the long-lived manager thread.
+
+    comtypes initializes the thread that imports it for the first time and
+    registers process-exit cleanup for that apartment. Importing it first on a
+    short-lived picker worker leaves that cleanup attached to the wrong
+    thread, which can surface as RPC_E_DISCONNECTED after a session ends.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import comtypes  # type: ignore  # noqa: F401
+    except Exception:
+        pass
+
+
 def _uninitialize_com(comtypes_module: Any) -> None:
     if comtypes_module is not None:
         comtypes_module.CoUninitialize()
@@ -300,6 +322,13 @@ class DesktopHighlightOverlay:
         gdi32 = ctypes.windll.gdi32
         kernel32 = ctypes.windll.kernel32
         kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+        kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+        user32.RegisterClassW.restype = ctypes.c_ushort
+        user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+        user32.UnregisterClassW.restype = ctypes.wintypes.BOOL
+        user32.UnregisterClassW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p]
+        user32.DestroyWindow.restype = ctypes.wintypes.BOOL
+        user32.DestroyWindow.argtypes = [ctypes.wintypes.HWND]
         user32.CreateWindowExW.restype = ctypes.wintypes.HWND
         user32.CreateWindowExW.argtypes = [
             ctypes.c_ulong,
@@ -461,7 +490,7 @@ class PickerSession:
     session_id: str
     group_id: str
     actor_id: str
-    hotkey: str = "Ctrl+Shift+L"
+    hotkey: str = "Ctrl+Shift+LeftClick"
     status: str = "active"
     started_at: float = field(default_factory=time.time)
     sequence: int = 0
@@ -536,6 +565,7 @@ class ElementPickerManager:
         snapshot_provider: Optional[Callable[[], Any]] = None,
         probe_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
+        _prepare_com_runtime()
         self.home = home
         self.lease = lease
         self.snapshot_provider = snapshot_provider
@@ -544,11 +574,10 @@ class ElementPickerManager:
         self.overlay = DesktopHighlightOverlay()
         self._sessions: Dict[str, PickerSession] = {}
         self._lock = threading.RLock()
-        self._stop = threading.Event()
         self._wake = threading.Event()
         self._requests: "queue.Queue[PickerThreadRequest]" = queue.Queue()
         self._thread: Optional[threading.Thread] = None
-        self._hotkey_down = False
+        self._gesture_down = False
 
     def _session(self, session_id: str) -> PickerSession:
         session = self._sessions.get(session_id)
@@ -556,7 +585,7 @@ class ElementPickerManager:
             raise PickerError(f"拾取会话不存在或已清理：{session_id}", code="picker_session_not_found")
         return session
 
-    def start(self, group_id: str, actor_id: str, *, hotkey: str = "Ctrl+Shift+L", session_id: str = "") -> Dict[str, Any]:
+    def start(self, group_id: str, actor_id: str, *, hotkey: str = "Ctrl+Shift+LeftClick", session_id: str = "") -> Dict[str, Any]:
         with self._lock:
             # Completed sessions are retained long enough for an SSE reconnect
             # but do not accumulate forever.  Active sessions are never
@@ -572,7 +601,13 @@ class ElementPickerManager:
                     raise LeaseConflict({"run_id": existing.session_id, "group_id": existing.group_id, "actor_id": existing.actor_id, "observe_only": True})
             sid = session_id.strip() or "pick_" + uuid.uuid4().hex[:14]
             lease = self.lease.acquire(group_id=group_id, actor_id=actor_id or "user", run_id=sid, observe_only=True)
-            session = PickerSession(session_id=sid, group_id=group_id, actor_id=actor_id or "user", hotkey=hotkey.strip() or "Ctrl+Shift+L", last_heartbeat_at=time.time())
+            session = PickerSession(
+                session_id=sid,
+                group_id=group_id,
+                actor_id=actor_id or "user",
+                hotkey=hotkey.strip() or "Ctrl+Shift+LeftClick",
+                last_heartbeat_at=time.time(),
+            )
             session.emit("started", lease=lease, hotkey=session.hotkey, native_available=False, overlay_available=False)
             self._sessions[sid] = session
             try:
@@ -581,7 +616,6 @@ class ElementPickerManager:
                 self._sessions.pop(sid, None)
                 raise
             if self._thread is None or not self._thread.is_alive():
-                self._stop.clear()
                 self._wake.clear()
                 self._thread = threading.Thread(target=self._poll_loop, name="onecolleague-picker", daemon=True)
                 self._thread.start()
@@ -634,6 +668,7 @@ class ElementPickerManager:
         com_initialized = False
         probe: Any = UnavailableUIAProbe()
         probe_error = ""
+        normal_exit = False
         try:
             try:
                 comtypes_module = _initialize_com()
@@ -666,11 +701,25 @@ class ElementPickerManager:
                     for session in active_at_start:
                         session.overlay_available = overlay_available
 
-            while not self._stop.is_set():
+            # A new worker may start while the user is still releasing the
+            # previous gesture. Seed the edge detector from physical state so
+            # that this does not immediately lock the next session.
+            self._gesture_down = self._lock_gesture_pressed()
+
+            while True:
                 self._process_thread_requests(probe)
                 with self._lock:
                     active = [session for session in self._sessions.values() if session.status == "active"]
-                if not active:
+                    if not active:
+                        # Complete teardown while holding the same lock used by
+                        # start(). A new session either joins this worker before
+                        # this point or starts a fresh worker after teardown.
+                        self.overlay.stop()
+                        self.probe = UnavailableUIAProbe()
+                        if self._thread is threading.current_thread():
+                            self._thread = None
+                        normal_exit = True
+                if normal_exit:
                     break
                 point = _cursor_position()
                 element = probe.element_at(point) if point is not None and probe.available else None
@@ -679,8 +728,8 @@ class ElementPickerManager:
                         continue
                     if point is not None:
                         self._update_hover(session, point, element)
-                pressed = self._hotkey_pressed() if point is not None else False
-                if pressed and not self._hotkey_down:
+                pressed = self._lock_gesture_pressed() if point is not None else False
+                if pressed and not self._gesture_down:
                     for session in active:
                         try:
                             self._lock_on_owner(
@@ -692,57 +741,74 @@ class ElementPickerManager:
                         except Exception as exc:
                             with self._lock:
                                 session.emit("warning", code="picker_lock_failed", message=str(exc), retryable=True)
-                self._hotkey_down = pressed
-                self._wake.wait(0.15)
+                self._gesture_down = pressed
+                self._wake.wait(0.05)
                 self._wake.clear()
         except Exception as exc:
             probe_error = str(exc)
         finally:
-            self.overlay.stop()
-            with self._lock:
-                self.probe = UnavailableUIAProbe()
-                abandoned = [session for session in self._sessions.values() if session.status == "active"]
+            if not normal_exit:
+                with self._lock:
+                    abandoned = [session for session in self._sessions.values() if session.status == "active"]
+                    for session in abandoned:
+                        session.status = "failed"
+                        session.warning = "元素拾取线程意外结束，请重新开始拾取"
+                        if probe_error:
+                            session.warning += f"：{probe_error[:200]}"
+                        session.emit("ended", reason="picker_thread_unavailable", code="picker_thread_unavailable")
+                    # Exceptional teardown is atomic with start(). A normal
+                    # exit already did this before publishing _thread=None and
+                    # must never touch resources owned by a replacement worker.
+                    self.overlay.stop()
+                    self.probe = UnavailableUIAProbe()
+                    if self._thread is threading.current_thread():
+                        self._thread = None
                 for session in abandoned:
-                    session.status = "failed"
-                    session.warning = "元素拾取线程意外结束，请重新开始拾取"
-                    if probe_error:
-                        session.warning += f"：{probe_error[:200]}"
-                    session.emit("ended", reason="picker_thread_unavailable", code="picker_thread_unavailable")
-            for session in abandoned:
-                self._stop_session_heartbeat(session)
-                try:
-                    self.lease.release(run_id=session.session_id, force=False)
-                except (OSError, PermissionError):
-                    pass
-            thread_error = PickerError(
-                "元素拾取线程已经结束，请重新开始拾取",
-                code="picker_thread_unavailable",
-                retryable=True,
-            )
-            while True:
-                try:
-                    request = self._requests.get_nowait()
-                except queue.Empty:
-                    break
-                request.error = thread_error
-                request.done.set()
+                    self._stop_session_heartbeat(session)
+                    try:
+                        self.lease.release(run_id=session.session_id, force=False)
+                    except (OSError, PermissionError):
+                        pass
+                thread_error = PickerError(
+                    "元素拾取线程已经结束，请重新开始拾取",
+                    code="picker_thread_unavailable",
+                    retryable=True,
+                )
+                while True:
+                    try:
+                        request = self._requests.get_nowait()
+                    except queue.Empty:
+                        break
+                    request.error = thread_error
+                    request.done.set()
             if com_initialized:
+                try:
+                    close_probe = getattr(probe, "close", None)
+                    if callable(close_probe):
+                        close_probe()
+                except Exception:
+                    pass
+                probe = UnavailableUIAProbe()
+                # comtypes may retain cyclic wrapper objects after the last
+                # Python reference is cleared. Release them inside the same
+                # apartment before CoUninitialize, never on a later worker.
+                gc.collect()
                 try:
                     _uninitialize_com(comtypes_module)
                 except Exception:
                     pass
-            self._stop.set()
 
     @staticmethod
-    def _hotkey_pressed() -> bool:
+    def _lock_gesture_pressed() -> bool:
         if sys.platform != "win32":
             return False
         try:
             user32 = ctypes.windll.user32
+            left_button = int(user32.GetAsyncKeyState(0x01))
             return bool(
                 (user32.GetAsyncKeyState(0x11) & 0x8000)
                 and (user32.GetAsyncKeyState(0x10) & 0x8000)
-                and (user32.GetAsyncKeyState(ord("L")) & 0x8000)
+                and (left_button & 0x8001)
             )
         except Exception:
             return False
@@ -1043,7 +1109,6 @@ class ElementPickerManager:
             # The lease may have expired and been handed to another run;
             # never force-delete that newer owner's lease.
             pass
-        self.overlay.stop()
         self._wake.set()
         return {"session": public, "locator": element.get("locator_preview"), "element": element}
 
@@ -1063,7 +1128,6 @@ class ElementPickerManager:
                 self.lease.release(run_id=session.session_id, force=False)
             except (OSError, PermissionError):
                 pass
-            self.overlay.stop()
             self._wake.set()
         return public
 

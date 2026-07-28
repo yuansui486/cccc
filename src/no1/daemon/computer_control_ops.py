@@ -215,7 +215,7 @@ def _picker(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) ->
         return picker.start(
             group_id,
             actor_id or "user",
-            hotkey=str(args.get("hotkey") or "Ctrl+Shift+L"),
+            hotkey=str(args.get("hotkey") or "Ctrl+Shift+LeftClick"),
             session_id=session_id,
         )
     if not session_id:

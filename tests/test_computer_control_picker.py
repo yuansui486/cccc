@@ -2,8 +2,10 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import no1.computer_control.picker as picker_module
 from no1.computer_control.lease import ComputerControlLease
 from no1.computer_control.picker import ElementPickerManager, UnavailableUIAProbe
 
@@ -30,10 +32,14 @@ class FakeProbe:
     def __init__(self, element=None):
         self.element = dict(element or _element())
         self.call_threads = []
+        self.close_threads = []
 
     def element_at(self, point):
         self.call_threads.append(threading.get_ident())
         return dict(self.element)
+
+    def close(self):
+        self.close_threads.append(threading.get_ident())
 
 
 class FakeOverlay:
@@ -59,6 +65,25 @@ class FakeOverlay:
 
 
 class TestElementPickerManager(unittest.TestCase):
+    def test_lock_gesture_uses_ctrl_shift_left_click(self):
+        requested_keys = []
+
+        class FakeUser32:
+            @staticmethod
+            def GetAsyncKeyState(key):
+                requested_keys.append(key)
+                return 0x8001 if key == 0x01 else 0x8000
+
+        with patch.object(picker_module.sys, "platform", "win32"), patch.object(
+            picker_module.ctypes,
+            "windll",
+            SimpleNamespace(user32=FakeUser32()),
+        ):
+            self.assertTrue(ElementPickerManager._lock_gesture_pressed())
+
+        self.assertEqual(set(requested_keys), {0x01, 0x10, 0x11})
+        self.assertNotIn(ord("L"), requested_keys)
+
     def test_session_lifecycle_uses_observe_only_lease(self):
         with tempfile.TemporaryDirectory() as td:
             manager = ElementPickerManager(
@@ -67,6 +92,7 @@ class TestElementPickerManager(unittest.TestCase):
                 probe_factory=UnavailableUIAProbe,
             )
             started = manager.start("group", "actor")
+            worker = manager._thread
             self.assertEqual(started["status"], "active")
             self.assertEqual(manager.lease.status()["lease"]["run_id"], started["session_id"])
             events = manager.events(started["session_id"])
@@ -74,7 +100,8 @@ class TestElementPickerManager(unittest.TestCase):
             ended = manager.cancel(started["session_id"], reason="test")
             self.assertEqual(ended["status"], "cancelled")
             self.assertFalse(manager.lease.status()["active"])
-            manager._thread.join(timeout=2)
+            self.assertIsNotNone(worker)
+            worker.join(timeout=2)
 
     def test_snapshot_fallback_can_lock_and_confirm_without_native_ui(self):
         snapshot = {
@@ -95,13 +122,15 @@ class TestElementPickerManager(unittest.TestCase):
                 probe_factory=UnavailableUIAProbe,
             )
             started = manager.start("group", "actor")
+            worker = manager._thread
             locked = manager.lock(started["session_id"], point=[20, 25])
             self.assertTrue(locked["element"]["locator_preview"]["window_name"] == "Demo")
             self.assertTrue(locked["stable"])
             confirmed = manager.confirm(started["session_id"])
             self.assertEqual(confirmed["session"]["status"], "confirmed")
             self.assertEqual(confirmed["locator"]["fallback_policy"], "never")
-            manager._thread.join(timeout=2)
+            self.assertIsNotNone(worker)
+            worker.join(timeout=2)
 
     def test_uia_probe_and_lock_sampling_stay_on_owner_thread(self):
         main_thread = threading.get_ident()
@@ -140,20 +169,71 @@ class TestElementPickerManager(unittest.TestCase):
             )
             manager.overlay = overlay
             started = manager.start("group", "actor")
+            owner_worker = manager._thread
             self.assertTrue(overlay.updated.wait(timeout=2))
             locked = manager.lock(started["session_id"], point=[20, 25])
             self.assertTrue(locked["stable"])
             calls_before_confirm = len(probe.call_threads)
             manager.confirm(started["session_id"])
-            manager._thread.join(timeout=2)
+            self.assertIsNotNone(owner_worker)
+            owner_worker.join(timeout=2)
 
-        self.assertFalse(manager._thread.is_alive())
+        self.assertFalse(owner_worker.is_alive())
+        self.assertIsNone(manager._thread)
         self.assertEqual(len(probe.call_threads), calls_before_confirm)
         owner_threads = set(factory_threads + initialized_threads + probe.call_threads + overlay.start_threads + overlay.update_threads)
         self.assertEqual(len(owner_threads), 1)
         self.assertNotIn(main_thread, owner_threads)
         self.assertEqual(uninitialized_threads, factory_threads)
+        self.assertEqual(probe.close_threads, factory_threads)
         self.assertGreaterEqual(overlay.stop_calls, 1)
+
+    def test_consecutive_sessions_restart_overlay_and_keep_second_session_usable(self):
+        probe = FakeProbe()
+        overlay = FakeOverlay()
+
+        with tempfile.TemporaryDirectory() as td, patch(
+            "no1.computer_control.picker._initialize_com", return_value=object()
+        ), patch(
+            "no1.computer_control.picker._uninitialize_com"
+        ), patch(
+            "no1.computer_control.picker._cursor_position", return_value=[20, 25]
+        ), patch(
+            "no1.computer_control.picker.time.sleep", return_value=None
+        ):
+            manager = ElementPickerManager(
+                Path(td),
+                ComputerControlLease(Path(td)),
+                probe_factory=lambda: probe,
+            )
+            manager.overlay = overlay
+
+            first = manager.start("group", "actor")
+            self.assertTrue(overlay.updated.wait(timeout=2))
+            first_worker = manager._thread
+            manager.cancel(first["session_id"])
+            self.assertIsNotNone(first_worker)
+            first_worker.join(timeout=2)
+            self.assertFalse(first_worker.is_alive())
+
+            overlay.updated.clear()
+            first_update_count = len(overlay.update_threads)
+            second = manager.start("group", "actor")
+            second_worker = manager._thread
+            self.assertIsNot(second_worker, first_worker)
+            self.assertTrue(overlay.updated.wait(timeout=2))
+            self.assertGreater(len(overlay.update_threads), first_update_count)
+            self.assertTrue(manager.status(second["session_id"])["overlay_available"])
+
+            locked = manager.lock(second["session_id"], point=[20, 25])
+            self.assertTrue(locked["stable"])
+            manager.cancel(second["session_id"])
+            self.assertIsNotNone(second_worker)
+            second_worker.join(timeout=2)
+            self.assertFalse(second_worker.is_alive())
+
+        self.assertGreaterEqual(len(overlay.start_threads), 2)
+        self.assertGreaterEqual(overlay.stop_calls, 2)
 
     def test_same_name_with_different_runtime_id_is_unstable(self):
         samples = [_element(runtime_id=[42, value]) for value in (1, 2, 2)]
@@ -202,11 +282,13 @@ class TestElementPickerManager(unittest.TestCase):
                 probe_factory=UnavailableUIAProbe,
             )
             started = manager.start("group", "actor")
+            worker = manager._thread
             locked = manager.lock(started["session_id"], point=[20, 25])
             self.assertTrue(locked["stable"])
             self.assertTrue(lease.status()["active"])
             manager.cancel(started["session_id"])
-            manager._thread.join(timeout=2)
+            self.assertIsNotNone(worker)
+            worker.join(timeout=2)
 
     def test_picker_thread_failure_releases_its_lease(self):
         class FailingProbe(FakeProbe):
@@ -220,8 +302,11 @@ class TestElementPickerManager(unittest.TestCase):
             lease = ComputerControlLease(Path(td))
             manager = ElementPickerManager(Path(td), lease, probe_factory=FailingProbe)
             started = manager.start("group", "actor")
-            manager._thread.join(timeout=2)
-            self.assertFalse(manager._thread.is_alive())
+            failed_worker = manager._thread
+            self.assertIsNotNone(failed_worker)
+            failed_worker.join(timeout=2)
+            self.assertFalse(failed_worker.is_alive())
+            self.assertIsNone(manager._thread)
             self.assertFalse(lease.status()["active"])
             self.assertEqual(manager.status(started["session_id"])["status"], "failed")
 

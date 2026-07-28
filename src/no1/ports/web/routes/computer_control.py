@@ -674,7 +674,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 actor_id=actor_id,
                 action="start",
                 session_id=str(payload.get("session_id") or ""),
-                hotkey=str(payload.get("hotkey") or "Ctrl+Shift+L"),
+                hotkey=str(payload.get("hotkey") or "Ctrl+Shift+LeftClick"),
             )
         except HTTPException:
             raise

@@ -450,7 +450,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   async function startPicker() {
     if (!groupId || pickerBusy || pickerSession) return;
     setPickerBusy(true);
-    setPickerStatus("正在启动桌面元素拾取器。请把鼠标移动到目标控件上，再按 Ctrl+Shift+L 锁定。\u2026");
+    setPickerStatus("正在启动桌面元素拾取器。请把鼠标移动到目标控件上，再按 Ctrl+Shift+鼠标左键锁定。\u2026");
     const response = await computerControlApi.pickerStart(groupId, { node_id: selectedNode?.id });
     setPickerBusy(false);
     if (!response.ok) {
@@ -459,7 +459,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       return;
     }
     setPickerSession(response.result);
-    setPickerStatus("拾取器已启动：移动鼠标观察元素，按 Ctrl+Shift+L 锁定。");
+    setPickerStatus("拾取器已启动：移动鼠标观察元素，按 Ctrl+Shift+鼠标左键锁定。");
   }
 
   async function lockPicker() {
@@ -1832,7 +1832,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                         <div className="mt-3 rounded-md border border-sky-500/30 bg-sky-500/5 p-2.5 text-xs">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium text-sky-900 dark:text-sky-100">
-                              桌面拾取中 · {pickerSession.hotkey || "Ctrl+Shift+L"}
+                              桌面拾取中 · {pickerSession.hotkey === "Ctrl+Shift+LeftClick"
+                                ? "Ctrl+Shift+鼠标左键"
+                                : pickerSession.hotkey || "Ctrl+Shift+鼠标左键"}
                             </span>
                             <button type="button" className="text-[var(--color-text-secondary)] underline" onClick={() => void stopPicker()}>结束拾取</button>
                           </div>
