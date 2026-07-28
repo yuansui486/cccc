@@ -2,11 +2,13 @@ import unittest
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import no1.computer_control.observation as observation_module
 from no1.computer_control.lease import ComputerControlLease
 from no1.computer_control.elements import normalize_snapshot
-from no1.computer_control.observation import NativeWindowObserver, merge_observations, window_names_match
+from no1.computer_control.observation import NativeWindowObserver, desktop_session_available, merge_observations, window_names_match
 from no1.computer_control.recording import RecordingStore
 from no1.computer_control.requests import ComputerRequestStore
 from no1.computer_control.storage import WorkflowStore
@@ -15,6 +17,34 @@ from no1.kernel.registry import load_registry
 
 
 class TestComputerControlObservation(unittest.TestCase):
+    def test_desktop_session_probe_closes_the_input_desktop(self) -> None:
+        calls = []
+
+        class FakeFunction:
+            def __init__(self, value, name):
+                self.value = value
+                self.name = name
+                self.restype = None
+                self.argtypes = None
+
+            def __call__(self, *args):
+                calls.append((self.name, args))
+                return self.value
+
+        user32 = SimpleNamespace(
+            OpenInputDesktop=FakeFunction(123, "open"),
+            SwitchDesktop=FakeFunction(1, "switch"),
+            CloseDesktop=FakeFunction(1, "close"),
+        )
+        with patch.object(observation_module.sys, "platform", "win32"), patch.object(
+            observation_module.ctypes,
+            "windll",
+            SimpleNamespace(user32=user32),
+        ):
+            self.assertTrue(desktop_session_available())
+
+        self.assertEqual([name for name, _args in calls], ["open", "switch", "close"])
+
     def test_window_name_matching_accepts_decorated_titles(self) -> None:
         self.assertTrue(window_names_match("订单", "订单 - 企业系统"))
         self.assertTrue(window_names_match("WeChat", "WeChat"))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 import time
 import uuid
@@ -16,6 +17,7 @@ from ....computer_control.models import (
     TrustRequest,
     WorkflowCreateRequest,
     WorkflowRunRequest,
+    WorkflowTrigger,
     WorkflowUpdateRequest,
     computer_control_permissions,
 )
@@ -27,6 +29,7 @@ from ....computer_control.risk import annotate_catalog
 from ....computer_control.mcp import validate_workflow_tools
 from ....computer_control.compiler import compile_workflow, compile_or_raise
 from ....computer_control.elements import normalize_snapshot, resolve_locator
+from ....computer_control.triggers import next_cron_time, next_schedule_time, parse_at_timestamp, validate_trigger
 from ..schemas import RouteContext, require_admin, require_group, require_user
 
 
@@ -93,6 +96,241 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     def with_effective_version(manifest: Dict[str, Any]) -> Dict[str, Any]:
         return {**manifest, "effective_version": service.store.effective_version(manifest, current_fingerprint())}
+
+    def trigger_setup_status() -> Dict[str, Any]:
+        value = service.setup.status()
+        phase = str(value.get("phase") or value.get("setup_phase") or "")
+        fingerprint = str(value.get("fingerprint") or "")
+        return {
+            "ready": bool(phase == "ready" and fingerprint),
+            "phase": phase,
+            "fingerprint": fingerprint,
+            "session_running": bool(value.get("session_running")),
+        }
+
+    async def scheduler_trigger_status(group_id: str, workflow_id: str) -> Dict[str, Any]:
+        status_method = getattr(service.scheduler, "status", None)
+        if callable(status_method):
+            try:
+                try:
+                    value = status_method(group_id=group_id, workflow_id=workflow_id)
+                except TypeError:
+                    value = status_method(group_id, workflow_id)
+                if inspect.isawaitable(value):
+                    value = await value
+                if isinstance(value, dict):
+                    return value
+            except Exception as exc:
+                return {"available": False, "code": "scheduler_status_unavailable", "message": str(exc)}
+        task = getattr(service.scheduler, "_task", None)
+        return {
+            "available": False,
+            "code": "scheduler_status_not_supported",
+            "running": bool(task is not None and not task.done()),
+            "supported_types": ["interval"],
+        }
+
+    async def scheduler_test_trigger(group_id: str, workflow_id: str, trigger: Dict[str, Any]) -> Dict[str, Any]:
+        test_method = getattr(service.scheduler, "test_trigger", None)
+        if not callable(test_method):
+            return {"available": False, "code": "scheduler_trigger_test_not_supported"}
+        try:
+            try:
+                value = test_method(group_id=group_id, workflow_id=workflow_id, trigger=trigger)
+            except TypeError:
+                value = test_method(group_id, workflow_id, trigger)
+            if inspect.isawaitable(value):
+                value = await value
+            return value if isinstance(value, dict) else {"available": True, "result": value}
+        except Exception as exc:
+            return {"available": False, "code": "scheduler_trigger_test_failed", "message": str(exc)}
+
+    def scheduler_trigger_entry(scheduler: Dict[str, Any], trigger_id: str) -> Dict[str, Any]:
+        raw = scheduler.get("triggers")
+        if isinstance(raw, dict) and isinstance(raw.get(trigger_id), dict):
+            return dict(raw[trigger_id])
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, dict) and str(item.get("trigger_id") or item.get("id") or "") == trigger_id:
+                    return dict(item)
+        return {}
+
+    async def trigger_result(group_id: str, value: Dict[str, Any], *, finalization: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        manifest = value["manifest"]
+        version = int(value["version"])
+        definition = WorkflowDefinition.model_validate(
+            {key: child for key, child in value["definition"].items() if key != "change_note"}
+        )
+        setup = trigger_setup_status()
+        scheduler = await scheduler_trigger_status(group_id, str(manifest.get("workflow_id") or ""))
+        activation = manifest.get("trigger_activation") if isinstance(manifest.get("trigger_activation"), dict) else {}
+        published_version = int(manifest.get("published_version") or 0)
+        published_triggers: Dict[str, Dict[str, Any]] = {}
+        if published_version:
+            try:
+                published = service.store.get(group_id, str(manifest.get("workflow_id") or ""), version=published_version)
+                published_triggers = {
+                    str(item.get("id") or ""): item
+                    for item in published["definition"].get("triggers", [])
+                    if isinstance(item, dict)
+                }
+            except WorkflowNotFound:
+                published_triggers = {}
+        trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
+        trust = trusted.get(str(published_version)) if isinstance(trusted, dict) else None
+        fingerprint_trusted = bool(
+            setup["fingerprint"]
+            and isinstance(trust, dict)
+            and str(trust.get("fingerprint") or "") == setup["fingerprint"]
+        )
+        statuses: Dict[str, Dict[str, Any]] = {}
+        for trigger in definition.triggers:
+            gate = activation.get(trigger.id) if isinstance(activation.get(trigger.id), dict) else {}
+            published_trigger = published_triggers.get(trigger.id) or {}
+            scheduler_value = scheduler_trigger_entry(scheduler, trigger.id)
+            runtime_enabled = bool(
+                setup["ready"]
+                and fingerprint_trusted
+                and published_trigger.get("enabled")
+                and (gate.get("enabled") is not False)
+            )
+            scheduler_enabled = scheduler_value.get("runtime_enabled", scheduler_value.get("enabled"))
+            if scheduler_enabled is not None:
+                runtime_enabled = bool(
+                    scheduler_enabled
+                    and setup["ready"]
+                    and fingerprint_trusted
+                    and gate.get("enabled") is not False
+                )
+            if runtime_enabled:
+                reason = "active"
+            elif gate.get("enabled") is False:
+                reason = str(gate.get("reason") or "runtime_gate_closed")
+            elif not published_trigger.get("enabled"):
+                reason = "disabled" if not trigger.enabled else "not_published"
+            elif not setup["ready"]:
+                reason = "setup_not_ready"
+            elif not fingerprint_trusted:
+                reason = "workflow_not_trusted"
+            else:
+                reason = str(scheduler_value.get("reason") or "scheduler_inactive")
+            statuses[trigger.id] = {
+                "desired_enabled": trigger.enabled,
+                "runtime_enabled": runtime_enabled,
+                "reason": reason,
+                "version": version,
+                "published_version": published_version or None,
+                "pending_changes": version != published_version,
+                "present_in_draft": True,
+                "present_in_published": bool(published_trigger),
+                "scheduler": scheduler_value,
+                "gate": dict(gate),
+            }
+        for trigger_id, published_trigger in published_triggers.items():
+            if not trigger_id or trigger_id in statuses:
+                continue
+            gate = activation.get(trigger_id) if isinstance(activation.get(trigger_id), dict) else {}
+            scheduler_value = scheduler_trigger_entry(scheduler, trigger_id)
+            scheduler_enabled = scheduler_value.get("runtime_enabled", scheduler_value.get("enabled"))
+            runtime_enabled = bool(
+                setup["ready"]
+                and fingerprint_trusted
+                and published_trigger.get("enabled")
+                and gate.get("enabled") is not False
+            )
+            if scheduler_enabled is not None:
+                runtime_enabled = bool(
+                    scheduler_enabled
+                    and setup["ready"]
+                    and fingerprint_trusted
+                    and gate.get("enabled") is not False
+                )
+            statuses[trigger_id] = {
+                "desired_enabled": False,
+                "runtime_enabled": runtime_enabled,
+                "reason": "pending_removal" if runtime_enabled else str(gate.get("reason") or "removed_from_draft"),
+                "version": version,
+                "published_version": published_version or None,
+                "pending_changes": True,
+                "present_in_draft": False,
+                "present_in_published": True,
+                "scheduler": scheduler_value,
+                "gate": dict(gate),
+            }
+        result = {
+            "revision": manifest.get("revision"),
+            "version": version,
+            "published_version": published_version or None,
+            "effective_version": service.store.effective_version(manifest, setup["fingerprint"]),
+            "triggers": [item.model_dump(mode="json") for item in definition.triggers],
+            "trigger_status": statuses,
+            "activation": {str(key): dict(item) for key, item in activation.items() if isinstance(item, dict)},
+            "setup": setup,
+            "scheduler": scheduler,
+        }
+        if finalization is not None:
+            result["finalization"] = finalization
+        return result
+
+    def require_trigger_setup() -> Dict[str, Any]:
+        setup = trigger_setup_status()
+        if not setup["ready"]:
+            raise _error(
+                "windows_mcp_not_ready",
+                "启用触发器前必须完成 Windows-MCP 安装并取得当前工具指纹",
+                409,
+                setup,
+            )
+        return setup
+
+    def finalize_trigger_version(group_id: str, value: Dict[str, Any], *, allow_unready_disable: bool) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        workflow_id = str(value["manifest"].get("workflow_id") or "")
+        version = int(value["version"])
+        definition = WorkflowDefinition.model_validate(
+            {key: child for key, child in value["definition"].items() if key != "change_note"}
+        )
+        enabled = [trigger for trigger in definition.triggers if trigger.enabled]
+        setup = trigger_setup_status()
+        if enabled and not setup["ready"] and not allow_unready_disable:
+            require_trigger_setup()
+        if not setup["ready"] and allow_unready_disable:
+            current = service.store.get(group_id, workflow_id, version=version)
+            return current, {
+                "auto_published": False,
+                "auto_trusted": False,
+                "runtime_activation_opened": False,
+                "setup_ready": False,
+                "draft_reason": "setup_not_ready_runtime_gate_closed",
+            }
+        service.store.publish(group_id, workflow_id, version)
+        trusted = False
+        if setup["ready"]:
+            service.store.trust(
+                group_id,
+                workflow_id,
+                version,
+                fingerprint=setup["fingerprint"],
+                permissions=["all_windows_mcp_tools"],
+            )
+            trusted = True
+        current = service.store.get(group_id, workflow_id, version=version)
+        for trigger in definition.triggers:
+            service.store.set_trigger_activation(
+                group_id,
+                workflow_id,
+                trigger.id,
+                enabled=bool(trigger.enabled and trusted),
+                version=version,
+                fingerprint=setup["fingerprint"] if trigger.enabled and trusted else "",
+                reason="active" if trigger.enabled and trusted else "setup_not_ready" if trigger.enabled else "disabled",
+            )
+        current = service.store.get(group_id, workflow_id, version=version)
+        return current, {
+            "auto_published": True,
+            "auto_trusted": trusted,
+            "runtime_activation_opened": bool(enabled and trusted),
+            "setup_ready": setup["ready"],
+        }
 
     def enrich_lease(value: Any) -> Dict[str, Any]:
         raw = value if isinstance(value, dict) else {}
@@ -381,12 +619,28 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             value = service.store.get(group_id, workflow_id)
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
-        definition = WorkflowDefinition.model_validate({k: v for k, v in value["definition"].items() if k != "change_note"})
-        return {"ok": True, "result": {"revision": value["manifest"].get("revision"), "triggers": [item.model_dump(mode="json") for item in definition.triggers]}}
+        return {"ok": True, "result": await trigger_result(group_id, value)}
+
+    @group_router.get("/workflows/{workflow_id}/triggers/status")
+    async def workflow_trigger_status(group_id: str, workflow_id: str) -> Dict[str, Any]:
+        try:
+            value = service.store.get(group_id, workflow_id)
+        except WorkflowNotFound as exc:
+            raise _error("workflow_not_found", str(exc), 404) from exc
+        result = await trigger_result(group_id, value)
+        return {
+            "ok": True,
+            "result": {
+                key: result[key]
+                for key in ("revision", "version", "published_version", "effective_version", "trigger_status", "activation", "setup", "scheduler")
+            },
+        }
 
     @group_router.put("/workflows/{workflow_id}/triggers")
     async def update_workflow_triggers(group_id: str, workflow_id: str, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         expected = int(payload.get("expected_revision") or 0)
+        if expected < 1:
+            raise _error("invalid_request", "expected_revision is required", 422)
         try:
             current = service.store.get(group_id, workflow_id)
         except WorkflowNotFound as exc:
@@ -395,13 +649,218 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         definition_payload["triggers"] = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
         try:
             definition = WorkflowDefinition.model_validate({k: v for k, v in definition_payload.items() if k != "change_note"})
-            value = service.store.update(group_id, workflow_id, definition, expected_revision=expected, change_note="trigger update")
-            value = await validate_and_finalize(group_id, value)
+            compile_or_raise(definition)
+            has_enabled_triggers = any(trigger.enabled for trigger in definition.triggers)
+            if has_enabled_triggers:
+                require_trigger_setup()
+            value = service.store.update_triggers(
+                group_id,
+                workflow_id,
+                definition,
+                expected_revision=expected,
+            )
+            value, finalization = finalize_trigger_version(
+                group_id,
+                value,
+                allow_unready_disable=not has_enabled_triggers,
+            )
         except RevisionConflict as exc:
             raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
-        except (WorkflowNotFound, ValueError) as exc:
+        except WorkflowNotFound as exc:
+            raise _error("workflow_not_found", str(exc), 404) from exc
+        except ValueError as exc:
             raise _error("workflow_invalid", str(exc), 422) from exc
-        return {"ok": True, "result": value}
+        audit(
+            ctx.home,
+            "computer_control.triggers_updated",
+            group_id=group_id,
+            details={"workflow_id": workflow_id, "version": value["version"], **finalization},
+        )
+        _emit("triggers.updated", group_id=group_id, workflow_id=workflow_id, version=value["version"])
+        return {"ok": True, "result": await trigger_result(group_id, value, finalization=finalization)}
+
+    @group_router.patch("/workflows/{workflow_id}/triggers/{trigger_id}/activation")
+    async def update_trigger_activation(
+        group_id: str,
+        workflow_id: str,
+        trigger_id: str,
+        payload: Dict[str, Any] = Body(...),
+    ) -> Dict[str, Any]:
+        if not isinstance(payload.get("enabled"), bool):
+            raise _error("invalid_request", "enabled must be a boolean", 422)
+        expected = int(payload.get("expected_revision") or 0)
+        if expected < 1:
+            raise _error("invalid_request", "expected_revision is required", 422)
+        desired_enabled = bool(payload["enabled"])
+        try:
+            current = service.store.get(group_id, workflow_id)
+            definition_payload = {key: value for key, value in current["definition"].items() if key != "change_note"}
+            triggers = definition_payload.get("triggers") if isinstance(definition_payload.get("triggers"), list) else []
+            found = False
+            updated_triggers = []
+            for item in triggers:
+                if isinstance(item, dict) and str(item.get("id") or "") == trigger_id:
+                    item = {**item, "enabled": desired_enabled}
+                    found = True
+                updated_triggers.append(item)
+            if not found:
+                raise WorkflowNotFound(f"trigger {trigger_id} not found")
+            definition_payload["triggers"] = updated_triggers
+            definition = WorkflowDefinition.model_validate(definition_payload)
+            if desired_enabled:
+                compile_or_raise(definition)
+                require_trigger_setup()
+            value = service.store.update_triggers(
+                group_id,
+                workflow_id,
+                definition,
+                expected_revision=expected,
+            )
+            value, finalization = finalize_trigger_version(
+                group_id,
+                value,
+                allow_unready_disable=not desired_enabled,
+            )
+        except RevisionConflict as exc:
+            raise _error("revision_conflict", str(exc), 409, {"current_revision": exc.current_revision}) from exc
+        except WorkflowNotFound as exc:
+            raise _error("trigger_not_found", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("workflow_invalid", str(exc), 422) from exc
+        audit(
+            ctx.home,
+            "computer_control.trigger_activation_updated",
+            group_id=group_id,
+            details={
+                "workflow_id": workflow_id,
+                "trigger_id": trigger_id,
+                "enabled": desired_enabled,
+                "version": value["version"],
+                **finalization,
+            },
+        )
+        _emit(
+            "trigger.activation_updated",
+            group_id=group_id,
+            workflow_id=workflow_id,
+            trigger_id=trigger_id,
+            enabled=desired_enabled,
+        )
+        return {"ok": True, "result": await trigger_result(group_id, value, finalization=finalization)}
+
+    @group_router.post("/workflows/{workflow_id}/triggers/{trigger_id}/test")
+    async def test_workflow_trigger(
+        group_id: str,
+        workflow_id: str,
+        trigger_id: str,
+        payload: Dict[str, Any] = Body(default_factory=dict),
+    ) -> Dict[str, Any]:
+        try:
+            value = service.store.get(group_id, workflow_id)
+            definition = WorkflowDefinition.model_validate(
+                {key: child for key, child in value["definition"].items() if key != "change_note"}
+            )
+            persisted = next((item for item in definition.triggers if item.id == trigger_id), None)
+            if persisted is None:
+                raise WorkflowNotFound(f"trigger {trigger_id} not found")
+            draft = payload.get("trigger") if isinstance(payload.get("trigger"), dict) else None
+            raw_trigger = dict(draft or persisted.model_dump(mode="json"))
+            raw_trigger.setdefault("id", trigger_id)
+            if str(raw_trigger.get("id") or "") != trigger_id:
+                raise ValueError("draft trigger id must match the route trigger id")
+            trigger = WorkflowTrigger.model_validate(raw_trigger)
+            validate_trigger(trigger, group_root=service.store.root(group_id).parent.parent)
+            raw_trigger = trigger.model_dump(mode="json")
+            trigger_type = trigger.type
+            if trigger.type == "element":
+                ElementLocator.model_validate(trigger.config.get("locator") or {})
+        except WorkflowNotFound as exc:
+            raise _error("trigger_not_found", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("trigger_invalid", str(exc), 422) from exc
+        status = await trigger_result(group_id, value)
+        scheduler_test = (
+            await scheduler_test_trigger(group_id, workflow_id, raw_trigger)
+            if trigger_type not in {"event", "file"}
+            else {"available": False, "code": "trigger_test_not_exposed"}
+        )
+        scheduler_value = status["trigger_status"].get(trigger_id, {}).get("scheduler") or {}
+        preview = dict(scheduler_test.get("preview")) if isinstance(scheduler_test.get("preview"), dict) else {}
+        preview.update({"type": trigger_type, "read_only": True})
+        supported = trigger_type not in {"event", "file"}
+        config = raw_trigger.get("config") if isinstance(raw_trigger.get("config"), dict) else {}
+        if trigger_type == "interval":
+            seconds = int(config.get("seconds") or 0)
+            preview.setdefault("seconds", seconds)
+            preview.setdefault("next_fire_at", time.time() + seconds)
+            preview.setdefault("schedule", {"kind": "interval", "seconds": seconds})
+        elif trigger_type == "cron":
+            preview.update(
+                {
+                    "expression": config.get("expression") or config.get("cron"),
+                    "timezone": config.get("timezone") or "local",
+                }
+            )
+            preview.setdefault(
+                "next_fire_at",
+                scheduler_test.get("next_fire_at")
+                or scheduler_value.get("next_fire_at")
+                or next_cron_time(
+                    str(config.get("expression") or config.get("cron") or ""),
+                    time.time(),
+                    timezone=config.get("timezone"),
+                ),
+            )
+            preview["preview_available"] = preview.get("next_fire_at") is not None
+        elif trigger_type == "schedule":
+            preview.update(
+                {
+                    "time": config.get("time"),
+                    "weekdays": config.get("weekdays") or [],
+                    "timezone": config.get("timezone") or "local",
+                }
+            )
+            preview.setdefault("next_fire_at", next_schedule_time(config, time.time()))
+        elif trigger_type == "at":
+            preview.update({"at": config.get("at"), "timezone": config.get("timezone") or "local"})
+            preview.setdefault(
+                "next_fire_at",
+                parse_at_timestamp(
+                    config.get("at", config.get("datetime", config.get("timestamp"))),
+                    timezone=config.get("timezone"),
+                ),
+            )
+        elif trigger_type == "element":
+            preview.update(
+                {
+                    "locator": config.get("locator"),
+                    "probe": scheduler_test.get("probe")
+                    if isinstance(scheduler_test.get("probe"), dict)
+                    else scheduler_value.get("probe")
+                    if isinstance(scheduler_value.get("probe"), dict)
+                    else {"available": False, "reason": "scheduler_probe_not_exposed"},
+                }
+            )
+        elif not supported:
+            preview.update({"available": False, "reason": "trigger_type_not_exposed_in_first_release"})
+        audit(
+            ctx.home,
+            "computer_control.trigger_tested",
+            group_id=group_id,
+            details={"workflow_id": workflow_id, "trigger_id": trigger_id, "read_only": True},
+        )
+        return {
+            "ok": True,
+            "result": {
+                "valid": True,
+                "read_only": True,
+                "supported": supported,
+                "trigger": raw_trigger,
+                "runtime_status": status["trigger_status"].get(trigger_id),
+                "preview": preview,
+                "scheduler_test": scheduler_test,
+            },
+        }
 
     @group_router.get("/workflows/{workflow_id}/optimization-proposals")
     async def optimization_proposals(group_id: str, workflow_id: str) -> Dict[str, Any]:

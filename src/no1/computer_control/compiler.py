@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Sequence
 
 from .mcp import validate_workflow_tools
 from .models import WorkflowDefinition
+from .triggers import validate_trigger
 
 
 def _diagnostic(code: str, message: str, *, path: str = "", severity: str = "error", next_action: str = "") -> Dict[str, Any]:
@@ -66,6 +67,30 @@ def compile_workflow(definition: WorkflowDefinition | Dict[str, Any], catalog: S
                 diagnostics.append(_diagnostic("low_stability", "该元素稳定性较低，运行前会重新观察；建议补充窗口、控件类型或父级约束", path=f"{path}.target", severity="warning"))
             if target is None and any(key in args for key in ("loc", "x", "y")) and args.get("coordinate_fallback") is not True:
                 diagnostics.append(_diagnostic("coordinate_requires_opt_in", "坐标只能作为显式的一次性兜底", path=f"{path}.arguments", next_action="打开“允许一次性位置兜底”"))
+
+    trigger_ids: set[str] = set()
+    for index, trigger in enumerate(model.triggers):
+        path = f"triggers[{index}]"
+        if trigger.id in trigger_ids:
+            diagnostics.append(_diagnostic("duplicate_trigger_id", "触发器 ID 必须唯一", path=f"{path}.id"))
+        trigger_ids.add(trigger.id)
+        if trigger.enabled and not trigger.actor_id.strip():
+            diagnostics.append(
+                _diagnostic(
+                    "trigger_actor_required",
+                    "启用触发器前必须指定执行智能体",
+                    path=f"{path}.actor_id",
+                    next_action="选择用于无人值守运行的智能体",
+                )
+            )
+        if trigger.type == "file":
+            if not str(trigger.config.get("path") or "").strip():
+                diagnostics.append(_diagnostic("trigger_invalid", "文件触发器必须指定路径", path=f"{path}.config.path"))
+            continue
+        try:
+            validate_trigger(trigger)
+        except (TypeError, ValueError) as exc:
+            diagnostics.append(_diagnostic("trigger_invalid", str(exc), path=f"{path}.config", next_action="修正触发条件后重新编译"))
 
     return {"valid": not any(item["severity"] == "error" for item in diagnostics), "definition": normalized, "diagnostics": diagnostics}
 

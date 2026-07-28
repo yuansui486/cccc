@@ -234,6 +234,104 @@ class WorkflowStore:
             self._write_json(directory / "manifest.json", manifest)
             return self.get(group_id, workflow_id)
 
+    def update_triggers(
+        self,
+        group_id: str,
+        workflow_id: str,
+        definition: WorkflowDefinition,
+        *,
+        expected_revision: int,
+        changed_by: str = "user",
+    ) -> Dict[str, Any]:
+        """Create an immutable version and close runtime gates before activation.
+
+        Trigger activation is deliberately separate from the definition's
+        desired ``enabled`` value.  A scheduler can therefore stop dispatching
+        immediately while a new version is being published and trusted.
+        """
+
+        with self._lock:
+            current = self.get(group_id, workflow_id)
+            old_definition = WorkflowDefinition.model_validate(
+                {key: value for key, value in current["definition"].items() if key != "change_note"}
+            )
+            value = self.update(
+                group_id,
+                workflow_id,
+                definition,
+                expected_revision=expected_revision,
+                changed_by=changed_by,
+                change_note="trigger update",
+            )
+            manifest = value["manifest"]
+            activation = manifest.get("trigger_activation") if isinstance(manifest.get("trigger_activation"), dict) else {}
+            desired = {trigger.id: trigger for trigger in definition.triggers}
+            known_ids = {trigger.id for trigger in old_definition.triggers} | set(desired)
+            now = time.time()
+            for trigger_id in known_ids:
+                trigger = desired.get(trigger_id)
+                activation[trigger_id] = {
+                    "enabled": False,
+                    "desired_enabled": bool(trigger and trigger.enabled),
+                    "version": int(value["version"]),
+                    "updated_at": now,
+                    "reason": "awaiting_activation" if trigger and trigger.enabled else "disabled",
+                }
+            manifest["trigger_activation"] = activation
+            self._write_json(self._workflow_dir(group_id, workflow_id) / "manifest.json", manifest)
+            return self.get(group_id, workflow_id)
+
+    def set_trigger_activation(
+        self,
+        group_id: str,
+        workflow_id: str,
+        trigger_id: str,
+        *,
+        enabled: bool,
+        version: Optional[int] = None,
+        fingerprint: str = "",
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """Set the scheduler gate, enforcing publish/trust before enabling."""
+
+        with self._lock:
+            directory = self._workflow_dir(group_id, workflow_id)
+            manifest = self._read_json(directory / "manifest.json")
+            target_version = int(version or manifest.get("current_version") or 0)
+            definition = self._read_json(directory / "versions" / f"{target_version}.json")
+            triggers = definition.get("triggers") if isinstance(definition.get("triggers"), list) else []
+            trigger = next(
+                (item for item in triggers if isinstance(item, dict) and str(item.get("id") or "") == trigger_id),
+                None,
+            )
+            if trigger is None:
+                raise WorkflowNotFound(f"trigger {trigger_id} not found")
+            if enabled:
+                if not bool(trigger.get("enabled")):
+                    raise ValueError("trigger definition is disabled")
+                if int(manifest.get("published_version") or 0) != target_version:
+                    raise ValueError("trigger version must be published before activation")
+                trusted = manifest.get("trusted") if isinstance(manifest.get("trusted"), dict) else {}
+                trust = trusted.get(str(target_version)) if isinstance(trusted, dict) else None
+                if not fingerprint or not isinstance(trust, dict) or str(trust.get("fingerprint") or "") != fingerprint:
+                    raise ValueError("trigger version must be trusted for the current Windows-MCP fingerprint")
+            activation = manifest.get("trigger_activation") if isinstance(manifest.get("trigger_activation"), dict) else {}
+            activation[trigger_id] = {
+                "enabled": bool(enabled),
+                "desired_enabled": bool(trigger.get("enabled")),
+                "version": target_version,
+                "updated_at": time.time(),
+                "reason": str(reason or ("active" if enabled else "disabled")),
+            }
+            manifest["trigger_activation"] = activation
+            self._write_json(directory / "manifest.json", manifest)
+            return dict(activation[trigger_id])
+
+    def trigger_activation(self, group_id: str, workflow_id: str) -> Dict[str, Dict[str, Any]]:
+        manifest = self._read_json(self._workflow_dir(group_id, workflow_id) / "manifest.json")
+        value = manifest.get("trigger_activation") if isinstance(manifest.get("trigger_activation"), dict) else {}
+        return {str(key): dict(item) for key, item in value.items() if isinstance(item, dict)}
+
     def versions(self, group_id: str, workflow_id: str) -> List[Dict[str, Any]]:
         directory = self._workflow_dir(group_id, workflow_id)
         manifest = self._read_json(directory / "manifest.json")

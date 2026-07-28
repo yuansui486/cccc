@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 NODE_TYPES = frozenset({"start", "action", "condition", "wait", "loop", "approval", "end"})
-TRIGGER_TYPES = frozenset({"cron", "interval", "event", "file", "element"})
+TRIGGER_TYPES = frozenset({"interval", "schedule", "at", "cron", "element", "event", "file"})
 SECRET_REF_RE = re.compile(r"^\$\{secret:[A-Za-z_][A-Za-z0-9_]*\}$")
 TEMPLATE_REF_RE = re.compile(r"^\$\{(?:inputs|steps)\.[A-Za-z0-9_.-]+\}$")
 
@@ -132,10 +132,12 @@ class WorkflowTrigger(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str = Field(min_length=1, max_length=100)
-    type: Literal["cron", "interval", "event", "file", "element"]
+    type: Literal["interval", "schedule", "at", "cron", "element", "event", "file"]
+    name: str = Field(default="", max_length=200)
     enabled: bool = False
-    actor_id: str = Field(default="", max_length=100)
+    actor_id: str = Field(default="foreman", min_length=1, max_length=100)
     config: Dict[str, Any] = Field(default_factory=dict)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
     cooldown_seconds: int = Field(default=30, ge=0, le=86400)
 
 

@@ -74,6 +74,31 @@ _INTERACTIVE_TYPES = {
 }
 
 
+def desktop_session_available() -> bool:
+    """Return whether Windows currently exposes a switchable input desktop."""
+    if sys.platform != "win32":
+        return False
+    desktop = None
+    try:
+        user32 = ctypes.windll.user32
+        user32.OpenInputDesktop.restype = ctypes.c_void_p
+        user32.OpenInputDesktop.argtypes = [ctypes.c_uint, ctypes.wintypes.BOOL, ctypes.c_uint]
+        user32.SwitchDesktop.restype = ctypes.wintypes.BOOL
+        user32.SwitchDesktop.argtypes = [ctypes.c_void_p]
+        user32.CloseDesktop.restype = ctypes.wintypes.BOOL
+        user32.CloseDesktop.argtypes = [ctypes.c_void_p]
+        desktop = user32.OpenInputDesktop(0, False, 0x0100)  # DESKTOP_SWITCHDESKTOP
+        return bool(desktop and user32.SwitchDesktop(desktop))
+    except Exception:
+        return False
+    finally:
+        if desktop:
+            try:
+                ctypes.windll.user32.CloseDesktop(desktop)
+            except Exception:
+                pass
+
+
 def create_uia_automation() -> Any:
     """Create UI Automation through the system type library, not a ProgID.
 

@@ -8,6 +8,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import {
+  AlarmClock,
   AlertTriangle,
   Check,
   ChevronDown,
@@ -44,6 +45,7 @@ import {
   type WorkflowVersion,
 } from "../../services/api/computerControl";
 import { SchemaForm } from "./SchemaForm";
+import { TriggerEditor } from "./TriggerEditor";
 import { toolDescription, toolName } from "./localization";
 import type {
   CanvasEdge,
@@ -258,6 +260,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [trustDialogOpen, setTrustDialogOpen] = useState(false);
+  const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [settings, setSettings] = useState<ComputerControlSettings>({
     auto_publish_and_trust: true,
   });
@@ -366,6 +369,7 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setRequests([]);
     setVersions([]);
     setProposals([]);
+    setTriggerDialogOpen(false);
   }, [groupId]);
 
   useEffect(() => {
@@ -1262,6 +1266,14 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             信任
           </button>
           <button
+            className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50"
+            onClick={() => setTriggerDialogOpen(true)}
+            disabled={!record || Boolean(busy)}
+          >
+            <AlarmClock size={15} />
+            触发器
+          </button>
+          <button
             className="inline-flex h-9 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-sm text-white disabled:opacity-50"
             onClick={() => void run()}
             disabled={!setupReady || !isTrusted || Boolean(busy)}
@@ -2044,6 +2056,29 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           </section>
         )}
       </div>
+
+      {record && (
+        <TriggerEditor
+          open={triggerDialogOpen}
+          groupId={groupId}
+          workflowId={record.manifest.workflow_id}
+          revision={record.manifest.revision}
+          initialTriggers={definition.triggers}
+          onClose={() => setTriggerDialogOpen(false)}
+          onSaved={(triggers, nextRevision) => {
+            setDefinition((current) => ({ ...current, triggers }));
+            setRecord((current) => current ? {
+              ...current,
+              manifest: {
+                ...current.manifest,
+                revision: nextRevision || current.manifest.revision,
+              },
+              definition: { ...current.definition, triggers },
+            } : current);
+            void refresh();
+          }}
+        />
+      )}
 
       {trustDialogOpen && selectedManifest && (
         <div

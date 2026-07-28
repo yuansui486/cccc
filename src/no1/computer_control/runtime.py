@@ -561,6 +561,7 @@ class WorkflowRunner:
         version: Optional[int],
         inputs: Dict[str, Any],
         authorization: Optional[Dict[str, Any]] = None,
+        trigger_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Submit a run from the synchronous MCP tool server."""
         loop = self._ensure_sync_loop()
@@ -572,6 +573,7 @@ class WorkflowRunner:
                 version=version,
                 inputs=inputs,
                 authorization=authorization,
+                trigger_context=trigger_context,
             ),
             loop,
         )
@@ -835,6 +837,7 @@ class WorkflowRunner:
         version: Optional[int],
         inputs: Dict[str, Any],
         authorization: Optional[Dict[str, Any]] = None,
+        trigger_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         selected = self.store.get(group_id, workflow_id, version=version)
         definition = WorkflowDefinition.model_validate({k: v for k, v in selected["definition"].items() if k != "change_note"})
@@ -845,6 +848,21 @@ class WorkflowRunner:
         run_id = "run_" + uuid.uuid4().hex[:16]
         self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=run_id)
         now = time.time()
+        trigger = {
+            key: trigger_context.get(key)
+            for key in (
+                "trigger_id",
+                "name",
+                "type",
+                "scheduled_for",
+                "detected_at",
+                "definition_fingerprint",
+                "source",
+            )
+            if isinstance(trigger_context, dict) and trigger_context.get(key) not in (None, "")
+        }
+        if isinstance(trigger_context, dict) and isinstance(trigger_context.get("evidence"), dict):
+            trigger["evidence"] = dict(trigger_context["evidence"])
         run = {
             "run_id": run_id,
             "group_id": group_id,
@@ -856,6 +874,7 @@ class WorkflowRunner:
             "started_at": now,
             "updated_at": now,
             "events": [],
+            **({"trigger": trigger} if trigger else {}),
             "metrics": {
                 "replay_success": False,
                 "transport_restarts": 0,
@@ -875,6 +894,15 @@ class WorkflowRunner:
             } if isinstance(authorization, dict) else {},
         }
         self._write(group_id, run)
+        self._emit(
+            "run.started",
+            group_id=group_id,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            actor_id=actor_id,
+            version=selected["version"],
+            trigger=trigger or None,
+        )
         task = asyncio.create_task(self._execute(run, definition, effective_inputs))
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
