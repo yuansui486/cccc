@@ -65,6 +65,38 @@ class FakeOverlay:
 
 
 class TestElementPickerManager(unittest.TestCase):
+    def test_unavailable_probe_diagnostics_are_exposed_by_session(self):
+        class DiagnosedUnavailableProbe(UnavailableUIAProbe):
+            diagnostics = {
+                "available": False,
+                "code": "native_uia_bindings_missing",
+                "layer": "dependency",
+                "message": "missing generated bindings",
+                "detail": "ImportError: comtypes.gen.UIAutomationClient",
+                "next_action": "reinstall",
+                "retryable": False,
+            }
+
+        with tempfile.TemporaryDirectory() as td:
+            manager = ElementPickerManager(
+                Path(td),
+                ComputerControlLease(Path(td)),
+                probe_factory=DiagnosedUnavailableProbe,
+            )
+            started = manager.start("group", "actor")
+            deadline = threading.Event()
+            for _ in range(50):
+                status = manager.status(started["session_id"])
+                if status["diagnostics"].get("code") == "native_uia_bindings_missing":
+                    break
+                deadline.wait(0.01)
+            self.assertEqual(status["diagnostics"]["code"], "native_uia_bindings_missing")
+            self.assertEqual(status["diagnostics"]["layer"], "dependency")
+            self.assertFalse(status["native_available"])
+            warning = next(item for item in manager.events(started["session_id"])["events"] if item["type"] == "warning")
+            self.assertIn("comtypes.gen.UIAutomationClient", warning["detail"])
+            manager.cancel(started["session_id"])
+
     def test_lock_gesture_uses_ctrl_shift_left_click(self):
         requested_keys = []
 

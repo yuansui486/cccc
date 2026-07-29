@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import ctypes.wintypes
+import importlib
 import sys
 import threading
 import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from ..util.process import is_frozen_executable
 
 
 _CONTROL_TYPES = {
@@ -99,6 +102,52 @@ def desktop_session_available() -> bool:
                 pass
 
 
+class UIAUnavailableError(RuntimeError):
+    """Classified native UI Automation startup failure."""
+
+    def __init__(self, message: str, *, code: str, layer: str, next_action: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.layer = layer
+        self.next_action = next_action
+
+    def diagnostics(self) -> Dict[str, Any]:
+        return {
+            "code": self.code,
+            "layer": self.layer,
+            "message": str(self),
+            "detail": str(self),
+            "next_action": self.next_action,
+            "retryable": False,
+        }
+
+
+def _load_uia_client_module() -> Any:
+    """Load a bundled UIA typelib, generating it only in source installs."""
+    try:
+        return importlib.import_module("comtypes.gen.UIAutomationClient")
+    except Exception as bundled_error:
+        if is_frozen_executable():
+            raise UIAUnavailableError(
+                f"冻结程序缺少 comtypes UIAutomation 绑定：{bundled_error}",
+                code="native_uia_bindings_missing",
+                layer="dependency",
+                next_action="重新安装包含 UIAutomation 绑定的完整 OneColleague 发布包",
+            ) from bundled_error
+
+    try:
+        import comtypes.client  # type: ignore
+
+        return comtypes.client.GetModule("UIAutomationCore.dll")
+    except Exception as exc:
+        raise UIAUnavailableError(
+            f"无法加载 UIAutomationCore 类型库：{exc}",
+            code="native_uia_bindings_unavailable",
+            layer="dependency",
+            next_action="确认 comtypes 已安装，并在可交互的 Windows 桌面会话中重试",
+        ) from exc
+
+
 def create_uia_automation() -> Any:
     """Create UI Automation through the system type library, not a ProgID.
 
@@ -106,11 +155,132 @@ def create_uia_automation() -> Any:
     generated type library also gives comtypes the IUIAutomation interface
     needed for this non-IDispatch COM server.
     """
-    import comtypes.client  # type: ignore
+    try:
+        import comtypes.client  # type: ignore
+    except Exception as exc:
+        raise UIAUnavailableError(
+            f"无法导入 comtypes：{exc}",
+            code="native_uia_dependency_missing",
+            layer="dependency",
+            next_action="重新安装包含 comtypes 的 OneColleague 发布包",
+        ) from exc
 
-    module = comtypes.client.GetModule("UIAutomationCore.dll")
-    automation_class = getattr(module, "CUIAutomation8", None) or module.CUIAutomation
-    return comtypes.client.CreateObject(automation_class, interface=module.IUIAutomation)
+    module = _load_uia_client_module()
+    automation_class = getattr(module, "CUIAutomation8", None) or getattr(module, "CUIAutomation", None)
+    interface = getattr(module, "IUIAutomation", None)
+    if automation_class is None or interface is None:
+        raise UIAUnavailableError(
+            "UIAutomation 绑定缺少 CUIAutomation 或 IUIAutomation 定义",
+            code="native_uia_bindings_invalid",
+            layer="dependency",
+            next_action="重新构建或安装完整的 OneColleague Windows 发布包",
+        )
+    try:
+        return comtypes.client.CreateObject(automation_class, interface=interface)
+    except Exception as exc:
+        raise UIAUnavailableError(
+            f"无法创建 Windows UI Automation：{exc}",
+            code="native_uia_creation_failed",
+            layer="com",
+            next_action="确认当前进程运行在已登录且未锁定的 Windows 桌面会话中",
+        ) from exc
+
+
+def diagnose_uia_readiness() -> Dict[str, Any]:
+    """Probe native UIA without requiring Windows-MCP or a picker lease."""
+    runtime: Dict[str, Any] = {
+        "platform": sys.platform,
+        "frozen": is_frozen_executable(),
+        "executable": sys.executable,
+    }
+    checks: Dict[str, Any] = {
+        "platform": sys.platform == "win32",
+        "interactive_desktop": False,
+        "com_initialized": False,
+        "bindings_loaded": False,
+        "automation_created": False,
+        "element_from_point": False,
+    }
+    result: Dict[str, Any] = {
+        "available": False,
+        "code": "native_uia_platform_unsupported",
+        "layer": "platform",
+        "message": "原生元素拾取仅支持 Windows",
+        "detail": "",
+        "next_action": "请在 Windows 桌面端使用实时元素捕获",
+        "retryable": False,
+        "runtime": runtime,
+        "checks": checks,
+    }
+    if sys.platform != "win32":
+        return result
+
+    checks["interactive_desktop"] = desktop_session_available()
+    initialized = False
+    try:
+        import comtypes  # type: ignore
+
+        runtime["comtypes_version"] = str(getattr(comtypes, "__version__", "unknown"))
+        comtypes.CoInitialize()
+        initialized = True
+        checks["com_initialized"] = True
+        module = _load_uia_client_module()
+        checks["bindings_loaded"] = True
+        runtime["bindings_module"] = str(getattr(module, "__name__", "comtypes.gen.UIAutomationClient"))
+        automation = create_uia_automation()
+        checks["automation_created"] = automation is not None
+        point = ctypes.wintypes.POINT()  # type: ignore[attr-defined]
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+            checks["element_from_point"] = automation.ElementFromPoint(point) is not None
+
+        if not checks["interactive_desktop"]:
+            result.update(
+                code="native_uia_desktop_unavailable",
+                layer="desktop",
+                message="当前进程不在可交互的 Windows 输入桌面中",
+                next_action="登录并解锁 Windows，确保 OneColleague 不在 Session 0 服务会话中运行",
+                retryable=True,
+            )
+            return result
+        if not checks["element_from_point"]:
+            result.update(
+                code="native_uia_element_unavailable",
+                layer="uia",
+                message="UI Automation 已启动，但无法读取当前鼠标位置的元素",
+                next_action="移动鼠标到普通应用窗口后重试，并检查目标应用与 OneColleague 的权限级别",
+                retryable=True,
+            )
+            return result
+        result.update(
+            available=True,
+            code="ok",
+            layer="uia",
+            message="Windows 原生元素拾取可用",
+            next_action="",
+            retryable=False,
+        )
+        return result
+    except UIAUnavailableError as exc:
+        result.update(exc.diagnostics())
+        return result
+    except Exception as exc:
+        result.update(
+            code="native_uia_probe_failed",
+            layer="com",
+            message="Windows UI Automation 自检失败",
+            detail=f"{type(exc).__name__}: {exc}",
+            next_action="复制诊断信息，并确认发布包完整且 Windows 桌面已解锁",
+            retryable=True,
+        )
+        return result
+    finally:
+        if initialized:
+            try:
+                import comtypes  # type: ignore
+
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 def foreground_window() -> Dict[str, Any]:

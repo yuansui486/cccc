@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlarmClock,
   Check,
+  Copy,
   LoaderCircle,
   MousePointer2,
   Plus,
@@ -12,6 +13,8 @@ import {
 } from "lucide-react";
 import { apiJson } from "../../services/api/base";
 import { computerControlApi, type ElementPickerElement, type ElementPickerSession } from "../../services/api/computerControl";
+import { copyTextToClipboard } from "../../utils/copy";
+import { formatPickerDiagnostics, pickerCapabilitySummary } from "./pickerPresentation";
 import {
   createTrigger,
   normalizeTrigger,
@@ -277,6 +280,12 @@ export function TriggerEditor({ open, groupId, workflowId, revision, initialTrig
     setPicker(null);
   }
 
+  async function copyPickerDiagnostics() {
+    if (!picker) return;
+    const copied = await copyTextToClipboard(formatPickerDiagnostics(picker));
+    setMessage(copied ? "元素拾取诊断已复制。" : "复制失败，请检查浏览器剪贴板权限。");
+  }
+
   if (!open) return null;
   const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
   return (
@@ -357,7 +366,22 @@ export function TriggerEditor({ open, groupId, workflowId, revision, initialTrig
                   <div className="space-y-4">
                     <div className="border border-[var(--color-border)] p-3 text-xs">
                       <div className="flex items-start justify-between gap-3"><div><div className="font-medium">目标界面元素</div><div className="mt-1 text-[var(--color-text-secondary)]">{selected.locator ? `${selected.locator.name || selected.locator.text || "未命名元素"} · ${selected.locator.control_type || "控件"} · ${selected.locator.window_name || "当前窗口"}` : "尚未捕获元素"}</div></div>{!picker && <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5" disabled={Boolean(busy)} onClick={() => void startPicker()}><MousePointer2 size={13} />实时捕获</button>}</div>
-                      {picker && <div className="mt-3 border-t border-[var(--color-border)] pt-3"><div className="font-medium">桌面拾取器 · {picker.hotkey === "Ctrl+Shift+LeftClick" ? "Ctrl+Shift+鼠标左键" : picker.hotkey || "Ctrl+Shift+鼠标左键"}</div><div className="mt-1 text-[var(--color-text-secondary)]">移动鼠标到目标元素后按快捷键，或点击“锁定当前元素”。</div>{picker.element && <div className="mt-2 bg-black/5 px-2 py-1.5 dark:bg-white/5">{picker.element.name || picker.element.text || "未命名元素"} · {picker.element.control_type || "控件"}</div>}<div className="mt-2 flex gap-2"><button type="button" className="rounded border px-2 py-1" disabled={Boolean(busy)} onClick={() => void lockPicker()}>锁定当前元素</button><button type="button" className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-700 disabled:opacity-40" disabled={Boolean(busy) || !picker.element} onClick={() => void confirmPicker()}>确认定位</button><button type="button" className="rounded px-2 py-1 text-red-600" onClick={() => void stopPicker()}>取消</button></div></div>}
+                      {picker && (
+                        <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+                          <div className="font-medium">桌面拾取器 · {picker.hotkey === "Ctrl+Shift+LeftClick" ? "Ctrl+Shift+鼠标左键" : picker.hotkey || "Ctrl+Shift+鼠标左键"}</div>
+                          <div className="mt-1 text-[var(--color-text-secondary)]">移动鼠标到目标元素后按快捷键，或点击“锁定当前元素”。</div>
+                          <div className={`mt-2 flex items-start justify-between gap-2 border px-2 py-1.5 ${picker.native_available && picker.overlay_available ? "border-emerald-500/30 text-emerald-700" : "border-amber-500/30 text-amber-700"}`}>
+                            <span>{pickerCapabilitySummary(picker)}</span>
+                            <button type="button" className="inline-flex shrink-0 items-center gap-1 underline" onClick={() => void copyPickerDiagnostics()} title="复制原生拾取诊断"><Copy size={12} />复制诊断</button>
+                          </div>
+                          {picker.element && <div className="mt-2 bg-black/5 px-2 py-1.5 dark:bg-white/5">{picker.element.name || picker.element.text || "未命名元素"} · {picker.element.control_type || "控件"}</div>}
+                          <div className="mt-2 flex gap-2">
+                            <button type="button" className="rounded border px-2 py-1" disabled={Boolean(busy)} onClick={() => void lockPicker()}>锁定当前元素</button>
+                            <button type="button" className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-700 disabled:opacity-40" disabled={Boolean(busy) || !picker.element} onClick={() => void confirmPicker()}>确认定位</button>
+                            <button type="button" className="rounded px-2 py-1 text-red-600" onClick={() => void stopPicker()}>取消</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2"><div className="text-xs font-medium">触发条件<div className="mt-1 flex h-9 items-center rounded-md border border-[var(--color-border)] bg-black/[0.025] px-2.5 font-normal dark:bg-white/[0.025]">元素从未出现变为出现时触发</div></div><label className="text-xs font-medium">检查间隔（秒）<input className={fieldClass} type="number" min={0.5} step={0.5} value={selected.pollIntervalSeconds} onChange={(event) => updateSelected({ pollIntervalSeconds: Math.max(0.5, Number(event.target.value)) })} /></label></div>
                     <label className="block text-xs font-medium">连续命中次数<input className={fieldClass} type="number" min={1} max={10} value={selected.requiredHits} onChange={(event) => updateSelected({ requiredHits: Number(event.target.value) })} /><span className="mt-1 block font-normal text-[var(--color-text-secondary)]">默认连续命中 2 次才确认，触发后需恢复为不命中才会重新布防。</span></label>

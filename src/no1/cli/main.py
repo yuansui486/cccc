@@ -400,6 +400,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_doctor = sub.add_parser("doctor", help="Check environment and show available agent runtimes")
     p_doctor.add_argument("--all", action="store_true", help="Show all known runtimes (not just primary ones)")
+    p_doctor.add_argument(
+        "--require-native-picker",
+        action="store_true",
+        help="Return a non-zero status when the Windows native element picker is unavailable",
+    )
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_runtime = sub.add_parser("runtime", help="Manage agent runtimes")
