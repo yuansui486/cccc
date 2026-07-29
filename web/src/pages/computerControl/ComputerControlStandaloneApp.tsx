@@ -57,6 +57,7 @@ import type {
 } from "./types";
 import { normalizeDefinition, serializeDefinition } from "./types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
+import { formatPickerDiagnostics, pickerCapabilitySummary } from "./pickerPresentation";
 import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
 import { copyTextToClipboard } from "../../utils/copy";
 import { useUIStore } from "../../stores";
@@ -538,6 +539,12 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     setPickerStatus("元素拾取器已关闭。");
   }
 
+  async function copyPickerDiagnostics() {
+    if (!pickerSession) return;
+    const copied = await copyTextToClipboard(formatPickerDiagnostics(pickerSession));
+    setPickerStatus(copied ? "元素拾取诊断已复制。" : "复制失败，请检查浏览器剪贴板权限。");
+  }
+
   useEffect(() => {
     if (!groupId || !pickerSession || ["ended", "confirmed", "failed"].includes(pickerSession.status)) return undefined;
     const timer = window.setInterval(() => {
@@ -885,9 +892,29 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       serializeDefinition(initialDefinition()),
     );
     if (response.ok) {
-      setSelectedId(response.result.manifest.workflow_id);
-      await refresh();
-    } else setMessage(response.error.message);
+      const created = response.result;
+      const nextDefinition = normalizeDefinition(created.definition || initialDefinition());
+      const canvas = toCanvas(nextDefinition);
+      setWorkflows((items) => [
+        created.manifest,
+        ...items.filter((item) => item.workflow_id !== created.manifest.workflow_id),
+      ]);
+      setSelectedId(created.manifest.workflow_id);
+      setRecord(created);
+      setDefinition(nextDefinition);
+      setNodes(canvas.nodes);
+      setEdges(canvas.edges);
+      setSelectedNodeId("");
+      setHistory([]);
+      setVersions([]);
+      setProposals([]);
+      setMessage("工作流已创建，可以继续编辑并保存。");
+      // The create response already contains a complete editable record. Do
+      // not keep the editor locked while the background list refresh runs.
+      setBusy("");
+      void refresh();
+      return;
+    } else setMessage(friendlyError(response.error.message));
     setBusy("");
   }
 
@@ -2001,6 +2028,13 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
                           </div>
                           <div className="mt-1 text-[var(--color-text-secondary)]">
                             将鼠标移到目标元素上，按快捷键锁定；也可以使用下方按钮。
+                          </div>
+                          <div className={`mt-2 flex items-start justify-between gap-2 rounded border px-2 py-1.5 ${pickerSession.native_available && pickerSession.overlay_available ? "border-emerald-500/30 text-emerald-700" : "border-amber-500/30 text-amber-700"}`}>
+                            <span>{pickerCapabilitySummary(pickerSession)}</span>
+                            <button type="button" className="inline-flex shrink-0 items-center gap-1 underline" onClick={() => void copyPickerDiagnostics()} title="复制原生拾取诊断">
+                              <Copy size={12} />
+                              复制诊断
+                            </button>
                           </div>
                           {pickerSession.element && (
                             <div className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-2">

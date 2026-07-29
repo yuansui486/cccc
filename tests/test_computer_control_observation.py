@@ -1,14 +1,21 @@
 import unittest
 import tempfile
 import time
+import sys
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, patch
 
 import no1.computer_control.observation as observation_module
 from no1.computer_control.lease import ComputerControlLease
 from no1.computer_control.elements import normalize_snapshot
-from no1.computer_control.observation import NativeWindowObserver, desktop_session_available, merge_observations, window_names_match
+from no1.computer_control.observation import (
+    NativeWindowObserver,
+    UIAUnavailableError,
+    desktop_session_available,
+    merge_observations,
+    window_names_match,
+)
 from no1.computer_control.recording import RecordingStore
 from no1.computer_control.requests import ComputerRequestStore
 from no1.computer_control.storage import WorkflowStore
@@ -17,6 +24,35 @@ from no1.kernel.registry import load_registry
 
 
 class TestComputerControlObservation(unittest.TestCase):
+    def test_frozen_uia_loader_never_generates_missing_bindings(self) -> None:
+        with patch.object(observation_module, "is_frozen_executable", return_value=True), patch.object(
+            observation_module.importlib,
+            "import_module",
+            side_effect=ImportError("generated module missing"),
+        ):
+            with self.assertRaises(UIAUnavailableError) as raised:
+                observation_module._load_uia_client_module()
+
+        self.assertEqual(raised.exception.code, "native_uia_bindings_missing")
+        self.assertEqual(raised.exception.layer, "dependency")
+
+    def test_source_uia_loader_generates_bindings_as_fallback(self) -> None:
+        generated = SimpleNamespace(IUIAutomation=object(), CUIAutomation=object())
+        get_module = Mock(return_value=generated)
+        comtypes_package = ModuleType("comtypes")
+        comtypes_package.__path__ = []  # type: ignore[attr-defined]
+        comtypes_client = ModuleType("comtypes.client")
+        comtypes_client.GetModule = get_module  # type: ignore[attr-defined]
+        comtypes_package.client = comtypes_client  # type: ignore[attr-defined]
+        with patch.object(observation_module, "is_frozen_executable", return_value=False), patch.object(
+            observation_module.importlib,
+            "import_module",
+            side_effect=ImportError("not generated yet"),
+        ), patch.dict(sys.modules, {"comtypes": comtypes_package, "comtypes.client": comtypes_client}):
+            self.assertIs(observation_module._load_uia_client_module(), generated)
+
+        get_module.assert_called_once_with("UIAutomationCore.dll")
+
     def test_desktop_session_probe_closes_the_input_desktop(self) -> None:
         calls = []
 

@@ -2,8 +2,22 @@ import { describe, expect, it } from "vitest";
 import { computerControlGroupIdFromPath, isComputerControlPath } from "../src/utils/appTabs";
 import { isValidNodePosition, normalizeDefinition } from "../src/pages/computerControl/types";
 import { setupErrorMessage } from "../src/pages/computerControl/statusPresentation";
+import { formatPickerDiagnostics, pickerCapabilitySummary } from "../src/pages/computerControl/pickerPresentation";
 
 describe("computer control workspace routing", () => {
+  it("explains native picker readiness and keeps snapshot fallback explicit", () => {
+    const unavailable = {
+      session_id: "pick_1",
+      status: "active",
+      native_available: false,
+      overlay_available: false,
+      diagnostics: { code: "native_uia_bindings_missing", message: "缺少 UIA 绑定" },
+    };
+    expect(pickerCapabilitySummary(unavailable)).toContain("读取快照");
+    expect(formatPickerDiagnostics(unavailable)).toContain("native_uia_bindings_missing");
+    expect(pickerCapabilitySummary({ ...unavailable, native_available: true, overlay_available: true })).toContain("均可用");
+  });
+
   it("turns Python 9009 setup failures into an actionable message", () => {
     expect(setupErrorMessage("python.EXE exited with code 9009", "failed")).toContain("Windows 错误 9009");
     expect(setupErrorMessage("", "ready")).toBe("");

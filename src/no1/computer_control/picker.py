@@ -23,7 +23,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .lease import ComputerControlLease, LeaseConflict
 from .elements import element_at_point, locator_from_element, normalize_snapshot
-from .observation import create_uia_automation
+from .observation import (
+    UIAUnavailableError,
+    create_uia_automation,
+    desktop_session_available,
+    diagnose_uia_readiness,
+)
+from ..util.process import is_frozen_executable
 
 
 _CONTROL_TYPES = {
@@ -103,12 +109,53 @@ class NativeUIAProbe:
 
     def __init__(self) -> None:
         self._automation: Any = None
+        self.diagnostics: Dict[str, Any] = {
+            "available": False,
+            "code": "native_uia_starting",
+            "layer": "uia",
+            "message": "正在启动 Windows 原生元素拾取",
+            "retryable": True,
+            "runtime": {
+                "platform": sys.platform,
+                "frozen": is_frozen_executable(),
+                "executable": sys.executable,
+            },
+            "checks": {
+                "interactive_desktop": desktop_session_available(),
+                "automation_created": False,
+            },
+        }
         if sys.platform != "win32":
+            self.diagnostics.update(
+                code="native_uia_platform_unsupported",
+                layer="platform",
+                message="原生元素拾取仅支持 Windows",
+                retryable=False,
+            )
             return
         try:
             self._automation = create_uia_automation()
             self.available = self._automation is not None
-        except Exception:
+            if self.available:
+                self.diagnostics["checks"]["automation_created"] = True
+                self.diagnostics.update(
+                    available=True,
+                    code="ok",
+                    message="Windows 原生元素拾取可用",
+                    retryable=False,
+                )
+        except UIAUnavailableError as exc:
+            self.diagnostics.update(exc.diagnostics())
+            self.diagnostics["available"] = False
+            self._automation = None
+        except Exception as exc:
+            self.diagnostics.update(
+                code="native_uia_probe_failed",
+                layer="com",
+                message="Windows UI Automation 启动失败",
+                detail=f"{type(exc).__name__}: {exc}",
+                next_action="复制诊断信息并重新启动 OneColleague",
+            )
             self._automation = None
 
     def close(self) -> None:
@@ -235,6 +282,13 @@ class UnavailableUIAProbe:
     """Non-COM placeholder used before or after the picker owner thread."""
 
     available = False
+    diagnostics = {
+        "available": False,
+        "code": "native_uia_unavailable",
+        "layer": "uia",
+        "message": "Windows 原生元素拾取不可用",
+        "retryable": True,
+    }
 
     @staticmethod
     def element_at(point: List[int]) -> Optional[Dict[str, Any]]:
@@ -485,6 +539,37 @@ class DesktopHighlightOverlay:
         self._thread = None
         self.available = False
 
+
+def diagnose_native_picker() -> Dict[str, Any]:
+    """Run the same native prerequisites used by a live picker session."""
+    diagnostics = diagnose_uia_readiness()
+    checks = dict(diagnostics.get("checks") or {})
+    checks["overlay"] = False
+    diagnostics["checks"] = checks
+    diagnostics["overlay_available"] = False
+    diagnostics["uia_available"] = bool(diagnostics.get("available"))
+    if not diagnostics.get("available"):
+        return diagnostics
+
+    overlay = DesktopHighlightOverlay()
+    try:
+        available = overlay.start()
+        checks["overlay"] = bool(available)
+        diagnostics["overlay_available"] = bool(available)
+        if not available:
+            diagnostics.update(
+                available=False,
+                code="native_picker_overlay_unavailable",
+                layer="overlay",
+                message="Windows UI Automation 可用，但元素高亮覆盖层无法启动",
+                detail=str(overlay.error or "覆盖层启动失败"),
+                next_action="确认 OneColleague 运行在已登录且未锁定的桌面会话中",
+                retryable=True,
+            )
+    finally:
+        overlay.stop()
+    return diagnostics
+
 @dataclass
 class PickerSession:
     session_id: str
@@ -499,6 +584,7 @@ class PickerSession:
     locked: Optional[Dict[str, Any]] = None
     samples: List[Dict[str, Any]] = field(default_factory=list)
     warning: str = ""
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
     native_available: bool = False
     overlay_available: bool = False
     last_heartbeat_at: float = 0.0
@@ -530,6 +616,7 @@ class PickerSession:
             "candidates": [self.locked or self.hovered] if (self.locked or self.hovered) else [],
             "stability": self.locked.get("stability") if isinstance(self.locked, dict) else None,
             "warning": self.warning,
+            "diagnostics": dict(self.diagnostics),
             "native_available": self.native_available,
             # A separate helper can provide a click-through highlight overlay;
             # the UI should show the fallback state until that helper is
@@ -607,6 +694,13 @@ class ElementPickerManager:
                 actor_id=actor_id or "user",
                 hotkey=hotkey.strip() or "Ctrl+Shift+LeftClick",
                 last_heartbeat_at=time.time(),
+                diagnostics={
+                    "available": False,
+                    "code": "native_uia_starting",
+                    "layer": "uia",
+                    "message": "正在启动 Windows 原生元素拾取",
+                    "retryable": True,
+                },
             )
             session.emit("started", lease=lease, hotkey=session.hotkey, native_available=False, overlay_available=False)
             self._sessions[sid] = session
@@ -683,6 +777,7 @@ class ElementPickerManager:
                 active_at_start = [session for session in self._sessions.values() if session.status == "active"]
                 for session in active_at_start:
                     session.native_available = bool(probe.available)
+                    session.diagnostics = dict(getattr(probe, "diagnostics", {}) or {})
                     if not probe.available:
                         session.warning = (
                             "当前环境无法使用 Windows UI Automation；可继续使用快照捕获，"
@@ -692,14 +787,29 @@ class ElementPickerManager:
                             "warning",
                             code="native_picker_unavailable",
                             message=session.warning,
-                            detail=probe_error,
-                            next_action="安装 comtypes 并在 Windows 桌面会话中重试",
+                            detail=str(session.diagnostics.get("detail") or probe_error),
+                            layer=str(session.diagnostics.get("layer") or "uia"),
+                            next_action=str(session.diagnostics.get("next_action") or "复制诊断信息并重试"),
                         )
             if probe.available and active_at_start:
                 overlay_available = self.overlay.start()
                 with self._lock:
                     for session in active_at_start:
                         session.overlay_available = overlay_available
+                        checks = dict(session.diagnostics.get("checks") or {})
+                        checks["overlay"] = overlay_available
+                        session.diagnostics["checks"] = checks
+                        session.diagnostics["overlay_available"] = overlay_available
+                        if not overlay_available:
+                            session.emit(
+                                "warning",
+                                code="native_picker_overlay_unavailable",
+                                layer="overlay",
+                                message="元素可以读取，但桌面高亮框不可用",
+                                detail=str(self.overlay.error or "覆盖层启动失败"),
+                                next_action="复制诊断信息并重新启动 OneColleague",
+                                retryable=True,
+                            )
 
             # A new worker may start while the user is still releasing the
             # previous gesture. Seed the edge detector from physical state so

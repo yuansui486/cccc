@@ -101,6 +101,24 @@ function Test-OneColleagueVersion {
   }
 }
 
+function Prepare-WindowsUIAutomationBindings {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PythonPath
+  )
+
+  $probe = @"
+import comtypes.client
+module = comtypes.client.GetModule("UIAutomationCore.dll")
+assert getattr(module, "IUIAutomation", None), "missing IUIAutomation"
+assert getattr(module, "CUIAutomation8", None) or getattr(module, "CUIAutomation", None), "missing CUIAutomation class"
+import comtypes.gen.UIAutomationClient as generated
+assert getattr(generated, "IUIAutomation", None), "generated UIAutomationClient is invalid"
+print("UIAutomation bindings:", generated.__file__)
+"@
+  Invoke-CheckedNative -FilePath $PythonPath -ArgumentList @("-c", $probe) -WorkingDirectory $rootDir
+}
+
 function Resolve-ProjectPython {
   param(
     [Parameter(Mandatory = $true)]
@@ -141,7 +159,7 @@ function Invoke-OneColleagueSmoke {
     $env:CCCC_HOME = $script:smokeHome
 
     Test-OneColleagueVersion -ExePath $ExePath
-    Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("doctor") -WorkingDirectory $rootDir
+    Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("doctor", "--require-native-picker") -WorkingDirectory $rootDir
     Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("daemon", "start") -WorkingDirectory $rootDir
     Invoke-CheckedNative -FilePath $ExePath -ArgumentList @("daemon", "status") -WorkingDirectory $rootDir
   }
@@ -207,6 +225,9 @@ $pythonPath = Resolve-ProjectPython -PythonSelector $Python
 Write-Host "==> Check Python and Nuitka"
 Invoke-CheckedNative -FilePath $pythonPath -ArgumentList @("-c", "import sys; from importlib.metadata import version; print(sys.version); print('Nuitka', version('Nuitka'))") -WorkingDirectory $rootDir
 
+Write-Host "==> Prepare Windows UI Automation bindings"
+Prepare-WindowsUIAutomationBindings -PythonPath $pythonPath
+
 Write-Host "==> Build bundled Web UI"
 Invoke-CheckedNative -FilePath $npmPath -ArgumentList @("-C", $webDir, "run", "build") -WorkingDirectory $rootDir
 Test-PathExists -Path (Join-Path $webDistDir "index.html") -Message "Web build failed, missing src\no1\ports\web\dist\index.html"
@@ -222,6 +243,7 @@ $nuitkaArgs = @(
   "--output-filename=onecolleague.exe",
   "--output-folder-name=no1.frozen_entry.dist",
   "--include-package=no1",
+  "--include-package=comtypes.gen",
   "--include-package-data=no1",
   "--include-distribution-metadata=no1",
   "--include-data-dir=src\no1\ports\web\dist=no1\ports\web\dist",

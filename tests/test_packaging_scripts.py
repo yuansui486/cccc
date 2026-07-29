@@ -55,6 +55,9 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "Invoke-CheckedNative -FilePath $pythonPath -ArgumentList $nuitkaArgs" in script
     assert "--output-filename=onecolleague.exe" in script
     assert "--include-package=no1" in script
+    assert "Prepare-WindowsUIAutomationBindings" in script
+    assert 'GetModule("UIAutomationCore.dll")' in script
+    assert "--include-package=comtypes.gen" in script
     assert "--include-package-data=no1" in script
     assert "--include-distribution-metadata=no1" in script
     assert "src\\no1\\ports\\web\\dist=no1\\ports\\web\\dist" in script
@@ -68,6 +71,7 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "$env:ONECOLLEAGUE_HOME = $script:smokeHome" in script
     assert "$env:CCCC_HOME = $script:smokeHome" in script
     assert "daemon\", \"start" in script
+    assert '"doctor", "--require-native-picker"' in script
     assert "daemon\", \"status" in script
     assert "& $ExePath daemon stop" in script
     assert "SkipSmokeTests" in script

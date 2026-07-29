@@ -334,6 +334,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("Daemon: not running")
 
     pty_diag = pty_support_details()
+    native_picker_failed = False
     if sys.platform.startswith("win"):
         print()
         if bool(pty_diag.get("supported")):
@@ -343,6 +344,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             print(f"  {pty_diag.get('message')}")
             for hint in pty_diag.get("hints") if isinstance(pty_diag.get("hints"), list) else []:
                 print(f"  - {hint}")
+
+        from ..computer_control.picker import diagnose_native_picker
+
+        picker_diag = diagnose_native_picker()
+        native_picker_failed = not bool(picker_diag.get("available"))
+        if native_picker_failed:
+            print(f"Native element picker: NOT READY ({picker_diag.get('code')})")
+            print(f"  {picker_diag.get('message')}")
+            detail = str(picker_diag.get("detail") or "").strip()
+            if detail and detail != str(picker_diag.get("message") or "").strip():
+                print(f"  Detail: {detail}")
+            next_action = str(picker_diag.get("next_action") or "").strip()
+            if next_action:
+                print(f"  Next: {next_action}")
+        else:
+            print("Native element picker: OK (UI Automation and highlight overlay available)")
 
     print()
     print("Agent Runtimes:")
@@ -377,6 +394,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("  onecolleague actor add my-agent --runtime <name>")
         print("  onecolleague")
     
+    if bool(getattr(args, "require_native_picker", False)) and native_picker_failed:
+        return 2
     return 0
 
 def cmd_web(args: argparse.Namespace) -> int:

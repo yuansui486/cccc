@@ -134,6 +134,20 @@ export type ElementPickerSession = {
   candidates?: ElementPickerElement[];
   warnings?: string[];
   warning?: string;
+  native_available?: boolean;
+  overlay_available?: boolean;
+  diagnostics?: {
+    available?: boolean;
+    code?: string;
+    layer?: string;
+    message?: string;
+    detail?: string;
+    next_action?: string;
+    retryable?: boolean;
+    runtime?: Record<string, unknown>;
+    checks?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
   stability?: string | Record<string, unknown> | null;
   created_at?: number;
   updated_at?: number;
