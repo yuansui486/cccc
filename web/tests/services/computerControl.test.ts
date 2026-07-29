@@ -4,8 +4,11 @@ import {
   computerControlProviderLabel,
   computerControlSessionDetails,
   formatComputerControlTime,
+  formatSetupDiagnostics,
+  formatSetupDuration,
   latestComputerControlObservation,
   newestComputerControlObservation,
+  setupStepLabel,
   shouldRefreshComputerControlAfterSseTransition,
 } from "../../src/pages/computerControl/statusPresentation";
 
@@ -40,6 +43,25 @@ describe("computer control session presentation", () => {
     expect(details.startedAt).toBeNull();
     expect(details.transportRestarts).toBeNull();
     expect(details.observation).toBeNull();
+  });
+
+  it("presents setup stages and diagnostics without treating setup time as session time", () => {
+    const setup = {
+      phase: "downloading",
+      version: "",
+      attempt_id: "setup_123",
+      step: "installing_python_313",
+      started_at: 1_785_200_000,
+      last_activity_at: 1_785_200_010,
+      package_index: "https://pypi.tuna.tsinghua.edu.cn/simple",
+      logs: ["[system] preparing", "[stdout] downloading"],
+    };
+
+    expect(setupStepLabel(setup.step, setup.phase)).toBe("正在由 uv 下载 Python 3.13");
+    expect(formatSetupDuration(setup.started_at, 1_785_200_065_000)).toBe("1 分 5 秒");
+    expect(formatSetupDiagnostics(setup)).toContain("setup_123");
+    expect(formatSetupDiagnostics(setup)).toContain("https://pypi.tuna.tsinghua.edu.cn/simple");
+    expect(computerControlSessionDetails(setup).startedAt).toBeNull();
   });
 
   it("requests a full refresh after SSE reconnects while the page is active", () => {
@@ -97,6 +119,25 @@ describe("computer control session API", () => {
     expect(response.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/computer-control/setup/restart-session",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("uses the dedicated setup cancellation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, result: { phase: "cancelled", version: "" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", { location: { search: "" } });
+    vi.stubGlobal("sessionStorage", { getItem: () => null, setItem: () => undefined, removeItem: () => undefined });
+
+    const response = await computerControlApi.cancelSetup();
+
+    expect(response.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/computer-control/setup/cancel",
       expect.objectContaining({ method: "POST" }),
     );
   });

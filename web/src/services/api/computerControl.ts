@@ -10,7 +10,6 @@ export type ComputerSetup = {
   logs?: string[];
   session_running?: boolean;
   session_started_at?: number | string | null;
-  started_at?: number | string | null;
   transport_restarts?: number;
   session?: {
     running?: boolean;
@@ -26,6 +25,24 @@ export type ComputerSetup = {
   in_progress?: boolean;
   detail?: string | null;
   python_candidates?: string[];
+  attempt_id?: string;
+  operation?: string;
+  step?: string;
+  started_at?: number | string | null;
+  step_started_at?: number | string | null;
+  last_activity_at?: number | string | null;
+  updated_at?: number | string | null;
+  finished_at?: number | string | null;
+  uv_version?: string | null;
+  python_path?: string | null;
+  python_source?: "system" | "uv_managed" | string | null;
+  package_index?: string | null;
+  package_index_fallback?: boolean;
+  package_index_fallback_allowed?: boolean;
+  process_id?: number | null;
+  current_command?: string | null;
+  can_cancel?: boolean;
+  log_truncated?: boolean;
   failure?: { phase?: string; exit_code?: number | null; stderr_tail?: string[] } | null;
 };
 
@@ -152,6 +169,7 @@ export const computerControlApi = {
   status: () => apiJson<ComputerSetup>(`${root}/setup/status`),
   repair: () => apiJson<ComputerSetup>(`${root}/setup/repair`, { method: "POST" }),
   upgrade: () => apiJson<ComputerSetup>(`${root}/setup/upgrade`, { method: "POST" }),
+  cancelSetup: () => apiJson<ComputerSetup>(`${root}/setup/cancel`, { method: "POST" }),
   restartSession: () => apiJson<ComputerSetup>(`${root}/setup/restart-session`, { method: "POST" }),
   catalog: (tool?: string) => apiJson<{ version?: string; fingerprint?: string; healthy?: boolean; tools?: Record<string, unknown>[]; tool?: Record<string, unknown> }>(`${root}/catalog${tool ? `?tool=${encodeURIComponent(tool)}` : ""}`),
   leaseStatus: () => apiJson<ComputerControlLease>(`${root}/lease/status`),

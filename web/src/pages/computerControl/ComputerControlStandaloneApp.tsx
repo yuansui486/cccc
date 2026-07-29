@@ -58,8 +58,9 @@ import type {
 import { normalizeDefinition, serializeDefinition } from "./types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
 import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
+import { copyTextToClipboard } from "../../utils/copy";
 import { useUIStore } from "../../stores";
-import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, latestComputerControlObservation, newestComputerControlObservation, setupErrorMessage, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
+import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, formatSetupDiagnostics, formatSetupDuration, latestComputerControlObservation, newestComputerControlObservation, setupErrorMessage, setupStepLabel, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
 
 type Section = "tools" | "steps" | "properties" | "runs";
 type Snapshot = { nodes: CanvasNode[]; edges: CanvasEdge[] };
@@ -105,6 +106,7 @@ function phaseLabel(phase: string): string {
         verifying: "正在验证工具",
         ready: "已就绪",
         failed: "安装失败",
+        cancelled: "已取消",
         not_started: "等待安装",
       } as Record<string, string>
     )[phase] || phase
@@ -240,6 +242,12 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
     phase: "not_started",
     version: "",
   });
+  const [setupPollError, setSetupPollError] = useState("");
+  const [setupLogsOpen, setSetupLogsOpen] = useState(false);
+  const [setupClock, setSetupClock] = useState(() => Date.now());
+  const setupLogRef = React.useRef<HTMLPreElement | null>(null);
+  const setupLogPinnedRef = React.useRef(true);
+  const setupPhaseRef = React.useRef(setup.phase);
   const [tools, setTools] = useState<ToolCatalogItem[]>([]);
   const [toolSearch, setToolSearch] = useState("");
   const [workflows, setWorkflows] = useState<WorkflowManifest[]>([]);
@@ -301,7 +309,12 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
           refreshQueued.current = true;
           continue;
         }
-        if (status.ok) setSetup(status.result);
+        if (status.ok) {
+          setSetup(status.result);
+          setSetupPollError("");
+        } else {
+          setSetupPollError(friendlyError(status.error.message));
+        }
         if (workflowResponse.ok) {
           setWorkflows(workflowResponse.result.workflows || []);
           const first = workflowResponse.result.workflows?.[0];
@@ -334,7 +347,10 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       const response = await computerControlApi.ensure();
       if (!cancelled && response.ok) {
         setSetup(response.result);
+        setSetupPollError("");
         if (response.result.phase === "ready") await loadCatalog();
+      } else if (!cancelled && !response.ok) {
+        setSetupPollError(friendlyError(response.error.message));
       }
       if (!cancelled) setBusy("");
       await refresh();
@@ -345,21 +361,38 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
   }, [loadCatalog, refresh]);
 
   useEffect(() => {
-    if (setup.phase === "ready") {
-      return;
-    }
-    if (setup.phase === "failed") return;
+    if (!setup.in_progress && ["ready", "failed", "cancelled"].includes(setup.phase)) return;
     const timer = window.setInterval(() => {
       void computerControlApi.status().then((response) => {
         if (response.ok) {
           setSetup(response.result);
+          setSetupPollError("");
           if (response.result.phase === "ready" && tools.length === 0)
             void loadCatalog();
-        }
+        } else setSetupPollError(friendlyError(response.error.message));
       });
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [loadCatalog, setup.phase, tools.length]);
+  }, [loadCatalog, setup.in_progress, setup.phase, tools.length]);
+
+  useEffect(() => {
+    if (!setup.in_progress) return undefined;
+    const timer = window.setInterval(() => setSetupClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [setup.in_progress]);
+
+  useEffect(() => {
+    const previous = setupPhaseRef.current;
+    setupPhaseRef.current = setup.phase;
+    if (setup.attempt_id && (setup.in_progress || ["failed", "cancelled"].includes(setup.phase))) {
+      if (previous !== setup.phase || setup.logs?.length === 1) setSetupLogsOpen(true);
+    }
+  }, [setup.attempt_id, setup.in_progress, setup.logs?.length, setup.phase]);
+
+  useEffect(() => {
+    const panel = setupLogRef.current;
+    if (setupLogsOpen && panel && setupLogPinnedRef.current) panel.scrollTop = panel.scrollHeight;
+  }, [setup.logs, setupLogsOpen]);
 
   useEffect(() => {
     setSelectedId("");
@@ -763,8 +796,9 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         ...current,
         ...response.result,
         phase: response.result.phase || response.result.setup_phase || current.phase,
-        session_started_at: response.result.session_started_at || response.result.started_at || current.session_started_at,
+        session_started_at: response.result.session_started_at || current.session_started_at,
       }));
+      setSetupPollError("");
       setMessage(
         kind === "upgrade" ? "正在检查 Windows-MCP 更新"
           : kind === "restart" ? "Windows-MCP 会话已重启，正在刷新工具和运行状态"
@@ -776,6 +810,36 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
       }
     } else setMessage(friendlyError(response.error.message));
     setBusy("");
+  }
+
+  async function refreshSetupStatus() {
+    setBusy("refresh-setup");
+    const response = await computerControlApi.status();
+    if (response.ok) {
+      setSetup(response.result);
+      setSetupPollError("");
+      setMessage("Windows-MCP 安装状态已刷新");
+    } else {
+      setSetupPollError(friendlyError(response.error.message));
+    }
+    setBusy("");
+  }
+
+  async function cancelSetup() {
+    if (!setup.in_progress || busy) return;
+    setBusy("cancel-setup");
+    const response = await computerControlApi.cancelSetup();
+    if (response.ok) {
+      setSetup(response.result);
+      setSetupPollError("");
+      setMessage("Windows-MCP 安装已取消");
+    } else setMessage(friendlyError(response.error.message));
+    setBusy("");
+  }
+
+  async function copySetupDiagnostics() {
+    const copied = await copyTextToClipboard(formatSetupDiagnostics(setup, setupPollError));
+    setMessage(copied ? "安装诊断信息已复制" : "复制失败，请展开日志后手动选择");
   }
 
   function resetEditor() {
@@ -1294,78 +1358,145 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         </div>
       )}
 
-      <div className="mx-4 mt-3 flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
-        {setup.phase === "ready" ? (
-          <Check size={15} className="text-emerald-600" />
-        ) : setup.phase === "failed" ? (
-          <AlertTriangle size={15} className="text-red-600" />
-        ) : (
-          <LoaderCircle size={15} className="animate-spin text-amber-600" />
-        )}
-        <div className="min-w-0 flex-1">
-          <span className="font-medium">
-            Windows-MCP {phaseLabel(setup.phase)}
-          </span>
-          {setup.version && (
-            <span className="ml-2 text-[var(--color-text-secondary)]">
-              版本 {setup.version}
-            </span>
+      <div className="mx-4 mt-3 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs md:mx-6">
+        <div className="flex flex-wrap items-start gap-3">
+          {setup.phase === "ready" ? (
+            <Check size={15} className="mt-0.5 shrink-0 text-emerald-600" />
+          ) : setup.phase === "failed" ? (
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-600" />
+          ) : setup.phase === "cancelled" ? (
+            <CircleStop size={15} className="mt-0.5 shrink-0 text-amber-600" />
+          ) : (
+            <LoaderCircle size={15} className="mt-0.5 shrink-0 animate-spin text-amber-600" />
           )}
-          <div className="text-[var(--color-text-secondary)]">
-            {setupErrorMessage(setup.error?.message, setup.phase) ||
-              (setup.phase === "ready"
-                ? `已验证 ${setup.tool_count || 0} 个电脑工具`
-                : "首次准备可能需要一到两分钟，可以继续浏览此页面")}
+          <div className="min-w-0 flex-[1_1_18rem]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="font-medium">Windows-MCP {phaseLabel(setup.phase)}</span>
+              {setup.version && <span className="text-[var(--color-text-secondary)]">版本 {setup.version}</span>}
+              {setup.started_at && (
+                <span className="text-[var(--color-text-secondary)]">
+                  耗时 {formatSetupDuration(setup.started_at, setup.in_progress ? null : setup.finished_at || setup.updated_at, setupClock)}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 text-[var(--color-text-secondary)]">
+              {setupErrorMessage(setup.error?.message, setup.phase) ||
+                (setup.phase === "ready"
+                  ? `已验证 ${setup.tool_count || 0} 个电脑工具`
+                  : setupStepLabel(setup.step || setup.detail, setup.phase))}
+            </div>
+            {setupPollError && (
+              <div className="mt-1 text-red-600">状态刷新失败：{setupPollError}</div>
+            )}
             {setup.phase === "failed" && setup.python_candidates && setup.python_candidates.length > 0 && (
               <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
                 已尝试：{setup.python_candidates.join("、")}
               </div>
             )}
+            {(setup.in_progress || setup.package_index) && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                {setup.package_index && <span>Python 包：{setup.package_index}{setup.package_index_fallback ? "（镜像失败，已回退）" : ""}</span>}
+                <span>Python 3.13：由 uv 自动检测和准备</span>
+                {setup.last_activity_at && <span>最近活动：{formatComputerControlTime(setup.last_activity_at)}</span>}
+              </div>
+            )}
+            {(sessionDetails.startedAt || sessionDetails.transportRestarts !== null) && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                {sessionDetails.startedAt && <span>会话启动：{formatComputerControlTime(sessionDetails.startedAt)}</span>}
+                {sessionDetails.transportRestarts !== null && <span>会话恢复/重启：{sessionDetails.transportRestarts} 次</span>}
+              </div>
+            )}
+            {currentObservation && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                {currentObservation.updatedAt && <span>最近观察：{formatComputerControlTime(currentObservation.updatedAt)}</span>}
+                {currentObservation.provider && <span>提供者：{computerControlProviderLabel(currentObservation.provider)}</span>}
+                {currentObservation.targetWindow && <span className="max-w-72 truncate">目标窗口：{currentObservation.targetWindow}</span>}
+                {currentObservation.elementCount !== null && <span>元素：{currentObservation.elementCount} 个</span>}
+              </div>
+            )}
           </div>
-          {(sessionDetails.startedAt || sessionDetails.transportRestarts !== null) && (
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
-              {sessionDetails.startedAt && <span>会话启动：{formatComputerControlTime(sessionDetails.startedAt)}</span>}
-              {sessionDetails.transportRestarts !== null && <span>会话恢复/重启：{sessionDetails.transportRestarts} 次</span>}
-            </div>
-          )}
-          {currentObservation && (
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
-              {currentObservation.updatedAt && <span>最近观察：{formatComputerControlTime(currentObservation.updatedAt)}</span>}
-              {currentObservation.provider && <span>提供者：{computerControlProviderLabel(currentObservation.provider)}</span>}
-              {currentObservation.targetWindow && <span className="max-w-72 truncate">目标窗口：{currentObservation.targetWindow}</span>}
-              {currentObservation.elementCount !== null && <span>元素：{currentObservation.elementCount} 个</span>}
-            </div>
-          )}
+          <div className="ml-6 flex w-full shrink-0 flex-wrap justify-end gap-1.5 sm:ml-0 sm:w-auto">
+            <button
+              title="刷新安装状态"
+              aria-label="刷新安装状态"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border disabled:opacity-40"
+              onClick={() => void refreshSetupStatus()}
+              disabled={Boolean(busy)}
+            >
+              <RefreshCw size={13} className={busy === "refresh-setup" ? "animate-spin" : ""} />
+            </button>
+            <button
+              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+              onClick={() => void copySetupDiagnostics()}
+              disabled={!setup.logs?.length && !setup.error && !setupPollError}
+            >
+              <Copy size={13} />
+              复制诊断
+            </button>
+            {setup.in_progress ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2 py-1 text-red-600 disabled:opacity-40"
+                onClick={() => void cancelSetup()}
+                disabled={Boolean(busy) || !setup.can_cancel}
+              >
+                <CircleStop size={13} />
+                取消安装
+              </button>
+            ) : setup.phase === "failed" || setup.phase === "cancelled" ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
+                onClick={() => void beginSetup("repair")}
+                disabled={Boolean(busy) || lease.active}
+              >
+                <Wrench size={13} />
+                修复
+              </button>
+            ) : (
+              <>
+                <button
+                  title="仅重启 Windows-MCP 连接，不会重新安装或升级"
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+                  onClick={() => void beginSetup("restart")}
+                  disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+                >
+                  <RefreshCw size={13} />
+                  重启会话
+                </button>
+                <button
+                  title="检查并安装最新版 Windows-MCP"
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
+                  onClick={() => void beginSetup("upgrade")}
+                  disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+                >
+                  <Upload size={13} />
+                  更新组件
+                </button>
+              </>
+            )}
+          </div>
         </div>
-        {setup.phase === "failed" ? (
-          <button
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-            onClick={() => void beginSetup("repair")}
-            disabled={Boolean(busy) || lease.active}
-          >
-            <Wrench size={13} />
-            修复
-          </button>
-        ) : (
-          <div className="flex shrink-0 items-center gap-1.5">
+        {(setup.logs?.length || setup.current_command) && (
+          <div className="mt-2 border-t border-[var(--color-border)] pt-2">
             <button
-              title="仅重启 Windows-MCP 连接，不会重新安装或升级"
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
-              onClick={() => void beginSetup("restart")}
-              disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
+              className="inline-flex items-center gap-1 text-[var(--color-text-secondary)]"
+              onClick={() => setSetupLogsOpen((open) => !open)}
             >
-              <RefreshCw size={13} />
-              重启会话
+              {setupLogsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {setupLogsOpen ? "收起安装日志" : "展开安装日志"}
+              {setup.current_command && !setupLogsOpen && <span className="max-w-96 truncate">· {setup.current_command}</span>}
             </button>
-            <button
-              title="检查并安装最新版 Windows-MCP"
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 disabled:opacity-40"
-              onClick={() => void beginSetup("upgrade")}
-              disabled={setup.phase !== "ready" || Boolean(busy) || lease.active}
-            >
-              <Upload size={13} />
-              更新组件
-            </button>
+            {setupLogsOpen && (
+              <pre
+                ref={setupLogRef}
+                onScroll={(event) => {
+                  const panel = event.currentTarget;
+                  setupLogPinnedRef.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
+                }}
+                className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-black/90 p-2 font-mono text-[11px] leading-5 text-zinc-100"
+              >
+                {(setup.logs || []).join("\n") || setup.current_command}
+              </pre>
+            )}
           </div>
         )}
       </div>

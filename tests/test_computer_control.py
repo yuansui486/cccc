@@ -957,8 +957,8 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(candidates[:2], [installed, stale])
 
     async def test_windows_9009_command_failure_has_actionable_error(self):
-        process = Mock(returncode=9009)
-        process.communicate = AsyncMock(return_value=(b"", b""))
+        process = Mock(returncode=9009, pid=1234, stdout=None, stderr=None)
+        process.wait = AsyncMock(return_value=9009)
         with tempfile.TemporaryDirectory() as td:
             setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
             with patch("no1.computer_control.mcp.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
@@ -987,6 +987,7 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             metadata.parent.mkdir(parents=True, exist_ok=True)
             metadata.write_text("Name: windows-mcp\nVersion: 1.2.3\n", encoding="utf-8")
             setup._ensure_uv = AsyncMock(return_value=Path("uv.exe"))
+            setup._ensure_python_313 = AsyncMock(return_value=root / "python.exe")
             setup._run_command = AsyncMock(return_value="")
 
             with patch("no1.computer_control.mcp.os.name", "nt"):
@@ -998,6 +999,8 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             command = setup._run_command.await_args.args[0]
             self.assertIn("windows-mcp", command)
             self.assertFalse(any("windows-mcp==" in item for item in command))
+            self.assertIn("--default-index", command)
+            self.assertIn("https://pypi.tuna.tsinghua.edu.cn/simple", command)
             self.assertEqual(session.configured, (executable, "1.2.3"))
 
     async def test_missing_uv_is_installed_with_pip_and_found_without_path_restart(self):
@@ -1013,8 +1016,9 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(result, installed)
             calls = [call.args[0] for call in setup._run_command.await_args_list]
-            self.assertEqual(calls[0], ["python", "-m", "pip", "install", "--user", "uv"])
-            self.assertEqual(calls[1], ["python", "-m", "pip", "install", "uv"])
+            index_args = ["--index-url", "https://pypi.tuna.tsinghua.edu.cn/simple"]
+            self.assertEqual(calls[0], ["python", "-m", "pip", "install", "--user", *index_args, "uv"])
+            self.assertEqual(calls[1], ["python", "-m", "pip", "install", *index_args, "uv"])
 
     async def test_broken_uv_on_path_falls_back_to_pip_installed_uv(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1032,8 +1036,184 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result, installed)
             calls = [call.args[0] for call in setup._run_command.await_args_list]
             self.assertEqual(calls[0], [str(broken), "--version"])
-            self.assertEqual(calls[1], ["python", "-m", "pip", "install", "--user", "uv"])
+            self.assertEqual(
+                calls[1],
+                [
+                    "python",
+                    "-m",
+                    "pip",
+                    "install",
+                    "--user",
+                    "--index-url",
+                    "https://pypi.tuna.tsinghua.edu.cn/simple",
+                    "uv",
+                ],
+            )
             self.assertEqual(calls[2], [str(installed), "--version"])
+
+    def test_package_index_prefers_explicit_https_configuration(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "no1.computer_control.mcp.os.environ",
+            {"ONECOLLEAGUE_PYPI_INDEX_URL": "https://packages.example.test/simple/"},
+            clear=True,
+        ):
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            self.assertEqual(setup._package_index(), ("https://packages.example.test/simple", False))
+
+    def test_invalid_or_insecure_package_index_uses_default_mirror(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "no1.computer_control.mcp.os.environ",
+            {"ONECOLLEAGUE_PYPI_INDEX_URL": "http://packages.example.test/simple"},
+            clear=True,
+        ):
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            self.assertEqual(
+                setup._package_index(),
+                ("https://pypi.tuna.tsinghua.edu.cn/simple", True),
+            )
+
+    async def test_default_package_index_falls_back_to_official_pypi_for_same_attempt(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "no1.computer_control.mcp.os.environ", {}, clear=True
+        ):
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            setup._begin_attempt("install")
+            setup._run_command = AsyncMock(side_effect=[MCPUnavailable("connection timed out"), "installed", "next"])
+
+            result = await setup._run_package_command(["uv", "tool", "install"], ["windows-mcp"], env={}, timeout=1)
+            await setup._run_package_command(["uv", "tool", "upgrade"], ["windows-mcp"], env={}, timeout=1)
+
+            self.assertEqual(result, "installed")
+            calls = [call.args[0] for call in setup._run_command.await_args_list]
+            self.assertIn("https://pypi.tuna.tsinghua.edu.cn/simple", calls[0])
+            self.assertIn("https://pypi.org/simple", calls[1])
+            self.assertIn("https://pypi.org/simple", calls[2])
+            self.assertTrue(setup.status()["package_index_fallback"])
+
+    async def test_private_package_index_never_falls_back_implicitly(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "no1.computer_control.mcp.os.environ",
+            {"ONECOLLEAGUE_PYPI_INDEX_URL": "https://user:password@packages.example.test/simple"},
+            clear=True,
+        ):
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            setup._begin_attempt("install")
+            setup._run_command = AsyncMock(side_effect=MCPUnavailable("connection timed out"))
+
+            with self.assertRaisesRegex(MCPUnavailable, "connection timed out"):
+                await setup._run_package_command(["uv", "tool", "install"], ["windows-mcp"], env={}, timeout=1)
+
+            self.assertEqual(setup._run_command.await_count, 1)
+            self.assertNotIn("password", setup.status()["package_index"])
+            self.assertNotIn("password", "\n".join(setup.status()["logs"]))
+
+    async def test_python_runtime_download_does_not_use_pypi_index(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "no1.computer_control.mcp.os.environ",
+            {"ONECOLLEAGUE_UV_PYTHON_MIRROR": "https://python.example.test/downloads"},
+            clear=True,
+        ):
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            python = setup.python_dir / "cpython-3.13" / "python.exe"
+            calls = []
+
+            async def run(command, **_kwargs):
+                calls.append(command)
+                if "install" in command:
+                    python.parent.mkdir(parents=True, exist_ok=True)
+                    python.write_bytes(b"")
+                    return "installed"
+                return str(python) if python.is_file() else ""
+
+            setup._run_command = AsyncMock(side_effect=run)
+            result = await setup._ensure_python_313(Path("uv.exe"), env={})
+
+            self.assertEqual(result, python)
+            install = next(command for command in calls if "install" in command)
+            self.assertIn("--mirror", install)
+            self.assertIn("https://python.example.test/downloads", install)
+            self.assertNotIn("--default-index", install)
+            self.assertNotIn("--index-url", install)
+
+    async def test_command_output_is_visible_before_process_exits(self):
+        first_line = asyncio.Event()
+        finish = asyncio.Event()
+
+        class Stream:
+            def __init__(self):
+                self.sent = False
+
+            async def readline(self):
+                if not self.sent:
+                    self.sent = True
+                    first_line.set()
+                    return b"downloading package\n"
+                await finish.wait()
+                return b""
+
+        process = Mock(pid=321, returncode=None, stdout=Stream(), stderr=None)
+
+        async def wait():
+            await finish.wait()
+            process.returncode = 0
+            return 0
+
+        process.wait = AsyncMock(side_effect=wait)
+        with tempfile.TemporaryDirectory() as td:
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            with patch("no1.computer_control.mcp.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+                task = asyncio.create_task(setup._run_command(["uv", "tool", "install"], timeout=2))
+                await asyncio.wait_for(first_line.wait(), timeout=1)
+                await asyncio.sleep(0)
+                self.assertIn("downloading package", "\n".join(setup.status()["logs"]))
+                finish.set()
+                self.assertIn("downloading package", await task)
+
+    async def test_cancel_marks_running_setup_as_cancelled(self):
+        started = asyncio.Event()
+
+        async def wait_for_cancel():
+            started.set()
+            await asyncio.Event().wait()
+
+        with tempfile.TemporaryDirectory() as td:
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            setup._ensure_uv = AsyncMock(side_effect=wait_for_cancel)
+            with patch("no1.computer_control.mcp.os.name", "nt"):
+                await setup.ensure(force=True)
+                await asyncio.wait_for(started.wait(), timeout=1)
+                result = await setup.cancel()
+
+            self.assertEqual(result["phase"], "cancelled")
+            self.assertFalse(result["in_progress"])
+            self.assertFalse(result["can_cancel"])
+
+    def test_stale_transient_setup_is_marked_interrupted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "state" / "computer-control" / "setup.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"phase": "downloading", "owner_pid": os.getpid(), "detail": "installing_windows_mcp"}),
+                encoding="utf-8",
+            )
+
+            setup = WindowsMCPSetup(root, _SetupSession(), WorkflowStore(root))
+
+            self.assertEqual(setup.status()["phase"], "failed")
+            self.assertEqual(setup.status()["error"]["code"], "setup_interrupted")
+
+    async def test_completed_task_cannot_leave_setup_in_transient_phase(self):
+        with tempfile.TemporaryDirectory() as td:
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            setup._status = {"phase": "downloading", "detail": "installing_windows_mcp"}
+            setup._task = asyncio.create_task(asyncio.sleep(0))
+            await setup._task
+
+            result = setup.status()
+
+            self.assertEqual(result["phase"], "failed")
+            self.assertEqual(result["error"]["code"], "setup_task_stopped")
 
 
 if __name__ == "__main__":
