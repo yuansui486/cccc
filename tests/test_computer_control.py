@@ -797,6 +797,23 @@ class _SetupSession:
 
 
 class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
+    def test_find_uv_ignores_missing_user_base_in_frozen_runtime(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            uv_name = "uv.exe" if os.name == "nt" else "uv"
+            uv_path = root / "Scripts" / uv_name
+            uv_path.parent.mkdir(parents=True, exist_ok=True)
+            uv_path.write_bytes(b"")
+            setup = WindowsMCPSetup(root, _SetupSession(), WorkflowStore(root))
+            setup._python_commands = Mock(return_value=[[str(root / "python.exe")]])
+
+            with patch("no1.computer_control.mcp.site.USER_BASE", None), patch(
+                "no1.computer_control.mcp.shutil.which", return_value=None
+            ):
+                result = setup._find_uv()
+
+            self.assertEqual(result, uv_path)
+
     async def test_latest_package_is_installed_without_a_version_constraint(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

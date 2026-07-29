@@ -776,11 +776,44 @@ class WindowsMCPSetup:
         names = ["uv.exe", "uv"] if os.name == "nt" else ["uv"]
         found = shutil.which("uv")
         if found:
-            return Path(found)
-        roots = [Path(sys.executable).parent, Path(site.USER_BASE) / ("Scripts" if os.name == "nt" else "bin")]
+            try:
+                return Path(found)
+            except (TypeError, ValueError, OSError):
+                pass
+
+        roots: List[Path] = []
+
+        def as_path(value: Any) -> Optional[Path]:
+            if value is None or (isinstance(value, str) and not value.strip()):
+                return None
+            try:
+                return Path(value)
+            except (TypeError, ValueError, OSError):
+                return None
+
+        def add_root(value: Any) -> None:
+            path = as_path(value)
+            if path is not None:
+                roots.append(path)
+
+        executable = getattr(sys, "executable", None)
+        executable_path = as_path(executable)
+        if executable_path is not None:
+            add_root(executable_path.parent)
+
+        user_base = getattr(site, "USER_BASE", None)
+        user_base_path = as_path(user_base)
+        if user_base_path is not None:
+            add_root(user_base_path / ("Scripts" if os.name == "nt" else "bin"))
+
         for command in self._python_commands():
-            executable = Path(command[0])
-            roots.extend([executable.parent, executable.parent / "Scripts"])
+            if not command:
+                continue
+            command_path = command[0]
+            executable_path = as_path(command_path)
+            if executable_path is None:
+                continue
+            roots.extend([executable_path.parent, executable_path.parent / "Scripts"])
         seen = set()
         for root in roots:
             for name in names:
