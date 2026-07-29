@@ -1,10 +1,10 @@
-/* eslint-disable no-control-regex */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
 
 import { fetchTerminalTail, withAuthToken } from "../../services/api";
 import type { TerminalSignal } from "../../stores/useTerminalSignalsStore";
 import { getTerminalSignalFromChunk } from "../../utils/terminalWorkingState";
+import { filterTerminalInputChunk } from "../../utils/terminalInputFilter";
 import {
   buildTerminalConnectionKey,
   isTerminalAttachNonRetryableErrorCode,
@@ -63,6 +63,7 @@ export function useAgentTerminalConnection(args: {
   const terminalReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputFilterTailRef = useRef("");
   const terminalSignalBufferRef = useRef("");
+  const terminalInputFilterPendingRef = useRef("");
   const terminalAttachNoRetryRef = useRef(false);
   const terminalAttachStartupRaceRef = useRef(false);
   const lastTermEpochRef = useRef(termEpoch);
@@ -75,6 +76,9 @@ export function useAgentTerminalConnection(args: {
   const clearTerminalSignalRef = useRef(clearTerminalSignal);
 
   useEffect(() => {
+    if (runtimeRef.current !== actorRuntime) {
+      terminalInputFilterPendingRef.current = "";
+    }
     isRunningRef.current = isRunning;
     runtimeRef.current = actorRuntime;
     canControlRef.current = canControl;
@@ -90,6 +94,7 @@ export function useAgentTerminalConnection(args: {
   useEffect(() => {
     if (isRunning && !isHeadless) return;
     terminalSignalBufferRef.current = "";
+    terminalInputFilterPendingRef.current = "";
     clearTerminalSignalRef.current(groupId, actorId);
   }, [actorId, groupId, isHeadless, isRunning]);
 
@@ -170,6 +175,7 @@ export function useAgentTerminalConnection(args: {
         reconnectAttemptRef.current = 0;
         outputFilterTailRef.current = "";
         terminalSignalBufferRef.current = "";
+        terminalInputFilterPendingRef.current = "";
 
         if (terminalReadyTimeoutRef.current) {
           clearTimeout(terminalReadyTimeoutRef.current);
@@ -308,21 +314,16 @@ export function useAgentTerminalConnection(args: {
         disposable = term.onData((data) => {
           if (ws.readyState !== WebSocket.OPEN) return;
           const runtime = runtimeRef.current;
-          if (runtime === "droid" || runtime === "gemini" || runtime === "neovate") {
-            const isDeviceAttributesReply = /^\x1b\[(?:\?|>)(?:\d+)(?:;\d+)*c$/.test(data);
-            if (isDeviceAttributesReply) return;
-            const isOscColorReply = /^\x1b\](?:10|11);rgb:[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}\/[0-9a-fA-F]{1,4}(?:\x07|\x1b\\)$/.test(data);
-            if (isOscColorReply) return;
-            const isFocusEvent = /^\x1b\[[IO]$/.test(data);
-            if (isFocusEvent) return;
-          }
-          if (data.includes("\r") || data.includes("\n") || data.includes("\x03")) {
+          const filtered = filterTerminalInputChunk(terminalInputFilterPendingRef.current, data, runtime);
+          terminalInputFilterPendingRef.current = filtered.pending;
+          if (!filtered.data) return;
+          if (filtered.data.includes("\r") || filtered.data.includes("\n") || filtered.data.includes("\x03")) {
             setTerminalSignalRef.current(groupId, actorId, {
               kind: "working_output",
               updatedAt: Date.now(),
             });
           }
-          ws.send(JSON.stringify({ t: "i", d: data }));
+          ws.send(JSON.stringify({ t: "i", d: filtered.data }));
         });
 
         resizeDisposable = term.onResize(({ cols, rows }) => {
@@ -353,6 +354,7 @@ export function useAgentTerminalConnection(args: {
         }
         wsRef.current = null;
       }
+      terminalInputFilterPendingRef.current = "";
       setConnectionStatus("disconnected");
       setTerminalReady(false);
     };
