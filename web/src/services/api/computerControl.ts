@@ -25,6 +25,7 @@ export type ComputerSetup = {
   observation_element_count?: number;
   in_progress?: boolean;
   detail?: string | null;
+  python_candidates?: string[];
   failure?: { phase?: string; exit_code?: number | null; stderr_tail?: string[] } | null;
 };
 

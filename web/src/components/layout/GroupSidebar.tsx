@@ -955,16 +955,6 @@ export function GroupSidebar({
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={() => handleTabSelect(COMPUTER_CONTROL_TAB)}
-              className={navButtonClass(activeTab === COMPUTER_CONTROL_TAB)}
-              title="电脑控制"
-            >
-              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>
-              <span className="min-w-0 flex-1 truncate">电脑控制</span>
-            </button>
-
           </div>
         </section>
 
@@ -1100,6 +1090,15 @@ export function GroupSidebar({
                 <BookOpenIcon size={24} strokeWidth={1.8} />
               </span>
               <span className="min-w-0 flex-1 truncate">{t("experience")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTabSelect(COMPUTER_CONTROL_TAB)}
+              className={navButtonClass(activeTab === COMPUTER_CONTROL_TAB)}
+              title="电脑控制"
+            >
+              <span className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)]"><Laptop size={22} strokeWidth={1.8} /></span>
+              <span className="min-w-0 flex-1 truncate">电脑控制</span>
             </button>
           </div>
         </section>

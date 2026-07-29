@@ -797,6 +797,99 @@ class _SetupSession:
 
 
 class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
+    def test_command_search_path_refreshes_machine_and_user_registry_paths(self):
+        machine_root = str(Path(tempfile.gettempdir()) / "machine-python")
+        user_root = str(Path(tempfile.gettempdir()) / "user-python")
+        process_root = str(Path(tempfile.gettempdir()) / "stale-process-path")
+        machine_hive = object()
+        user_hive = object()
+
+        class RegistryKey:
+            def __init__(self, hive):
+                self.hive = hive
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        registry = Mock(HKEY_LOCAL_MACHINE=machine_hive, HKEY_CURRENT_USER=user_hive)
+        registry.OpenKey.side_effect = lambda hive, _name: RegistryKey(hive)
+        registry.QueryValueEx.side_effect = lambda key, _name: (
+            (machine_root if key.hive is machine_hive else user_root),
+            1,
+        )
+        with patch("no1.computer_control.mcp.sys.platform", "win32"), patch.dict(
+            "sys.modules", {"winreg": registry}
+        ), patch.dict("no1.computer_control.mcp.os.environ", {"PATH": process_root}, clear=False):
+            result = WindowsMCPSetup._command_search_path().split(os.pathsep)
+
+        self.assertEqual(result[:3], [machine_root, user_root, process_root])
+
+    def test_python_commands_skip_frozen_host_and_prefer_real_python_launcher(self):
+        def which(name, *, path=None):
+            self.assertEqual(path, r"C:\FreshPath")
+            return {
+                "py": r"C:\Python\py.exe",
+                "python": r"C:\Python\python.exe",
+            }.get(name)
+
+        with patch("no1.computer_control.mcp.sys.executable", r"C:\OneColleague\onecolleague.exe"), patch(
+            "no1.computer_control.mcp.shutil.which", side_effect=which
+        ), patch(
+            "no1.computer_control.mcp.WindowsMCPSetup._command_search_path", return_value=r"C:\FreshPath"
+        ):
+            commands = WindowsMCPSetup._python_commands()
+
+        self.assertEqual(commands[:2], [[r"C:\Python\py.exe", "-3"], [r"C:\Python\python.exe"]])
+        self.assertNotIn([r"C:\OneColleague\onecolleague.exe"], commands)
+
+    def test_python_commands_find_standard_windows_install_outside_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            python = root / "Programs" / "Python" / "Python313" / "python.exe"
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_bytes(b"")
+            environment = {
+                "LOCALAPPDATA": str(root),
+                "WINDIR": str(root / "Windows"),
+                "ProgramFiles": "",
+                "ProgramFiles(x86)": "",
+            }
+            with patch("no1.computer_control.mcp.sys.platform", "win32"), patch(
+                "no1.computer_control.mcp.sys.executable", str(root / "onecolleague.exe")
+            ), patch("no1.computer_control.mcp.shutil.which", return_value=None), patch.dict(
+                "no1.computer_control.mcp.os.environ", environment, clear=False
+            ):
+                commands = WindowsMCPSetup._python_commands()
+
+            self.assertIn([str(python)], commands)
+            self.assertNotIn([str(root / "onecolleague.exe")], commands)
+
+    def test_python_commands_keep_real_python_after_stale_windows_alias(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            alias_root = root / "WindowsApps"
+            python_root = root / "Python313"
+            alias = alias_root / "python.exe"
+            python = python_root / "python.exe"
+            alias_root.mkdir()
+            python_root.mkdir()
+            alias.write_bytes(b"")
+            python.write_bytes(b"")
+            search_path = os.pathsep.join((str(alias_root), str(python_root)))
+
+            with patch("no1.computer_control.mcp.sys.executable", str(root / "onecolleague.exe")), patch(
+                "no1.computer_control.mcp.shutil.which", return_value=str(alias)
+            ), patch(
+                "no1.computer_control.mcp.WindowsMCPSetup._command_search_path", return_value=search_path
+            ):
+                commands = WindowsMCPSetup._python_commands()
+
+            self.assertIn([str(alias)], commands)
+            self.assertIn([str(python)], commands)
+
     def test_find_uv_ignores_missing_user_base_in_frozen_runtime(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -813,6 +906,74 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
                 result = setup._find_uv()
 
             self.assertEqual(result, uv_path)
+
+    async def test_missing_python_commands_returns_actionable_uv_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            setup._uv_candidates = Mock(return_value=[])
+            setup._python_commands = Mock(return_value=[])
+
+            with self.assertRaisesRegex(MCPUnavailable, "未找到可用的 Python 命令"):
+                await setup._ensure_uv()
+
+            self.assertEqual(setup.status().get("python_candidates"), [])
+
+    async def test_python_probe_discovers_system_and_user_script_directories(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            scripts = root / "Python313" / "Scripts"
+            user_scripts = root / "Roaming" / "Python" / "Python313" / "Scripts"
+            setup = WindowsMCPSetup(root, _SetupSession(), WorkflowStore(root))
+            setup._run_command = AsyncMock(
+                return_value="launcher noise\n"
+                + json.dumps(
+                    {
+                        "executable": str(root / "Python313" / "python.exe"),
+                        "script_dirs": [str(scripts), str(user_scripts)],
+                    }
+                )
+            )
+
+            result = await setup._python_script_dirs(["py.exe", "-3"])
+
+            self.assertEqual(result, [scripts, user_scripts])
+            self.assertEqual(setup._run_command.await_args.args[0][:3], ["py.exe", "-3", "-c"])
+
+    def test_python_reported_script_directory_precedes_stale_uv_on_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            stale = root / "old" / "uv.exe"
+            installed = root / "Python313" / "Scripts" / "uv.exe"
+            stale.parent.mkdir(parents=True)
+            installed.parent.mkdir(parents=True)
+            stale.write_bytes(b"")
+            installed.write_bytes(b"")
+            setup = WindowsMCPSetup(root, _SetupSession(), WorkflowStore(root))
+            setup._python_commands = Mock(return_value=[])
+
+            with patch("no1.computer_control.mcp.shutil.which", return_value=str(stale)):
+                candidates = setup._uv_candidates(extra_roots=[installed.parent])
+
+            self.assertEqual(candidates[:2], [installed, stale])
+
+    async def test_windows_9009_command_failure_has_actionable_error(self):
+        process = Mock(returncode=9009)
+        process.communicate = AsyncMock(return_value=(b"", b""))
+        with tempfile.TemporaryDirectory() as td:
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            with patch("no1.computer_control.mcp.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+                with self.assertRaisesRegex(MCPUnavailable, "Windows.*9009"):
+                    await setup._run_command(["python.EXE", "-m", "pip"], timeout=1)
+
+    async def test_missing_executable_has_actionable_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
+            with patch(
+                "no1.computer_control.mcp.asyncio.create_subprocess_exec",
+                AsyncMock(side_effect=FileNotFoundError(2, "missing")),
+            ):
+                with self.assertRaisesRegex(MCPUnavailable, "python.exe.*无法启动"):
+                    await setup._run_command(["python.exe", "-m", "pip"], timeout=1)
 
     async def test_latest_package_is_installed_without_a_version_constraint(self):
         with tempfile.TemporaryDirectory() as td:
@@ -843,9 +1004,10 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as td:
             setup = WindowsMCPSetup(Path(td), _SetupSession(), WorkflowStore(Path(td)))
             installed = Path(td) / "Scripts" / "uv.exe"
-            setup._find_uv = Mock(side_effect=[None, installed])
+            setup._uv_candidates = Mock(side_effect=[[], [installed]])
             setup._python_commands = Mock(return_value=[["python"]])
-            setup._run_command = AsyncMock(side_effect=[RuntimeError("user site disabled"), ""])
+            setup._python_script_dirs = AsyncMock(return_value=[installed.parent])
+            setup._run_command = AsyncMock(side_effect=[RuntimeError("user site disabled"), "", "uv 0.8.0"])
 
             result = await setup._ensure_uv()
 
@@ -853,6 +1015,25 @@ class TestWindowsMCPSetup(unittest.IsolatedAsyncioTestCase):
             calls = [call.args[0] for call in setup._run_command.await_args_list]
             self.assertEqual(calls[0], ["python", "-m", "pip", "install", "--user", "uv"])
             self.assertEqual(calls[1], ["python", "-m", "pip", "install", "uv"])
+
+    async def test_broken_uv_on_path_falls_back_to_pip_installed_uv(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            broken = root / "old" / "uv.exe"
+            installed = root / "Python313" / "Scripts" / "uv.exe"
+            setup = WindowsMCPSetup(root, _SetupSession(), WorkflowStore(root))
+            setup._uv_candidates = Mock(side_effect=[[broken], [installed]])
+            setup._python_commands = Mock(return_value=[["python"]])
+            setup._python_script_dirs = AsyncMock(return_value=[installed.parent])
+            setup._run_command = AsyncMock(side_effect=[RuntimeError("broken uv"), "", "uv 0.8.0"])
+
+            result = await setup._ensure_uv()
+
+            self.assertEqual(result, installed)
+            calls = [call.args[0] for call in setup._run_command.await_args_list]
+            self.assertEqual(calls[0], [str(broken), "--version"])
+            self.assertEqual(calls[1], ["python", "-m", "pip", "install", "--user", "uv"])
+            self.assertEqual(calls[2], [str(installed), "--version"])
 
 
 if __name__ == "__main__":

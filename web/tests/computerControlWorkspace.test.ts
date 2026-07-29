@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { computerControlGroupIdFromPath, isComputerControlPath } from "../src/utils/appTabs";
 import { isValidNodePosition, normalizeDefinition } from "../src/pages/computerControl/types";
+import { setupErrorMessage } from "../src/pages/computerControl/statusPresentation";
 
 describe("computer control workspace routing", () => {
+  it("turns Python 9009 setup failures into an actionable message", () => {
+    expect(setupErrorMessage("python.EXE exited with code 9009", "failed")).toContain("Windows 错误 9009");
+    expect(setupErrorMessage("", "ready")).toBe("");
+  });
+
   it("recognizes legacy paths and decodes the group id", () => {
     expect(isComputerControlPath("/computer-control/g%201")).toBe(true);
     expect(computerControlGroupIdFromPath("/ui/computer-control/g%201")).toBe("g 1");

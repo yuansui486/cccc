@@ -4,9 +4,18 @@ import {
   normalizeTrigger,
   normalizeTriggerRuntime,
   serializeTrigger,
+  triggerKindLabel,
 } from "../src/pages/computerControl/triggerTypes";
 
 describe("computer control trigger drafts", () => {
+  it("uses clear user-facing labels for every supported trigger type", () => {
+    expect(triggerKindLabel("element")).toBe("元素出现");
+    expect(triggerKindLabel("interval")).toBe("按间隔");
+    expect(triggerKindLabel("schedule")).toBe("定时计划");
+    expect(triggerKindLabel("at")).toBe("一次性计划");
+    expect(triggerKindLabel("cron")).toBe("Cron（高级）");
+  });
+
   it("uses practical interval and element polling defaults", () => {
     expect(createTrigger("interval").intervalSeconds).toBe(300);
     expect(createTrigger("element").pollIntervalSeconds).toBe(2);

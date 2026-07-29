@@ -32,6 +32,10 @@ export type TriggerRuntimeStatus = {
   error?: string;
 };
 
+export function triggerKindLabel(kind: TriggerKind): string {
+  return ({ interval: "按间隔", schedule: "定时计划", at: "一次性计划", cron: "Cron（高级）", element: "元素出现" } as Record<TriggerKind, string>)[kind];
+}
+
 export type TriggerDraft = {
   id: string;
   title: string;

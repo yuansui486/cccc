@@ -59,7 +59,7 @@ import { normalizeDefinition, serializeDefinition } from "./types";
 import { WorkflowCanvas } from "./WorkflowCanvas";
 import { COMPUTER_CONTROL_TAB } from "../../utils/appTabs";
 import { useUIStore } from "../../stores";
-import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, latestComputerControlObservation, newestComputerControlObservation, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
+import { computerControlProviderLabel, computerControlSessionDetails, formatComputerControlTime, latestComputerControlObservation, newestComputerControlObservation, setupErrorMessage, shouldRefreshComputerControlAfterSseTransition } from "./statusPresentation";
 
 type Section = "tools" | "steps" | "properties" | "runs";
 type Snapshot = { nodes: CanvasNode[]; edges: CanvasEdge[] };
@@ -1269,9 +1269,10 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--color-border)] px-3 text-sm disabled:opacity-50"
             onClick={() => setTriggerDialogOpen(true)}
             disabled={!record || Boolean(busy)}
+            title={!record ? "请先选择或创建工作流" : "配置元素、定时、周期和一次性触发"}
           >
             <AlarmClock size={15} />
-            触发器
+            自动触发
           </button>
           <button
             className="inline-flex h-9 items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 text-sm text-white disabled:opacity-50"
@@ -1311,10 +1312,15 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
             </span>
           )}
           <div className="text-[var(--color-text-secondary)]">
-            {setup.error?.message ||
+            {setupErrorMessage(setup.error?.message, setup.phase) ||
               (setup.phase === "ready"
                 ? `已验证 ${setup.tool_count || 0} 个电脑工具`
                 : "首次准备可能需要一到两分钟，可以继续浏览此页面")}
+            {setup.phase === "failed" && setup.python_candidates && setup.python_candidates.length > 0 && (
+              <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                已尝试：{setup.python_candidates.join("、")}
+              </div>
+            )}
           </div>
           {(sessionDetails.startedAt || sessionDetails.transportRestarts !== null) && (
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-[var(--color-text-secondary)]">
@@ -1456,9 +1462,21 @@ export function ComputerControlWorkspace({ groupId, activeTab, groupLabelById }:
         >
           <div className="mb-4">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                工作流
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-semibold text-[var(--color-text-secondary)]">
+                  工作流
+                </h2>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent-primary)] disabled:opacity-40"
+                  onClick={() => setTriggerDialogOpen(true)}
+                  disabled={!record || Boolean(busy)}
+                  title={!record ? "请先选择或创建工作流" : "配置元素、定时、周期和一次性触发"}
+                >
+                  <AlarmClock size={12} />
+                  自动触发
+                </button>
+              </div>
               <div className="flex items-center gap-1">
                 <button
                   title="新建工作流"

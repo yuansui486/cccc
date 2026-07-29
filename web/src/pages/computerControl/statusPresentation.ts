@@ -1,5 +1,16 @@
 import type { ComputerSetup } from "../../services/api/computerControl";
 
+export function setupErrorMessage(message: unknown, phase = ""): string {
+  const text = String(message || "");
+  if (/9009|python(?:\.exe|\.EXE)?.*未找到|not found.*python/i.test(text)) {
+    return "找不到可用的 Python 命令（Windows 错误 9009）。请安装 Python 3.9+，勾选“Add Python to PATH”或安装 Python Launcher，然后点击“修复”。";
+  }
+  if (/Unable to install uv with pip/i.test(text)) {
+    return "无法通过 Python 安装 uv。请确认 Python 和 pip 可用，并允许当前用户安装工具后再点击“修复”。";
+  }
+  return text || (phase === "failed" ? "Windows-MCP 安装失败，请点击“修复”重试。" : "");
+}
+
 export type ComputerControlSessionDetails = {
   startedAt: number | string | null;
   transportRestarts: number | null;

@@ -719,6 +719,7 @@ class WindowsMCPSetup:
             detail=None,
             error=None,
             failure=None,
+            python_candidates=[],
         )
         return self.status()
 
@@ -726,6 +727,9 @@ class WindowsMCPSetup:
         self.tool_dir.mkdir(parents=True, exist_ok=True)
         self.bin_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
+        search_path = self._command_search_path()
+        if search_path:
+            env["PATH"] = search_path
         env.update(
             {
                 "UV_TOOL_DIR": str(self.tool_dir),
@@ -741,47 +745,198 @@ class WindowsMCPSetup:
         return self.bin_dir / f"windows-mcp{suffix}"
 
     async def _ensure_uv(self) -> Path:
-        existing = self._find_uv()
-        if existing is not None:
-            self._set("checking", detail="uv_ready", uv_path=str(existing))
-            return existing
-        self._set("downloading", detail="installing_uv_with_pip")
         errors: List[str] = []
-        for command in self._python_commands():
-            for location_args in (["--user"], []):
+
+        async def find_working_uv(*, extra_roots: Sequence[Path] = ()) -> Optional[Path]:
+            for candidate in self._uv_candidates(extra_roots=extra_roots):
                 try:
-                    await self._run_command([*command, "-m", "pip", "install", *location_args, "uv"], timeout=600)
+                    await self._run_command(
+                        [str(candidate), "--version"],
+                        env=self._bootstrap_environment(),
+                        timeout=30,
+                    )
                 except Exception as exc:
                     errors.append(_redact(str(exc)))
                     continue
-                installed = self._find_uv()
+                return candidate
+            return None
+
+        existing = await find_working_uv()
+        if existing is not None:
+            self._set("checking", detail="uv_ready", uv_path=str(existing), python_candidates=[])
+            return existing
+        commands = self._python_commands()
+        self._set(
+            "downloading",
+            detail="installing_uv_with_pip",
+            python_candidates=[" ".join(str(part) for part in command) for command in commands],
+        )
+        for command in commands:
+            try:
+                script_dirs = await self._python_script_dirs(command)
+            except Exception as exc:
+                errors.append(_redact(str(exc)))
+                continue
+            for location_args in (["--user"], []):
+                try:
+                    await self._run_command(
+                        [*command, "-m", "pip", "install", *location_args, "uv"],
+                        env=self._bootstrap_environment(),
+                        timeout=600,
+                    )
+                except Exception as exc:
+                    errors.append(_redact(str(exc)))
+                    continue
+                installed = await find_working_uv(extra_roots=script_dirs)
                 if installed is not None:
-                    self._set("checking", detail="uv_installed", uv_path=str(installed))
+                    self._set("checking", detail="uv_installed", uv_path=str(installed), python_candidates=[])
                     return installed
         detail = " | ".join(errors[-3:])
+        if not commands:
+            raise MCPUnavailable("未找到可用的 Python 命令，无法安装 uv。请安装 Python 3.9+ 或 Python Launcher (py.exe)，并将其加入 PATH")
         raise MCPUnavailable(f"Unable to install uv with pip{': ' + detail if detail else ''}")
+
+    def _bootstrap_environment(self) -> Dict[str, str]:
+        env = dict(os.environ)
+        search_path = self._command_search_path()
+        if search_path:
+            env["PATH"] = search_path
+        env["PYTHONUTF8"] = "1"
+        return env
+
+    async def _python_script_dirs(self, command: Sequence[str]) -> List[Path]:
+        probe = (
+            "import json,os,site,sys,sysconfig;"
+            "user=site.getuserbase();"
+            "scripts=sysconfig.get_path('scripts');"
+            "user_scripts=(os.path.join(user,'Python%d%d'%sys.version_info[:2],'Scripts') "
+            "if user and os.name=='nt' else (os.path.join(user,'bin') if user else ''));"
+            "print(json.dumps({'executable':sys.executable,'script_dirs':[scripts,user_scripts]}))"
+        )
+        output = await self._run_command(
+            [*command, "-c", probe],
+            env=self._bootstrap_environment(),
+            timeout=30,
+        )
+        metadata: Dict[str, Any] = {}
+        for line in reversed(output.splitlines()):
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                metadata = value
+                break
+        if not metadata:
+            raise MCPUnavailable(f"{Path(str(command[0])).name} 未返回有效的 Python 环境信息")
+        roots: List[Path] = []
+        for value in metadata.get("script_dirs", []):
+            if isinstance(value, str) and value.strip():
+                roots.append(Path(value))
+        return roots
+
+    @staticmethod
+    def _command_search_path() -> str:
+        values: List[str] = []
+        if sys.platform == "win32":
+            try:
+                import winreg
+
+                locations = (
+                    (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+                    (winreg.HKEY_CURRENT_USER, r"Environment"),
+                )
+                for hive, key_name in locations:
+                    try:
+                        with winreg.OpenKey(hive, key_name) as key:
+                            raw, _ = winreg.QueryValueEx(key, "Path")
+                    except OSError:
+                        continue
+                    if raw:
+                        values.append(os.path.expandvars(str(raw)))
+            except (ImportError, OSError):
+                pass
+        values.append(str(os.environ.get("PATH") or ""))
+        result: List[str] = []
+        seen = set()
+        for value in values:
+            for item in value.split(os.pathsep):
+                expanded = os.path.expandvars(item.strip().strip('"'))
+                if not expanded:
+                    continue
+                key = os.path.normcase(os.path.abspath(expanded))
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(expanded)
+        return os.pathsep.join(result)
 
     @staticmethod
     def _python_commands() -> List[List[str]]:
         commands: List[List[str]] = []
-        if sys.executable:
-            commands.append([sys.executable])
-        if shutil.which("py"):
-            commands.append([str(shutil.which("py")), "-3"])
-        if shutil.which("python") and str(shutil.which("python")) != sys.executable:
-            commands.append([str(shutil.which("python"))])
+        seen_commands = set()
+
+        def add(command: Sequence[str]) -> None:
+            if not command or not str(command[0] or "").strip():
+                return
+            key = (os.path.normcase(os.path.abspath(str(command[0]))), tuple(str(item) for item in command[1:]))
+            if key in seen_commands:
+                return
+            seen_commands.add(key)
+            commands.append(list(command))
+
+        def add_path_matches(names: Sequence[str], *arguments: str) -> None:
+            for raw_root in search_path.split(os.pathsep):
+                root = raw_root.strip().strip('"')
+                if not root:
+                    continue
+                for name in names:
+                    candidate = Path(root) / name
+                    if candidate.is_file():
+                        add([str(candidate), *arguments])
+
+        executable = str(getattr(sys, "executable", "") or "").strip()
+        executable_name = Path(executable).name.casefold() if executable else ""
+        # In a Nuitka build sys.executable is onecolleague.exe, not Python.
+        if executable and executable_name.startswith("python"):
+            add([executable])
+
+        search_path = WindowsMCPSetup._command_search_path()
+        launcher = shutil.which("py", path=search_path)
+        if launcher:
+            add([str(launcher), "-3"])
+        elif sys.platform == "win32":
+            windows_dir = Path(str(os.environ.get("WINDIR") or r"C:\Windows"))
+            launcher_path = windows_dir / "py.exe"
+            if launcher_path.is_file():
+                add([str(launcher_path), "-3"])
+        add_path_matches(("py.exe", "py"), "-3")
+        for name in ("python", "python3", "python.exe", "python3.exe"):
+            candidate = shutil.which(name, path=search_path)
+            if candidate:
+                add([str(candidate)])
+        add_path_matches(("python.exe", "python3.exe", "python", "python3"))
+        if sys.platform == "win32":
+            search_patterns = [
+                (os.environ.get("LOCALAPPDATA"), "Programs/Python/Python*/python.exe"),
+                (os.environ.get("ProgramFiles"), "Python*/python.exe"),
+                (os.environ.get("ProgramFiles"), "Python/Python*/python.exe"),
+                (os.environ.get("ProgramFiles(x86)"), "Python*/python.exe"),
+            ]
+            for raw_root, pattern in search_patterns:
+                if not raw_root:
+                    continue
+                root = Path(str(raw_root))
+                for candidate in sorted(root.glob(pattern), reverse=True):
+                    if candidate.is_file():
+                        add([str(candidate)])
         return commands
 
-    def _find_uv(self) -> Optional[Path]:
+    def _uv_candidates(self, *, extra_roots: Sequence[Path] = ()) -> List[Path]:
         names = ["uv.exe", "uv"] if os.name == "nt" else ["uv"]
-        found = shutil.which("uv")
-        if found:
-            try:
-                return Path(found)
-            except (TypeError, ValueError, OSError):
-                pass
-
+        candidates: List[Path] = []
         roots: List[Path] = []
+        seen = set()
 
         def as_path(value: Any) -> Optional[Path]:
             if value is None or (isinstance(value, str) and not value.strip()):
@@ -796,6 +951,29 @@ class WindowsMCPSetup:
             if path is not None:
                 roots.append(path)
 
+        def add_candidate(value: Any) -> None:
+            path = as_path(value)
+            if path is None:
+                return
+            key = os.path.normcase(os.path.abspath(str(path)))
+            if key in seen or not path.is_file():
+                return
+            seen.add(key)
+            candidates.append(path)
+
+        # After pip installation, prefer the Scripts directories reported by
+        # that exact Python over a stale or broken uv earlier on PATH.
+        for root in extra_roots:
+            root_path = as_path(root)
+            if root_path is None:
+                continue
+            for name in names:
+                add_candidate(root_path / name)
+
+        found = shutil.which("uv", path=self._command_search_path())
+        if found:
+            add_candidate(found)
+
         executable = getattr(sys, "executable", None)
         executable_path = as_path(executable)
         if executable_path is not None:
@@ -806,6 +984,15 @@ class WindowsMCPSetup:
         if user_base_path is not None:
             add_root(user_base_path / ("Scripts" if os.name == "nt" else "bin"))
 
+        if sys.platform == "win32":
+            app_data = as_path(os.environ.get("APPDATA"))
+            if app_data is not None:
+                roots.extend(path for path in app_data.glob("Python/Python*/Scripts") if path.is_dir())
+            local_app_data = as_path(os.environ.get("LOCALAPPDATA"))
+            if local_app_data is not None:
+                roots.extend(path for path in local_app_data.glob("Programs/Python/Python*/Scripts") if path.is_dir())
+        add_root(Path.home() / ".local" / "bin")
+
         for command in self._python_commands():
             if not command:
                 continue
@@ -814,15 +1001,14 @@ class WindowsMCPSetup:
             if executable_path is None:
                 continue
             roots.extend([executable_path.parent, executable_path.parent / "Scripts"])
-        seen = set()
         for root in roots:
             for name in names:
-                candidate = root / name
-                key = str(candidate).lower()
-                if key not in seen and candidate.is_file():
-                    return candidate
-                seen.add(key)
-        return None
+                add_candidate(root / name)
+        return candidates
+
+    def _find_uv(self, *, extra_roots: Sequence[Path] = ()) -> Optional[Path]:
+        candidates = self._uv_candidates(extra_roots=extra_roots)
+        return candidates[0] if candidates else None
 
     def _installed_version(self) -> str:
         patterns = [
@@ -850,13 +1036,23 @@ class WindowsMCPSetup:
     ) -> str:
         display = " ".join(command)
         self._setup_logs.append(_redact(f"> {display}"))
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-            creationflags=_creation_flags(),
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                creationflags=_creation_flags(),
+            )
+        except FileNotFoundError as exc:
+            command_name = Path(str(command[0])).name
+            raise MCPUnavailable(
+                f"{command_name} 无法启动（Windows 找不到该命令）。请确认 Python 或 uv 已正确安装并加入 PATH"
+            ) from exc
+        except OSError as exc:
+            command_name = Path(str(command[0])).name
+            detail = f"WinError {exc.winerror}" if getattr(exc, "winerror", None) is not None else str(exc)
+            raise MCPUnavailable(f"{command_name} 无法启动：{detail}") from exc
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -868,5 +1064,10 @@ class WindowsMCPSetup:
         self._setup_logs.extend(line[:2000] for line in lines[-30:])
         if process.returncode != 0:
             tail = " | ".join(lines[-8:])
+            if process.returncode == 9009:
+                command_name = Path(str(command[0])).name
+                raise MCPUnavailable(
+                    f"{command_name} 未找到（Windows 错误 9009）。请确认 Python 或 Python Launcher 已安装并加入 PATH"
+                )
             raise MCPUnavailable(f"{Path(command[0]).name} exited with code {process.returncode}{': ' + tail if tail else ''}")
         return output
