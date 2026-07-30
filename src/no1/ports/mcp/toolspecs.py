@@ -1016,6 +1016,11 @@ MCP_TOOLS = [
                 "state": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
                 "force": {"type": "boolean", "default": False},
+                "fresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Only for sources/artifact list. Bypass the local metadata snapshot and fetch the remote list.",
+                },
                 "wait": {"type": "boolean", "default": False},
                 "save_to_space": {"type": "boolean", "default": True},
                 "output_path": {"type": "string"},

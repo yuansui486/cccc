@@ -1591,14 +1591,20 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             )
         if action == "sources":
             by = _resolve_caller_from_by(arguments)
+            source_action = str(arguments.get("source_action") or arguments.get("sub_action") or "list")
             return space_sources(
                 group_id=gid,
                 by=by,
                 provider=provider,
                 lane=(lane or "work"),
-                action=str(arguments.get("source_action") or arguments.get("sub_action") or "list"),
+                action=source_action,
                 source_id=str(arguments.get("source_id") or ""),
                 new_title=str(arguments.get("new_title") or ""),
+                fresh=(
+                    coerce_bool(arguments.get("fresh"), default=False)
+                    if source_action.strip().lower() == "list"
+                    else False
+                ),
             )
         if action == "artifact":
             by = _resolve_caller_from_by(arguments)
@@ -1617,6 +1623,11 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                 action=parsed["action"],
                 kind=str(arguments.get("kind") or ""),
                 options=parsed["options"],
+                fresh=(
+                    coerce_bool(arguments.get("fresh"), default=False)
+                    if str(parsed["action"] or "").strip().lower() == "list"
+                    else False
+                ),
                 wait=coerce_bool(arguments.get("wait"), default=False),
                 save_to_space=coerce_bool(arguments.get("save_to_space"), default=True),
                 output_path=str(arguments.get("output_path") or ""),

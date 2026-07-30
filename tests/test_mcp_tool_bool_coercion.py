@@ -440,6 +440,66 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             self.assertEqual(kwargs.get("by"), "peer1")
             self.assertFalse(bool(kwargs.get("wait")))
 
+    def test_space_list_fresh_bool_coercion_reaches_both_handlers(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        cases = (
+            ("sources", None, False),
+            ("sources", "true", True),
+            ("sources", "false", False),
+            ("artifact", None, False),
+            ("artifact", "true", True),
+            ("artifact", "false", False),
+        )
+        for action, raw_fresh, expected in cases:
+            with self.subTest(action=action, fresh=raw_fresh), patch.object(
+                mcp_server, "_resolve_group_id", return_value="g_test"
+            ), patch.object(mcp_server, "_resolve_caller_from_by", return_value="peer1"), patch.object(
+                mcp_server, "space_sources", return_value={"ok": True}
+            ) as mock_sources, patch.object(
+                mcp_server, "space_artifact", return_value={"ok": True}
+            ) as mock_artifact:
+                arguments = {
+                    "action": action,
+                    "sub_action": "list",
+                    "lane": "work",
+                }
+                if raw_fresh is not None:
+                    arguments["fresh"] = raw_fresh
+                mcp_server.handle_tool_call("onecolleague_space", arguments)
+
+                called = mock_sources if action == "sources" else mock_artifact
+                self.assertEqual(called.call_args.kwargs.get("fresh"), expected)
+
+    def test_space_handlers_only_send_fresh_for_list_actions(self) -> None:
+        from no1.ports.mcp.handlers import onecolleague_space
+
+        captured = []
+
+        def _fake_daemon(req, **_kwargs):
+            captured.append(req)
+            return {"ok": True}
+
+        with patch.object(onecolleague_space, "_call_daemon_or_raise", side_effect=_fake_daemon):
+            onecolleague_space.space_sources(group_id="g_test", by="peer1", action="list", fresh=True)
+            onecolleague_space.space_sources(group_id="g_test", by="peer1", action="list", fresh=False)
+            onecolleague_space.space_sources(group_id="g_test", by="peer1", action="refresh", fresh=True)
+            onecolleague_space.space_artifact(group_id="g_test", by="peer1", action="list", fresh=True)
+            onecolleague_space.space_artifact(group_id="g_test", by="peer1", action="list", fresh=False)
+            onecolleague_space.space_artifact(
+                group_id="g_test",
+                by="peer1",
+                action="generate",
+                kind="report",
+                fresh=True,
+            )
+
+        args = [req.get("args") if isinstance(req.get("args"), dict) else {} for req in captured]
+        self.assertEqual([item.get("fresh") for item in args[:2]], [True, False])
+        self.assertNotIn("fresh", args[2])
+        self.assertEqual([item.get("fresh") for item in args[3:5]], [True, False])
+        self.assertNotIn("fresh", args[5])
+
     def test_space_artifact_infers_generate_when_action_missing(self) -> None:
         from no1.ports.mcp import server as mcp_server
 

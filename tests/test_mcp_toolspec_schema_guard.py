@@ -52,6 +52,11 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertIn("source_ids", opt_props)
         self.assertNotIn("language", opt_props)
         self.assertNotIn("lang", opt_props)
+        fresh = props.get("fresh") if isinstance(props, dict) else {}
+        self.assertIsInstance(fresh, dict)
+        self.assertEqual(fresh.get("type"), "boolean")
+        self.assertFalse(bool(fresh.get("default")))
+        self.assertIn("sources/artifact list", str(fresh.get("description") or ""))
 
     def test_memory_actions_match_reme_surface(self) -> None:
         spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_memory"), None)
