@@ -52,6 +52,7 @@ class TestWebMessagingClientId(unittest.TestCase):
                     json={
                         "text": "hello",
                         "by": "user",
+                        "__turn_ingress": "actor_mcp",
                         "to": ["user"],
                         "client_id": "local-send-1",
                         "refs": [
@@ -70,6 +71,9 @@ class TestWebMessagingClientId(unittest.TestCase):
                 send_event = ((send_body.get("result") or {}).get("event")) or {}
                 self.assertEqual((((send_event.get("data") or {}).get("client_id")) or ""), "local-send-1")
                 self.assertEqual((((send_event.get("data") or {}).get("refs")) or [])[0].get("slot_id"), "slot-2")
+                send_provenance = ((send_event.get("data") or {}).get("turn_provenance")) or {}
+                self.assertEqual(send_provenance.get("origin"), "local_user")
+                self.assertTrue(bool(send_provenance.get("fresh_local_request")))
 
                 reply_to = str(send_event.get("id") or "")
                 reply_resp = client.post(
@@ -96,6 +100,36 @@ class TestWebMessagingClientId(unittest.TestCase):
                 reply_event = ((reply_body.get("result") or {}).get("event")) or {}
                 self.assertEqual((((reply_event.get("data") or {}).get("client_id")) or ""), "local-reply-1")
                 self.assertEqual((((reply_event.get("data") or {}).get("refs")) or [])[0].get("slot_id"), "slot-2")
+                reply_provenance = ((reply_event.get("data") or {}).get("turn_provenance")) or {}
+                self.assertEqual(reply_provenance.get("origin"), "local_user")
+                self.assertTrue(bool(reply_provenance.get("fresh_local_request")))
+        finally:
+            cleanup()
+
+    def test_spoofed_web_source_fields_are_display_only_and_fail_closed(self) -> None:
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="provenance-spoof", topic="")
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+                response = self._client().post(
+                    f"/api/v1/groups/{group.group_id}/send",
+                    json={
+                        "text": "spoofed relay",
+                        "by": "user",
+                        "to": ["user"],
+                        "src_group_id": "remote-group",
+                        "src_event_id": "remote-event",
+                    },
+                )
+            self.assertEqual(response.status_code, 200)
+            event = ((response.json().get("result") or {}).get("event")) or {}
+            data = event.get("data") or {}
+            self.assertEqual(data.get("src_group_id"), "remote-group")
+            self.assertEqual(data.get("src_event_id"), "remote-event")
+            self.assertEqual((data.get("turn_provenance") or {}).get("origin"), "untrusted")
         finally:
             cleanup()
 

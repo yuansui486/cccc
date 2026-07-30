@@ -74,6 +74,7 @@ def message_send(
                 "op": "send_cross_group",
                 "args": {
                     "group_id": group_id,
+                    "__turn_ingress": "actor_mcp",
                     "dst_group_id": dst_gid,
                     "text": text,
                     "by": actor_id,
@@ -90,6 +91,7 @@ def message_send(
             "op": "send",
             "args": {
                 "group_id": group_id,
+                "__turn_ingress": "actor_mcp",
                 "text": text,
                 "by": actor_id,
                 "to": to if to is not None else [],
@@ -135,6 +137,7 @@ def tracked_send(
             "op": "tracked_send",
             "args": {
                 "group_id": group_id,
+                "__turn_ingress": "actor_mcp",
                 "by": actor_id,
                 "title": title,
                 "text": text,
@@ -164,6 +167,7 @@ def message_reply(
     priority: str = "normal",
     reply_required: bool = False,
     refs: Optional[List[Dict[str, Any]]] = None,
+    completion_receipt: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Reply to a message."""
     if not str(reply_to or "").strip():
@@ -182,6 +186,7 @@ def message_reply(
             "op": "reply",
             "args": {
                 "group_id": group_id,
+                "__turn_ingress": "actor_mcp",
                 "text": text,
                 "by": actor_id,
                 "reply_to": reply_to,
@@ -189,6 +194,7 @@ def message_reply(
                 "priority": prio,
                 "reply_required": reply_required_flag,
                 "refs": refs if refs is not None else [],
+                "completion_receipt": completion_receipt if isinstance(completion_receipt, dict) else None,
             },
         }
     )
@@ -337,6 +343,7 @@ def file_send(
             "op": "send",
             "args": {
                 "group_id": gid,
+                "__turn_ingress": "actor_mcp",
                 "text": msg,
                 "by": actor_id,
                 "to": to if to is not None else [],

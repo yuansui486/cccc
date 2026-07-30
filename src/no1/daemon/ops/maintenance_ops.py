@@ -12,6 +12,7 @@ from ...kernel.ledger_retention import snapshot as snapshot_ledger
 from ...kernel.permissions import require_group_permission
 from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
+from ..messaging.turn_provenance import INGRESS_CROSS_GROUP, TRUSTED_INGRESS_ARG
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -102,6 +103,7 @@ def handle_send_cross_group(
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"), default=False)
     collaboration_required = coerce_bool(args.get("collaboration_required"), default=False)
+    source_ingress = str(args.get(TRUSTED_INGRESS_ARG) or "").strip()
     to_raw = args.get("to")
     dst_to_tokens: list[str] = []
     if isinstance(to_raw, list):
@@ -140,6 +142,7 @@ def handle_send_cross_group(
         "send",
         {
             "group_id": src_group_id,
+            TRUSTED_INGRESS_ARG: source_ingress,
             "text": text,
             "by": by,
             "to": ["user"],
@@ -162,6 +165,7 @@ def handle_send_cross_group(
         "send",
         {
             "group_id": dst_group_id,
+            TRUSTED_INGRESS_ARG: INGRESS_CROSS_GROUP,
             "text": text,
             "by": by,
             "to": dst_to_canon,
@@ -170,6 +174,7 @@ def handle_send_cross_group(
             "collaboration_required": collaboration_required,
             "src_group_id": src_group_id,
             "src_event_id": src_event_id,
+            "src_by": by,
         },
     )
     if not dst_resp.ok:

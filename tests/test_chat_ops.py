@@ -1072,10 +1072,12 @@ class TestChatOps(unittest.TestCase):
                 patch("no1.daemon.messaging.chat_ops.schedule_headless_post_wake_delivery", return_value=True) as schedule_post_wake,
                 patch("no1.daemon.messaging.chat_ops.get_headless_targets_for_message", return_value=["fm1"]),
                 patch("no1.daemon.messaging.chat_ops.emit_system_notify") as emit_notify,
+                patch("no1.daemon.messaging.chat_ops.commit_experience_reminder") as commit_experience,
             ):
                 resp = handle_send(
                     {
                         "group_id": group_id,
+                        "__turn_ingress": "web_user",
                         "by": "user",
                         "text": "default to stopped foreman",
                     },
@@ -1087,6 +1089,9 @@ class TestChatOps(unittest.TestCase):
                     automation_on_new_message=lambda _group: None,
                     clear_pending_system_notifies=lambda _group_id, _kinds: None,
                 )
+                callback = schedule_post_wake.call_args.kwargs.get("on_delivered")
+                self.assertTrue(callable(callback))
+                callback()
 
             self.assertTrue(resp.ok, getattr(resp, "error", None))
             self.assertEqual(wake_calls, [["@foreman"]])
@@ -1102,6 +1107,11 @@ class TestChatOps(unittest.TestCase):
             self.assertEqual(schedule_kwargs.get("runtime"), "codex")
             self.assertEqual(schedule_kwargs.get("event_id"), event.get("id"))
             self.assertIn("default to stopped foreman", str(schedule_kwargs.get("text") or ""))
+            commit_experience.assert_called_once()
+            from no1.daemon.messaging.turn_provenance import get_current_turn_grant
+
+            grant = get_current_turn_grant(group, "fm1")
+            self.assertIsNone(grant)
             emit_notify.assert_not_called()
         finally:
             cleanup()

@@ -271,6 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_reply.add_argument("--priority", choices=["normal", "attention"], default="normal", help="Message mode")
     p_reply.add_argument("--reply-required", action="store_true", help="Require recipients to reply")
+    p_reply.add_argument("--completion-receipt", default="", help="Daemon delivery completion receipt JSON")
     p_reply.set_defaults(func=cmd_reply)
 
     p_tail = sub.add_parser("tail", help="Tail the active group's ledger (or --group)")

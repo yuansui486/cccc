@@ -13,6 +13,15 @@ from ...kernel.inbox import find_event, get_cursor, has_chat_ack, is_message_for
 from ...kernel.ledger import append_event
 from ...util.time import parse_utc_iso, utc_now_iso
 from ..messaging.actor_turn_rendering import render_actor_event_batch_for_delivery
+from ..messaging.turn_provenance import (
+    TurnDeliveryBusyError,
+    begin_turn_delivery_attempt,
+    finalize_turn_delivery_attempt,
+    invalidate_turn_grant_from_completion_receipt,
+    terminalize_uncertain_delivery_attempt,
+    turn_delivery_attempt_receipt,
+    turn_delivery_completion_receipt,
+)
 from ..runner_state_ops import update_headless_state, web_model_actor_running
 
 
@@ -216,6 +225,30 @@ def handle_web_model_runtime_wait_next_turn(args: Dict[str, Any]) -> DaemonRespo
             "if blocked or failed, still complete it with status=partial or failed and a concise summary."
         ),
     }
+    try:
+        delivery_attempt = begin_turn_delivery_attempt(
+            group,
+            actor_id=actor_id,
+            event_ids=turn["event_ids"],
+            binding={"transport": "web_model_pull", "turn_id": turn["turn_id"]},
+        )
+    except TurnDeliveryBusyError as exc:
+        return _error("turn_delivery_busy", str(exc))
+    if isinstance(delivery_attempt, dict):
+        try:
+            finalize_turn_delivery_attempt(group, actor_id=actor_id, attempt=delivery_attempt)
+            delivery_receipt = turn_delivery_attempt_receipt(group, actor_id=actor_id, attempt=delivery_attempt)
+        except Exception:
+            terminalize_uncertain_delivery_attempt(
+                group,
+                actor_id=actor_id,
+                attempt=delivery_attempt,
+                reason="web_model_pull_finalize_uncertain",
+            )
+            return _error("turn_delivery_failed", "failed to publish web_model pulled turn")
+        if not bool(delivery_receipt.get("finalized")):
+            return _error("turn_delivery_failed", "failed to publish web_model pulled turn")
+        turn["completion_receipt"] = turn_delivery_completion_receipt(delivery_attempt)
     update_headless_state(
         group_id,
         actor_id,
@@ -497,6 +530,14 @@ def handle_web_model_runtime_complete_turn(args: Dict[str, Any]) -> DaemonRespon
         )
     except Exception:
         pass
+
+    invalidate_turn_grant_from_completion_receipt(
+        group,
+        actor_id,
+        completion_receipt=args.get("completion_receipt"),
+        event_ids=[str(event.get("id") or "") for event in events],
+        reason=f"complete_turn:{status}",
+    )
 
     return DaemonResponse(
         ok=True,

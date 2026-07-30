@@ -995,6 +995,9 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val_reply,
+            completion_receipt=(
+                arguments.get("completion_receipt") if isinstance(arguments.get("completion_receipt"), dict) else None
+            ),
         )
 
     if name == "onecolleague_voice_secretary_document":
@@ -1421,6 +1424,11 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                     "latest_event_id": str(arguments.get("latest_event_id") or ""),
                     "status": str(arguments.get("status") or "done"),
                     "summary": str(arguments.get("summary") or ""),
+                    "completion_receipt": (
+                        arguments.get("completion_receipt")
+                        if isinstance(arguments.get("completion_receipt"), dict)
+                        else None
+                    ),
                 },
             },
             timeout_s=120.0,

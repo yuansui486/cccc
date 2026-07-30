@@ -21,6 +21,7 @@ from ...runners import pty as pty_runner
 from ...util.conv import coerce_bool
 from .actor_runtime_ops import model_from_runtime_command, resolve_actor_launch_spec
 from .actor_profile_runtime import ActorProfileAccessDeniedError, resolve_linked_actor_before_start
+from ..messaging.turn_provenance import invalidate_turn_grant
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -172,6 +173,9 @@ def handle_actor_stop(
     try:
         require_actor_permission(group, by=by, action="actor.stop", target_actor_id=actor_id)
         current_actor = find_actor(group, actor_id)
+        if not isinstance(current_actor, dict):
+            return _error("actor_stop_failed", f"actor not found: {actor_id}")
+        invalidate_turn_grant(group, actor_id, reason="actor_stop")
         if isinstance(current_actor, dict) and is_internal_actor(current_actor):
             actor = dict(current_actor)
         else:
@@ -267,8 +271,11 @@ def handle_actor_restart(
     try:
         require_actor_permission(group, by=by, action="actor.restart", target_actor_id=actor_id)
         current_actor = find_actor(group, actor_id)
+        if not isinstance(current_actor, dict):
+            return _error("actor_restart_failed", f"actor not found: {actor_id}")
         if _is_unsupported_internal_actor(current_actor):
             return _unsupported_internal_actor_error(group.group_id, actor_id, current_actor)
+        invalidate_turn_grant(group, actor_id, reason="actor_restart")
         actor = update_actor(group, actor_id, {"enabled": True})
         actor = resolve_linked_actor_before_start(
             group,

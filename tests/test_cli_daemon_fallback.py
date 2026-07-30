@@ -115,6 +115,35 @@ class TestCliDaemonFallback(unittest.TestCase):
             req = call_daemon.call_args.args[0]
             self.assertEqual(req.get("op"), "send")
             self.assertEqual((req.get("args") or {}).get("by"), "小抠")
+            self.assertEqual((req.get("args") or {}).get("__turn_ingress"), "actor_mcp")
+        finally:
+            cleanup()
+
+    def test_send_marks_local_cli_user_ingress(self) -> None:
+        from no1 import cli
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+            args = Namespace(
+                group=group_id,
+                text="local user request",
+                by="user",
+                path="",
+                to=[],
+                priority="normal",
+                reply_required=False,
+            )
+
+            with patch.dict(os.environ, {"CCCC_ACTOR_ID": ""}, clear=False), \
+                 patch.object(cli, "_ensure_daemon_running", return_value=True), \
+                 patch.object(cli, "call_daemon", return_value={"ok": True, "result": {}}) as call_daemon, \
+                 patch.object(cli, "_print_json"):
+                code = cli.cmd_send(args)
+
+            self.assertEqual(code, 0)
+            req = call_daemon.call_args.args[0]
+            self.assertEqual((req.get("args") or {}).get("__turn_ingress"), "cli_user")
         finally:
             cleanup()
 
@@ -157,6 +186,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             req = call_daemon.call_args.args[0]
             self.assertEqual(req.get("op"), "reply")
             self.assertEqual((req.get("args") or {}).get("by"), "小抠")
+            self.assertEqual((req.get("args") or {}).get("__turn_ingress"), "actor_mcp")
         finally:
             cleanup()
 
@@ -193,6 +223,7 @@ class TestCliDaemonFallback(unittest.TestCase):
             req = call_daemon.call_args.args[0]
             self.assertEqual(req.get("op"), "tracked_send")
             self.assertEqual((req.get("args") or {}).get("by"), "小抠")
+            self.assertEqual((req.get("args") or {}).get("__turn_ingress"), "actor_mcp")
         finally:
             cleanup()
 

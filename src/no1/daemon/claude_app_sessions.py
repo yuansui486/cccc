@@ -25,11 +25,24 @@ from ..kernel.actors import find_actor
 from ..kernel.blobs import resolve_blob_attachment_path
 from ..kernel.headless_events import append_headless_event
 from ..kernel.group import load_group
+from ..kernel.inbox import iter_events, set_cursor, unread_messages
+from ..kernel.ledger import append_event
 from ..kernel.system_prompt import render_system_prompt
 from ..paths import ensure_home
 from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .mcp_install import ensure_mcp_installed
-from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
+from .messaging.actor_turn_rendering import render_actor_event_for_delivery
+from .messaging.delivery import append_mcp_reply_reminder, auto_mark_headless_delivery_started, render_headless_control_text
+from .messaging.turn_provenance import (
+    TurnDeliveryBusyError,
+    begin_turn_delivery_attempt,
+    fail_turn_delivery_attempt,
+    finalize_turn_delivery_attempt,
+    invalidate_turn_grant,
+    invalidate_turn_grant_if_identity,
+    terminalize_uncertain_delivery_attempt,
+    turn_delivery_attempt_receipt,
+)
 from .runner_state_ops import headless_state_path, remove_headless_state
 from .runtime_session_ops import (
     mark_runtime_session_resume_failed,
@@ -129,6 +142,23 @@ class _PendingTurn:
     validation_snapshot: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ClaudeWriteOutcome:
+    accepted: bool
+    retryable: bool
+    phase: str
+    transport_epoch: int
+    error: str = ""
+
+
+def _coerce_claude_write_outcome(value: Any, *, transport_epoch: int) -> ClaudeWriteOutcome:
+    if isinstance(value, ClaudeWriteOutcome):
+        return value
+    if bool(value):
+        return ClaudeWriteOutcome(True, False, "accepted", transport_epoch)
+    return ClaudeWriteOutcome(False, True, "pre_write_failed", transport_epoch)
+
+
 @dataclass
 class ClaudeSessionState:
     status: str = "idle"
@@ -165,19 +195,30 @@ class ClaudeAppSession:
         self.env = dict(env or {})
         self.model = str(model or "").strip()
         self._proc: Optional[subprocess.Popen[str]] = None
-        self._lock = threading.Lock()
+        # Event attribution and transport rotation share this gate. Handlers
+        # re-enter it in existing helpers, so it must be reentrant.
+        self._lock = threading.RLock()
         self._running = False
         self._stop_requested = False
         self._session_state = ClaudeSessionState(status="idle")
         self._turn_queue: "queue.Queue[Optional[_PendingTurn]]" = queue.Queue()
         self._turn_done = threading.Event()
+        self._turn_generation = 0
+        self._active_turn_generation = 0
         self._active_turn_id = ""
         self._active_event_id = ""
+        self._active_transport_epoch = 0
+        self._active_delivery_attempt: Optional[dict[str, Any]] = None
+        self._active_grant_generation = 0
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._turn_thread: Optional[threading.Thread] = None
         self._runtime_command: list[str] = []
         self._resumed_provider_session_id = ""
+        self._transport_generation = 0
+        self._proc_generation = 0
+        self._accepted_transport_generation = 0
+        self._transport_restart_required = False
 
         # Streaming text delta tracking (snapshot diffing)
         self._last_text_snapshot = ""
@@ -193,6 +234,7 @@ class ClaudeAppSession:
         self._tool_activity_context: Dict[str, Dict[str, Any]] = {}
         self._active_control_kind = ""
         self._active_payload: Optional[_PendingTurn] = None
+        self._recovery_markers: Dict[str, set[str]] = {}
 
     # ── state persistence ───────────────────────────────────────────────
 
@@ -583,6 +625,10 @@ class ClaudeAppSession:
                 **windowless_subprocess_popen_kwargs(),
             )
             self._running = True
+            self._transport_generation += 1
+            self._proc_generation = self._transport_generation
+            self._accepted_transport_generation = self._proc_generation
+            self._transport_restart_required = False
 
         # Wait briefly for process to prove it's alive (MCP init may take time).
         time.sleep(1.0)
@@ -620,13 +666,18 @@ class ClaudeAppSession:
                         pass
             raise RuntimeError(resume_error)
 
+        with self._lock:
+            proc = self._proc
+            transport_generation = self._proc_generation
         self._stdout_thread = threading.Thread(
             target=self._stdout_loop,
+            args=(proc, transport_generation),
             name=f"onecolleague-claude-out:{self.group_id}:{self.actor_id}",
             daemon=True,
         )
         self._stderr_thread = threading.Thread(
             target=self._stderr_loop,
+            args=(proc,),
             name=f"onecolleague-claude-err:{self.group_id}:{self.actor_id}",
             daemon=True,
         )
@@ -663,6 +714,7 @@ class ClaudeAppSession:
             self._session_state.updated_at = utc_now_iso()
         self._persist_state()
         self._queue_bootstrap_control_turn()
+        self._queue_recovery_turns()
         self._turn_thread.start()
         logger.info("claude headless started: group=%s actor=%s pid=%s", self.group_id, self.actor_id, self._proc.pid if self._proc else "?")
 
@@ -678,11 +730,21 @@ class ClaudeAppSession:
             self._session_state.current_task_id = None
             self._session_state.updated_at = utc_now_iso()
             self._active_control_kind = ""
+            self._active_turn_id = ""
+            self._active_turn_generation = 0
+            self._active_event_id = ""
+            self._active_transport_epoch = 0
+            self._active_delivery_attempt = None
+            self._active_grant_generation = 0
+            self._active_payload = None
             self._resumed_provider_session_id = ""
+            self._accepted_transport_generation = 0
+            self._transport_restart_required = False
         if was_running:
             exit_code = proc.poll() if proc else None
             logger.info("claude headless stopping: group=%s actor=%s exit_code=%s", self.group_id, self.actor_id, exit_code)
         self._persist_state()
+        invalidate_turn_grant(self.group_id, self.actor_id, reason="claude_session_stopped")
         self._turn_done.set()
         try:
             self._turn_queue.put_nowait(None)
@@ -844,23 +906,42 @@ class ClaudeAppSession:
 
     # ── stdin writer ────────────────────────────────────────────────────
 
-    def _write_stdin(self, data: Dict[str, Any]) -> bool:
+    def _write_stdin(self, data: Dict[str, Any]) -> ClaudeWriteOutcome:
         with self._lock:
             proc = self._proc
+            transport_epoch = int(self._proc_generation or 0)
             if not self._running or proc is None or proc.stdin is None:
-                return False
+                return ClaudeWriteOutcome(False, True, "pre_write_failed", transport_epoch, "transport unavailable")
+            if self._proc_generation and self._accepted_transport_generation != self._proc_generation:
+                return ClaudeWriteOutcome(False, True, "pre_write_failed", transport_epoch, "transport not open")
+            line = json.dumps(data, ensure_ascii=False) + "\n"
+
+            def uncertain(phase: str, error: str) -> ClaudeWriteOutcome:
+                if self._proc is proc and self._proc_generation == transport_epoch:
+                    self._accepted_transport_generation = 0
+                    self._transport_restart_required = True
+                return ClaudeWriteOutcome(False, False, phase, transport_epoch, error)
+
             try:
-                line = json.dumps(data, ensure_ascii=False)
-                proc.stdin.write(line + "\n")
+                written = proc.stdin.write(line)
+                if written is not None and int(written) != len(line):
+                    return uncertain("write_unknown", "stdin write was incomplete")
                 proc.stdin.flush()
-                return True
-            except Exception:
-                return False
+                return ClaudeWriteOutcome(True, False, "accepted", transport_epoch)
+            except Exception as exc:
+                return uncertain("write_unknown", str(exc))
 
     # ── stdout event loop ───────────────────────────────────────────────
 
-    def _stdout_loop(self) -> None:
-        proc = self._proc
+    def _stdout_loop(
+        self,
+        proc: Optional[subprocess.Popen[str]] = None,
+        transport_generation: Optional[int] = None,
+    ) -> None:
+        if proc is None:
+            proc = self._proc
+        if transport_generation is None:
+            transport_generation = self._proc_generation
         if proc is None or proc.stdout is None:
             return
         try:
@@ -875,18 +956,24 @@ class ClaudeAppSession:
                     continue
                 if not isinstance(event, dict):
                     continue
-                self._handle_event(event)
+                self._handle_event(event, transport_generation=transport_generation)
         except Exception:
             logger.exception("claude stdout loop failed: %s/%s", self.group_id, self.actor_id)
         finally:
-            # Claude -p is a print-mode transport and may close stdout after a
-            # completed turn.  Treat that as a transient process end, not as a
-            # durable actor stop; otherwise autostarted headless actors become
-            # permanently disabled after a successful bootstrap.
-            self.stop(persist_actor_stopped=False)
+            with self._lock:
+                owns_current_transport = bool(
+                    self._proc is proc
+                    and self._proc_generation == transport_generation
+                    and not self._transport_restart_required
+                )
+                if owns_current_transport:
+                    # Keep the ownership check and stop in one transport gate;
+                    # otherwise an old reader can stop a newly rotated process.
+                    self.stop(persist_actor_stopped=False)
 
-    def _stderr_loop(self) -> None:
-        proc = self._proc
+    def _stderr_loop(self, proc: Optional[subprocess.Popen[str]] = None) -> None:
+        if proc is None:
+            proc = self._proc
         if proc is None or proc.stderr is None:
             return
         try:
@@ -931,6 +1018,264 @@ class ClaudeAppSession:
 
     # ── turn loop ───────────────────────────────────────────────────────
 
+    @staticmethod
+    def _close_transport(proc: Optional[subprocess.Popen[str]]) -> None:
+        if proc is None:
+            return
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=3.0)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _restart_transport_after_stream_completion(self) -> bool:
+        with self._lock:
+            if not self._transport_restart_required:
+                return True
+            if self._stop_requested:
+                return False
+            old_proc = self._proc
+            self._proc = None
+            self._running = False
+            self._proc_generation = 0
+
+        self._close_transport(old_proc)
+
+        env = os.environ.copy()
+        env.update(self.env)
+        resolved_home = str(env.get("ONECOLLEAGUE_HOME") or env.get("CCCC_HOME") or ensure_home())
+        env.setdefault("ONECOLLEAGUE_HOME", resolved_home)
+        env.setdefault("CCCC_HOME", env["ONECOLLEAGUE_HOME"])
+        env["ONECOLLEAGUE_GROUP_ID"] = self.group_id
+        env["ONECOLLEAGUE_ACTOR_ID"] = self.actor_id
+        env["CCCC_GROUP_ID"] = self.group_id
+        env["CCCC_ACTOR_ID"] = self.actor_id
+        env = with_node_deprecation_warnings_suppressed(env)
+
+        launch_cmd, runtime_doc, launch_kind = prepare_claude_headless_launch_command(
+            group_id=self.group_id,
+            actor_id=self.actor_id,
+            cwd=self.cwd,
+            base_command=self._runtime_command,
+            model=self.model,
+        )
+        provider_session_id = str((runtime_doc or {}).get("provider_session_id") or "").strip()
+        if launch_kind != "resume" or not provider_session_id:
+            logger.error(
+                "claude transport rotation requires a resumable provider session: group=%s actor=%s",
+                self.group_id,
+                self.actor_id,
+            )
+            return False
+
+        try:
+            proc = subprocess.Popen(
+                launch_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(self.cwd),
+                env=env,
+                text=True,
+                bufsize=1,
+                **windowless_subprocess_popen_kwargs(),
+            )
+        except Exception:
+            logger.exception(
+                "failed to restart claude transport: group=%s actor=%s",
+                self.group_id,
+                self.actor_id,
+            )
+            return False
+
+        time.sleep(1.0)
+        if proc.poll() is not None:
+            self._close_transport(proc)
+            mark_runtime_session_resume_failed(
+                group_id=self.group_id,
+                actor_id=self.actor_id,
+                error="claude transport rotation resume process exited immediately",
+            )
+            return False
+
+        with self._lock:
+            if self._stop_requested:
+                install_transport = False
+            else:
+                self._transport_generation += 1
+                transport_generation = self._transport_generation
+                self._proc = proc
+                self._running = True
+                self._proc_generation = transport_generation
+                self._accepted_transport_generation = transport_generation
+                self._transport_restart_required = False
+                self._resumed_provider_session_id = provider_session_id
+                install_transport = True
+        if not install_transport:
+            self._close_transport(proc)
+            return False
+
+        self._stdout_thread = threading.Thread(
+            target=self._stdout_loop,
+            args=(proc, transport_generation),
+            name=f"onecolleague-claude-out:{self.group_id}:{self.actor_id}",
+            daemon=True,
+        )
+        self._stderr_thread = threading.Thread(
+            target=self._stderr_loop,
+            args=(proc,),
+            name=f"onecolleague-claude-err:{self.group_id}:{self.actor_id}",
+            daemon=True,
+        )
+        self._stdout_thread.start()
+        self._stderr_thread.start()
+        self._persist_state()
+        return True
+
+    def _persist_queued_recovery(self) -> None:
+        with self._turn_queue.mutex:
+            queued = list(self._turn_queue.queue)
+        event_ids: list[str] = []
+        for payload in queued:
+            if not isinstance(payload, _PendingTurn) or payload.control_kind or not payload.event_id:
+                continue
+            if payload.event_id not in event_ids:
+                event_ids.append(payload.event_id)
+        if not event_ids:
+            return
+        group = load_group(self.group_id)
+        if group is None:
+            return
+        append_event(
+            group.ledger_path,
+            kind="headless.delivery.recovery_required",
+            group_id=group.group_id,
+            scope_key="",
+            by=self.actor_id,
+            data={"actor_id": self.actor_id, "event_ids": event_ids},
+        )
+
+    def _queue_recovery_turns(self) -> None:
+        group = load_group(self.group_id)
+        if group is None:
+            return
+        unresolved: Dict[str, list[str]] = {}
+        for event in iter_events(group.ledger_path):
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            if str(data.get("actor_id") or "") != self.actor_id:
+                continue
+            kind = str(event.get("kind") or "")
+            if kind == "headless.delivery.recovery_completed":
+                unresolved.pop(str(data.get("recovery_event_id") or ""), None)
+                continue
+            if kind != "headless.delivery.recovery_required":
+                continue
+            marker_id = str(event.get("id") or "")
+            if not marker_id:
+                continue
+            unresolved[marker_id] = [
+                str(event_id or "").strip()
+                for event_id in (data.get("event_ids") or [])
+                if str(event_id or "").strip()
+            ]
+        if not unresolved:
+            return
+        unread_by_id = {
+            str(event.get("id") or ""): event
+            for event in unread_messages(group, actor_id=self.actor_id, limit=0, kind_filter="chat")
+        }
+        marker_pending: Dict[str, set[str]] = {
+            marker_id: {event_id for event_id in event_ids if event_id in unread_by_id}
+            for marker_id, event_ids in unresolved.items()
+        }
+        requested_ids: list[str] = []
+        for event_ids in unresolved.values():
+            for event_id in event_ids:
+                if event_id in unread_by_id and event_id not in requested_ids:
+                    requested_ids.append(event_id)
+        for event_id in requested_ids:
+            event = unread_by_id.get(event_id)
+            if not isinstance(event, dict):
+                continue
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            text = append_mcp_reply_reminder(render_actor_event_for_delivery(event, actor_id=self.actor_id))
+            if not text.strip():
+                continue
+            self._turn_queue.put_nowait(
+                _PendingTurn(
+                    text=text,
+                    event_id=event_id,
+                    ts=str(event.get("ts") or ""),
+                    reply_to=str(data.get("reply_to") or "") or None,
+                    attachments=[
+                        item for item in (data.get("attachments") or []) if isinstance(item, dict)
+                    ],
+                )
+            )
+        with self._lock:
+            self._recovery_markers = marker_pending
+        self._complete_recovery_markers()
+
+    def _complete_recovery_markers(self) -> None:
+        with self._lock:
+            completed_ids = [
+                marker_id for marker_id, event_ids in self._recovery_markers.items() if not event_ids
+            ]
+        if not completed_ids:
+            return
+        group = load_group(self.group_id)
+        if group is None:
+            return
+        for marker_id in completed_ids:
+            append_event(
+                group.ledger_path,
+                kind="headless.delivery.recovery_completed",
+                group_id=group.group_id,
+                scope_key="",
+                by=self.actor_id,
+                data={"actor_id": self.actor_id, "recovery_event_id": marker_id},
+            )
+            with self._lock:
+                if not self._recovery_markers.get(marker_id):
+                    self._recovery_markers.pop(marker_id, None)
+
+    def _mark_payload_consumed(self, payload: _PendingTurn) -> bool:
+        if payload.control_kind or not payload.event_id or not payload.ts:
+            return False
+        group = load_group(self.group_id)
+        if group is None:
+            return False
+        cursor = set_cursor(group, self.actor_id, event_id=payload.event_id, ts=payload.ts)
+        if (
+            str(cursor.get("event_id") or "") != payload.event_id
+            or str(cursor.get("ts") or "") != payload.ts
+        ):
+            return False
+        append_event(
+            group.ledger_path,
+            kind="chat.read",
+            group_id=group.group_id,
+            scope_key="",
+            by=self.actor_id,
+            data={"actor_id": self.actor_id, "event_id": payload.event_id},
+        )
+        with self._lock:
+            for event_ids in self._recovery_markers.values():
+                event_ids.discard(payload.event_id)
+        self._complete_recovery_markers()
+        return True
+
     def _turn_loop(self) -> None:
         while self.is_running():
             try:
@@ -942,8 +1287,29 @@ class ClaudeAppSession:
             self._turn_done.clear()
             turn_id = uuid.uuid4().hex[:12]
             with self._lock:
+                self._turn_generation += 1
+                turn_generation = self._turn_generation
                 self._active_control_kind = str(payload.control_kind or "").strip().lower()
                 self._active_payload = payload
+                transport_epoch = int(self._accepted_transport_generation or 0)
+            try:
+                delivery_attempt = begin_turn_delivery_attempt(
+                    self.group_id,
+                    actor_id=self.actor_id,
+                    event_ids=[payload.event_id],
+                    binding={
+                        "transport": "claude_app",
+                        "transport_epoch": transport_epoch,
+                        "turn_generation": turn_generation,
+                    },
+                )
+            except TurnDeliveryBusyError as exc:
+                self._emit(
+                    "headless.control.failed" if payload.control_kind else "headless.turn.failed",
+                    {"event_id": payload.event_id, "error": str(exc)},
+                )
+                continue
+            managed_delivery_attempt = delivery_attempt is not None
 
             # Reset streaming state for new turn
             self._last_text_snapshot = ""
@@ -955,44 +1321,172 @@ class ClaudeAppSession:
             self._tool_activity_context.clear()
 
             with self._lock:
+                self._active_turn_generation = turn_generation
                 self._active_turn_id = turn_id
                 self._active_event_id = payload.event_id
-                if not payload.control_kind:
-                    self._session_state.status = "working"
-                self._session_state.current_task_id = turn_id or payload.event_id or None
-                self._session_state.updated_at = utc_now_iso()
-            self._persist_state()
+                self._active_transport_epoch = transport_epoch
+                self._active_delivery_attempt = delivery_attempt
+                self._active_grant_generation = 0
 
             # Send user message to claude via stdin
             user_content = self._compose_user_content(payload)
-            ok = self._write_stdin({
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": user_content,
-                },
-            })
-            if not ok:
+            write_outcome = _coerce_claude_write_outcome(
+                self._write_stdin(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": user_content,
+                        },
+                    }
+                ),
+                transport_epoch=transport_epoch,
+            )
+            if not write_outcome.accepted:
                 logger.warning("claude stdin write failed: group=%s actor=%s", self.group_id, self.actor_id)
                 with self._lock:
-                    self._session_state.status = "idle"
-                    self._active_event_id = ""
-                    self._active_control_kind = ""
-                    self._active_payload = None
-                    self._session_state.current_task_id = None
-                    self._session_state.updated_at = utc_now_iso()
+                    if (
+                        self._active_turn_generation == turn_generation
+                        and self._active_transport_epoch == transport_epoch
+                        and self._active_turn_id == turn_id
+                    ):
+                        self._session_state.status = "idle"
+                        self._active_turn_id = ""
+                        self._active_turn_generation = 0
+                        self._active_event_id = ""
+                        self._active_transport_epoch = 0
+                        self._active_delivery_attempt = None
+                        self._active_grant_generation = 0
+                        self._active_control_kind = ""
+                        self._active_payload = None
+                        self._session_state.current_task_id = None
+                        self._session_state.updated_at = utc_now_iso()
                 self._persist_state()
+                if managed_delivery_attempt:
+                    if write_outcome.retryable:
+                        fail_turn_delivery_attempt(
+                            self.group_id,
+                            actor_id=self.actor_id,
+                            attempt=delivery_attempt,
+                            reason="claude_turn_start_failed",
+                        )
+                    else:
+                        terminalized = terminalize_uncertain_delivery_attempt(
+                            self.group_id,
+                            actor_id=self.actor_id,
+                            attempt=delivery_attempt,
+                            reason="claude_turn_start_uncertain",
+                        )
+                        if terminalized:
+                            self._mark_payload_consumed(payload)
                 self._emit(
                     "headless.control.failed" if payload.control_kind else "headless.turn.failed",
                     {
                         "turn_id": turn_id,
                         "event_id": payload.event_id,
                         "control_kind": payload.control_kind or None,
-                        "error": "failed to write to claude stdin",
+                        "error": write_outcome.error or "failed to write to claude stdin",
+                        "acceptance_uncertain": not write_outcome.retryable,
                     },
                 )
+                if not write_outcome.retryable:
+                    if not self._restart_transport_after_stream_completion():
+                        self._persist_queued_recovery()
+                        self.stop(persist_actor_stopped=False)
+                        return
                 continue
 
+            try:
+                if managed_delivery_attempt:
+                    finalize_turn_delivery_attempt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                    )
+                    receipt = turn_delivery_attempt_receipt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                    )
+                else:
+                    receipt = {"finalized": True, "grant": None}
+            except Exception:
+                if managed_delivery_attempt:
+                    terminalized = terminalize_uncertain_delivery_attempt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                        reason="claude_accepted_finalize_uncertain",
+                    )
+                    if terminalized:
+                        self._mark_payload_consumed(payload)
+                self._emit(
+                    "headless.control.failed" if payload.control_kind else "headless.turn.failed",
+                    {"turn_id": turn_id, "event_id": payload.event_id, "error": "grant finalize failed"},
+                )
+                self.stop(persist_actor_stopped=False)
+                return
+            grant = receipt.get("grant") if isinstance(receipt.get("grant"), dict) else None
+            with self._lock:
+                active_same_turn = bool(
+                    self._active_turn_generation == turn_generation
+                    and self._active_transport_epoch == transport_epoch
+                    and self._active_turn_id == turn_id
+                )
+                if active_same_turn:
+                    self._active_grant_generation = int((grant or {}).get("generation") or 0)
+                    if bool(receipt.get("finalized")):
+                        if not payload.control_kind:
+                            self._session_state.status = "working"
+                        self._session_state.current_task_id = turn_id or payload.event_id or None
+                        self._session_state.updated_at = utc_now_iso()
+            if active_same_turn and not bool(receipt.get("finalized")):
+                with self._lock:
+                    if (
+                        self._active_turn_generation == turn_generation
+                        and self._active_transport_epoch == transport_epoch
+                        and self._active_turn_id == turn_id
+                    ):
+                        self._active_turn_id = ""
+                        self._active_turn_generation = 0
+                        self._active_event_id = ""
+                        self._active_transport_epoch = 0
+                        self._active_delivery_attempt = None
+                        self._active_grant_generation = 0
+                        self._active_control_kind = ""
+                        self._active_payload = None
+                        self._session_state.status = "idle"
+                        self._session_state.current_task_id = None
+                        self._session_state.updated_at = utc_now_iso()
+                        if self._proc_generation == transport_epoch:
+                            self._accepted_transport_generation = 0
+                            self._transport_restart_required = True
+                if managed_delivery_attempt:
+                    terminalized = terminalize_uncertain_delivery_attempt(
+                        self.group_id,
+                        actor_id=self.actor_id,
+                        attempt=delivery_attempt,
+                        reason="claude_accepted_finalize_not_committed",
+                    )
+                    if terminalized:
+                        self._mark_payload_consumed(payload)
+                self._persist_state()
+                self._emit(
+                    "headless.control.failed" if payload.control_kind else "headless.turn.failed",
+                    {"turn_id": turn_id, "event_id": payload.event_id, "error": "grant finalize not committed"},
+                )
+                if not self._restart_transport_after_stream_completion():
+                    self._persist_queued_recovery()
+                    self.stop(persist_actor_stopped=False)
+                    return
+                continue
+            if not active_same_turn:
+                if not self._restart_transport_after_stream_completion():
+                    self._persist_queued_recovery()
+                    self.stop(persist_actor_stopped=False)
+                    return
+                continue
+            self._persist_state()
             if payload.control_kind:
                 self._emit(
                     "headless.control.started",
@@ -1003,12 +1497,19 @@ class ClaudeAppSession:
                     },
                 )
             else:
-                auto_mark_headless_delivery_started(
-                    group_id=self.group_id,
-                    actor_id=self.actor_id,
-                    event_id=payload.event_id,
-                    ts=payload.ts,
-                )
+                with self._lock:
+                    recovered_turn = any(
+                        payload.event_id in event_ids for event_ids in self._recovery_markers.values()
+                    )
+                if recovered_turn:
+                    self._mark_payload_consumed(payload)
+                else:
+                    auto_mark_headless_delivery_started(
+                        group_id=self.group_id,
+                        actor_id=self.actor_id,
+                        event_id=payload.event_id,
+                        ts=payload.ts,
+                    )
                 self._emit(
                     "headless.turn.started",
                     {
@@ -1020,32 +1521,42 @@ class ClaudeAppSession:
 
             # Wait for turn completion (signaled from _handle_event)
             self._turn_done.wait()
+            if not self._restart_transport_after_stream_completion():
+                self._persist_queued_recovery()
+                self.stop(persist_actor_stopped=False)
+                return
 
     # ── event handling ──────────────────────────────────────────────────
 
-    def _handle_event(self, event: Dict[str, Any]) -> None:
-        event_type = str(event.get("type") or "").strip()
-        if not event_type:
-            return
+    def _handle_event(self, event: Dict[str, Any], *, transport_generation: Optional[int] = None) -> None:
+        # Hold the transport gate through the complete handler. A captured old
+        # epoch can never pass validation, pause, then mutate a newer turn.
+        with self._lock:
+            if transport_generation is not None:
+                if transport_generation != self._accepted_transport_generation:
+                    return
+            event_type = str(event.get("type") or "").strip()
+            if not event_type:
+                return
 
-        if event_type == "system":
-            self._handle_system_event(event)
-        elif event_type == "assistant":
-            self._handle_assistant_event(event)
-        elif event_type == "tool_progress":
-            self._handle_tool_progress_event(event)
-        elif event_type == "tool_result":
-            self._handle_tool_result_event(event)
-        elif event_type == "tool_use_summary":
-            self._handle_tool_use_summary_event(event)
-        elif event_type == "result":
-            self._handle_result_event(event)
-        elif event_type == "stream_event":
-            self._handle_stream_event(event)
-        elif event_type == "user":
-            pass  # echo of user/tool_result messages sent back — no action needed
-        else:
-            logger.debug("claude unhandled event type=%s: %s", event_type, str(event)[:300])
+            if event_type == "system":
+                self._handle_system_event(event)
+            elif event_type == "assistant":
+                self._handle_assistant_event(event)
+            elif event_type == "tool_progress":
+                self._handle_tool_progress_event(event)
+            elif event_type == "tool_result":
+                self._handle_tool_result_event(event)
+            elif event_type == "tool_use_summary":
+                self._handle_tool_use_summary_event(event)
+            elif event_type == "result":
+                self._handle_result_event(event)
+            elif event_type == "stream_event":
+                self._handle_stream_event(event, transport_generation=transport_generation)
+            elif event_type == "user":
+                pass  # echo of user/tool_result messages sent back — no action needed
+            else:
+                logger.debug("claude unhandled event type=%s: %s", event_type, str(event)[:300])
 
     def _handle_system_event(self, event: Dict[str, Any]) -> None:
         subtype = str(event.get("subtype") or "").strip()
@@ -1187,7 +1698,12 @@ class ClaudeAppSession:
                 )
             return
 
-    def _handle_stream_event(self, event: Dict[str, Any]) -> None:
+    def _handle_stream_event(
+        self,
+        event: Dict[str, Any],
+        *,
+        transport_generation: Optional[int] = None,
+    ) -> None:
         """Handle raw Anthropic streaming events from --include-partial-messages."""
         inner = event.get("event") if isinstance(event.get("event"), dict) else {}
         inner_type = str(inner.get("type") or "").strip()
@@ -1265,15 +1781,23 @@ class ClaudeAppSession:
 
         elif inner_type == "message_stop":
             if self._stream_end_turn_pending:
-                self._complete_turn_from_stream()
+                self._complete_turn_from_stream(transport_generation=transport_generation)
 
-    def _complete_turn_from_stream(self) -> None:
+    def _complete_turn_from_stream(self, *, transport_generation: Optional[int] = None) -> None:
         """Complete a turn using accumulated stream_event data (for providers that don't send result events)."""
         now = utc_now_iso()
 
         with self._lock:
+            if (
+                transport_generation is not None
+                and transport_generation != self._accepted_transport_generation
+            ):
+                return
             turn_id = str(self._active_turn_id or "").strip()
+            turn_generation = int(self._active_turn_generation or 0)
             active_event_id = str(self._active_event_id or "").strip()
+            active_transport_epoch = int(self._active_transport_epoch or 0)
+            active_delivery_attempt = self._active_delivery_attempt
             control_kind = str(self._active_control_kind or "").strip().lower()
             active_payload = self._active_payload
             # Guard: if turn already completed by _handle_result_event, no-op.
@@ -1284,13 +1808,37 @@ class ClaudeAppSession:
                 snapshot=(active_payload.validation_snapshot if isinstance(active_payload, _PendingTurn) else {}),
             )
             self._active_turn_id = ""
+            self._active_turn_generation = 0
             self._active_event_id = ""
+            self._active_transport_epoch = 0
+            self._active_delivery_attempt = None
+            self._active_grant_generation = 0
             self._active_control_kind = ""
             self._active_payload = None
             self._session_state.status = "idle"
             self._session_state.current_task_id = None
             self._session_state.updated_at = now
+            if transport_generation is not None:
+                # Seal this reader before releasing the next payload. Any
+                # identity-less result that follows on the old stdout can no
+                # longer be observed by a later turn.
+                self._accepted_transport_generation = 0
+                self._transport_restart_required = True
         self._persist_state()
+        if isinstance(active_delivery_attempt, dict):
+            invalidate_turn_grant_if_identity(
+                self.group_id,
+                self.actor_id,
+                attempt_id=str(active_delivery_attempt.get("attempt_id") or ""),
+                generation=int(active_delivery_attempt.get("generation") or 0),
+                event_ids=[active_event_id],
+                binding={
+                    "transport": "claude_app",
+                    "transport_epoch": active_transport_epoch,
+                    "turn_generation": turn_generation,
+                },
+                reason="claude_turn_completed",
+            )
 
         stream_id = self._current_stream_id or ""
         text = self._last_text_snapshot or ""
@@ -1556,6 +2104,9 @@ class ClaudeAppSession:
         with self._lock:
             active_event_id = str(self._active_event_id or "").strip()
             turn_id = str(self._active_turn_id or "").strip()
+            turn_generation = int(self._active_turn_generation or 0)
+            active_transport_epoch = int(self._active_transport_epoch or 0)
+            active_delivery_attempt = self._active_delivery_attempt
             control_kind = str(self._active_control_kind or "").strip().lower()
             active_payload = self._active_payload
             # Guard: if turn already completed by _complete_turn_from_stream, no-op.
@@ -1566,7 +2117,11 @@ class ClaudeAppSession:
                 snapshot=(active_payload.validation_snapshot if isinstance(active_payload, _PendingTurn) else {}),
             )
             self._active_turn_id = ""
+            self._active_turn_generation = 0
             self._active_event_id = ""
+            self._active_transport_epoch = 0
+            self._active_delivery_attempt = None
+            self._active_grant_generation = 0
             self._active_control_kind = ""
             self._active_payload = None
             self._session_state.status = "idle"
@@ -1575,6 +2130,20 @@ class ClaudeAppSession:
             if subtype in ("success", ""):
                 self._resumed_provider_session_id = ""
         self._persist_state()
+        if isinstance(active_delivery_attempt, dict):
+            invalidate_turn_grant_if_identity(
+                self.group_id,
+                self.actor_id,
+                attempt_id=str(active_delivery_attempt.get("attempt_id") or ""),
+                generation=int(active_delivery_attempt.get("generation") or 0),
+                event_ids=[active_event_id],
+                binding={
+                    "transport": "claude_app",
+                    "transport_epoch": active_transport_epoch,
+                    "turn_generation": turn_generation,
+                },
+                reason="claude_turn_completed",
+            )
 
         resume_error_text = str(event.get("error") or event.get("result") or "unknown error")
         resume_rejected = False

@@ -1439,6 +1439,7 @@ class IMBridge:
             "op": "send",
             "args": {
                 "group_id": self.group.group_id,
+                "__turn_ingress": "im",
                 "text": msg_text,
                 "by": "user",
                 "to": canonical_to,

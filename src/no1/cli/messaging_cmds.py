@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Messaging/inbox/ledger CLI command handlers."""
 
+import json
 import os
 
 from .common import *  # noqa: F401,F403
@@ -41,6 +42,10 @@ def _resolve_cli_message_sender(args: argparse.Namespace) -> str:
     return "user"
 
 
+def _cli_turn_ingress() -> str:
+    return "actor_mcp" if str(os.environ.get("CCCC_ACTOR_ID") or "").strip() else "cli_user"
+
+
 def cmd_send(args: argparse.Namespace) -> int:
     group_id = _resolve_group_id(getattr(args, "group", ""))
     if not group_id:
@@ -58,13 +63,13 @@ def cmd_send(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
         return 2
     reply_required = bool(getattr(args, "reply_required", False))
-
     if _ensure_daemon_running():
         resp = call_daemon(
             {
                 "op": "send",
                 "args": {
                     "group_id": group_id,
+                    "__turn_ingress": _cli_turn_ingress(),
                     "text": args.text,
                     "by": by,
                     "path": str(args.path or ""),
@@ -155,6 +160,7 @@ def cmd_tracked_send(args: argparse.Namespace) -> int:
             "op": "tracked_send",
             "args": {
                 "group_id": group_id,
+                "__turn_ingress": _cli_turn_ingress(),
                 "by": by,
                 "title": str(getattr(args, "title", "") or ""),
                 "text": str(getattr(args, "text", "") or ""),
@@ -215,6 +221,24 @@ def cmd_reply(args: argparse.Namespace) -> int:
         _print_json({"ok": False, "error": {"code": "invalid_priority", "message": "priority must be 'normal' or 'attention'"}})
         return 2
     reply_required = bool(getattr(args, "reply_required", False))
+    completion_receipt = None
+    raw_completion_receipt = str(getattr(args, "completion_receipt", "") or "").strip()
+    if raw_completion_receipt:
+        try:
+            completion_receipt = json.loads(raw_completion_receipt)
+        except Exception:
+            completion_receipt = None
+        if not isinstance(completion_receipt, dict):
+            _print_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "invalid_completion_receipt",
+                        "message": "completion receipt must be a JSON object",
+                    },
+                }
+            )
+            return 2
 
     if _ensure_daemon_running():
         resp = call_daemon(
@@ -222,12 +246,14 @@ def cmd_reply(args: argparse.Namespace) -> int:
                 "op": "reply",
                 "args": {
                     "group_id": group_id,
+                    "__turn_ingress": _cli_turn_ingress(),
                     "text": args.text,
                     "by": by,
                     "reply_to": reply_to,
                     "to": to_tokens,
                     "priority": priority,
                     "reply_required": reply_required,
+                    "completion_receipt": completion_receipt,
                 },
             }
         )

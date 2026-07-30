@@ -49,6 +49,15 @@ from .experience_reminder import (
     commit_experience_reminder,
     plan_experience_reminder,
 )
+from .turn_provenance import (
+    TurnDeliveryBusyError,
+    begin_turn_delivery_attempt,
+    fail_turn_delivery_attempt,
+    finalize_turn_delivery_attempt,
+    invalidate_turn_grant,
+    terminalize_uncertain_delivery_attempt,
+    turn_delivery_completion_receipt,
+)
 
 
 _ASYNC_FLUSH_LOCK = threading.Lock()
@@ -70,6 +79,23 @@ ASYNC_FLUSH_MAX_WAIT_SECONDS = 12.0  # Avoid keeping a kick thread alive indefin
 ### NOTE
 # Delivery is intentionally daemon-driven (single-writer). If a service needs to notify actors, it
 # should call the daemon IPC and retry on transient failures rather than writing directly to ledgers.
+
+
+@dataclass(frozen=True)
+class PtySubmitOutcome:
+    accepted: bool
+    retryable: bool
+    phase: str
+    error: str = ""
+
+
+def _coerce_pty_submit_outcome(value: Any) -> PtySubmitOutcome:
+    if isinstance(value, PtySubmitOutcome):
+        return value
+    if bool(value):
+        return PtySubmitOutcome(accepted=True, retryable=False, phase="accepted")
+    # Compatibility for tests and third-party wrappers that still return bool.
+    return PtySubmitOutcome(accepted=False, retryable=True, phase="pre_write_failed")
 
 
 def _get_delivery_config(group: Group) -> Dict[str, Any]:
@@ -703,6 +729,20 @@ def render_batched_messages(messages: List[PendingMessage], *, reminder_after_in
     return out
 
 
+def append_turn_completion_receipt(text: str, attempt: Any) -> str:
+    receipt = turn_delivery_completion_receipt(attempt)
+    if not receipt:
+        return str(text or "")
+    receipt_line = "[onecolleague] completion_receipt=" + json.dumps(
+        receipt,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    body = str(text or "").strip()
+    return f"{receipt_line}\n\n{body}" if body else receipt_line
+
+
 # ============================================================================
 # Legacy render function (for backward compatibility)
 # ============================================================================
@@ -740,7 +780,8 @@ def pty_submit_text(
     text: str,
     file_fallback: bool = False,
     wait_for_submit: bool = False,
-) -> bool:
+    detailed_result: bool = False,
+) -> Any:
     """Send message text to a PTY session.
 
     Strategy:
@@ -751,15 +792,18 @@ def pty_submit_text(
     aid = str(actor_id or "").strip()
     if not gid or not aid:
         logger.warning(f"[pty_submit_text] Missing gid={gid} or aid={aid}")
-        return False
+        outcome = PtySubmitOutcome(False, True, "pre_write_failed", "missing actor identity")
+        return outcome if detailed_result else False
     if not pty_runner.SUPERVISOR.actor_running(gid, aid):
         logger.warning(f"[pty_submit_text] Actor not running: {gid}/{aid}")
-        return False
+        outcome = PtySubmitOutcome(False, True, "pre_write_failed", "actor not running")
+        return outcome if detailed_result else False
 
     raw = (text or "").rstrip("\n")
     if not raw:
         logger.warning(f"[pty_submit_text] Empty text for {gid}/{aid}")
-        return False
+        outcome = PtySubmitOutcome(False, True, "pre_write_failed", "empty payload")
+        return outcome if detailed_result else False
 
     multiline = ("\n" in raw) or ("\r" in raw)
     
@@ -792,23 +836,38 @@ def pty_submit_text(
         text_payload = payload
     
     # Step 1: write payload
-    ok = bool(pty_runner.SUPERVISOR.write_input(group_id=gid, actor_id=aid, data=text_payload))
+    try:
+        ok = bool(pty_runner.SUPERVISOR.write_input(group_id=gid, actor_id=aid, data=text_payload))
+    except Exception as exc:
+        outcome = PtySubmitOutcome(False, False, "payload_write_unknown", str(exc))
+        if detailed_result:
+            return outcome
+        raise
     if not ok:
         logger.warning(f"[pty_submit_text] Failed to write payload to {gid}/{aid}")
-        return False
+        outcome = PtySubmitOutcome(False, False, "payload_write_unknown", "payload write was not confirmed")
+        return outcome if detailed_result else False
     logger.debug(f"[pty_submit_text] Sent text payload, scheduling delayed submit")
     
     # Step 2: send submit (Enter/Newline) after a small delay for CLI timing
     if submit:
-        if wait_for_submit:
+        if wait_for_submit or detailed_result:
             time.sleep(PTY_SUBMIT_DELAY_SECONDS)
             if not pty_runner.SUPERVISOR.actor_running(gid, aid):
                 logger.warning(f"[pty_submit_text] Actor no longer running for delayed submit: {gid}/{aid}")
-                return False
-            ok_submit = bool(pty_runner.SUPERVISOR.write_input(group_id=gid, actor_id=aid, data=submit))
+                outcome = PtySubmitOutcome(False, False, "submit_write_unknown", "actor stopped before submit")
+                return outcome if detailed_result else False
+            try:
+                ok_submit = bool(pty_runner.SUPERVISOR.write_input(group_id=gid, actor_id=aid, data=submit))
+            except Exception as exc:
+                outcome = PtySubmitOutcome(False, False, "submit_write_unknown", str(exc))
+                if detailed_result:
+                    return outcome
+                raise
             if not ok_submit:
                 logger.warning(f"[pty_submit_text] Delayed submit failed to write to {gid}/{aid}")
-                return False
+                outcome = PtySubmitOutcome(False, False, "submit_write_unknown", "submit write was not confirmed")
+                return outcome if detailed_result else False
             logger.debug(f"[pty_submit_text] Delayed submit sent to {gid}/{aid}")
         else:
             def delayed_submit():
@@ -825,7 +884,8 @@ def pty_submit_text(
             submit_thread = threading.Thread(target=delayed_submit, daemon=True)
             submit_thread.start()
     
-    return True
+    outcome = PtySubmitOutcome(True, False, "accepted")
+    return outcome if detailed_result else True
 
 
 # ============================================================================
@@ -1085,11 +1145,20 @@ def _finalize_delivery_success(
     chat_total: int,
     deliverable: List[PendingMessage],
     requeue: List[PendingMessage],
+    delivery_attempt: Optional[dict[str, Any]] = None,
     experience_decision: Optional[ExperienceReminderDecision] = None,
 ) -> None:
     """Record a successful delivery attempt and preserve blocked messages."""
     gid = str(group.group_id or "").strip()
     aid = str(actor_id or "").strip()
+    attempt = delivery_attempt or begin_turn_delivery_attempt(
+        group,
+        actor_id=aid,
+        event_ids=[str(msg.event_id or "") for msg in deliverable],
+        binding={"transport": "pty"},
+    )
+    if attempt is not None:
+        finalize_turn_delivery_attempt(group, actor_id=aid, attempt=attempt)
     if chat_total > 0:
         THROTTLE.add_delivered_chat_count(gid, aid, chat_total)
     if experience_decision is not None:
@@ -1105,6 +1174,114 @@ def _finalize_delivery_success(
         )
     if requeue:
         THROTTLE.requeue_front(gid, aid, requeue)
+
+
+def _record_uncertain_accepted_delivery(
+    group: Group,
+    *,
+    actor_id: str,
+    attempt: dict[str, Any],
+    error: BaseException,
+) -> None:
+    terminalize_uncertain_delivery_attempt(
+        group,
+        actor_id=actor_id,
+        attempt=attempt,
+        reason="pty_accepted_finalize_uncertain",
+    )
+    try:
+        append_event(
+            group.ledger_path,
+            kind="actor.delivery.failed",
+            group_id=group.group_id,
+            scope_key="",
+            by="daemon",
+            data={
+                "actor_id": actor_id,
+                "event_ids": list(attempt.get("event_ids") or []),
+                "attempt_id": str(attempt.get("attempt_id") or ""),
+                "generation": int(attempt.get("generation") or 0),
+                "accepted": True,
+                "retryable": False,
+                "reason": "grant_finalize_uncertain",
+                "error": str(error),
+            },
+        )
+    except Exception:
+        logger.exception("[flush] failed to persist accepted-delivery failure event")
+
+
+def _record_uncertain_pty_submission(
+    group: Group,
+    *,
+    actor_id: str,
+    attempt: dict[str, Any],
+    outcome: PtySubmitOutcome,
+) -> None:
+    try:
+        terminalize_uncertain_delivery_attempt(
+            group,
+            actor_id=actor_id,
+            attempt=attempt,
+            reason=f"pty_{outcome.phase}",
+        )
+    except Exception:
+        logger.exception("[flush] failed to terminalize uncertain PTY submission")
+    try:
+        append_event(
+            group.ledger_path,
+            kind="actor.delivery.failed",
+            group_id=group.group_id,
+            scope_key="",
+            by="daemon",
+            data={
+                "actor_id": actor_id,
+                "event_ids": list(attempt.get("event_ids") or []),
+                "attempt_id": str(attempt.get("attempt_id") or ""),
+                "generation": int(attempt.get("generation") or 0),
+                "accepted": None,
+                "retryable": False,
+                "reason": outcome.phase,
+                "error": outcome.error,
+            },
+        )
+    except Exception:
+        logger.exception("[flush] failed to persist uncertain PTY failure event")
+    try:
+        pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+    except Exception:
+        logger.exception("[flush] failed to isolate uncertain PTY session")
+
+
+def _record_uncertain_pty_preamble(
+    group: Group,
+    *,
+    actor_id: str,
+    event_ids: list[str],
+    outcome: PtySubmitOutcome,
+) -> None:
+    try:
+        append_event(
+            group.ledger_path,
+            kind="actor.delivery.failed",
+            group_id=group.group_id,
+            scope_key="",
+            by="daemon",
+            data={
+                "actor_id": actor_id,
+                "event_ids": event_ids,
+                "accepted": None,
+                "retryable": False,
+                "reason": f"preamble_{outcome.phase}",
+                "error": outcome.error,
+            },
+        )
+    except Exception:
+        logger.exception("[flush] failed to persist uncertain PTY preamble event")
+    try:
+        pty_runner.SUPERVISOR.stop_actor(group_id=group.group_id, actor_id=actor_id)
+    except Exception:
+        logger.exception("[flush] failed to isolate PTY after uncertain preamble")
 
 
 def maybe_auto_mark_delivered_event(
@@ -1217,23 +1394,53 @@ def _start_async_first_delivery(
     aid = str(actor_id or "").strip()
 
     def worker() -> None:
+        delivery_attempt: Optional[dict[str, Any]] = None
+        allow_followup = True
         try:
             prompt = render_system_prompt(group=group, actor=actor)
             if prompt and prompt.strip():
-                preamble_ok = pty_submit_text(group, actor_id=aid, text=prompt.strip(), wait_for_submit=True)
-                if not preamble_ok:
+                try:
+                    preamble_outcome = _coerce_pty_submit_outcome(
+                        pty_submit_text(
+                            group,
+                            actor_id=aid,
+                            text=prompt.strip(),
+                            wait_for_submit=True,
+                            detailed_result=True,
+                        )
+                    )
+                except Exception as exc:
+                    preamble_outcome = PtySubmitOutcome(False, False, "submit_call_unknown", str(exc))
+                if preamble_outcome.retryable:
                     THROTTLE.requeue_front(gid, aid, messages)
+                    return
+                if not preamble_outcome.accepted:
+                    _record_uncertain_pty_preamble(
+                        group,
+                        actor_id=aid,
+                        event_ids=[str(msg.event_id or "") for msg in deliverable],
+                        outcome=preamble_outcome,
+                    )
+                    THROTTLE.requeue_front(gid, aid, messages)
+                    allow_followup = False
                     return
                 mark_preamble_sent(group, aid)
                 logger.debug(f"[flush] {gid}/{aid} preamble sent in background, will send message after delay")
 
             if not message_text:
+                delivery_attempt = begin_turn_delivery_attempt(
+                    group,
+                    actor_id=aid,
+                    event_ids=[str(msg.event_id or "") for msg in deliverable],
+                    binding={"transport": "pty"},
+                )
                 _finalize_delivery_success(
                     group,
                     actor_id=aid,
                     chat_total=chat_total,
                     deliverable=deliverable,
                     requeue=requeue,
+                    delivery_attempt=delivery_attempt,
                     experience_decision=experience_decision,
                 )
                 return
@@ -1245,26 +1452,82 @@ def _start_async_first_delivery(
                 return
 
             logger.debug(f"[flush] {gid}/{aid} sending delayed first message now")
-            ok = bool(pty_submit_text(group, actor_id=aid, text=message_text))
-            if ok:
-                _finalize_delivery_success(
+            delivery_attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id=aid,
+                event_ids=[str(msg.event_id or "") for msg in deliverable],
+                binding={"transport": "pty"},
+            )
+            delivery_text = append_turn_completion_receipt(message_text, delivery_attempt)
+            try:
+                submit_outcome = _coerce_pty_submit_outcome(
+                    pty_submit_text(
+                        group,
+                        actor_id=aid,
+                        text=delivery_text,
+                        wait_for_submit=True,
+                        detailed_result=True,
+                    )
+                )
+            except Exception as exc:
+                submit_outcome = PtySubmitOutcome(False, False, "submit_call_unknown", str(exc))
+            if submit_outcome.accepted:
+                try:
+                    _finalize_delivery_success(
+                        group,
+                        actor_id=aid,
+                        chat_total=chat_total,
+                        deliverable=deliverable,
+                        requeue=requeue,
+                        delivery_attempt=delivery_attempt,
+                        experience_decision=experience_decision,
+                    )
+                except Exception as exc:
+                    _record_uncertain_accepted_delivery(
+                        group,
+                        actor_id=aid,
+                        attempt=delivery_attempt,
+                        error=exc,
+                    )
+                    logger.exception("[flush] accepted first delivery could not publish grant gid=%s aid=%s", gid, aid)
+                    return
+            elif submit_outcome.retryable:
+                fail_turn_delivery_attempt(
                     group,
                     actor_id=aid,
-                    chat_total=chat_total,
-                    deliverable=deliverable,
-                    requeue=requeue,
-                    experience_decision=experience_decision,
+                    attempt=delivery_attempt,
+                    reason="pty_delivery_failed",
                 )
-            else:
                 THROTTLE.requeue_front(gid, aid, messages)
+            else:
+                _record_uncertain_pty_submission(
+                    group,
+                    actor_id=aid,
+                    attempt=delivery_attempt,
+                    outcome=submit_outcome,
+                )
+                allow_followup = False
+                return
+        except TurnDeliveryBusyError:
+            THROTTLE.requeue_front(gid, aid, messages)
         except Exception:
+            if delivery_attempt is not None:
+                fail_turn_delivery_attempt(
+                    group,
+                    actor_id=aid,
+                    attempt=delivery_attempt,
+                    reason="pty_delivery_exception",
+                )
             # First-delivery worker must be lossless: once flush() has taken pending
             # messages, any exception in preamble/submit/mark/message steps must
             # push the full batch back before releasing the actor-level inflight gate.
             THROTTLE.requeue_front(gid, aid, messages)
             logger.exception("[flush] first delivery worker failed gid=%s aid=%s", gid, aid)
         finally:
-            _finish_delivery_chain(group, actor_id=aid)
+            if allow_followup:
+                _finish_delivery_chain(group, actor_id=aid)
+            else:
+                THROTTLE.end_delivery(gid, aid)
 
     thread = threading.Thread(target=worker, name=f"onecolleague-delivery-{gid}-{aid}", daemon=True)
     thread.start()
@@ -1381,19 +1644,67 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
         # Send message (no preamble delay needed)
         delivered = False
         if message_text:
-            delivered = bool(pty_submit_text(group, actor_id=aid, text=message_text))
-            if delivered:
-                _finalize_delivery_success(
+            delivery_attempt: Optional[dict[str, Any]] = None
+            try:
+                delivery_attempt = begin_turn_delivery_attempt(
                     group,
                     actor_id=aid,
-                    chat_total=chat_total,
-                    deliverable=deliverable,
-                    requeue=requeue,
-                    experience_decision=experience_decision,
+                    event_ids=[str(msg.event_id or "") for msg in deliverable],
+                    binding={"transport": "pty"},
                 )
-            else:
+            except TurnDeliveryBusyError:
+                THROTTLE.requeue_front(gid, aid, messages)
+                return False
+            delivery_text = append_turn_completion_receipt(message_text, delivery_attempt)
+            try:
+                submit_outcome = _coerce_pty_submit_outcome(
+                    pty_submit_text(
+                        group,
+                        actor_id=aid,
+                        text=delivery_text,
+                        wait_for_submit=True,
+                        detailed_result=True,
+                    )
+                )
+            except Exception as exc:
+                submit_outcome = PtySubmitOutcome(False, False, "submit_call_unknown", str(exc))
+            delivered = submit_outcome.accepted
+            if submit_outcome.accepted:
+                try:
+                    _finalize_delivery_success(
+                        group,
+                        actor_id=aid,
+                        chat_total=chat_total,
+                        deliverable=deliverable,
+                        requeue=requeue,
+                        delivery_attempt=delivery_attempt,
+                        experience_decision=experience_decision,
+                    )
+                except Exception as exc:
+                    _record_uncertain_accepted_delivery(
+                        group,
+                        actor_id=aid,
+                        attempt=delivery_attempt,
+                        error=exc,
+                    )
+                    logger.exception("[flush] accepted delivery could not publish grant gid=%s aid=%s", gid, aid)
+                    delivered = False
+            elif submit_outcome.retryable:
+                fail_turn_delivery_attempt(
+                    group,
+                    actor_id=aid,
+                    attempt=delivery_attempt,
+                    reason="pty_delivery_failed",
+                )
                 # Delivery failed: keep everything queued for retry.
                 THROTTLE.requeue_front(gid, aid, messages)
+            else:
+                _record_uncertain_pty_submission(
+                    group,
+                    actor_id=aid,
+                    attempt=delivery_attempt,
+                    outcome=submit_outcome,
+                )
 
         return delivered
     finally:

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ....kernel.group import load_group
+from ....daemon.messaging.turn_provenance import INGRESS_WEB_USER, TRUSTED_INGRESS_ARG
 from ..schemas import (
     ReplyRequest,
     RouteContext,
@@ -63,7 +64,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         return str(raw or "").strip()
 
     def _build_message_request(op: str, *, group_id: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        return {"op": op, "args": {"group_id": group_id, **args}}
+        return {"op": op, "args": {"group_id": group_id, **args, TRUSTED_INGRESS_ARG: INGRESS_WEB_USER}}
 
     async def _submit_message(req: Dict[str, Any]) -> Dict[str, Any]:
         return await ctx.daemon(req)
@@ -131,6 +132,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 "op": "send_cross_group",
                 "args": {
                     "group_id": group_id,
+                    TRUSTED_INGRESS_ARG: INGRESS_WEB_USER,
                     "dst_group_id": req.dst_group_id,
                     "text": req.text,
                     "by": req.by,

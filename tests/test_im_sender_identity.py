@@ -379,6 +379,9 @@ class TestImSenderIdentity(unittest.TestCase):
             self.assertEqual(str(data.get("source_user_id") or ""), "staff_001")
             self.assertEqual(data.get("mention_user_ids"), ["staff_001"])
             self.assertEqual(str(event.get("by") or ""), "user")
+            provenance = data.get("turn_provenance") if isinstance(data.get("turn_provenance"), dict) else {}
+            self.assertEqual(provenance.get("origin"), "im")
+            self.assertFalse(bool(provenance.get("fresh_local_request")))
         finally:
             if bridge is not None:
                 bridge.stop()

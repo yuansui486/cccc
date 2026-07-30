@@ -27,6 +27,7 @@ from ..assistants.voice_secretary_runtime_ops import (
     restore_voice_secretary_actor_state,
     sync_voice_secretary_actor_from_foreman,
 )
+from ..messaging.turn_provenance import invalidate_group_turn_grants
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +333,11 @@ def handle_group_stop(
     try:
         require_group_permission(group, by=by, action="group.stop")
         actors = list_actors(group)
+        actor_ids = [
+            str(actor.get("id") or "").strip()
+            for actor in actors
+            if isinstance(actor, dict) and str(actor.get("id") or "").strip()
+        ]
         stopped: list[str] = []
         for actor in actors:
             if not isinstance(actor, dict):
@@ -345,10 +351,13 @@ def handle_group_stop(
             except Exception:
                 pass
 
-        pty_runner.SUPERVISOR.stop_group(group_id=group.group_id)
-        headless_runner.SUPERVISOR.stop_group(group_id=group.group_id)
-        codex_app_supervisor.stop_group(group_id=group.group_id)
-        claude_app_supervisor.stop_group(group_id=group.group_id)
+        try:
+            pty_runner.SUPERVISOR.stop_group(group_id=group.group_id)
+            headless_runner.SUPERVISOR.stop_group(group_id=group.group_id)
+            codex_app_supervisor.stop_group(group_id=group.group_id)
+            claude_app_supervisor.stop_group(group_id=group.group_id)
+        finally:
+            invalidate_group_turn_grants(group, actor_ids, reason="group_stop")
 
         try:
             pdir = pty_state_dir_for_group(group.group_id)

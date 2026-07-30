@@ -197,6 +197,15 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertIn("does not mark messages read", wait_desc)
         self.assertIn("whether it was browser-delivered or pulled", complete_desc)
 
+    def test_terminal_tools_accept_completion_receipts(self) -> None:
+        for tool_name in ("onecolleague_message_reply", "onecolleague_runtime_complete_turn"):
+            spec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == tool_name), None)
+            self.assertIsInstance(spec, dict)
+            schema = spec.get("inputSchema") if isinstance(spec, dict) else {}
+            props = schema.get("properties") if isinstance(schema, dict) else {}
+            receipt = props.get("completion_receipt") if isinstance(props, dict) else {}
+            self.assertEqual(receipt, {"type": "object"})
+
     def test_code_exec_schema_advertises_discovery_helpers(self) -> None:
         code_exec = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_code_exec"), None)
         self.assertIsInstance(code_exec, dict)

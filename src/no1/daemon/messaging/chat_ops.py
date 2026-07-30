@@ -59,6 +59,12 @@ from .actor_turn_rendering import (
 )
 from ..context.context_ops import handle_context_sync
 from .install_slash_command import INSTALL_CAPABILITY_ID, parse_install_slash_command, render_install_command_task
+from .turn_provenance import (
+    TRUSTED_INGRESS_ARG,
+    build_reply_turn_provenance,
+    build_send_turn_provenance,
+    invalidate_turn_grant_from_completion_receipt,
+)
 
 logger = logging.getLogger("no1.daemon.server")
 
@@ -300,6 +306,14 @@ def _notify_headless_targets(
         pass
 
 
+def _commit_headless_delivery_queued(
+    group: Any,
+    *,
+    experience_decision: Any,
+) -> None:
+    commit_experience_reminder(group, experience_decision)
+
+
 def handle_send(
     args: Dict[str, Any],
     *,
@@ -512,6 +526,7 @@ def handle_send(
             dst_group_id=dst_group_id or None,
             dst_to=dst_to if dst_group_id else None,
             client_id=client_id or None,
+            turn_provenance=build_send_turn_provenance(args),
         ).model_dump(),
     )
     if computer_control_request is not None:
@@ -592,7 +607,10 @@ def handle_send(
                 attachments=attachments,
             ))
             if delivered:
-                commit_experience_reminder(group, experience_decision)
+                _commit_headless_delivery_queued(
+                    group,
+                    experience_decision=experience_decision,
+                )
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
@@ -604,7 +622,10 @@ def handle_send(
                 attachments=attachments,
             ))
             if delivered:
-                commit_experience_reminder(group, experience_decision)
+                _commit_headless_delivery_queued(
+                    group,
+                    experience_decision=experience_decision,
+                )
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
@@ -645,7 +666,10 @@ def handle_send(
                     codex_submit_user_message=codex_app_supervisor.submit_user_message,
                     claude_submit_user_message=claude_app_supervisor.submit_user_message,
                     logger=logger,
-                    on_delivered=lambda g=group, d=experience_decision: commit_experience_reminder(g, d),
+                    on_delivered=lambda g=group, d=experience_decision: _commit_headless_delivery_queued(
+                        g,
+                        experience_decision=d,
+                    ),
                 ):
                     skip_headless_notify_actor_ids.add(actor_id)
             logger.debug(f"[SEND] skip actor={actor_id} ({decision.reason})")
@@ -723,6 +747,7 @@ def handle_tracked_send(
     reply_required = coerce_bool(args.get("reply_required")) if "reply_required" in args else True
     message_args = {
         "group_id": group_id,
+        TRUSTED_INGRESS_ARG: str(args.get(TRUSTED_INGRESS_ARG) or "").strip(),
         "text": text,
         "by": by,
         "to": _normalize_to_tokens(args.get("to")),
@@ -993,8 +1018,17 @@ def handle_reply(
             mention_user_ids=original_mention_user_ids or None,
             **build_sender_snapshot(group, by=by),
             client_id=client_id or None,
+            turn_provenance=build_reply_turn_provenance(original, args),
         ).model_dump(),
     )
+
+    if isinstance(find_actor(group, by), dict):
+        invalidate_turn_grant_from_completion_receipt(
+            group,
+            by,
+            completion_receipt=args.get("completion_receipt"),
+            reason="actor_reply",
+        )
 
     ack_event: Optional[dict[str, Any]] = None
     try:
@@ -1073,7 +1107,10 @@ def handle_reply(
                 attachments=attachments,
             ))
             if delivered:
-                commit_experience_reminder(group, experience_decision)
+                _commit_headless_delivery_queued(
+                    group,
+                    experience_decision=experience_decision,
+                )
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_CLAUDE_HEADLESS:
             delivered = bool(claude_app_supervisor.submit_user_message(
@@ -1086,7 +1123,10 @@ def handle_reply(
                 attachments=attachments,
             ))
             if delivered:
-                commit_experience_reminder(group, experience_decision)
+                _commit_headless_delivery_queued(
+                    group,
+                    experience_decision=experience_decision,
+                )
                 skip_headless_notify_actor_ids.add(actor_id)
         elif decision.transport == TRANSPORT_PTY:
             queue_chat_message(
@@ -1126,7 +1166,10 @@ def handle_reply(
                 codex_submit_user_message=codex_app_supervisor.submit_user_message,
                 claude_submit_user_message=claude_app_supervisor.submit_user_message,
                 logger=logger,
-                on_delivered=lambda g=group, d=experience_decision: commit_experience_reminder(g, d),
+                on_delivered=lambda g=group, d=experience_decision: _commit_headless_delivery_queued(
+                    g,
+                    experience_decision=d,
+                ),
             ):
                 skip_headless_notify_actor_ids.add(actor_id)
 

@@ -39,7 +39,7 @@ from .group_space import (
 )
 from .group_template import GroupTemplate, GroupTemplateActor, GroupTemplatePrompts, GroupTemplateSettings
 from .ipc import DaemonError, DaemonRequest, DaemonResponse
-from .message import Attachment, ChatMessageData, ChatReactionData, ChatStreamData, Reference
+from .message import Attachment, ChatMessageData, ChatReactionData, ChatStreamData, Reference, TurnProvenance
 from .notify import NotifyAckData, NotifyKind, NotifyPriority, SystemNotifyData
 from .presentation import (
     PresentationCard,
@@ -78,6 +78,7 @@ __all__ = [
     "ChatMessageData",
     "ChatReactionData",
     "ChatStreamData",
+    "TurnProvenance",
     "DaemonError",
     "DaemonRequest",
     "DaemonResponse",

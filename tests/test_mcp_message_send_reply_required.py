@@ -37,6 +37,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertEqual(req.get("op"), "send")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertTrue(args.get("reply_required") is True)
+        self.assertEqual(args.get("__turn_ingress"), "actor_mcp")
 
     def test_message_send_passes_refs(self) -> None:
         from no1.ports.mcp import server as mcp_server
@@ -98,6 +99,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertEqual(args.get("group_id"), "g_runtime")
         self.assertEqual(args.get("dst_group_id"), "g_selected")
         self.assertEqual(args.get("to"), ["@foreman"])
+        self.assertEqual(args.get("__turn_ingress"), "actor_mcp")
 
     def test_message_reply_passes_refs(self) -> None:
         from no1.ports.mcp import server as mcp_server
@@ -128,6 +130,63 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         req = captured.get("req") or {}
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("refs"), refs)
+
+    def test_message_reply_passes_completion_receipt(self) -> None:
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+
+        captured = {}
+        receipt = {"v": 1, "attempt_id": "attempt-1", "generation": 7}
+
+        def _fake_call_daemon(req):
+            captured["req"] = req
+            return {"ok": True, "result": {"event_id": "ev_test"}}
+
+        with patch.dict(os.environ, _CLEAN_ENV, clear=False), patch.object(
+            mcp_common, "call_daemon", side_effect=_fake_call_daemon
+        ):
+            mcp_server.handle_tool_call(
+                "onecolleague_message_reply",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "event_id": "ev_1",
+                    "text": "reply",
+                    "completion_receipt": receipt,
+                },
+            )
+
+        args = (captured.get("req") or {}).get("args") or {}
+        self.assertEqual(args.get("completion_receipt"), receipt)
+
+    def test_runtime_complete_turn_passes_completion_receipt(self) -> None:
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+
+        captured = {}
+        receipt = {"v": 1, "attempt_id": "attempt-2", "generation": 8}
+
+        def _fake_call_daemon(req):
+            captured["req"] = req
+            return {"ok": True, "result": {"status": "done"}}
+
+        with patch.dict(os.environ, _CLEAN_ENV, clear=False), patch.object(
+            mcp_common, "call_daemon", side_effect=_fake_call_daemon
+        ):
+            mcp_server.handle_tool_call(
+                "onecolleague_runtime_complete_turn",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "event_ids": ["ev_1"],
+                    "status": "done",
+                    "completion_receipt": receipt,
+                },
+            )
+
+        req = captured.get("req") or {}
+        self.assertEqual(req.get("op"), "web_model_runtime_complete_turn")
+        self.assertEqual((req.get("args") or {}).get("completion_receipt"), receipt)
 
     def test_tracked_send_passes_task_contract_args(self) -> None:
         from no1.ports.mcp import server as mcp_server
@@ -164,6 +223,58 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
         self.assertEqual(args.get("title"), "Review PR")
         self.assertEqual(args.get("checklist"), checklist)
         self.assertTrue(args.get("reply_required"))
+        self.assertEqual(args.get("__turn_ingress"), "actor_mcp")
+
+    def test_tracked_send_persists_actor_provenance_through_daemon(self) -> None:
+        from no1.contracts.v1 import DaemonRequest
+        from no1.daemon.server import handle_request
+        from no1.ports.mcp import common as mcp_common
+        from no1.ports.mcp import server as mcp_server
+
+        def _local_call_daemon(req):
+            response, _ = handle_request(DaemonRequest.model_validate(req))
+            return response.model_dump(exclude_none=True)
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            {**_CLEAN_ENV, "CCCC_HOME": td},
+            clear=False,
+        ):
+            created, _ = handle_request(
+                DaemonRequest(op="group_create", args={"title": "tracked-provenance", "by": "user"})
+            )
+            self.assertTrue(created.ok, getattr(created, "error", None))
+            group_id = str((created.result or {}).get("group_id") or "")
+            added, _ = handle_request(
+                DaemonRequest(
+                    op="actor_add",
+                    args={
+                        "group_id": group_id,
+                        "actor_id": "foreman1",
+                        "runtime": "codex",
+                        "runner": "headless",
+                        "by": "user",
+                    },
+                )
+            )
+            self.assertTrue(added.ok, getattr(added, "error", None))
+
+            with patch.object(mcp_common, "call_daemon", side_effect=_local_call_daemon):
+                result = mcp_server.handle_tool_call(
+                    "onecolleague_tracked_send",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "foreman1",
+                        "title": "Tracked request",
+                        "text": "Record this task",
+                        "to": ["user"],
+                    },
+                )
+
+        event = result.get("event") if isinstance(result.get("event"), dict) else {}
+        provenance = (event.get("data") or {}).get("turn_provenance") or {}
+        self.assertEqual(provenance.get("origin"), "local_actor")
+        self.assertFalse(bool(provenance.get("fresh_local_request")))
 
     def test_message_send_allows_codex_headless_actor(self) -> None:
         from no1.contracts.v1 import DaemonRequest
