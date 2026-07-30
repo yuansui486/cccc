@@ -191,6 +191,212 @@ class TestGroupSpaceRuntime(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_running_job_stale_threshold_defaults_clamps_and_checks_state(self) -> None:
+        from datetime import datetime, timezone
+
+        from no1.daemon.space import group_space_store as store
+
+        key = "CCCC_SPACE_RUNNING_JOB_STALE_SECONDS"
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(key, None)
+            self.assertEqual(store._running_job_stale_seconds(), 6 * 3600)
+
+        for raw, expected in (
+            ("invalid", 6 * 3600),
+            ("1", 600),
+            ("600", 600),
+            (str(30 * 86400), 30 * 86400),
+            (str(31 * 86400), 30 * 86400),
+        ):
+            with self.subTest(raw=raw), patch.dict(os.environ, {key: raw}, clear=False):
+                self.assertEqual(store._running_job_stale_seconds(), expected)
+
+        now_ts = datetime(2026, 7, 30, tzinfo=timezone.utc).timestamp()
+
+        def timestamp(seconds_ago: int) -> str:
+            return datetime.fromtimestamp(now_ts - seconds_ago, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with patch.dict(os.environ, {key: "600"}, clear=False):
+            self.assertFalse(
+                store._running_job_is_stale(
+                    {"state": "running", "updated_at": timestamp(599)},
+                    now_ts=now_ts,
+                )
+            )
+            self.assertTrue(
+                store._running_job_is_stale(
+                    {"state": "running", "updated_at": timestamp(600)},
+                    now_ts=now_ts,
+                )
+            )
+            self.assertTrue(store._running_job_is_stale({"state": "running"}, now_ts=now_ts))
+            self.assertTrue(
+                store._running_job_is_stale(
+                    {
+                        "state": "running",
+                        "created_at": timestamp(1),
+                        "updated_at": "invalid",
+                    },
+                    now_ts=now_ts,
+                )
+            )
+            self.assertFalse(
+                store._running_job_is_stale(
+                    {"state": "pending", "updated_at": timestamp(60_000)},
+                    now_ts=now_ts,
+                )
+            )
+
+    def test_queue_summary_preserves_fresh_running_job_when_updated_at_is_missing(self) -> None:
+        import json
+        from pathlib import Path
+
+        from no1.daemon.space import group_space_store as store
+        from no1.daemon.space.group_space_store import (
+            enqueue_space_job,
+            get_space_job,
+            mark_space_job_running,
+            space_queue_summary,
+        )
+
+        home, cleanup = self._with_home()
+        try:
+            job, _ = enqueue_space_job(
+                group_id="g_fresh_restart",
+                provider="notebooklm",
+                lane="work",
+                remote_space_id="nb_fresh_restart",
+                kind="context_sync",
+                payload={"summary": {"name": "fresh"}},
+                idempotency_key="fresh-restart-running",
+            )
+            job_id = str(job.get("job_id") or "")
+            self.assertTrue(job_id)
+            mark_space_job_running(job_id)
+
+            jobs_path = Path(home, "state", "space", "jobs.json")
+            doc = json.loads(jobs_path.read_text(encoding="utf-8"))
+            fresh_created_at = str(doc["jobs"][job_id].get("created_at") or "")
+            self.assertTrue(fresh_created_at)
+            doc["jobs"][job_id].pop("updated_at", None)
+            jobs_path.write_text(json.dumps(doc), encoding="utf-8")
+
+            with store._DOC_CACHE_LOCK:
+                store._DOC_CACHE.clear()
+
+            with patch.dict(os.environ, {"CCCC_SPACE_RUNNING_JOB_STALE_SECONDS": "600"}, clear=False):
+                summary = space_queue_summary(
+                    group_id="g_fresh_restart",
+                    provider="notebooklm",
+                    lane="work",
+                    remote_space_id="nb_fresh_restart",
+                )
+
+            self.assertEqual(summary, {"pending": 0, "running": 1, "failed": 0})
+            restored = get_space_job(job_id) or {}
+            self.assertEqual(str(restored.get("state") or ""), "running")
+            self.assertEqual(str(restored.get("created_at") or ""), fresh_created_at)
+            self.assertEqual(str(restored.get("updated_at") or ""), fresh_created_at)
+        finally:
+            cleanup()
+
+    def test_queue_summary_recovers_stale_running_job_after_restart(self) -> None:
+        import json
+        from pathlib import Path
+
+        from no1.daemon.space import group_space_store as store
+        from no1.daemon.space.group_space_store import (
+            enqueue_space_job,
+            get_space_job,
+            list_due_space_jobs,
+            mark_space_job_running,
+            space_queue_summary,
+        )
+
+        home, cleanup = self._with_home()
+        try:
+            jobs = {}
+            for name in ("stale", "missing_times", "pending"):
+                job, deduped = enqueue_space_job(
+                    group_id="g_restart_recovery",
+                    provider="notebooklm",
+                    lane="work",
+                    remote_space_id="nb_restart_recovery",
+                    kind="context_sync",
+                    payload={"summary": {"name": name}},
+                    idempotency_key=f"restart-recovery-{name}",
+                )
+                self.assertFalse(deduped)
+                jobs[name] = str(job.get("job_id") or "")
+                self.assertTrue(jobs[name])
+
+            mark_space_job_running(jobs["stale"])
+            mark_space_job_running(jobs["missing_times"])
+
+            jobs_path = Path(home, "state", "space", "jobs.json")
+            doc = json.loads(jobs_path.read_text(encoding="utf-8"))
+            doc["jobs"][jobs["stale"]]["created_at"] = "2000-01-01T00:00:00Z"
+            doc["jobs"][jobs["stale"]].pop("updated_at", None)
+            doc["jobs"][jobs["missing_times"]].pop("created_at", None)
+            doc["jobs"][jobs["missing_times"]].pop("updated_at", None)
+            doc["jobs"][jobs["pending"]]["updated_at"] = "2000-01-01T00:00:00Z"
+            jobs_path.write_text(json.dumps(doc), encoding="utf-8")
+
+            with store._DOC_CACHE_LOCK:
+                store._DOC_CACHE.clear()
+
+            with patch.dict(os.environ, {"CCCC_SPACE_RUNNING_JOB_STALE_SECONDS": "600"}, clear=False):
+                summary = space_queue_summary(
+                    group_id="g_restart_recovery",
+                    provider="notebooklm",
+                    lane="work",
+                    remote_space_id="nb_restart_recovery",
+                )
+                self.assertEqual(summary, {"pending": 1, "running": 0, "failed": 2})
+
+                stale = get_space_job(jobs["stale"]) or {}
+                self.assertEqual(str(stale.get("state") or ""), "failed")
+                self.assertIsNone(stale.get("next_run_at"))
+                self.assertEqual(
+                    str((stale.get("last_error") or {}).get("code") or ""),
+                    "space_job_stale_running",
+                )
+                missing_times = get_space_job(jobs["missing_times"]) or {}
+                self.assertEqual(str(missing_times.get("state") or ""), "failed")
+                self.assertEqual(
+                    str((missing_times.get("last_error") or {}).get("code") or ""),
+                    "space_job_stale_running",
+                )
+                self.assertEqual(str((get_space_job(jobs["pending"]) or {}).get("state") or ""), "pending")
+
+                persisted = json.loads(jobs_path.read_text(encoding="utf-8"))["jobs"]
+                self.assertEqual(str(persisted[jobs["stale"]].get("state") or ""), "failed")
+                self.assertEqual(str(persisted[jobs["stale"]].get("created_at") or ""), "2000-01-01T00:00:00Z")
+                self.assertEqual(
+                    str(persisted[jobs["stale"]].get("updated_at") or ""),
+                    str(stale.get("updated_at") or ""),
+                )
+                self.assertEqual(str(persisted[jobs["missing_times"]].get("state") or ""), "failed")
+                self.assertEqual(str(persisted[jobs["missing_times"]].get("created_at") or ""), "")
+
+                replacement, deduped = enqueue_space_job(
+                    group_id="g_restart_recovery",
+                    provider="notebooklm",
+                    lane="work",
+                    remote_space_id="nb_restart_recovery",
+                    kind="context_sync",
+                    payload={"summary": {"name": "stale"}},
+                    idempotency_key="restart-recovery-stale",
+                )
+                self.assertFalse(deduped)
+                replacement_id = str(replacement.get("job_id") or "")
+                self.assertTrue(replacement_id)
+
+                due_ids = {str(item.get("job_id") or "") for item in list_due_space_jobs(limit=20)}
+                self.assertEqual(due_ids, {jobs["pending"], replacement_id})
+        finally:
+            cleanup()
+
     def test_space_job_store_reuses_cached_jobs_doc_between_reads(self) -> None:
         from no1.daemon.space import group_space_store as store
         from no1.daemon.space.group_space_store import enqueue_space_job, list_due_space_jobs
