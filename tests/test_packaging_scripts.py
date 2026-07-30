@@ -94,6 +94,7 @@ def test_vendored_windows_uia_bindings_are_complete() -> None:
     assert "IUIAutomation" in (bindings_dir / "UIAutomationClient.py").read_text(encoding="utf-8")
     stage_script = Path("scripts/stage_windows_uia_bindings.py").read_text(encoding="utf-8")
     assert 'EXPECTED_COMTYPES_VERSION = "1.4.16"' in stage_script
+    assert "import comtypes.client" in stage_script
     assert "UIA_wine_private" not in stage_script
 
 

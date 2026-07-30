@@ -41,6 +41,10 @@ def main() -> int:
             f"installed version is {installed_version}"
         )
 
+    # A clean comtypes wheel does not contain comtypes.gen yet. Importing the
+    # client creates its writable generated-module package without loading a
+    # UIAutomation type library.
+    import comtypes.client  # type: ignore  # noqa: F401
     import comtypes.gen  # type: ignore
 
     source_dir = Path(__file__).resolve().with_name("windows_comtypes_gen")
