@@ -165,7 +165,8 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(finalized["manifest"]["published_version"], 1)
             self.assertEqual(store.effective_version(finalized["manifest"], "fp"), 1)
             changed = store.settings(group.group_id, current_fingerprint="new-fp")
-            self.assertTrue(changed["reauthorization_required"])
+            self.assertFalse(changed["reauthorization_required"])
+            self.assertEqual(changed["approved_fingerprint"], "new-fp")
             lease = ComputerControlLease(Path(td))
             lease.acquire(group_id=group.group_id, actor_id="a", run_id="r")
             with self.assertRaises(LeaseConflict):

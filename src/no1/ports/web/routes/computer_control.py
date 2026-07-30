@@ -601,9 +601,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     @group_router.post("/workflows/{workflow_id}/publish")
     async def publish_workflow(group_id: str, workflow_id: str, version: int = Body(..., embed=True)) -> Dict[str, Any]:
         try:
-            return {"ok": True, "result": service.store.publish(group_id, workflow_id, version)}
+            value = service.store.publish(group_id, workflow_id, version)
+            return {"ok": True, "result": await validate_and_finalize(group_id, value)}
         except WorkflowNotFound as exc:
             raise _error("workflow_not_found", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("workflow_invalid", str(exc), 422) from exc
 
     @group_router.post("/workflows/{workflow_id}/versions/{version}/rollback")
     async def rollback_workflow(group_id: str, workflow_id: str, version: int) -> Dict[str, Any]:
