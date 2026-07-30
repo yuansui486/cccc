@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
+import secrets
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, TypeVar
 
 from ...contracts.v1.message import TurnProvenance
 from ...kernel.group import Group, load_group
@@ -29,6 +32,7 @@ _DAEMON_ISSUER_EPOCH = f"daemon_{uuid.uuid4().hex}"
 
 _STATE_LOCK = threading.Lock()
 _ACTOR_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+_ClaimResult = TypeVar("_ClaimResult")
 
 
 class TurnDeliveryBusyError(RuntimeError):
@@ -264,6 +268,25 @@ def _normalized_binding(binding: Optional[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _authorization_material(binding: Optional[dict[str, Any]]) -> tuple[dict[str, Any], str]:
+    secret = secrets.token_urlsafe(32)
+    public_binding = _normalized_binding(binding)
+    for reserved in ("authority_id", "secret_digest", "authorization_secret"):
+        public_binding.pop(reserved, None)
+    return (
+        {
+            **public_binding,
+            "authority_id": f"turnauth_{uuid.uuid4().hex}",
+            "secret_digest": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+        },
+        secret,
+    )
+
+
+def _persisted_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in attempt.items() if key != "authorization_secret"}
+
+
 def begin_turn_delivery_attempt(
     group_or_id: Group | str,
     *,
@@ -289,6 +312,7 @@ def begin_turn_delivery_attempt(
         if isinstance(previous.get("pending_attempt"), dict):
             raise TurnDeliveryBusyError(f"delivery attempt already pending for {group.group_id}/{aid}")
         generation = max(0, int(previous.get("generation") or 0)) + 1
+        authorization_binding, authorization_secret = _authorization_material(binding)
         attempt = {
             "v": 1,
             "issuer_epoch": _DAEMON_ISSUER_EPOCH,
@@ -298,6 +322,8 @@ def begin_turn_delivery_attempt(
             "event_ids": ids,
             "generation": generation,
             "binding": _normalized_binding(binding),
+            "authorization_binding": authorization_binding,
+            "authorization_secret": authorization_secret,
             "started_at": _utc_iso(at),
             "started_at_epoch": at,
         }
@@ -309,7 +335,7 @@ def begin_turn_delivery_attempt(
                 "group_id": group.group_id,
                 "actor_id": aid,
                 "generation": generation,
-                "pending_attempt": attempt,
+                "pending_attempt": _persisted_attempt(attempt),
                 "current_grant": None,
                 "invalidated_reason": "delivery_attempt",
                 "updated_at": _utc_iso(at),
@@ -328,6 +354,8 @@ def _attempt_matches(current: Any, expected: dict[str, Any]) -> bool:
         and int(current.get("generation") or -1) == int(expected.get("generation") or -2)
         and _normalized_event_ids(current.get("event_ids") or [])
         == _normalized_event_ids(expected.get("event_ids") or [])
+        and _normalized_binding(current.get("authorization_binding"))
+        == _normalized_binding(expected.get("authorization_binding"))
     )
 
 
@@ -383,6 +411,9 @@ def finalize_turn_delivery_attempt(
             **_normalized_binding(pending.get("binding") if isinstance(pending, dict) else None),
             **_normalized_binding(binding),
         }
+        authorization_binding = _normalized_binding(
+            pending.get("authorization_binding") if isinstance(pending, dict) else None
+        )
         generation = int(attempt.get("generation") or 0)
         grant: Optional[dict[str, Any]] = None
         if pure_local:
@@ -397,6 +428,7 @@ def finalize_turn_delivery_attempt(
                 "attempt_id": str(attempt.get("attempt_id") or ""),
                 "generation": generation,
                 "binding": merged_binding,
+                "authorization_binding": authorization_binding,
                 "issued_at": _utc_iso(at),
                 "issued_at_epoch": at,
                 "expires_at": _utc_iso(expires_at),
@@ -574,6 +606,26 @@ def turn_delivery_completion_receipt(attempt: Any) -> Optional[dict[str, Any]]:
         "generation": generation,
         "event_ids": event_ids,
         "binding": _normalized_binding(attempt.get("binding")),
+    }
+
+
+def turn_delivery_grant_receipt(attempt: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(attempt, dict):
+        return None
+    completion = turn_delivery_completion_receipt(attempt)
+    authorization_binding = _normalized_binding(attempt.get("authorization_binding"))
+    authorization_secret = str(attempt.get("authorization_secret") or "").strip()
+    if (
+        completion is None
+        or not str(authorization_binding.get("authority_id") or "").strip()
+        or not str(authorization_binding.get("secret_digest") or "").strip()
+        or not authorization_secret
+    ):
+        return None
+    return {
+        **completion,
+        "authorization_binding": authorization_binding,
+        "authorization_secret": authorization_secret,
     }
 
 
@@ -826,6 +878,103 @@ def get_current_turn_grant(
             invalidate_turn_grant(group, aid, reason="invalid_grant_state", now=at)
             return None
         return dict(grant)
+
+
+def _claim_from_receipt_unlocked(
+    group: Group,
+    actor_id: str,
+    receipt: Any,
+    *,
+    now: float,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(receipt, dict):
+        return None
+    state = _load_state(group, actor_id)
+    state = _abandon_stale_issuer_state(group, actor_id, state, now=now)
+    grant = state.get("current_grant") if isinstance(state.get("current_grant"), dict) else None
+    if grant is None:
+        return None
+    try:
+        expires_at = float(grant.get("expires_at_epoch") or 0.0)
+        receipt_generation = int(receipt.get("generation") or 0)
+    except Exception:
+        return None
+    if expires_at <= now:
+        invalidate_turn_grant(group, actor_id, reason="ttl_expired", now=now)
+        return None
+    receipt_ids = _normalized_event_ids(receipt.get("event_ids") or [])
+    grant_ids = _normalized_event_ids(grant.get("event_ids") or [])
+    receipt_binding = _normalized_binding(receipt.get("binding"))
+    receipt_authorization = _normalized_binding(receipt.get("authorization_binding"))
+    grant_authorization = _normalized_binding(grant.get("authorization_binding"))
+    receipt_public_authorization = {
+        key: value
+        for key, value in receipt_authorization.items()
+        if key not in {"authority_id", "secret_digest"}
+    }
+    secret = str(receipt.get("authorization_secret") or "")
+    stored_digest = str(grant_authorization.get("secret_digest") or "")
+    presented_digest = hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else ""
+    if (
+        int(receipt.get("v") or 0) != 1
+        or str(receipt.get("issuer_epoch") or "") != _DAEMON_ISSUER_EPOCH
+        or str(receipt.get("group_id") or "").strip() != group.group_id
+        or str(receipt.get("actor_id") or "").strip() != actor_id
+        or str(receipt.get("attempt_id") or "").strip() != str(grant.get("attempt_id") or "")
+        or receipt_generation != int(grant.get("generation") or -1)
+        or receipt_generation != int(state.get("generation") or -2)
+        or not receipt_ids
+        or receipt_ids != grant_ids
+        or not receipt_binding
+        or not receipt_authorization
+        or receipt_authorization != grant_authorization
+        or receipt_binding != receipt_public_authorization
+        or not stored_digest
+        or not presented_digest
+        or not hmac.compare_digest(presented_digest, stored_digest)
+    ):
+        return None
+    return dict(grant)
+
+
+def validate_turn_grant_receipt(
+    group_or_id: Group | str,
+    actor_id: str,
+    *,
+    turn_grant_receipt: Any,
+    now: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    """Validate one presented bearer receipt against the exact live grant."""
+
+    group = group_or_id if isinstance(group_or_id, Group) else load_group(str(group_or_id or "").strip())
+    aid = str(actor_id or "").strip()
+    if group is None or not aid:
+        return None
+    at = float(time.time() if now is None else now)
+    with _actor_lock(group.group_id, aid):
+        return _claim_from_receipt_unlocked(group, aid, turn_grant_receipt, now=at)
+
+
+def consume_turn_grant_receipt(
+    group_or_id: Group | str,
+    actor_id: str,
+    *,
+    turn_grant_receipt: Any,
+    consumer: Callable[[dict[str, Any]], _ClaimResult],
+    now: Optional[float] = None,
+) -> Optional[_ClaimResult]:
+    """Run a short claim consumer while the exact actor generation is locked."""
+
+    group = group_or_id if isinstance(group_or_id, Group) else load_group(str(group_or_id or "").strip())
+    aid = str(actor_id or "").strip()
+    if group is None or not aid or not callable(consumer):
+        return None
+    at = float(time.time() if now is None else now)
+    with _actor_lock(group.group_id, aid):
+        claim = _claim_from_receipt_unlocked(group, aid, turn_grant_receipt, now=at)
+        if claim is None:
+            return None
+        return consumer(claim)
 
 
 def invalidate_group_turn_grants(group: Group, actor_ids: Iterable[str], *, reason: str) -> None:

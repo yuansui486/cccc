@@ -238,6 +238,53 @@ class TestComputerControl(unittest.TestCase):
                 names = {str(item.get("name") or "") for item in list_tools_for_caller()}
             self.assertTrue(computer_tools.isdisjoint(names))
 
+    def test_computer_control_mcp_passes_presented_receipt_unchanged(self):
+        from no1.kernel.actors import add_actor
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="receipt-passthrough", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            receipt = {
+                "v": 1,
+                "issuer_epoch": "daemon_epoch",
+                "group_id": group.group_id,
+                "actor_id": "peer",
+                "attempt_id": "turnattempt_1",
+                "generation": 1,
+                "event_ids": ["event_1"],
+                "binding": {"transport": "codex_app"},
+                "authorization_binding": {
+                    "authority_id": "turnauth_1",
+                    "secret_digest": "d" * 64,
+                    "transport": "codex_app",
+                },
+                "authorization_secret": "s" * 32,
+            }
+            calls = []
+
+            def call_daemon(request, *, timeout_s=None):
+                calls.append((request, timeout_s))
+                return {"ok": True, "result": {}}
+
+            cases = (
+                ("onecolleague_computer_control_catalog", {}),
+                ("onecolleague_computer_recording", {"action": "get", "recording_id": "rec"}),
+                ("onecolleague_computer_workflow", {"action": "list"}),
+                ("onecolleague_computer_run", {"action": "status", "run_id": "run"}),
+            )
+            with patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group.group_id, actor_id="peer", source="local_mcp"),
+            ), patch("no1.ports.mcp.server._call_daemon_or_raise", side_effect=call_daemon):
+                for tool_name, arguments in cases:
+                    handle_tool_call(tool_name, {**arguments, "turn_grant_receipt": receipt})
+
+            self.assertEqual(len(calls), len(cases))
+            for request, timeout_s in calls:
+                self.assertIsNone(timeout_s)
+                self.assertEqual((request.get("args") or {}).get("turn_grant_receipt"), receipt)
+
     def test_daemon_computer_control_rejects_missing_or_untrusted_surface(self):
         for surface in (None, "bridge", "remote", "web_model", "viewer", "im"):
             args = {"command": "catalog", "group_id": "_global"}
@@ -246,6 +293,446 @@ class TestComputerControl(unittest.TestCase):
             response, _ = try_handle_computer_control_op("computer_control", args)
             self.assertFalse(response.ok)
             self.assertEqual(response.error.code, "permission_denied")
+
+    def test_daemon_live_actions_require_presented_grant_before_services(self):
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import load_group
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="claim-gate", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            cases = [
+                {"command": "catalog"},
+                {"command": "recording", "action": "get", "recording_id": "rec"},
+                {"command": "workflow", "action": "validate", "definition": self._message_workflow()},
+                {"command": "run", "action": "status", "run_id": "run"},
+                {"command": "run", "action": "start", "workflow_id": "trusted"},
+                {"command": "picker", "action": "status", "session_id": "pick"},
+                {"command": "element_snapshot", "capture_id": "capture"},
+                {"command": "setup", "action": "ensure"},
+            ]
+            with patch("no1.daemon.computer_control_ops.get_services") as get_services:
+                for case in cases:
+                    with self.subTest(case=case):
+                        response, _ = try_handle_computer_control_op(
+                            "computer_control",
+                            {
+                                **case,
+                                "group_id": group.group_id,
+                                "actor_id": "peer",
+                                "caller_surface": "local_mcp",
+                            },
+                        )
+                        self.assertFalse(response.ok)
+                        self.assertEqual(response.error.code, "permission_denied")
+                get_services.assert_not_called()
+
+            fake = Mock()
+            fake.store.list.return_value = []
+            fake.lease.status.return_value = {"active": False}
+            fake.setup.status.return_value = {"phase": "ready"}
+            with patch("no1.daemon.computer_control_ops.get_services", return_value=fake):
+                for command, action in (("workflow", "list"), ("lease", "status"), ("setup", "status")):
+                    with self.subTest(exempt=(command, action)):
+                        response, _ = try_handle_computer_control_op(
+                            "computer_control",
+                            {
+                                "command": command,
+                                "action": action,
+                                "group_id": group.group_id,
+                                "actor_id": "peer",
+                                "caller_surface": "local_mcp",
+                            },
+                        )
+                        self.assertTrue(response.ok, response.error)
+            self.assertIsNotNone(load_group(group.group_id))
+
+    def test_daemon_valid_claim_activates_request_before_recording_start(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="request-order", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            request_payload = {
+                "request_id": "req-order",
+                "actor_id": "peer",
+                "mode": "create_and_run",
+                "workflow_id": "",
+            }
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(
+                    text="record",
+                    to=["peer"],
+                    computer_control_request=request_payload,
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            requests = ComputerRequestStore(WorkflowStore(Path(td)))
+            requests.append(
+                group.group_id,
+                {
+                    **request_payload,
+                    "event_id": str(event["id"]),
+                    "local_request_id": str(provenance.local_request_id),
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "codex_app"},
+            )
+            receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+
+            fake = Mock()
+            fake.requests = requests
+
+            def recording_start(*_args, **_kwargs):
+                activated = requests.get(group.group_id, "req-order") or {}
+                self.assertEqual(
+                    (activated.get("turn_authorization") or {}).get("generation"),
+                    (receipt or {}).get("generation"),
+                )
+                return {"recording_id": "rec-order", "status": "exploring"}
+
+            fake.recordings.start.side_effect = recording_start
+            with patch("no1.daemon.computer_control_ops.get_services", return_value=fake):
+                response, _ = try_handle_computer_control_op(
+                    "computer_control",
+                    {
+                        "command": "recording",
+                        "action": "start",
+                        "group_id": group.group_id,
+                        "actor_id": "peer",
+                        "request_id": "req-order",
+                        "caller_surface": "local_mcp",
+                        "turn_grant_receipt": receipt,
+                    },
+                )
+            self.assertTrue(response.ok, response.error)
+            fake.recordings.start.assert_called_once()
+
+            persisted = requests.get(group.group_id, "req-order") or {}
+            persisted_text = requests._path(group.group_id).read_text(encoding="utf-8")
+            self.assertTrue((persisted.get("turn_authorization") or {}).get("secret_digest"))
+            self.assertNotIn(str((receipt or {}).get("authorization_secret") or ""), persisted_text)
+            self.assertNotIn("authorization_secret", persisted_text)
+
+    def test_daemon_rejects_request_fact_tampering_before_services(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.ledger import append_event
+
+        permission_names = tuple(computer_control_permissions({}))
+        cases = [
+            ("missing_request_id", None),
+            ("expired", {"created_ts": time.time() - 7200}),
+            ("actor", {"actor_id": "other"}),
+            ("copied_request_id", {"copied_request_id": "req-copy"}),
+            ("mode", {"current_patch": {"mode": "run_existing"}}),
+            ("workflow_id", {"current_patch": {"workflow_id": "wf-escalated"}}),
+            *((name, {"current_patch": {name: True}}) for name in permission_names),
+        ]
+        for label, mutation in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as td, patch.dict(
+                os.environ,
+                {"CCCC_HOME": td},
+                clear=False,
+            ):
+                group = create_group(load_registry(), title=f"request-facts-{label}", topic="")
+                add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+                group.save()
+                provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+                event_request = {
+                    "request_id": "req-original",
+                    "actor_id": "peer",
+                    "mode": "create_and_run",
+                    "workflow_id": "",
+                    **computer_control_permissions({}),
+                }
+                if mutation and "actor_id" in mutation:
+                    event_request["actor_id"] = mutation["actor_id"]
+                event = append_event(
+                    group.ledger_path,
+                    kind="chat.message",
+                    group_id=group.group_id,
+                    scope_key="",
+                    by="user",
+                    data=ChatMessageData(
+                        text="record",
+                        to=["peer"],
+                        computer_control_request=event_request,
+                        turn_provenance=provenance,
+                    ).model_dump(),
+                )
+                request_id = str((mutation or {}).get("copied_request_id") or "req-original")
+                requests = ComputerRequestStore(WorkflowStore(Path(td)))
+                if label != "missing_request_id":
+                    requests.append(
+                        group.group_id,
+                        {
+                            **event_request,
+                            "request_id": request_id,
+                            "event_id": str(event["id"]),
+                            "local_request_id": str(provenance.local_request_id),
+                            "status": "accepted",
+                            "created_ts": float((mutation or {}).get("created_ts") or time.time()),
+                        },
+                    )
+                    current_patch = (mutation or {}).get("current_patch")
+                    if isinstance(current_patch, dict):
+                        requests.update(group.group_id, request_id, **current_patch)
+                attempt = begin_turn_delivery_attempt(
+                    group,
+                    actor_id="peer",
+                    event_ids=[str(event["id"])],
+                    binding={"transport": "codex_app"},
+                )
+                receipt = turn_delivery_grant_receipt(attempt)
+                finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+
+                with patch("no1.daemon.computer_control_ops.get_services") as get_services:
+                    response, _ = try_handle_computer_control_op(
+                        "computer_control",
+                        {
+                            "command": "recording",
+                            "action": "start",
+                            "group_id": group.group_id,
+                            "actor_id": "peer",
+                            "request_id": "" if label == "missing_request_id" else request_id,
+                            "caller_surface": "local_mcp",
+                            "turn_grant_receipt": receipt,
+                        },
+                    )
+                self.assertFalse(response.ok)
+                self.assertEqual(response.error.code, "permission_denied")
+                get_services.assert_not_called()
+                if label != "missing_request_id":
+                    persisted = requests.get(group.group_id, request_id) or {}
+                    self.assertNotIn("turn_authorization", persisted)
+
+    def test_trusted_workflow_start_still_uses_live_turn_claim(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="trusted-run-claim", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(text="run trusted", to=["peer"], turn_provenance=provenance).model_dump(),
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "claude_app"},
+            )
+            receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+
+            fake = Mock()
+            fake.setup.status.return_value = {"fingerprint": "fp-current"}
+            fake.store.get.return_value = {
+                "manifest": {
+                    "trusted": {"1": {"fingerprint": "fp-current"}},
+                }
+            }
+            fake.runner.start_sync.return_value = {"run_id": "run-trusted", "status": "running"}
+            with patch("no1.daemon.computer_control_ops.get_services", return_value=fake):
+                response, _ = try_handle_computer_control_op(
+                    "computer_control",
+                    {
+                        "command": "run",
+                        "action": "start",
+                        "group_id": group.group_id,
+                        "actor_id": "peer",
+                        "workflow_id": "wf-trusted",
+                        "version": 1,
+                        "caller_surface": "local_mcp",
+                        "turn_grant_receipt": receipt,
+                    },
+                )
+            self.assertTrue(response.ok, response.error)
+            fake.runner.start_sync.assert_called_once()
+            fake.requests.require_authorized.assert_not_called()
+
+    def test_request_activation_binds_local_event_to_exact_grant_without_secret(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            load_event_turn_provenance,
+            turn_delivery_grant_receipt,
+            validate_turn_grant_receipt,
+        )
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="request-claim", topic="")
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            request_payload = {
+                "request_id": "req-local",
+                "actor_id": "peer",
+                "mode": "create_and_run",
+                "workflow_id": "",
+            }
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(
+                    text="record this workflow",
+                    to=["peer"],
+                    computer_control_request=request_payload,
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            store = WorkflowStore(Path(td))
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    **request_payload,
+                    "event_id": str(event["id"]),
+                    "local_request_id": str(provenance.local_request_id),
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "pty"},
+            )
+            receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+            claim = validate_turn_grant_receipt(group, "peer", turn_grant_receipt=receipt)
+            self.assertIsNotNone(claim)
+            activated = requests.activate_for_turn_claim(
+                group.group_id,
+                "req-local",
+                "peer",
+                claim=claim,
+                provenance=load_event_turn_provenance(group, str(event["id"])),
+                ledger_event=event,
+            )
+            self.assertEqual(activated["turn_authorization"]["generation"], claim["generation"])
+            request_text = (group.path / "state" / "computer-control" / "requests.jsonl").read_text(encoding="utf-8")
+            self.assertNotIn(str((receipt or {}).get("authorization_secret") or ""), request_text)
+            self.assertNotIn("authorization_secret", request_text)
+
+            for label, patch_value in (
+                ("legacy", {"local_request_id": ""}),
+                ("copied_event", {"event_id": "event-missing"}),
+            ):
+                request_id = "req-" + label
+                requests.append(
+                    group.group_id,
+                    {
+                        "request_id": request_id,
+                        "actor_id": "peer",
+                        "event_id": str(event["id"]),
+                        "local_request_id": str(provenance.local_request_id),
+                        "mode": "create_and_run",
+                        "status": "accepted",
+                        "created_ts": time.time(),
+                        **patch_value,
+                    },
+                )
+                candidate = requests.get(group.group_id, request_id) or {}
+                candidate_provenance = load_event_turn_provenance(group, str(candidate.get("event_id") or ""))
+                with self.subTest(label=label), self.assertRaises(PermissionError):
+                    requests.activate_for_turn_claim(
+                        group.group_id,
+                        request_id,
+                        "peer",
+                        claim=claim,
+                        provenance=candidate_provenance,
+                        ledger_event=None,
+                    )
+
+    def test_request_store_rejects_public_authority_writes_without_disk_changes(self):
+        with tempfile.TemporaryDirectory() as td:
+            group = create_group(load_registry(), title="reserved-request-authority", topic="")
+            requests = ComputerRequestStore(WorkflowStore(Path(td)))
+            path = requests._path(group.group_id)
+            for field in sorted(ComputerRequestStore.RESERVED_AUTHORITY_FIELDS):
+                with self.subTest(operation="append", field=field):
+                    before = path.read_bytes() if path.exists() else None
+                    with self.assertRaisesRegex(PermissionError, "authority fields are reserved"):
+                        requests.append(
+                            group.group_id,
+                            {
+                                "request_id": "req-forged",
+                                "actor_id": "peer",
+                                field: {"authority_id": "forged"},
+                            },
+                        )
+                    after = path.read_bytes() if path.exists() else None
+                    self.assertEqual(after, before)
+
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-existing",
+                    "actor_id": "peer",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            for field in sorted(ComputerRequestStore.RESERVED_AUTHORITY_FIELDS):
+                with self.subTest(operation="update", field=field):
+                    before = path.read_bytes()
+                    with self.assertRaisesRegex(PermissionError, "authority fields are reserved"):
+                        requests.update(
+                            group.group_id,
+                            "req-existing",
+                            **{field: {"authority_id": "forged"}},
+                        )
+                    self.assertEqual(path.read_bytes(), before)
 
     def test_web_computer_control_rejects_viewer_and_remote_clients(self):
         local_request = Mock(client=Mock(host="127.0.0.1"))

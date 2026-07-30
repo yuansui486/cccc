@@ -530,11 +530,18 @@ def handle_send(
         ).model_dump(),
     )
     if computer_control_request is not None:
+        event_data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        event_provenance = (
+            event_data.get("turn_provenance")
+            if isinstance(event_data.get("turn_provenance"), dict)
+            else {}
+        )
         request_record = {
             **computer_control_request,
             "group_id": group.group_id,
             "text": text,
             "event_id": str(event.get("id") or ""),
+            "local_request_id": str(event_provenance.get("local_request_id") or ""),
             "created_at": utc_now_iso(),
             "created_ts": time.time(),
         }

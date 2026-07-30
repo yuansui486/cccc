@@ -478,6 +478,216 @@ class TestTurnProvenance(unittest.TestCase):
         )
         self.assertIsNone(get_current_turn_grant(self.group, "peer1", now=112.0))
 
+    def test_turn_grant_receipt_secret_is_delivered_but_never_persisted(self) -> None:
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_completion_receipt,
+            turn_delivery_grant_receipt,
+            validate_turn_grant_receipt,
+        )
+        from no1.util.fs import read_json
+
+        event = self._append(
+            provenance=build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+        )
+        attempt = begin_turn_delivery_attempt(
+            self.group,
+            actor_id="peer1",
+            event_ids=[str(event["id"])],
+            binding={"transport": "pty"},
+            now=100.0,
+        )
+        self.assertIsNotNone(attempt)
+        secret = str(attempt.get("authorization_secret") or "")
+        self.assertGreaterEqual(len(secret), 32)
+
+        state_path = self.group.path / "state" / "turn-grants" / "peer1.json"
+        pending_text = state_path.read_text(encoding="utf-8")
+        pending_state = read_json(state_path)
+        self.assertNotIn(secret, pending_text)
+        self.assertNotIn("authorization_secret", pending_text)
+        pending = pending_state.get("pending_attempt") or {}
+        self.assertTrue((pending.get("authorization_binding") or {}).get("secret_digest"))
+
+        completion = turn_delivery_completion_receipt(attempt)
+        receipt = turn_delivery_grant_receipt(attempt)
+        self.assertNotIn("authorization_secret", completion or {})
+        self.assertEqual((receipt or {}).get("authorization_secret"), secret)
+        self.assertIsNotNone(
+            finalize_turn_delivery_attempt(
+                self.group,
+                actor_id="peer1",
+                attempt=attempt,
+                now=101.0,
+                ttl_seconds=30.0,
+            )
+        )
+
+        current_text = state_path.read_text(encoding="utf-8")
+        current = (read_json(state_path).get("current_grant") or {})
+        self.assertNotIn(secret, current_text)
+        self.assertNotIn("authorization_secret", current_text)
+        self.assertEqual(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer1",
+                turn_grant_receipt=receipt,
+                now=110.0,
+            ),
+            current,
+        )
+
+        disk_only = {
+            key: current.get(key)
+            for key in (
+                "v",
+                "issuer_epoch",
+                "group_id",
+                "actor_id",
+                "attempt_id",
+                "generation",
+                "event_ids",
+                "authorization_binding",
+            )
+        }
+        self.assertIsNone(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer1",
+                turn_grant_receipt=disk_only,
+                now=110.0,
+            )
+        )
+        self.assertIsNone(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer1",
+                turn_grant_receipt={**(receipt or {}), "authorization_secret": "forged"},
+                now=110.0,
+            )
+        )
+        self.assertIsNone(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer1",
+                turn_grant_receipt=receipt,
+                now=132.0,
+            )
+        )
+
+    def test_turn_grant_receipt_exact_identity_rejects_replay_and_cross_binding(self) -> None:
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+            validate_turn_grant_receipt,
+        )
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        event = self._append(
+            provenance=build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+        )
+        attempt_a = begin_turn_delivery_attempt(
+            self.group,
+            actor_id="peer1",
+            event_ids=[str(event["id"])],
+            binding={"transport": "pty"},
+            now=100.0,
+        )
+        receipt_a = turn_delivery_grant_receipt(attempt_a)
+        finalize_turn_delivery_attempt(
+            self.group,
+            actor_id="peer1",
+            attempt=attempt_a,
+            now=101.0,
+            ttl_seconds=60.0,
+        )
+        other_group = create_group(load_registry(), title="other-turn-grant", topic="")
+        mutations = {
+            "issuer": {"issuer_epoch": "daemon_old"},
+            "actor": {"actor_id": "peer2"},
+            "attempt": {"attempt_id": "turnattempt_old"},
+            "generation": {"generation": 99},
+            "event_ids": {"event_ids": ["event_old"]},
+            "missing_binding": {"binding": {}},
+            "changed_binding": {"binding": {"transport": "claude_app"}},
+            "authorization_binding_without_transport": {
+                "authorization_binding": {
+                    key: value
+                    for key, value in ((receipt_a or {}).get("authorization_binding") or {}).items()
+                    if key != "transport"
+                }
+            },
+            "authorization_binding": {
+                "authorization_binding": {
+                    **((receipt_a or {}).get("authorization_binding") or {}),
+                    "authority_id": "turnauth_old",
+                }
+            },
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                self.assertIsNone(
+                    validate_turn_grant_receipt(
+                        self.group,
+                        "peer1",
+                        turn_grant_receipt={**(receipt_a or {}), **mutation},
+                        now=110.0,
+                    )
+                )
+        self.assertIsNone(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer2",
+                turn_grant_receipt=receipt_a,
+                now=110.0,
+            )
+        )
+        self.assertIsNone(
+            validate_turn_grant_receipt(
+                other_group,
+                "peer1",
+                turn_grant_receipt=receipt_a,
+                now=110.0,
+            )
+        )
+
+        attempt_b = begin_turn_delivery_attempt(
+            self.group,
+            actor_id="peer1",
+            event_ids=[str(event["id"])],
+            binding={"transport": "pty"},
+            now=111.0,
+        )
+        receipt_b = turn_delivery_grant_receipt(attempt_b)
+        finalize_turn_delivery_attempt(
+            self.group,
+            actor_id="peer1",
+            attempt=attempt_b,
+            now=112.0,
+            ttl_seconds=60.0,
+        )
+        self.assertIsNone(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer1",
+                turn_grant_receipt=receipt_a,
+                now=113.0,
+            )
+        )
+        self.assertIsNotNone(
+            validate_turn_grant_receipt(
+                self.group,
+                "peer1",
+                turn_grant_receipt=receipt_b,
+                now=113.0,
+            )
+        )
+
     def test_daemon_issuer_epoch_abandons_persisted_grant_and_pending_attempt(self) -> None:
         from no1.daemon.messaging import turn_provenance as provenance
         from no1.daemon.messaging.turn_provenance import build_send_turn_provenance
@@ -609,6 +819,44 @@ class TestTurnProvenance(unittest.TestCase):
         self.assertTrue(response.ok)
         self.assertIsNone(get_current_turn_grant(self.group, "peer1"))
 
+    def test_computer_request_persists_its_local_provenance_identity(self) -> None:
+        from no1.daemon.messaging.chat_ops import handle_send
+        from no1.kernel.actors import add_actor
+
+        add_actor(self.group, actor_id="peer1", runner="headless", runtime="codex")
+        with patch("no1.daemon.messaging.chat_ops.codex_app_supervisor.actor_running", return_value=True), patch(
+            "no1.daemon.messaging.chat_ops.codex_app_supervisor.submit_user_message", return_value=True
+        ):
+            response = handle_send(
+                {
+                    "group_id": self.group.group_id,
+                    "__turn_ingress": "web_user",
+                    "by": "user",
+                    "text": "record a workflow",
+                    "to": ["peer1"],
+                    "computer_control_request": {
+                        "actor_id": "peer1",
+                        "mode": "create_and_run",
+                    },
+                },
+                coerce_bool=bool,
+                normalize_attachments=lambda _group, _raw: [],
+                effective_runner_kind=lambda value: str(value or "pty"),
+                auto_wake_recipients=lambda _group, _to, _by: [],
+                automation_on_resume=lambda _group: None,
+                automation_on_new_message=lambda _group: None,
+                clear_pending_system_notifies=lambda _group_id, _kinds: None,
+            )
+        self.assertTrue(response.ok, getattr(response, "error", None))
+        event = response.result["event"]
+        request_id = str(event["data"]["computer_control_request"]["request_id"])
+        local_request_id = str(event["data"]["turn_provenance"]["local_request_id"])
+        request_path = self.group.path / "state" / "computer-control" / "requests.jsonl"
+        records = [json.loads(line) for line in request_path.read_text(encoding="utf-8").splitlines()]
+        request = next(item for item in records if str(item.get("request_id") or "") == request_id)
+        self.assertEqual(request.get("event_id"), event["id"])
+        self.assertEqual(request.get("local_request_id"), local_request_id)
+
     def test_provider_start_boundaries_sign_and_failures_do_not(self) -> None:
         from no1.daemon.claude_app_sessions import ClaudeAppSession, _PendingTurn as ClaudePendingTurn
         from no1.daemon.codex_app_sessions import CodexAppSession, _PendingTurn as CodexPendingTurn
@@ -622,10 +870,16 @@ class TestTurnProvenance(unittest.TestCase):
         codex._turn_queue.put(
             CodexPendingTurn(text="codex start", event_id=str(codex_event["id"]))
         )
+        codex_requests = []
+
+        def accept_codex(_method, params, **_kwargs):
+            codex_requests.append(params)
+            return {"turn": {"id": "codex-turn-1"}}
+
         with patch.object(codex, "is_running", side_effect=[True, False, False]), patch.object(
             codex,
             "_request",
-            return_value={"turn": {"id": "codex-turn-1"}},
+            side_effect=accept_codex,
         ), patch.object(codex, "_emit"), patch(
             "no1.daemon.codex_app_sessions.auto_mark_headless_delivery_started"
         ):
@@ -633,6 +887,13 @@ class TestTurnProvenance(unittest.TestCase):
         codex_grant = get_current_turn_grant(self.group, "peer1")
         self.assertIsNotNone(codex_grant)
         self.assertEqual(codex_grant["event_ids"], [codex_event["id"]])
+        codex_text = "\n".join(
+            str(item.get("text") or "")
+            for item in (codex_requests[0].get("input") or [])
+            if isinstance(item, dict)
+        )
+        self.assertIn("turn_grant_receipt=", codex_text)
+        self.assertIn("authorization_secret", codex_text)
 
         claude_event = self._append(
             provenance=build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
@@ -641,10 +902,16 @@ class TestTurnProvenance(unittest.TestCase):
         claude._turn_queue.put(
             ClaudePendingTurn(text="claude start", event_id=str(claude_event["id"]))
         )
+        claude_writes = []
+
+        def accept_claude(value):
+            claude_writes.append(value)
+            return True
+
         with patch.object(claude, "is_running", side_effect=[True, False]), patch.object(
             claude,
             "_write_stdin",
-            return_value=True,
+            side_effect=accept_claude,
         ), patch.object(claude._turn_done, "wait", return_value=True), patch.object(
             claude,
             "_emit",
@@ -653,6 +920,9 @@ class TestTurnProvenance(unittest.TestCase):
         claude_grant = get_current_turn_grant(self.group, "peer1")
         self.assertIsNotNone(claude_grant)
         self.assertEqual(claude_grant["event_ids"], [claude_event["id"]])
+        claude_text = str((((claude_writes[0].get("message") or {}).get("content")) or ""))
+        self.assertIn("turn_grant_receipt=", claude_text)
+        self.assertIn("authorization_secret", claude_text)
 
         failed_codex_event = self._append(
             provenance=build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
@@ -1008,7 +1278,10 @@ class TestTurnProvenance(unittest.TestCase):
         with patch.object(fallback_session, "is_running", side_effect=[True, False, False]), patch.object(
             fallback_session,
             "_build_turn_input_items",
-            return_value=[{"type": "text", "text": "image rejected"}, {"type": "local_image", "path": "/tmp/x"}],
+            side_effect=lambda payload, text_override=None: [
+                {"type": "text", "text": str(text_override or payload.text)},
+                {"type": "local_image", "path": "/tmp/x"},
+            ],
         ), patch.object(fallback_session, "_request", side_effect=reject_image_then_accept), patch.object(
             fallback_session, "_emit"
         ), patch("no1.daemon.codex_app_sessions.auto_mark_headless_delivery_started"):
@@ -1016,7 +1289,11 @@ class TestTurnProvenance(unittest.TestCase):
 
         self.assertEqual(len(fallback_requests), 2)
         self.assertTrue(any(item.get("type") == "local_image" for item in fallback_requests[0][1]["input"]))
-        self.assertEqual(fallback_requests[1][1]["input"], [{"type": "text", "text": "image rejected"}])
+        first_text = next(item["text"] for item in fallback_requests[0][1]["input"] if item.get("type") == "text")
+        second_text = fallback_requests[1][1]["input"][0]["text"]
+        self.assertIn("turn_grant_receipt=", first_text)
+        self.assertEqual(second_text, first_text)
+        self.assertTrue(second_text.endswith("image rejected"))
         self.assertIsNotNone(get_current_turn_grant(self.group, "peer1"))
         invalidate_turn_grant(self.group, "peer1", reason="test_cleanup")
 
@@ -1572,12 +1849,16 @@ class TestTurnProvenance(unittest.TestCase):
             due=False,
         )
         submitted_receipt: dict = {}
+        submitted_grant_receipt: dict = {}
 
         def submit_and_reply(_group, *, actor_id, text, **_kwargs):
             prefix = "[onecolleague] completion_receipt="
             line = next(item for item in str(text or "").splitlines() if item.startswith(prefix))
             receipt = json.loads(line[len(prefix) :])
             submitted_receipt.update(receipt)
+            grant_prefix = "[onecolleague] turn_grant_receipt="
+            grant_line = next(item for item in str(text or "").splitlines() if item.startswith(grant_prefix))
+            submitted_grant_receipt.update(json.loads(grant_line[len(grant_prefix) :]))
             response = handle_reply(
                 {
                     "group_id": self.group.group_id,
@@ -1622,6 +1903,9 @@ class TestTurnProvenance(unittest.TestCase):
         self.assertEqual(submitted_receipt.get("actor_id"), "peer1")
         self.assertEqual(submitted_receipt.get("event_ids"), [event_id])
         self.assertEqual(submitted_receipt.get("binding"), {"transport": "pty"})
+        self.assertNotIn("authorization_secret", submitted_receipt)
+        self.assertTrue(submitted_grant_receipt.get("authorization_secret"))
+        self.assertEqual(submitted_grant_receipt.get("event_ids"), [event_id])
         self.assertIsNone(get_current_turn_grant(self.group, "peer1"))
 
     def test_pty_accepted_finalize_uncertainty_never_requeues_or_leaves_grant(self) -> None:

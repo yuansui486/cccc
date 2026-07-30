@@ -71,6 +71,33 @@ _COMMON_ACTOR = {
 _COMMON_BY = {
     "by": {"type": "string", "description": "Caller actor id override (normally auto-resolved)"},
 }
+_TURN_GRANT_RECEIPT = {
+    "type": "object",
+    "description": "Exact bearer receipt delivered with the current local-user turn. Required for live computer-control actions.",
+    "properties": {
+        "v": {"type": "integer", "const": 1},
+        "issuer_epoch": {"type": "string"},
+        "group_id": {"type": "string"},
+        "actor_id": {"type": "string"},
+        "attempt_id": {"type": "string"},
+        "generation": {"type": "integer", "minimum": 1},
+        "event_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "binding": {"type": "object", "additionalProperties": True},
+        "authorization_binding": {"type": "object", "additionalProperties": True},
+        "authorization_secret": {"type": "string", "minLength": 32},
+    },
+    "required": [
+        "v",
+        "issuer_epoch",
+        "group_id",
+        "actor_id",
+        "attempt_id",
+        "generation",
+        "event_ids",
+        "authorization_binding",
+        "authorization_secret",
+    ],
+}
 
 
 def _computer_workflow_input_schema() -> dict:
@@ -98,6 +125,7 @@ def _computer_workflow_input_schema() -> dict:
     schema = _obj(
         {
             **_COMMON_GROUP,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
             "workflow_id": {"type": "string"},
             "action": {
                 "type": "string",
@@ -1359,6 +1387,7 @@ MCP_TOOLS = [
         "annotations": {"readOnlyHint": True},
         "inputSchema": _obj({
             **_COMMON_GROUP,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
             "tool": {"type": "string", "description": "Optional exact tool name. Returns its complete schema."},
         }),
     },
@@ -1372,6 +1401,7 @@ MCP_TOOLS = [
         "inputSchema": _obj({
             **_COMMON_GROUP,
             **_COMMON_ACTOR,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
             "action": {
                 "type": "string",
                 "enum": ["start", "call", "wait", "get", "resume", "update_step", "undo", "commit", "abort"],
@@ -1436,6 +1466,7 @@ MCP_TOOLS = [
         "inputSchema": _obj({
             **_COMMON_GROUP,
             **_COMMON_ACTOR,
+            "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
             "action": {"type": "string", "enum": ["start", "status", "recover", "verify", "cancel"], "default": "start"},
             "workflow_id": {"type": "string"},
             "version": {"type": "integer", "minimum": 1},

@@ -11,11 +11,23 @@ from ..computer_control.mcp import validate_workflow_tools
 from ..computer_control.lease import LeaseConflict
 from ..computer_control.elements import normalize_snapshot
 from ..computer_control.models import WorkflowDefinition
+from ..computer_control.authorization import (
+    request_id_requiring_turn_binding,
+    requires_live_turn_claim,
+)
+from ..computer_control.requests import ComputerRequestStore
 from ..computer_control.services import get_services
+from ..computer_control.storage import WorkflowStore
 from ..contracts.v1 import DaemonError, DaemonResponse
 from ..kernel.actors import find_actor
 from ..kernel.group import load_group
+from ..kernel.ledger_index import lookup_event_by_id
 from ..paths import ensure_home
+from .messaging.turn_provenance import (
+    consume_turn_grant_receipt,
+    load_event_turn_provenance,
+    validate_turn_grant_receipt,
+)
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> Tuple[DaemonResponse, bool]:
@@ -361,6 +373,8 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
     group_id = str(args.get("group_id") or "").strip()
     actor_id = str(args.get("actor_id") or "").strip()
     caller_surface = str(args.get("caller_surface") or "").strip().lower()
+    action_defaults = {"workflow": "list", "run": "start", "picker": "status", "lease": "status", "setup": "status"}
+    action = str(args.get("action") or action_defaults.get(command, "")).strip().lower()
     if caller_surface not in {"local_mcp", "local_web"}:
         return _error(
             "permission_denied",
@@ -376,6 +390,65 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             return _error("permission_denied", "computer control requires a bound local actor runtime")
         if str(actor.get("runtime") or "").strip().lower() == "web_model":
             return _error("permission_denied", "computer control is unavailable to Web Model actors")
+        if requires_live_turn_claim(command, action):
+            claim = validate_turn_grant_receipt(
+                group,
+                actor_id,
+                turn_grant_receipt=args.get("turn_grant_receipt"),
+            )
+            if claim is None:
+                return _error(
+                    "permission_denied",
+                    "computer control requires the exact live local-user turn grant",
+                    details={"command": command, "action": action, "reason": "turn_grant_required"},
+                )
+    if caller_surface == "local_mcp" and requires_live_turn_claim(command, action):
+        try:
+            request_id = request_id_requiring_turn_binding(command, action, args)
+            request_binding_required = bool(
+                (command == "recording" and action == "start")
+                or (command == "workflow" and action not in {"list", "get", "validate"})
+            )
+            if request_binding_required and not request_id:
+                raise PermissionError("computer control request_id is required for this action")
+            if request_id:
+                assert group is not None
+                request_store = ComputerRequestStore(WorkflowStore(ensure_home()))
+
+                def activate_request(claim: Dict[str, Any]) -> Dict[str, Any]:
+                    request = request_store.require_authorized(group_id, request_id, actor_id)
+                    event_id = str(request.get("event_id") or "").strip()
+                    ledger_event = lookup_event_by_id(group.ledger_path, event_id) if event_id else None
+                    provenance = load_event_turn_provenance(group, event_id) if event_id else None
+                    return request_store.activate_for_turn_claim(
+                        group_id,
+                        request_id,
+                        actor_id,
+                        claim=claim,
+                        provenance=provenance,
+                        ledger_event=ledger_event,
+                    )
+
+                activated = consume_turn_grant_receipt(
+                    group,
+                    actor_id,
+                    turn_grant_receipt=args.get("turn_grant_receipt"),
+                    consumer=activate_request,
+                )
+                if not isinstance(activated, dict):
+                    raise PermissionError("computer control turn grant is no longer current")
+        except PermissionError as exc:
+            return _error("permission_denied", str(exc), details={"retryable": False})
+        except Exception as exc:
+            details = {
+                "layer": str(getattr(exc, "layer", "computer_control")),
+                "next_action": str(getattr(exc, "next_action", "") or ""),
+                "field_errors": getattr(exc, "field_errors", {})
+                if isinstance(getattr(exc, "field_errors", {}), dict)
+                else {},
+                "retryable": bool(getattr(exc, "retryable", False)),
+            }
+            return _error(str(getattr(exc, "code", "computer_control_failed")), str(exc), details=details)
     service = get_services(ensure_home())
     try:
         if command == "catalog":

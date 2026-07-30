@@ -57,6 +57,7 @@ from .turn_provenance import (
     invalidate_turn_grant,
     terminalize_uncertain_delivery_attempt,
     turn_delivery_completion_receipt,
+    turn_delivery_grant_receipt,
 )
 
 
@@ -734,6 +735,20 @@ def append_turn_completion_receipt(text: str, attempt: Any) -> str:
     if not receipt:
         return str(text or "")
     receipt_line = "[onecolleague] completion_receipt=" + json.dumps(
+        receipt,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    body = str(text or "").strip()
+    return f"{receipt_line}\n\n{body}" if body else receipt_line
+
+
+def append_turn_grant_receipt(text: str, attempt: Any) -> str:
+    receipt = turn_delivery_grant_receipt(attempt)
+    if not receipt:
+        return str(text or "")
+    receipt_line = "[onecolleague] turn_grant_receipt=" + json.dumps(
         receipt,
         ensure_ascii=True,
         separators=(",", ":"),
@@ -1458,7 +1473,10 @@ def _start_async_first_delivery(
                 event_ids=[str(msg.event_id or "") for msg in deliverable],
                 binding={"transport": "pty"},
             )
-            delivery_text = append_turn_completion_receipt(message_text, delivery_attempt)
+            delivery_text = append_turn_grant_receipt(
+                append_turn_completion_receipt(message_text, delivery_attempt),
+                delivery_attempt,
+            )
             try:
                 submit_outcome = _coerce_pty_submit_outcome(
                     pty_submit_text(
@@ -1655,7 +1673,10 @@ def flush_pending_messages(group: Group, *, actor_id: str) -> bool:
             except TurnDeliveryBusyError:
                 THROTTLE.requeue_front(gid, aid, messages)
                 return False
-            delivery_text = append_turn_completion_receipt(message_text, delivery_attempt)
+            delivery_text = append_turn_grant_receipt(
+                append_turn_completion_receipt(message_text, delivery_attempt),
+                delivery_attempt,
+            )
             try:
                 submit_outcome = _coerce_pty_submit_outcome(
                     pty_submit_text(

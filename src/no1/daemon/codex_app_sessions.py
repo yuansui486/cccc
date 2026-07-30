@@ -23,7 +23,7 @@ from ..paths import ensure_home
 from ..runners import pty as pty_runner
 from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .mcp_install import ensure_mcp_installed
-from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
+from .messaging.delivery import append_turn_grant_receipt, auto_mark_headless_delivery_started, render_headless_control_text
 from .messaging.turn_provenance import (
     TurnDeliveryBusyError,
     begin_turn_delivery_attempt,
@@ -1318,6 +1318,7 @@ class CodexAppSession:
                 self._starting_delivery_attempt_id = str((delivery_attempt or {}).get("attempt_id") or "")
                 self._starting_runtime_turn_id = ""
                 self._pending_turn_terminals.clear()
+            turn_text = append_turn_grant_receipt(turn_text, delivery_attempt)
 
             def _handle_turn_start_failed(exc_obj: BaseException, *, acceptance_uncertain: bool = False) -> None:
                 timed_out = _is_codex_request_timeout(exc_obj, method="turn/start")

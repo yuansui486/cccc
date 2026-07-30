@@ -32,7 +32,12 @@ from ..paths import ensure_home
 from .actors.actor_exit_ops import persist_actor_process_exit_stopped
 from .mcp_install import ensure_mcp_installed
 from .messaging.actor_turn_rendering import render_actor_event_for_delivery
-from .messaging.delivery import append_mcp_reply_reminder, auto_mark_headless_delivery_started, render_headless_control_text
+from .messaging.delivery import (
+    append_mcp_reply_reminder,
+    append_turn_grant_receipt,
+    auto_mark_headless_delivery_started,
+    render_headless_control_text,
+)
 from .messaging.turn_provenance import (
     TurnDeliveryBusyError,
     begin_turn_delivery_attempt,
@@ -1329,7 +1334,10 @@ class ClaudeAppSession:
                 self._active_grant_generation = 0
 
             # Send user message to claude via stdin
-            user_content = self._compose_user_content(payload)
+            user_content = append_turn_grant_receipt(
+                self._compose_user_content(payload),
+                delivery_attempt,
+            )
             write_outcome = _coerce_claude_write_outcome(
                 self._write_stdin(
                     {
