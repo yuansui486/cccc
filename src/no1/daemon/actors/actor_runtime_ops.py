@@ -16,7 +16,6 @@ from ..runtime_session_ops import start_pty_actor_with_runtime_resume
 from ...runners import headless as headless_runner
 from ...runners import pty as pty_runner
 from ...runners.platform_support import pty_support_error_message
-from ..pet.review_scheduler import request_pet_review
 
 
 def _prepare_codex_skill_overlay(group: Any, actor_id: str, env: Dict[str, Any]) -> Dict[str, str]:
@@ -419,16 +418,6 @@ def start_actor_process(
 
     from ...kernel.events import publish_event
     publish_event("actor.start", {"group_id": group.group_id, "actor_id": actor_id})
-    try:
-        request_pet_review(
-            group.group_id,
-            reason="actor_start",
-            source_event_id=str(start_event.get("id") or "").strip(),
-            immediate=True,
-        )
-    except Exception:
-        pass
-
     return {
         "success": True,
         "actor": actor,

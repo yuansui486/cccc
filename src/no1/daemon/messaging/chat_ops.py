@@ -26,7 +26,6 @@ from ...kernel.messaging import (
 )
 from ...kernel.message_sender_snapshot import build_sender_snapshot
 from ...kernel.scope import detect_scope
-from ...kernel.pet_actor import PET_ACTOR_ID, get_pet_actor
 from ...util.time import utc_now_iso
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
 from ..codex_app_sessions import SUPERVISOR as codex_app_supervisor
@@ -58,8 +57,6 @@ from .actor_turn_rendering import (
     build_actor_headless_delivery_text as _build_headless_delivery_text,
     compact_delivery_text as _compact_delivery_text,
 )
-from ..pet.review_scheduler import request_pet_review
-from ..pet.profile_refresh import record_user_chat_message
 from ..context.context_ops import handle_context_sync
 from .install_slash_command import INSTALL_CAPABILITY_ID, parse_install_slash_command, render_install_command_task
 
@@ -68,13 +65,6 @@ logger = logging.getLogger("no1.daemon.server")
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
     return DaemonResponse(ok=False, error=DaemonError(code=code, message=message, details=(details or {})))
-
-
-def _is_internal_pet_sender(group: Any, by: str) -> bool:
-    actor_id = str(by or "").strip()
-    if actor_id != PET_ACTOR_ID:
-        return False
-    return isinstance(get_pet_actor(group), dict)
 
 
 def _wake_group_on_human_message(
@@ -398,11 +388,6 @@ def handle_send(
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    if _is_internal_pet_sender(group, by):
-        return _error(
-            "pet_visible_chat_forbidden",
-            "Pet cannot send or reply visible chat directly; use pet decisions instead.",
-        )
     if client_id:
         existing = _tracked_send_existing_result(group, client_id=client_id, by=by)
         if existing is not None:
@@ -679,26 +664,6 @@ def handle_send(
         automation_on_new_message(group)
     except Exception:
         pass
-    try:
-        request_pet_review(
-            group.group_id,
-            reason="chat_message",
-            source_event_id=event_id,
-            immediate=reply_required,
-        )
-    except Exception:
-        pass
-    try:
-        if by == "user":
-            record_user_chat_message(
-                group.group_id,
-                event_id=event_id,
-                ts=event_ts,
-                text=text,
-            )
-    except Exception:
-        pass
-
     return DaemonResponse(ok=True, result={"event": event})
 
 
@@ -945,11 +910,6 @@ def handle_reply(
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    if _is_internal_pet_sender(group, by):
-        return _error(
-            "pet_visible_chat_forbidden",
-            "Pet cannot send or reply visible chat directly; use pet decisions instead.",
-        )
 
     group = _wake_group_on_human_message(
         group,
@@ -1184,26 +1144,6 @@ def handle_reply(
         automation_on_new_message(group)
     except Exception:
         pass
-    try:
-        request_pet_review(
-            group.group_id,
-            reason="chat_reply",
-            source_event_id=event_id,
-            immediate=reply_required,
-        )
-    except Exception:
-        pass
-    try:
-        if by == "user":
-            record_user_chat_message(
-                group.group_id,
-                event_id=event_id,
-                ts=event_ts,
-                text=text,
-            )
-    except Exception:
-        pass
-
     return DaemonResponse(ok=True, result={"event": event, "ack_event": ack_event})
 
 

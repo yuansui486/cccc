@@ -163,7 +163,6 @@ export function TemplatePreviewDetails({
     "terminal_transcript_notify_tail",
     "terminal_transcript_notify_lines",
     "panorama_enabled",
-    "desktop_pet_enabled",
   ]
     .filter((k) => k in settings || (diff?.settings_changed && k in diff.settings_changed))
     .sort((a, b) => {

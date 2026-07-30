@@ -120,7 +120,7 @@ export function SettingsModal({
   const [terminalBacklogMiB, setTerminalBacklogMiB] = useState(10);
   const [terminalScrollbackLines, setTerminalScrollbackLines] = useState(8000);
   const [peerRuntimeVisibility, setPeerRuntimeVisibility] = useState<RuntimeVisibilityMode>("visible");
-  const [petRuntimeVisibility, setPetRuntimeVisibility] = useState<RuntimeVisibilityMode>("hidden");
+  const [assistantRuntimeVisibility, setAssistantRuntimeVisibility] = useState<RuntimeVisibilityMode>("hidden");
   const [obsBusy, setObsBusy] = useState(false);
 
   // Developer-mode debug views
@@ -227,8 +227,8 @@ export function SettingsModal({
         setPeerRuntimeVisibility(
           String(obs.runtime_visibility?.peer_runtime || "").trim().toLowerCase() === "hidden" ? "hidden" : "visible"
         );
-        setPetRuntimeVisibility(
-          String(obs.runtime_visibility?.pet_runtime || "").trim().toLowerCase() === "visible" ? "visible" : "hidden"
+        setAssistantRuntimeVisibility(
+          String(obs.runtime_visibility?.assistant_runtime || "").trim().toLowerCase() === "visible" ? "visible" : "hidden"
         );
       }
     } catch (e) {
@@ -348,7 +348,7 @@ export function SettingsModal({
         terminalTranscriptPerActorBytes: perActorBytes,
         terminalUiScrollbackLines: scrollbackLines,
         peerRuntimeVisibility,
-        petRuntimeVisibility,
+        assistantRuntimeVisibility,
       });
       if (resp.ok && resp.result?.observability) {
         const obs = resp.result.observability;
@@ -367,8 +367,8 @@ export function SettingsModal({
         setPeerRuntimeVisibility(
           String(obs.runtime_visibility?.peer_runtime || "").trim().toLowerCase() === "hidden" ? "hidden" : "visible"
         );
-        setPetRuntimeVisibility(
-          String(obs.runtime_visibility?.pet_runtime || "").trim().toLowerCase() === "visible" ? "visible" : "hidden"
+        setAssistantRuntimeVisibility(
+          String(obs.runtime_visibility?.assistant_runtime || "").trim().toLowerCase() === "visible" ? "visible" : "hidden"
         );
       } else if (resp.ok) {
         await loadObservability();
@@ -740,8 +740,8 @@ export function SettingsModal({
                   setTerminalScrollbackLines={setTerminalScrollbackLines}
                   peerRuntimeVisibility={peerRuntimeVisibility}
                   setPeerRuntimeVisibility={setPeerRuntimeVisibility}
-                  petRuntimeVisibility={petRuntimeVisibility}
-                  setPetRuntimeVisibility={setPetRuntimeVisibility}
+                  assistantRuntimeVisibility={assistantRuntimeVisibility}
+                  setAssistantRuntimeVisibility={setAssistantRuntimeVisibility}
                   obsBusy={obsBusy}
                   onSaveObservability={() => void handleSaveObservability()}
                   debugSnapshot={debugSnapshot}

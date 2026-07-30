@@ -7,6 +7,32 @@ from unittest.mock import patch
 
 
 class TestMcpCodeMode(unittest.TestCase):
+    def setUp(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        denied = set(mcp_server._WEB_MODEL_HARD_DENIED_TOOLS)
+        self._engine_authorization_patches = [
+            patch.object(mcp_server, "_WEB_MODEL_HARD_DENIED_TOOLS", frozenset()),
+            patch.object(
+                mcp_server,
+                "_WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES",
+                frozenset(set(mcp_server._WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES) | denied),
+            ),
+            patch.object(
+                mcp_server,
+                "_WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES",
+                frozenset(set(mcp_server._WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES) | denied),
+            ),
+            patch.object(
+                mcp_server,
+                "_WEB_MODEL_PEER_ALLOWED_TOOL_NAMES",
+                frozenset(set(mcp_server._WEB_MODEL_PEER_ALLOWED_TOOL_NAMES) | denied),
+            ),
+        ]
+        for authorization_patch in self._engine_authorization_patches:
+            authorization_patch.start()
+            self.addCleanup(authorization_patch.stop)
+
     def _with_home_and_group(self):
         from no1.kernel.actors import add_actor
         from no1.kernel.group import attach_scope_to_group, create_group
@@ -242,7 +268,7 @@ await new Promise(() => {});
         finally:
             cleanup()
 
-    def test_web_model_tools_keep_direct_fallbacks_visible(self) -> None:
+    def test_code_mode_engine_fixture_keeps_execution_fallbacks_visible(self) -> None:
         from no1.ports.mcp import server as mcp_server
         from no1.ports.mcp.common import runtime_context_override
 
@@ -485,6 +511,212 @@ text(results.join(","));
             with self.assertRaises(mcp_server.MCPError) as cm:
                 mcp_server.handle_tool_call("onecolleague_code_exec", {"source": "text('blocked')"})
         self.assertEqual(cm.exception.code, "invalid_actor_runtime")
+
+
+class TestWebModelLocalExecutionDenied(unittest.TestCase):
+    execution_tools = {
+        "onecolleague_shell",
+        "onecolleague_exec_command",
+        "onecolleague_write_stdin",
+        "onecolleague_code_exec",
+        "onecolleague_code_wait",
+        "onecolleague_git",
+    }
+    capability_tools = {
+        "onecolleague_capability_enable",
+        "onecolleague_capability_install",
+        "onecolleague_capability_use",
+    }
+    hard_denied_tools = execution_tools | capability_tools
+
+    def _with_web_model_actor(self, *, role: str):
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import attach_scope_to_group, create_group
+        from no1.kernel.registry import load_registry
+        from no1.kernel.scope import detect_scope
+
+        old_home = os.environ.get("CCCC_HOME")
+        td_ctx = tempfile.TemporaryDirectory()
+        td = Path(td_ctx.__enter__())
+        home = td / "home"
+        workspace = td / "repo"
+        home.mkdir()
+        workspace.mkdir()
+        os.environ["CCCC_HOME"] = str(home)
+        group = create_group(load_registry(), title=f"web-model-{role}", topic="")
+        group = attach_scope_to_group(load_registry(), group, detect_scope(workspace), set_active=True)
+        if role == "peer":
+            add_actor(group, actor_id="lead", title="Foreman", runtime="codex", runner="headless")
+            actor_id = "web-peer"
+        else:
+            actor_id = "web-foreman"
+        add_actor(group, actor_id=actor_id, title="Web Model", runtime="web_model", runner="headless")
+
+        def cleanup() -> None:
+            td_ctx.__exit__(None, None, None)
+            if old_home is None:
+                os.environ.pop("CCCC_HOME", None)
+            else:
+                os.environ["CCCC_HOME"] = old_home
+
+        return home, group, actor_id, cleanup
+
+    def test_peer_and_foreman_lists_hide_execution_tools_under_dynamic_and_full_profiles(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+
+        for role in ("peer", "foreman"):
+            home, group, actor_id, cleanup = self._with_web_model_actor(role=role)
+            try:
+                dynamic_tools = [
+                    {
+                        "name": name,
+                        "description": "injected",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }
+                    for name in sorted(self.hard_denied_tools)
+                ]
+                for profile in ("", "full"):
+                    with self.subTest(role=role, profile=profile or "default"), patch.dict(
+                        os.environ,
+                        {"CCCC_MCP_TOOL_PROFILE": profile},
+                        clear=False,
+                    ), patch.object(
+                        mcp_server,
+                        "_call_daemon_or_raise",
+                        return_value={"visible_tools": sorted(self.hard_denied_tools), "dynamic_tools": dynamic_tools},
+                    ), runtime_context_override(home=str(home), group_id=group.group_id, actor_id=actor_id):
+                        names = {str(spec.get("name") or "") for spec in mcp_server.list_tools_for_caller()}
+                    self.assertTrue(self.hard_denied_tools.isdisjoint(names), self.hard_denied_tools.intersection(names))
+                    self.assertTrue({"onecolleague_capability_search", "onecolleague_capability_state"}.issubset(names))
+                    self.assertTrue(
+                        {"onecolleague_repo", "onecolleague_repo_edit", "onecolleague_apply_patch"}.issubset(names)
+                    )
+            finally:
+                cleanup()
+
+    def test_peer_and_foreman_reject_direct_legacy_and_dynamic_execution_calls(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+        from no1.ports.mcp.toolspecs import legacy_mcp_tool_name
+
+        for role in ("peer", "foreman"):
+            home, group, actor_id, cleanup = self._with_web_model_actor(role=role)
+            try:
+                for canonical_name in sorted(self.execution_tools):
+                    for requested_name in (canonical_name, legacy_mcp_tool_name(canonical_name)):
+                        with self.subTest(role=role, tool=requested_name), patch.object(
+                            mcp_server,
+                            "_call_daemon_or_raise",
+                        ) as daemon_call, runtime_context_override(
+                            home=str(home), group_id=group.group_id, actor_id=actor_id
+                        ):
+                            with self.assertRaises(mcp_server.MCPError) as caught:
+                                mcp_server.handle_tool_call(requested_name, {})
+                        self.assertEqual(caught.exception.code, "permission_denied")
+                        daemon_call.assert_not_called()
+            finally:
+                cleanup()
+
+    def test_foreman_nested_and_external_capability_use_cannot_bypass_execution_deny(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+
+        home, group, actor_id, cleanup = self._with_web_model_actor(role="foreman")
+        try:
+            with runtime_context_override(home=str(home), group_id=group.group_id, actor_id=actor_id):
+                for tool_name in sorted(self.execution_tools):
+                    with self.subTest(path="nested_scope", tool=tool_name), mcp_server.capability_use_nested_builtin_call_scope():
+                        with self.assertRaises(mcp_server.MCPError) as nested_caught:
+                            mcp_server.handle_tool_call(tool_name, {})
+                    self.assertEqual(nested_caught.exception.code, "permission_denied")
+
+                    with self.subTest(path="external_capability", tool=tool_name), patch.object(
+                        mcp_server,
+                        "_call_daemon_or_raise",
+                    ) as daemon_call:
+                        with self.assertRaises(mcp_server.MCPError) as capability_caught:
+                            mcp_server.handle_tool_call(
+                                "onecolleague_capability_use",
+                                {
+                                    "capability_id": "mcp:injected-exec",
+                                    "tool_name": tool_name,
+                                    "tool_arguments": {},
+                                },
+                            )
+                    self.assertEqual(capability_caught.exception.code, "permission_denied")
+                    daemon_call.assert_not_called()
+        finally:
+            cleanup()
+
+    def test_dynamic_external_mcp_tool_cannot_bypass_capability_meta_tool_deny(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+
+        dynamic_tool_name = "onecolleague_ext_deadbeef_process_runner"
+        for role in ("peer", "foreman"):
+            home, group, actor_id, cleanup = self._with_web_model_actor(role=role)
+            try:
+                for meta_tool in sorted(self.capability_tools):
+                    arguments = {
+                        "actor_id": actor_id,
+                        "capability_id": "mcp:external-runner",
+                        "tool_name": dynamic_tool_name,
+                        "tool_arguments": {"command": "ignored"},
+                        "target": "mcp:external-runner",
+                    }
+                    with self.subTest(role=role, tool=meta_tool), patch.object(
+                        mcp_server,
+                        "_call_daemon_or_raise",
+                    ) as daemon_call, runtime_context_override(
+                        home=str(home), group_id=group.group_id, actor_id=actor_id
+                    ):
+                        with self.assertRaises(mcp_server.MCPError) as caught:
+                            mcp_server.handle_tool_call(meta_tool, arguments)
+                    self.assertEqual(caught.exception.code, "permission_denied")
+                    daemon_call.assert_not_called()
+            finally:
+                cleanup()
+
+    def test_unknown_dynamic_tool_name_is_denied_before_daemon_fallback(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+
+        dynamic_tool_name = "onecolleague_ext_deadbeef_process_runner"
+        for role in ("peer", "foreman"):
+            home, group, actor_id, cleanup = self._with_web_model_actor(role=role)
+            try:
+                with self.subTest(role=role), patch.object(
+                    mcp_server,
+                    "_call_daemon_or_raise",
+                ) as daemon_call, runtime_context_override(
+                    home=str(home), group_id=group.group_id, actor_id=actor_id
+                ):
+                    with self.assertRaises(mcp_server.MCPError) as caught:
+                        mcp_server.handle_tool_call(dynamic_tool_name, {"command": "ignored"})
+                self.assertEqual(caught.exception.code, "permission_denied")
+                daemon_call.assert_not_called()
+            finally:
+                cleanup()
+
+    def test_advertised_repo_context_and_message_builtins_remain_authorized(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+
+        preserved = {
+            "onecolleague_repo",
+            "onecolleague_context_get",
+            "onecolleague_message_send",
+        }
+        for role in ("peer", "foreman"):
+            home, group, actor_id, cleanup = self._with_web_model_actor(role=role)
+            try:
+                with runtime_context_override(home=str(home), group_id=group.group_id, actor_id=actor_id):
+                    for tool_name in sorted(preserved):
+                        with self.subTest(role=role, tool=tool_name):
+                            mcp_server._authorize_web_model_builtin_tool_call(tool_name)
+            finally:
+                cleanup()
 
 
 if __name__ == "__main__":

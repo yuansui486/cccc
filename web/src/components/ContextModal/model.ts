@@ -9,7 +9,6 @@ import type {
   TaskWaitingOn,
 } from "../../types";
 import { formatTime } from "../../utils/time";
-import { getDefaultPetPersonaSeed } from "../../utils/rolePresets";
 import { getTaskDisplaySummary, resolveTaskType, type TaskTypeId } from "../../utils/taskWorkflow";
 
 export interface BriefDraft {
@@ -48,7 +47,7 @@ export interface BoardColumns {
 }
 
 export type BoardStatus = keyof BoardColumns;
-export type ContextModalView = "coordination" | "agents" | "skills" | "tasks" | "desktop_pet";
+export type ContextModalView = "coordination" | "agents" | "skills" | "tasks";
 export type SteeringTab = "summary" | "project" | "log";
 export type TaskFilterValue = "all" | "blocked" | "waiting_user" | "handoff" | "unassigned";
 export type ContextTranslator = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
@@ -71,31 +70,9 @@ export function getWaitingOnOptions(tr: ContextTranslator): Array<{ value: TaskW
   ];
 }
 
-export function resolvePetPersonaDraft(savedPetPersona: string): string {
-  const saved = String(savedPetPersona || "").trim();
-  if (saved) return saved;
-  return getDefaultPetPersonaSeed();
-}
-
 export function isVisibleContextAgent(agent: AgentState | null | undefined): boolean {
   const id = String(agent?.id || "").trim();
-  if (!id) return false;
-  return id !== "pet-peer";
-}
-
-export function petPersonaDraftMatches(savedPetPersona: string, draft: string): boolean {
-  return String(draft || "") === resolvePetPersonaDraft(savedPetPersona);
-}
-
-export function petPersonaDraftDirty(
-  savedPetPersona: string,
-  draft: string,
-  options?: { loaded?: boolean | null },
-): boolean {
-  const loaded = options?.loaded === true;
-  const draftText = String(draft || "");
-  if (!loaded && draftText.trim() === "") return false;
-  return !petPersonaDraftMatches(savedPetPersona, draftText);
+  return Boolean(id);
 }
 
 export function taskTitle(task: Task | null | undefined): string {

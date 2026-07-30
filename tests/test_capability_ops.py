@@ -916,36 +916,6 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_pet_capability_state_uses_minimal_core_surface(self) -> None:
-        _, cleanup = self._with_home()
-        try:
-            from no1.kernel.group import load_group
-            from no1.kernel.pet_actor import ensure_pet_actor
-
-            gid = self._create_group()
-            self._add_actor(gid, "peer-1", by="user")
-            group = load_group(gid)
-            self.assertIsNotNone(group)
-            ensure_pet_actor(group)
-
-            state_resp, _ = self._call("capability_state", {"group_id": gid, "actor_id": "pet-peer", "by": "pet-peer"})
-            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
-            result = state_resp.result if isinstance(state_resp.result, dict) else {}
-            visible = set(result.get("visible_tools") or [])
-            autoload = set(result.get("autoload_capabilities") or [])
-
-            self.assertIn("onecolleague_help", visible)
-            self.assertIn("onecolleague_context_get", visible)
-            self.assertIn("onecolleague_agent_state", visible)
-            self.assertIn("pack:pet", autoload)
-            self.assertNotIn("onecolleague_message_send", visible)
-            self.assertNotIn("onecolleague_message_reply", visible)
-            self.assertNotIn("onecolleague_file", visible)
-            self.assertNotIn("cccc_coordination", visible)
-            self.assertNotIn("onecolleague_task", visible)
-        finally:
-            cleanup()
-
     def test_group_scope_enable_updates_group_capability_defaults(self) -> None:
         from no1.daemon.ops import capability_ops as ops
         from no1.kernel.group import load_group

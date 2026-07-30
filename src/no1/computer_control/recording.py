@@ -143,7 +143,7 @@ class RecordingStore:
         if str(request.get("mode") or "") != "create_and_run":
             raise PermissionError("request does not authorize workflow recording")
         if any(bool(item.get("enabled")) for item in (triggers or []) if isinstance(item, dict)):
-            if not all(request.get(key) is not False for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
+            if not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
                 raise PermissionError("enabled unattended triggers are not authorized")
         recording_id = "rec_" + uuid.uuid4().hex[:16]
         self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=recording_id)
@@ -585,7 +585,7 @@ class RecordingStore:
             created = self.workflows.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
             workflow_id = str(created["manifest"]["workflow_id"])
             request = self.requests.require_authorized(group_id, request_id, actor_id)
-            if request.get("allow_publish") is not False and request.get("allow_trust") is not False:
+            if bool(request.get("allow_publish")) and bool(request.get("allow_trust")):
                 created = self.workflows.auto_finalize(
                     group_id,
                     workflow_id,

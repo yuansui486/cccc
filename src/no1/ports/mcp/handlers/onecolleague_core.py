@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ....kernel.agent_state_hygiene import build_mind_context_mini, evaluate_agent_state_hygiene
-from ....kernel.actors import find_actor
+from ....kernel.actors import find_actor, get_effective_role
+from ....kernel.capabilities import WEB_MODEL_CORE_TOOLS, WEB_MODEL_FOREMAN_TOOLS
 from ....kernel.group import load_group
 from ....kernel.group_space import get_group_space_prompt_state
 from ....kernel.prompt_files import load_builtin_help_markdown as _load_builtin_help_markdown
@@ -24,6 +26,7 @@ _RUNTIME_HELP_SECTION_HEADERS = {
     "## Group Space (Runtime)",
     "## Web Model Transport (Runtime)",
 }
+_ONECOLLEAGUE_TOOL_REFERENCE_RE = re.compile(r"\b(?:onecolleague|cccc)_[a-z0-9_]+\b")
 
 
 def _trim_text(value: Any, *, max_chars: int) -> str:
@@ -42,7 +45,6 @@ _BOOTSTRAP_INTERRUPT_NOTIFY_KINDS = {
     "help_nudge",
     "keepalive",
     "nudge",
-    "pet_review",
     "silence_check",
     "standup",
 }
@@ -91,19 +93,49 @@ def _strip_reserved_runtime_help_sections(markdown: str) -> str:
     return result
 
 
-def _actor_runtime_for_help(*, group_id: str, actor_id: str) -> str:
+def _filter_web_model_help_tool_references(markdown: str, *, role: str) -> str:
+    raw = str(markdown or "")
+    if not raw:
+        return raw
+    allowed_tool_names = frozenset(WEB_MODEL_FOREMAN_TOOLS if role == "foreman" else WEB_MODEL_CORE_TOOLS)
+    keep_trailing_newline = raw.endswith("\n")
+    lines = []
+    skip_capability_section = False
+    for line in raw.splitlines():
+        stripped = str(line or "").strip()
+        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
+        if is_h2:
+            skip_capability_section = stripped == "## Capability"
+        if skip_capability_section:
+            continue
+        tool_names = {
+            "onecolleague_" + name[len("cccc_") :] if name.startswith("cccc_") else name
+            for name in _ONECOLLEAGUE_TOOL_REFERENCE_RE.findall(line)
+        }
+        if tool_names and not tool_names.issubset(allowed_tool_names):
+            continue
+        lines.append(line)
+    result = "\n".join(lines)
+    if keep_trailing_newline:
+        result += "\n"
+    return result
+
+
+def _actor_help_identity(*, group_id: str, actor_id: str) -> tuple[str, str]:
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()
     if not gid or not aid or aid == "user":
-        return ""
+        return "", ""
     try:
         group = load_group(gid)
         actor = find_actor(group, aid) if group is not None else None
+        role = str(get_effective_role(group, aid) or "").strip().lower() if group is not None else ""
     except Exception:
         actor = None
+        role = ""
     if not isinstance(actor, dict):
-        return ""
-    return str(actor.get("runtime") or "").strip().lower()
+        return "", role
+    return str(actor.get("runtime") or "").strip().lower(), role
 
 
 def _find_actor_state(*, context: Dict[str, Any], actor_id: str) -> Optional[Dict[str, Any]]:
@@ -567,13 +599,15 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
     if not gid or not aid:
         return base
     sections: List[str] = []
-    if _actor_runtime_for_help(group_id=gid, actor_id=aid) == "web_model":
+    actor_runtime, actor_role = _actor_help_identity(group_id=gid, actor_id=aid)
+    if actor_runtime == "web_model":
+        base = _filter_web_model_help_tool_references(base, role=actor_role)
         sections.append(
             "\n".join(
                 [
                     "## Web Model Transport (Runtime)",
                     "- You are still a normal OneColleague agent; follow the same "
-                    "bootstrap/help/message/coordination/capability rules as other actors.",
+                    "bootstrap/help/message/coordination rules as other actors.",
                     "- If a turn was injected into the web chat, work from that envelope and do not call "
                     "`onecolleague_runtime_wait_next_turn` first for that turn.",
                     "- If no turn was injected and you are operating by remote MCP pull, call "
@@ -583,24 +617,17 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
                     "- If OneColleague MCP tools are not visible in the selected ChatGPT model, you do not have OneColleague local access "
                     "in this chat. Do not claim local execution; tell the user to switch to a GPT-5.x ChatGPT session "
                     "that can see the OneColleague connector.",
-                    "- For non-trivial local workspace work, default to `onecolleague_code_exec`: use JavaScript `tools.*` "
-                    "calls to compose repo reads, patches, shell/test commands, git diff, and visible reports in one focused flow.",
-                    "- Use direct repo/shell/git tools for simple one-step actions; use `onecolleague_code_exec` when the work needs "
-                    "more than one local operation or when patch/test/diff feedback should stay together.",
-                    "- Direct tools remain available for simple steps: `onecolleague_repo`, `onecolleague_apply_patch`, `onecolleague_repo_edit`, "
-                    "`onecolleague_exec_command`, `onecolleague_write_stdin`, `onecolleague_shell`, and `onecolleague_git`.",
+                    "- Local workspace access is scope-bound. Read and inspect with `onecolleague_repo`, then edit with "
+                    "`onecolleague_repo_edit` or `onecolleague_apply_patch`.",
+                    "- Local command execution, process sessions, code mode, Git operations, and capability installation or activation "
+                    "are unavailable to Web Model actors. Do not attempt to reach them through dynamic tool aliases.",
                     "- Delivered OneColleague attachments are blob references, not browser uploads. Read text attachments with "
                     "`onecolleague_file(action=\"read\", rel_path=...)`; use `blob_path` for binary files or local inspection.",
                     "- When you create a file that the user or a peer should receive, keep it under the active scope and "
                     "send it back with `onecolleague_file(action=\"send\", path=..., text=...)` instead of only mentioning a path.",
-                    "- Inside `onecolleague_code_exec`, call nested tools as `await tools.onecolleague_repo({...})`, "
-                    "`await tools.onecolleague_apply_patch({...})`; inspect `COMMON_WORK_LOOPS`, `tool_names(\"repo\")`, "
-                    "`list_tools(\"repo\")`, or `tool_help(\"repo\")` if a tool name or loop is unclear; "
-                    "use `tool_help(\"repo\", {detail:\"schema\"})` only when needed.",
-                    "- Prefer the Codex-style loop: read with line ranges, patch, run focused validation, then inspect `onecolleague_git(action=\"diff\")`.",
                     "- For exact small edits, use `onecolleague_repo_edit(action=\"replace\"|\"multi_replace\", "
                     "expected_sha256=...)`; use `write` only for deliberate full-file writes.",
-                    "- Prefer `onecolleague_exec_command`/`onecolleague_write_stdin` for long-running commands; `onecolleague_shell` is for short one-shot commands.",
+                    "- Re-read affected ranges after editing and report any validation that could not be run from the available tool surface.",
                     "- Finish each processed turn with `onecolleague_runtime_complete_turn` for status/evidence. "
                     "Browser-injected turns are already delivery-committed, so missing completion should not block later turns.",
                 ]
@@ -631,7 +658,7 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
         space_state = get_group_space_prompt_state(gid, provider="notebooklm")
     except Exception:
         space_state = {}
-    if isinstance(space_state, dict):
+    if actor_runtime != "web_model" and isinstance(space_state, dict):
         provider = str(space_state.get("provider") or "notebooklm")
         mode = str(space_state.get("mode") or "disabled")
         work_bound = bool(space_state.get("work_bound"))
@@ -662,7 +689,7 @@ def _append_runtime_help_addenda(markdown: str, *, group_id: str, actor_id: str)
                 )
             sections.append("\n".join(lines_space).rstrip())
 
-    if active_list or autoload_list:
+    if actor_runtime != "web_model" and (active_list or autoload_list):
         def _skill_scope_label(item: Dict[str, Any]) -> str:
             sources = item.get("activation_sources") if isinstance(item.get("activation_sources"), list) else []
             parts: List[str] = []

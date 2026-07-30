@@ -1001,8 +1001,8 @@
     "runtimeVisibilityHint": "標準 Web UI に表示する runtime パネルを制御します。",
     "peerRuntime": "Peer runtime",
     "peerRuntimeHint": "通常 actor の runtime タブとターミナルパネルを表示/非表示にします。",
-    "petRuntime": "Pet runtime",
-    "petRuntimeHint": "内部 pet runtime 画面を表示/非表示にします。",
+    "assistantRuntime": "Assistant runtime",
+    "assistantRuntimeHint": "内部 assistant runtime 画面を表示/非表示にします。",
     "visible": "表示",
     "hidden": "非表示"
   },

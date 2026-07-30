@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class TestDiagnosticsOps(unittest.TestCase):
@@ -190,6 +191,161 @@ class TestDiagnosticsOps(unittest.TestCase):
             self.assertEqual(int(runtime.get("pid") or 0), 2_147_483_647)
             self.assertEqual(bool(runtime.get("pid_alive")), False)
             self.assertIn("runtime_pid_stale", web.get("issues") or [])
+        finally:
+            cleanup()
+
+    def test_terminal_tail_returns_stopped_actor_snapshot(self) -> None:
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="terminal-tail-stopped")
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="kimi", runner="pty")
+            with patch(
+                "no1.daemon.ops.diagnostics_ops.pty_runner.SUPERVISOR.tail_output",
+                return_value=b"Error code: 401\ninvalid_authentication_error\n",
+            ):
+                resp, _ = self._call(
+                    "terminal_tail",
+                    {"group_id": group.group_id, "actor_id": "peer1", "strip_ansi": False},
+                )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            self.assertEqual((resp.result or {}).get("text"), "Error code: 401\ninvalid_authentication_error\n")
+        finally:
+            cleanup()
+
+    def test_terminal_history_forwards_cursor_limit_and_expired_state(self) -> None:
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="terminal-history-cursor")
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")
+            with patch(
+                "no1.daemon.ops.diagnostics_ops.pty_runner.SUPERVISOR.history_page",
+                return_value={
+                    "data": b"",
+                    "start_cursor": 20,
+                    "end_cursor": 20,
+                    "has_more": False,
+                    "cursor_expired": True,
+                },
+            ) as history_page:
+                resp, _ = self._call(
+                    "terminal_history",
+                    {
+                        "group_id": group.group_id,
+                        "actor_id": "peer1",
+                        "before": 10,
+                        "limit_bytes": 5,
+                    },
+                )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            self.assertTrue((resp.result or {}).get("cursor_expired"))
+            self.assertEqual((resp.result or {}).get("start_cursor"), 20)
+            history_page.assert_called_once_with(
+                group_id=group.group_id,
+                actor_id="peer1",
+                before=10,
+                limit_bytes=5,
+            )
+        finally:
+            cleanup()
+
+    def test_terminal_history_uses_transcript_permission_policy(self) -> None:
+        from no1.daemon.ops.diagnostics_ops import handle_terminal_history
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="terminal-history-permission")
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")
+            resp = handle_terminal_history(
+                {"group_id": group.group_id, "actor_id": "peer1", "by": "peer2"},
+                can_read_terminal_transcript=lambda _group, _by, _target: False,
+                pty_backlog_bytes=lambda: 4096,
+            )
+
+            self.assertFalse(resp.ok)
+            self.assertEqual(resp.error.code, "permission_denied")
+        finally:
+            cleanup()
+
+    def test_terminal_history_rejects_non_pty_actor(self) -> None:
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="terminal-history-runner")
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="headless")
+            resp, _ = self._call(
+                "terminal_history",
+                {"group_id": group.group_id, "actor_id": "peer1"},
+            )
+
+            self.assertFalse(resp.ok)
+            self.assertEqual(resp.error.code, "not_pty_actor")
+        finally:
+            cleanup()
+
+    def test_terminal_tail_strips_codex_working_status_lines(self) -> None:
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        _, cleanup = self._with_home()
+        try:
+            group = create_group(load_registry(), title="terminal-tail-codex-status")
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="codex", runner="pty")
+            with patch(
+                "no1.daemon.ops.diagnostics_ops.pty_runner.SUPERVISOR.tail_output",
+                return_value="◦ Working  9m 41s • esc to interrupt)\nvisible\n".encode(),
+            ):
+                resp, _ = self._call(
+                    "terminal_tail",
+                    {"group_id": group.group_id, "actor_id": "peer1", "strip_ansi": False},
+                )
+
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            self.assertEqual((resp.result or {}).get("text"), "visible")
+        finally:
+            cleanup()
+
+    def test_terminal_tail_does_not_include_shared_runtime_log(self) -> None:
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import create_group
+        from no1.kernel.registry import load_registry
+
+        td, cleanup = self._with_home()
+        try:
+            shared_log = Path(td) / ".kimi" / "logs" / "kimi.log"
+            shared_log.parent.mkdir(parents=True, exist_ok=True)
+            shared_log.write_text("historical authentication error\n", encoding="utf-8")
+            group = create_group(load_registry(), title="terminal-tail-shared-log")
+            add_actor(group, actor_id="peer1", title="Peer 1", runtime="kimi", runner="pty")
+            with patch(
+                "no1.daemon.ops.diagnostics_ops.pty_runner.SUPERVISOR.tail_output",
+                return_value=b"Process exited with code 1 before producing terminal output.\n",
+            ):
+                resp, _ = self._call(
+                    "terminal_tail",
+                    {"group_id": group.group_id, "actor_id": "peer1", "strip_ansi": False},
+                )
+
+            text = str((resp.result or {}).get("text") or "")
+            self.assertTrue(resp.ok, getattr(resp, "error", None))
+            self.assertEqual(text, "Process exited with code 1 before producing terminal output.\n")
+            self.assertNotIn("historical authentication error", text)
         finally:
             cleanup()
 

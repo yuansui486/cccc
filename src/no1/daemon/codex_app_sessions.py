@@ -26,7 +26,7 @@ from .mcp_install import ensure_mcp_installed
 from .messaging.delivery import auto_mark_headless_delivery_started, render_headless_control_text
 from .runner_state_ops import headless_state_path, remove_headless_state
 from .codex_app_thread_ops import prepare_codex_app_tui_resume, start_codex_app_thread
-from .runtime_session_ops import record_codex_app_thread_runtime_session, runtime_resume_enabled
+from .runtime_session_ops import mark_runtime_session_auth_failed, record_codex_app_thread_runtime_session, runtime_resume_enabled
 from ..util.fs import atomic_write_json
 from ..util.node_env import with_node_deprecation_warnings_suppressed
 from ..util.process import pid_is_alive, resolve_subprocess_argv, terminate_pid, windowless_subprocess_popen_kwargs
@@ -241,6 +241,13 @@ def _is_closed_stream_logging_error(exc: BaseException) -> bool:
     return "i/o operation on closed file" in message or "closed stream" in message
 
 
+def _is_codex_app_server_auth_failure_line(line: str) -> bool:
+    lowered = str(line or "").strip().lower()
+    if not lowered or "401 unauthorized" not in lowered:
+        return False
+    return "responses" in lowered or "websocket" in lowered or "api.openai.com" in lowered
+
+
 def _is_codex_request_timeout(exc: BaseException, *, method: str = "") -> bool:
     message = str(exc or "").strip().lower()
     if "codex request timed out:" not in message:
@@ -438,6 +445,14 @@ class CodexAppSession:
                 thread_id,
                 exc_info=True,
             )
+
+    def _runtime_session_auth_failure_guard(self) -> tuple[list[str], str]:
+        with self._lock:
+            command = list(self._runtime_command)
+            provider_thread_id = str(self._session_state.thread_id or "").strip()
+        if not command:
+            command = ["codex", "app-server", "--listen", self.listen_url]
+        return command, provider_thread_id
 
     def _emit_activity(
         self,
@@ -1144,6 +1159,20 @@ class CodexAppSession:
                 line = str(raw_line or "").rstrip()
                 if line:
                     _safe_logger_call("info", "[codex-app %s/%s] %s", self.group_id, self.actor_id, line)
+                    if _is_codex_app_server_auth_failure_line(line):
+                        with self._lock:
+                            stop_requested = bool(self._stop_requested)
+                        if stop_requested:
+                            continue
+                        expected_command, expected_provider_thread_id = self._runtime_session_auth_failure_guard()
+                        mark_runtime_session_auth_failed(
+                            group_id=self.group_id,
+                            actor_id=self.actor_id,
+                            error=line,
+                            expected_command=expected_command,
+                            expected_provider_thread_id=expected_provider_thread_id,
+                            require_provider_thread_id_match=True,
+                        )
         except Exception as exc:
             if _is_closed_stream_logging_error(exc):
                 return

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import queue
 import selectors
+import secrets
 import socket
 import subprocess
 import threading
@@ -14,6 +15,9 @@ from typing import Callable, Dict, Iterable, Optional, Tuple
 
 from ..kernel.working_state import derive_pty_terminal_override
 from .platform_support import load_winpty_process_class, pty_support_error_message
+from .pty_lifecycle import LifecycleGate
+from .pty_snapshot import PtyBacklogSnapshot, PtyBacklogSnapshotCache
+from .pty_attach import PtyAttachBusyError, PtyAttachReservation
 from ..util.process import terminate_pid
 
 _WINPTY_PROCESS = load_winpty_process_class()
@@ -40,8 +44,11 @@ def _looks_like_timeout(exc: BaseException) -> bool:
 @dataclass
 class _PtyClient:
     sock: socket.socket
+    control: bool
     writer: bool
     outbuf: bytearray
+    active: bool = True
+    writer_lease: str = ""
 
 
 class PtySession:
@@ -77,11 +84,15 @@ class PtySession:
         self._selector = selectors.DefaultSelector()
         self._lock = threading.Lock()
         self._clients: Dict[int, _PtyClient] = {}
+        self._attach_reservations: Dict[int, PtyAttachReservation] = {}
+        self._accepting_attaches = True
         self._writer_fd: Optional[int] = None
-        self._attach_q: "queue.Queue[socket.socket]" = queue.Queue()
+        self._attach_q: "queue.Queue[object]" = queue.Queue()
 
         self._backlog: deque[bytes] = deque()
         self._backlog_bytes = 0
+        self._backlog_start_offset = 0
+        self._backlog_end_offset = 0
         self._terminal_signal_buffer = ""
         self._terminal_override: Optional[Dict[str, str]] = None
         self._mode_tail = b""
@@ -150,6 +161,18 @@ class PtySession:
             return int(getattr(self._proc, "pid", 0) or 0)
         except Exception:
             return 0
+
+    def returncode(self) -> Optional[int]:
+        for name in ("exitstatus", "returncode", "get_exitstatus"):
+            try:
+                value = getattr(self._proc, name, None)
+                if callable(value):
+                    value = value()
+                if value is not None:
+                    return int(value)
+            except Exception:
+                continue
+        return None
 
     def _proc_alive(self) -> bool:
         try:
@@ -223,6 +246,66 @@ class PtySession:
             data = data[-limit:]
         return data
 
+    def _backlog_snapshot(self) -> Tuple[bytes, int, int]:
+        with self._lock:
+            data = b"".join(self._backlog) if self._backlog else b""
+            start = int(getattr(self, "_backlog_start_offset", 0) or 0)
+            end = int(getattr(self, "_backlog_end_offset", start + len(data)) or 0)
+        return data, start, end
+
+    def history_page(self, *, before: Optional[int] = None, limit_bytes: int = 64_000) -> Dict[str, object]:
+        limit = int(limit_bytes or 0)
+        if limit <= 0:
+            limit = int(self._max_backlog_bytes or 0) or 64_000
+        limit = min(max(1, limit), int(self._max_backlog_bytes or 0) or limit)
+        data, start, end = self._backlog_snapshot()
+        if before is None:
+            page_end = end
+        else:
+            try:
+                page_end = int(before)
+            except Exception:
+                page_end = end
+        if page_end < start:
+            return {
+                "data": b"",
+                "start_cursor": start,
+                "end_cursor": start,
+                "has_more": False,
+                "cursor_expired": True,
+            }
+        if page_end > end:
+            page_end = end
+        page_start = max(start, page_end - limit)
+        rel_start = max(0, page_start - start)
+        rel_end = max(0, page_end - start)
+        return {
+            "data": data[rel_start:rel_end],
+            "start_cursor": page_start,
+            "end_cursor": page_end,
+            "has_more": page_start > start,
+            "cursor_expired": False,
+        }
+
+    def backlog_start_offset(self) -> int:
+        """Absolute offset of the oldest byte still in the backlog ring."""
+        with self._lock:
+            return int(getattr(self, "_backlog_start_offset", 0) or 0)
+
+    def history_since(self, since: Optional[int]) -> bytes:
+        data, start, end = self._backlog_snapshot()
+        if since is None:
+            return data
+        try:
+            cursor = int(since)
+        except Exception:
+            return data
+        if cursor < start:
+            return data
+        if cursor >= end:
+            return b""
+        return data[max(0, cursor - start):]
+
     def clear_backlog(self) -> None:
         with self._lock:
             try:
@@ -230,6 +313,8 @@ class PtySession:
             except Exception:
                 self._backlog = deque()
             self._backlog_bytes = 0
+            end = int(getattr(self, "_backlog_end_offset", 0) or 0)
+            self._backlog_start_offset = end
             self._mode_tail = b""
             self._query_tail = b""
 
@@ -250,10 +335,14 @@ class PtySession:
             self._last_output_at = now
             self._backlog.append(chunk)
             self._backlog_bytes += len(chunk)
+            self._backlog_end_offset = int(getattr(self, "_backlog_end_offset", 0) or 0) + len(chunk)
+            if not hasattr(self, "_backlog_start_offset"):
+                self._backlog_start_offset = self._backlog_end_offset - self._backlog_bytes
             limit = max(0, self._max_backlog_bytes)
             while limit and self._backlog_bytes > limit and self._backlog:
                 drop = self._backlog.popleft()
                 self._backlog_bytes -= len(drop)
+                self._backlog_start_offset = int(getattr(self, "_backlog_start_offset", 0) or 0) + len(drop)
             merged = f"{self._terminal_signal_buffer}{text}"
             if len(merged) > TERMINAL_SIGNAL_BUFFER_CHARS:
                 merged = merged[-TERMINAL_SIGNAL_BUFFER_CHARS:]
@@ -266,15 +355,20 @@ class PtySession:
 
     def _reader_loop(self) -> None:
         try:
-            while self._running and self._proc_alive():
+            while self._running:
+                proc_alive = self._proc_alive()
                 try:
                     chunk = self._proc.read(65536)
                 except Exception as e:
                     if _looks_like_timeout(e):
+                        if not proc_alive:
+                            break
                         continue
                     break
                 data = _coerce_bytes(chunk)
                 if not data:
+                    if not proc_alive:
+                        break
                     time.sleep(0.01)
                     continue
                 self._maybe_reply_to_terminal_queries(data)
@@ -346,13 +440,28 @@ class PtySession:
                 break
         while True:
             try:
-                sock = self._attach_q.get_nowait()
+                item = self._attach_q.get_nowait()
             except queue.Empty:
                 break
-            self._attach_client_now(sock)
+            if isinstance(item, tuple):
+                sock = item[0]
+                since = item[1] if len(item) > 1 else None
+                control = bool(item[2]) if len(item) > 2 else True
+            elif isinstance(item, PtyAttachReservation):
+                self._activate_client_now(item)
+                continue
+            else:
+                sock, since, control = item, None, True
+            self._attach_client_now(sock, since=since, control=control)
+        self._drain_output_queue()
+
+    def _drain_output_queue(self) -> None:
+        output_q = getattr(self, "_output_q", None)
+        if output_q is None:
+            return
         while True:
             try:
-                chunk = self._output_q.get_nowait()
+                chunk = output_q.get_nowait()
             except queue.Empty:
                 break
             if chunk is None:
@@ -366,6 +475,8 @@ class PtySession:
                     self.detach_client(fileno)
                     continue
                 client.outbuf.extend(chunk)
+                if not client.active:
+                    continue
                 try:
                     events = self._selector.get_key(client.sock).events
                     self._selector.modify(client.sock, events | selectors.EVENT_WRITE, data=("client", fileno))
@@ -386,6 +497,22 @@ class PtySession:
                     return
                 except Exception:
                     continue
+
+    def resize_if_writer(self, *, writer_lease: str, cols: int, rows: int) -> bool:
+        lease = str(writer_lease or "")
+        if not lease:
+            return False
+        with self._lock:
+            client = self._clients.get(self._writer_fd) if self._writer_fd is not None else None
+            if (
+                client is None
+                or not client.active
+                or not client.writer
+                or not secrets.compare_digest(client.writer_lease, lease)
+            ):
+                return False
+            self.resize(cols=cols, rows=rows)
+            return True
 
     def write_input(self, data: bytes) -> bool:
         if not data:
@@ -437,7 +564,6 @@ class PtySession:
                 pass
 
     def stop(self) -> None:
-        self._running = False
         pid = self.pid
         if pid > 0:
             try:
@@ -445,30 +571,211 @@ class PtySession:
             except Exception:
                 pass
         self._terminate_process()
+
+        # Keep the reader alive until the terminated ConPTY has yielded its
+        # final output and sentinel; the event loop owns backlog appends.
+        try:
+            if self._reader_thread.is_alive():
+                self._reader_thread.join(timeout=1.0)
+        except Exception:
+            pass
         self._notify_wake()
         try:
             if self._thread.is_alive():
                 self._thread.join(timeout=1.0)
         except Exception:
             pass
+
+        # A broken backend may never deliver EOF. Bound shutdown while still
+        # giving any already-queued output one final chance to be consumed.
+        reader_alive = False
+        loop_alive = False
         try:
-            if self._reader_thread.is_alive():
-                self._reader_thread.join(timeout=1.0)
+            reader_alive = bool(self._reader_thread.is_alive())
         except Exception:
             pass
-
-    def attach_client(self, sock: socket.socket) -> None:
         try:
-            self._attach_q.put_nowait(sock)
+            loop_alive = bool(self._thread.is_alive())
         except Exception:
+            pass
+        if reader_alive or loop_alive:
+            self._running = False
+            self._terminate_process()
+            self._notify_wake()
             try:
-                sock.close()
+                if reader_alive:
+                    self._reader_thread.join(timeout=0.2)
             except Exception:
                 pass
-            return
+            try:
+                if loop_alive:
+                    self._thread.join(timeout=0.2)
+            except Exception:
+                pass
+        self._drain_output_queue()
+
+    def reserve_attach_client(
+        self,
+        sock: socket.socket,
+        *,
+        since: Optional[int] = None,
+        mode: str = "control",
+        takeover: bool = False,
+    ) -> PtyAttachReservation:
+        requested_mode = str(mode or "control").strip().lower()
+        control = requested_mode != "viewer"
+        fileno = int(sock.fileno())
+        if fileno < 0:
+            raise RuntimeError("terminal socket is closed")
+        writable = False
+        writer_replaced = False
+        previous_writer_fd: Optional[int] = None
+        previous_writer_client: Optional[_PtyClient] = None
+        with self._lock:
+            if not self._accepting_attaches:
+                raise RuntimeError("terminal session is closing")
+            if fileno in self._clients:
+                raise RuntimeError("terminal socket is already attached")
+            data = b"".join(self._backlog) if self._backlog else b""
+            start = int(getattr(self, "_backlog_start_offset", 0) or 0)
+            end = int(getattr(self, "_backlog_end_offset", start + len(data)) or 0)
+            if since is None:
+                replay_cursor = start
+            else:
+                try:
+                    replay_cursor = int(since)
+                except Exception:
+                    replay_cursor = start
+                replay_cursor = max(start, min(replay_cursor, end))
+            backlog = data[max(0, replay_cursor - start) :]
+            if control:
+                previous_writer_fd = self._writer_fd
+                old_writer = self._clients.get(self._writer_fd) if self._writer_fd is not None else None
+                previous_writer_client = old_writer
+                old_writer_reservation = (
+                    self._attach_reservations.get(self._writer_fd) if self._writer_fd is not None else None
+                )
+                old_writer_pending = bool(
+                    old_writer is not None
+                    and old_writer_reservation is not None
+                    and old_writer_reservation._reserved_client is old_writer
+                    and old_writer_reservation._state in {"pending", "activating"}
+                )
+                if takeover and old_writer_pending:
+                    raise PtyAttachBusyError("another terminal writer attach is still pending")
+                if self._writer_fd is None or old_writer is None:
+                    self._writer_fd = fileno
+                    writable = True
+                elif takeover:
+                    old_writer.writer = False
+                    self._writer_fd = fileno
+                    writable = True
+                    writer_replaced = True
+            reserved_client = _PtyClient(
+                sock=sock,
+                control=control,
+                writer=writable,
+                outbuf=bytearray(backlog),
+                active=False,
+                writer_lease=secrets.token_urlsafe(24) if control else "",
+            )
+            self._clients[fileno] = reserved_client
+            metadata: Dict[str, object] = {
+                "mode": "control" if control else "viewer",
+                "writable": writable,
+                "writer_replaced": writer_replaced,
+                "attached_clients": len(self._clients),
+                "replay_cursor": replay_cursor,
+                "backlog_start_cursor": start,
+                "backlog_end_cursor": end,
+            }
+            if writable:
+                metadata["writer_lease"] = reserved_client.writer_lease
+            reservation = PtyAttachReservation(
+                session=self,
+                fileno=fileno,
+                reserved_client=reserved_client,
+                previous_writer_fd=previous_writer_fd,
+                previous_writer_client=previous_writer_client,
+                metadata=metadata,
+            )
+            self._attach_reservations[fileno] = reservation
+        return reservation
+
+    def attach_client(
+        self,
+        sock: socket.socket,
+        *,
+        since: Optional[int] = None,
+        mode: str = "control",
+        takeover: bool = False,
+    ) -> Dict[str, object]:
+        reservation = self.reserve_attach_client(sock, since=since, mode=mode, takeover=takeover)
+        metadata = reservation.metadata
+        if not reservation.activate():
+            metadata.update({"writable": False, "writer_replaced": False, "error": "attach_queue_failed"})
+        return metadata
+
+    def _activate_attach_reservation(self, reservation: PtyAttachReservation) -> bool:
+        with self._lock:
+            if reservation._state != "pending":
+                return reservation._state in {"activating", "active"}
+            client = self._clients.get(reservation._fileno)
+            current_reservation = self._attach_reservations.get(reservation._fileno)
+            if current_reservation is not reservation or client is not reservation._reserved_client or client.active:
+                return False
+            reservation._state = "activating"
+        try:
+            self._attach_q.put_nowait(reservation)
+        except Exception:
+            with self._lock:
+                if reservation._state == "activating":
+                    reservation._state = "pending"
+            reservation.cancel()
+            return False
         self._notify_wake()
+        return True
+
+    def _cancel_attach_reservation(self, reservation: PtyAttachReservation) -> None:
+        with self._lock:
+            if reservation._state not in {"pending", "activating"}:
+                return
+            reservation._state = "cancelled"
+            if self._attach_reservations.get(reservation._fileno) is reservation:
+                self._attach_reservations.pop(reservation._fileno, None)
+            client = self._clients.get(reservation._fileno)
+            owns_client = client is reservation._reserved_client
+            if owns_client:
+                self._clients.pop(reservation._fileno, None)
+            if owns_client and self._writer_fd == reservation._fileno:
+                previous_fd = reservation._previous_writer_fd
+                previous = self._clients.get(previous_fd) if previous_fd is not None else None
+                restore_previous = bool(
+                    previous is reservation._previous_writer_client
+                    and previous is not None
+                    and previous.control
+                    and previous.active
+                )
+                self._writer_fd = previous_fd if restore_previous else None
+                if restore_previous and previous is not None:
+                    previous.writer = True
+        if owns_client and client is not None and client.active:
+            try:
+                self._selector.unregister(client.sock)
+            except Exception:
+                pass
+        if owns_client and client is not None:
+            try:
+                client.sock.close()
+            except Exception:
+                pass
 
     def detach_client(self, fileno: int) -> None:
+        with self._lock:
+            reservation = self._attach_reservations.get(fileno)
+        if reservation is not None:
+            reservation.cancel()
+            return
         with self._lock:
             client = self._clients.pop(fileno, None)
             if self._writer_fd == fileno:
@@ -482,27 +789,54 @@ class PtySession:
                 client.sock.close()
             except Exception:
                 pass
-        self._maybe_promote_writer()
 
-    def _maybe_promote_writer(self) -> None:
+    def _activate_client_now(self, reservation: PtyAttachReservation) -> None:
+        fileno = reservation._fileno
+        client = None
         with self._lock:
-            if self._writer_fd is not None:
+            candidate = self._clients.get(fileno)
+            current_reservation = self._attach_reservations.get(fileno)
+            if (
+                reservation._state == "activating"
+                and current_reservation is reservation
+                and candidate is reservation._reserved_client
+                and not candidate.active
+            ):
+                client = candidate
+        if client is None:
+            return
+        try:
+            client.sock.setblocking(False)
+        except Exception:
+            pass
+        register_failed = False
+        with self._lock:
+            current = self._clients.get(fileno)
+            current_reservation = self._attach_reservations.get(fileno)
+            if (
+                reservation._state != "activating"
+                or current_reservation is not reservation
+                or current is not reservation._reserved_client
+                or current is not client
+                or current.active
+            ):
                 return
-            for fd, c in self._clients.items():
-                self._writer_fd = fd
-                c.writer = True
-                try:
-                    current = 0
-                    try:
-                        current = self._selector.get_key(c.sock).events
-                    except Exception:
-                        current = 0
-                    self._selector.modify(c.sock, current | selectors.EVENT_READ, data=("client", fd))
-                except Exception:
-                    pass
-                break
+            events = selectors.EVENT_READ
+            if client.outbuf:
+                events |= selectors.EVENT_WRITE
+            try:
+                self._selector.register(client.sock, events, data=("client", fileno))
+            except Exception:
+                reservation._state = "pending"
+                register_failed = True
+            else:
+                current.active = True
+                reservation._state = "active"
+                self._attach_reservations.pop(fileno, None)
+        if register_failed:
+            reservation.cancel()
 
-    def _attach_client_now(self, sock: socket.socket) -> None:
+    def _attach_client_now(self, sock: socket.socket, *, since: Optional[int] = None, control: bool = True) -> None:
         fileno = int(sock.fileno())
         if fileno < 0:
             try:
@@ -518,12 +852,27 @@ class PtySession:
         with self._lock:
             if fileno in self._clients:
                 return
-            writer = self._writer_fd is None
+            writer = bool(control and (self._writer_fd is None or self._writer_fd == fileno))
             if writer:
                 self._writer_fd = fileno
-            backlog = b"".join(self._backlog) if self._backlog else b""
+            data = b"".join(self._backlog) if self._backlog else b""
+            start = int(getattr(self, "_backlog_start_offset", 0) or 0)
+            end = int(getattr(self, "_backlog_end_offset", start + len(data)) or 0)
+            if since is None:
+                backlog = data
+            else:
+                try:
+                    cursor = int(since)
+                except Exception:
+                    cursor = start
+                if cursor < start:
+                    backlog = data
+                elif cursor >= end:
+                    backlog = b""
+                else:
+                    backlog = data[max(0, cursor - start):]
             outbuf = bytearray(backlog)
-            client = _PtyClient(sock=sock, writer=writer, outbuf=outbuf)
+            client = _PtyClient(sock=sock, control=bool(control), writer=writer, outbuf=outbuf, active=True)
             self._clients[fileno] = client
 
         events = selectors.EVENT_READ
@@ -579,6 +928,7 @@ class PtySession:
             del client.outbuf[:sent]
 
     def _close_all(self) -> None:
+        self._begin_attach_shutdown()
         try:
             self._selector.unregister(self._wake_r)
         except Exception:
@@ -611,19 +961,28 @@ class PtySession:
             pass
         while True:
             try:
-                sock = self._attach_q.get_nowait()
+                item = self._attach_q.get_nowait()
             except queue.Empty:
                 break
+            if isinstance(item, PtyAttachReservation):
+                item.cancel()
+                continue
+            sock = item[0] if isinstance(item, tuple) else item
             try:
                 sock.close()
             except Exception:
                 pass
 
+    def _begin_attach_shutdown(self) -> None:
+        with self._lock:
+            self._accepting_attaches = False
+            reservations = list(self._attach_reservations.values())
+        for reservation in reservations:
+            reservation.cancel()
+
     def _loop(self) -> None:
         try:
             while self._running:
-                if not self._proc_alive() and self._output_q.empty():
-                    break
                 for key, mask in self._selector.select(timeout=0.1):
                     kind, meta = key.data if isinstance(key.data, tuple) else ("", None)
                     if kind == "wake":
@@ -652,7 +1011,9 @@ class PtySession:
 class PtySupervisor:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._lifecycle = LifecycleGate()
         self._sessions: Dict[Tuple[str, str], PtySession] = {}
+        self._last_backlogs = PtyBacklogSnapshotCache()
         self._exit_hook: Optional[Callable[[PtySession], None]] = None
 
     def set_exit_hook(self, hook: Optional[Callable[[PtySession], None]]) -> None:
@@ -661,9 +1022,43 @@ class PtySupervisor:
 
     def _drop_if_same(self, group_id: str, actor_id: str, session: PtySession) -> None:
         key = (group_id, actor_id)
+        snapshot = self._snapshot_session(session)
         with self._lock:
             if self._sessions.get(key) is session:
                 self._sessions.pop(key, None)
+                self._last_backlogs.remember(key, snapshot)
+
+    def _snapshot_session(self, session: PtySession) -> PtyBacklogSnapshot:
+        try:
+            data, start, end = session._backlog_snapshot()
+        except Exception:
+            data, start, end = b"", 0, 0
+        if not isinstance(data, bytes):
+            data = bytes(str(data or ""), encoding="utf-8", errors="replace")
+        if not data:
+            try:
+                returncode = session.returncode()
+            except Exception:
+                returncode = None
+            if returncode not in (None, 0):
+                data = f"Process exited with code {returncode} before producing terminal output.\n".encode("utf-8")
+                start = 0
+                end = len(data)
+        return PtyBacklogSnapshot(
+            data=data,
+            start_cursor=int(start or 0),
+            end_cursor=int(end or 0),
+        )
+
+    def _finalize_stopped_session(self, key: Tuple[str, str], session: PtySession) -> None:
+        snapshot = self._snapshot_session(session)
+        with self._lock:
+            current = self._sessions.get(key)
+            if current is not None and current is not session:
+                return
+            if current is session:
+                self._sessions.pop(key, None)
+            self._last_backlogs.remember(key, snapshot)
 
     def _on_session_exit(self, session: PtySession) -> None:
         try:
@@ -700,12 +1095,53 @@ class PtySupervisor:
             return b""
         with self._lock:
             s = self._sessions.get(key)
+            snapshot = self._last_backlogs.get(key) if s is None else None
         if s is None:
-            return b""
+            return snapshot.tail_output(max_bytes=int(max_bytes or 0)) if snapshot is not None else b""
         try:
             return s.tail_output(max_bytes=int(max_bytes or 0))
         except Exception:
             return b""
+
+    def history_page(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        before: Optional[int] = None,
+        limit_bytes: int = 64_000,
+    ) -> Dict[str, object]:
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        if not key[0] or not key[1]:
+            return {"data": b"", "start_cursor": 0, "end_cursor": 0, "has_more": False, "cursor_expired": False}
+        with self._lock:
+            s = self._sessions.get(key)
+            snapshot = self._last_backlogs.get(key) if s is None else None
+        if s is None:
+            if snapshot is not None:
+                try:
+                    return snapshot.history_page(before=before, limit_bytes=int(limit_bytes or 0))
+                except Exception:
+                    pass
+            return {"data": b"", "start_cursor": 0, "end_cursor": 0, "has_more": False, "cursor_expired": False}
+        try:
+            return s.history_page(before=before, limit_bytes=int(limit_bytes or 0))
+        except Exception:
+            return {"data": b"", "start_cursor": 0, "end_cursor": 0, "has_more": False, "cursor_expired": False}
+
+    def backlog_start_offset(self, *, group_id: str, actor_id: str) -> int:
+        """Oldest retained backlog offset for an actor (0 if unknown)."""
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        if not key[0] or not key[1]:
+            return 0
+        with self._lock:
+            s = self._sessions.get(key)
+        if s is None:
+            return 0
+        try:
+            return s.backlog_start_offset()
+        except Exception:
+            return 0
 
     def clear_backlog(self, *, group_id: str, actor_id: str) -> bool:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
@@ -735,62 +1171,129 @@ class PtySupervisor:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
         if not key[0] or not key[1]:
             raise ValueError("missing group_id/actor_id")
+        with self._lifecycle.begin_start(key):
+            return self._start_actor_serialized(
+                key=key,
+                cwd=cwd,
+                command=command,
+                env=env,
+                runtime=runtime,
+                max_backlog_bytes=max_backlog_bytes,
+            )
+
+    def _start_actor_serialized(
+        self,
+        *,
+        key: Tuple[str, str],
+        cwd: Path,
+        command: Iterable[str],
+        env: Dict[str, str],
+        runtime: str,
+        max_backlog_bytes: int,
+    ) -> PtySession:
         with self._lock:
             existing = self._sessions.get(key)
         if existing is not None and existing.is_running():
             return existing
-        session = PtySession(
-            group_id=key[0],
-            actor_id=key[1],
-            cwd=cwd,
-            command=command,
-            env=env,
-            runtime=runtime,
-            on_exit=self._on_session_exit,
-            max_backlog_bytes=int(max_backlog_bytes or 0),
-        )
+        registered = threading.Event()
+
+        def _on_registered_session_exit(exited: PtySession) -> None:
+            registered.wait()
+            self._on_session_exit(exited)
+
+        try:
+            session = PtySession(
+                group_id=key[0],
+                actor_id=key[1],
+                cwd=cwd,
+                command=command,
+                env=env,
+                runtime=runtime,
+                on_exit=_on_registered_session_exit,
+                max_backlog_bytes=int(max_backlog_bytes or 0),
+            )
+        except BaseException:
+            registered.set()
+            raise
         with self._lock:
-            self._sessions[key] = session
+            try:
+                self._sessions[key] = session
+                self._last_backlogs.discard(key)
+            finally:
+                registered.set()
         return session
+
+    def _stop_actor_serialized(self, key: Tuple[str, str], *, suppress_errors: bool) -> None:
+        with self._lock:
+            session = self._sessions.get(key)
+        if session is None:
+            return
+        try:
+            session.stop()
+        except Exception:
+            if not suppress_errors:
+                raise
+        finally:
+            self._finalize_stopped_session(key, session)
 
     def stop_actor(self, *, group_id: str, actor_id: str) -> None:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
-        with self._lock:
-            s = self._sessions.pop(key, None)
-        if s is not None:
-            s.stop()
+        lease = self._lifecycle.begin_stop(key)
+        if lease is None:
+            return
+        with lease:
+            self._stop_actor_serialized(key, suppress_errors=False)
 
     def stop_group(self, *, group_id: str) -> None:
         gid = str(group_id or "").strip()
         if not gid:
             return
-        with self._lock:
-            items = [(k, s) for k, s in self._sessions.items() if k[0] == gid]
-            for k, _ in items:
-                self._sessions.pop(k, None)
-        for _, s in items:
-            try:
-                s.stop()
-            except Exception:
-                pass
+        with self._lifecycle.begin_bulk_stop(group_id=gid):
+            with self._lock:
+                keys = [key for key in self._sessions if key[0] == gid]
+            for key in keys:
+                self._stop_actor_serialized(key, suppress_errors=True)
 
     def stop_all(self) -> None:
-        with self._lock:
-            items = list(self._sessions.items())
-            self._sessions.clear()
-        for _, s in items:
-            try:
-                s.stop()
-            except Exception:
-                pass
+        with self._lifecycle.begin_bulk_stop(group_id=None):
+            with self._lock:
+                keys = list(self._sessions)
+            for key in keys:
+                self._stop_actor_serialized(key, suppress_errors=True)
 
-    def attach(self, *, group_id: str, actor_id: str, sock: socket.socket) -> None:
+    def attach(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        sock: socket.socket,
+        since: Optional[int] = None,
+        mode: str = "control",
+        takeover: bool = False,
+    ) -> Dict[str, object]:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
         with self._lock:
             s = self._sessions.get(key)
         if s is None or not s.is_running():
             raise RuntimeError("actor not running")
-        s.attach_client(sock)
+        return s.attach_client(sock, since=since, mode=mode, takeover=takeover)
+
+    def reserve_attach(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        sock: socket.socket,
+        since: Optional[int] = None,
+        mode: str = "control",
+        takeover: bool = False,
+    ) -> PtyAttachReservation:
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        with self._lock:
+            s = self._sessions.get(key)
+        if s is None or not s.is_running():
+            raise RuntimeError("actor not running")
+        return s.reserve_attach_client(sock, since=since, mode=mode, takeover=takeover)
 
     def bracketed_paste_enabled(self, *, group_id: str, actor_id: str) -> bool:
         key = (str(group_id or "").strip(), str(actor_id or "").strip())
@@ -870,6 +1373,22 @@ class PtySupervisor:
         if s is None:
             return
         s.resize(cols=int(cols), rows=int(rows))
+
+    def resize_if_writer(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        writer_lease: str,
+        cols: int,
+        rows: int,
+    ) -> bool:
+        key = (str(group_id or "").strip(), str(actor_id or "").strip())
+        with self._lock:
+            s = self._sessions.get(key)
+        if s is None or not s.is_running():
+            return False
+        return s.resize_if_writer(writer_lease=writer_lease, cols=int(cols), rows=int(rows))
 
     def write_input(self, *, group_id: str, actor_id: str, data: bytes) -> bool:
         if not data:

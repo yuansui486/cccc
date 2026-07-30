@@ -1002,8 +1002,8 @@
     "runtimeVisibilityHint": "Control which runtime panels are shown in the standard Web UI.",
     "peerRuntime": "Peer runtime",
     "peerRuntimeHint": "Show or hide runtime tabs and terminal panels for standard actors.",
-    "petRuntime": "Pet runtime",
-    "petRuntimeHint": "Show or hide the internal pet runtime surface.",
+    "assistantRuntime": "Assistant runtime",
+    "assistantRuntimeHint": "Show or hide the built-in assistant runtime surface.",
     "visible": "Visible",
     "hidden": "Hidden"
   },

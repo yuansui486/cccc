@@ -12,18 +12,13 @@ TEMPLATE_REF_RE = re.compile(r"^\$\{(?:inputs|steps)\.[A-Za-z0-9_.-]+\}$")
 
 
 def computer_control_permissions(value: Dict[str, Any]) -> Dict[str, bool]:
-    result = {
-        "allow_high_risk": value.get("allow_high_risk") is not False,
-        "allow_publish": value.get("allow_publish") is not False,
-        "allow_trust": value.get("allow_trust") is not False,
-        "allow_unattended_triggers": value.get("allow_unattended_triggers") is not False,
+    return {
+        "allow_high_risk": bool(value.get("allow_high_risk")),
+        "allow_publish": bool(value.get("allow_publish")),
+        "allow_trust": bool(value.get("allow_trust")),
+        "allow_unattended_triggers": bool(value.get("allow_unattended_triggers")),
+        "allow_workflow_edit": bool(value.get("allow_workflow_edit")),
     }
-    # Keep the legacy helper's exact shape for callers that do not know the
-    # newer permission. Request payloads that include the switch get the
-    # explicit value; omission remains permissive for backward compatibility.
-    if "allow_workflow_edit" in value:
-        result["allow_workflow_edit"] = value.get("allow_workflow_edit") is not False
-    return result
 
 
 class SuccessAssertion(BaseModel):

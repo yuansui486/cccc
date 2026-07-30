@@ -30,9 +30,17 @@ from no1.daemon.messaging.actor_turn_rendering import build_actor_delivery_text
 from no1.kernel.group import create_group
 from no1.kernel.registry import load_registry
 from no1.ports.mcp.toolspecs import MCP_TOOLS
-from no1.ports.mcp.server import _MCP_EXTRA_CONTENT_KEY, _attach_computer_artifacts
+from no1.ports.mcp.server import (
+    _MCP_EXTRA_CONTENT_KEY,
+    _attach_computer_artifacts,
+    _authorize_local_computer_control_tool_call,
+    handle_tool_call,
+    list_tools_for_caller,
+)
+from no1.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS
 from no1.ports.mcp import main as mcp_main
 from no1.daemon.computer_control_ops import try_handle_computer_control_op
+from no1.ports.web.routes.computer_control import _require_local_computer_control_admin
 
 
 class TestComputerControl(unittest.TestCase):
@@ -88,17 +96,167 @@ class TestComputerControl(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mustache syntax"):
             WorkflowDefinition.model_validate(invalid_template)
 
-    def test_computer_control_permissions_default_on_and_allow_explicit_opt_out(self):
+    def test_computer_control_permissions_default_off_and_require_explicit_opt_in(self):
         self.assertEqual(
             computer_control_permissions({}),
             {
-                "allow_high_risk": True,
-                "allow_publish": True,
-                "allow_trust": True,
-                "allow_unattended_triggers": True,
+                "allow_high_risk": False,
+                "allow_publish": False,
+                "allow_trust": False,
+                "allow_unattended_triggers": False,
+                "allow_workflow_edit": False,
             },
         )
-        self.assertFalse(computer_control_permissions({"allow_trust": False})["allow_trust"])
+        permissions = computer_control_permissions({"allow_trust": True, "allow_workflow_edit": True})
+        self.assertTrue(permissions["allow_trust"])
+        self.assertTrue(permissions["allow_workflow_edit"])
+        self.assertFalse(permissions["allow_publish"])
+
+    def test_computer_control_tools_are_not_core_or_web_model_tools(self):
+        names = {
+            "onecolleague_computer_control_catalog",
+            "onecolleague_computer_recording",
+            "onecolleague_computer_workflow",
+            "onecolleague_computer_run",
+        }
+        self.assertTrue(names.isdisjoint(CORE_BASIC_TOOLS))
+        self.assertTrue(names.isdisjoint(WEB_MODEL_CORE_TOOLS))
+
+    def test_computer_control_mcp_rejects_remote_and_web_model_contexts(self):
+        tool = "onecolleague_computer_run"
+        for source in ("bridge", "remote", "web_model", "im", ""):
+            with self.subTest(source=source), patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id="g", actor_id="peer", source=source),
+            ):
+                with self.assertRaisesRegex(Exception, "trusted local MCP actors"):
+                    _authorize_local_computer_control_tool_call(tool)
+        for group_id, actor_id in (("", "peer"), ("g", ""), ("g", "user")):
+            with self.subTest(group_id=group_id, actor_id=actor_id), patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group_id, actor_id=actor_id, source="local_mcp"),
+            ):
+                with self.assertRaisesRegex(Exception, "bound local actor"):
+                    _authorize_local_computer_control_tool_call(tool)
+        with patch(
+            "no1.ports.mcp.server._runtime_context",
+            return_value=Mock(group_id="g", actor_id="peer", source="local_mcp"),
+        ), patch("no1.ports.mcp.server.load_group", return_value=Mock()), patch(
+            "no1.ports.mcp.server.find_actor", return_value={"id": "peer", "runtime": "codex"}
+        ):
+            self.assertEqual(_authorize_local_computer_control_tool_call(tool), ("g", "peer"))
+        with patch(
+            "no1.ports.mcp.server._runtime_context",
+            return_value=Mock(group_id="g", actor_id="peer", source="local_mcp"),
+        ), patch("no1.ports.mcp.server.load_group", return_value=Mock()), patch(
+            "no1.ports.mcp.server.find_actor", return_value={"id": "peer", "runtime": "web_model"}
+        ):
+            with self.assertRaisesRegex(Exception, "Web Model"):
+                _authorize_local_computer_control_tool_call(tool)
+
+    def test_list_tools_exposes_computer_control_only_to_bound_local_standard_actor(self):
+        from no1.kernel.actors import add_actor
+        from no1.kernel.group import load_group
+
+        computer_tools = {
+            "onecolleague_computer_control_catalog",
+            "onecolleague_computer_recording",
+            "onecolleague_computer_workflow",
+            "onecolleague_computer_run",
+        }
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ,
+            {"CCCC_HOME": td, "CCCC_MCP_TOOL_PROFILE": ""},
+            clear=False,
+        ):
+            group_id = create_group(load_registry(), title="local-computer-tools", topic="").group_id
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+
+            with patch(
+                "no1.ports.mcp.server._call_daemon_or_raise",
+                side_effect=RuntimeError("daemon unavailable"),
+            ), patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group_id, actor_id="peer", source="local_mcp"),
+            ):
+                names = {str(item.get("name") or "") for item in list_tools_for_caller()}
+            self.assertTrue(computer_tools.issubset(names))
+
+            def call_computer_control_daemon(request, *, timeout_s=None):
+                response, _ = try_handle_computer_control_op(request.get("op"), request.get("args") or {})
+                self.assertTrue(response.ok, getattr(response, "error", None))
+                return response.result or {}
+
+            with patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group_id, actor_id="peer", source="local_mcp"),
+            ), patch(
+                "no1.ports.mcp.server._call_daemon_or_raise",
+                side_effect=call_computer_control_daemon,
+            ):
+                workflow_list = handle_tool_call(
+                    "onecolleague_computer_workflow",
+                    {"action": "list"},
+                )
+            self.assertTrue(workflow_list.get("ok"))
+            self.assertEqual((workflow_list.get("result") or {}).get("workflows"), [])
+
+            for source in ("bridge", "remote", "web_model", "im", "viewer", ""):
+                with self.subTest(source=source), patch(
+                    "no1.ports.mcp.server._call_daemon_or_raise",
+                    side_effect=RuntimeError("daemon unavailable"),
+                ), patch(
+                    "no1.ports.mcp.server._runtime_context",
+                    return_value=Mock(group_id=group_id, actor_id="peer", source=source),
+                ):
+                    names = {str(item.get("name") or "") for item in list_tools_for_caller()}
+                self.assertTrue(computer_tools.isdisjoint(names))
+
+            actor = next(item for item in group.doc.get("actors") or [] if item.get("id") == "peer")
+            actor["runtime"] = "web_model"
+            group.save()
+            with patch(
+                "no1.ports.mcp.server._call_daemon_or_raise",
+                side_effect=RuntimeError("daemon unavailable"),
+            ), patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group_id, actor_id="peer", source="local_mcp"),
+            ):
+                names = {str(item.get("name") or "") for item in list_tools_for_caller()}
+            self.assertTrue(computer_tools.isdisjoint(names))
+
+            actor["runtime"] = "codex"
+            group.save()
+            with patch.dict(os.environ, {"CCCC_MCP_TOOL_PROFILE": "full"}, clear=False), patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group_id, actor_id="peer", source="remote"),
+            ):
+                names = {str(item.get("name") or "") for item in list_tools_for_caller()}
+            self.assertTrue(computer_tools.isdisjoint(names))
+
+    def test_daemon_computer_control_rejects_missing_or_untrusted_surface(self):
+        for surface in (None, "bridge", "remote", "web_model", "viewer", "im"):
+            args = {"command": "catalog", "group_id": "_global"}
+            if surface is not None:
+                args["caller_surface"] = surface
+            response, _ = try_handle_computer_control_op("computer_control", args)
+            self.assertFalse(response.ok)
+            self.assertEqual(response.error.code, "permission_denied")
+
+    def test_web_computer_control_rejects_viewer_and_remote_clients(self):
+        local_request = Mock(client=Mock(host="127.0.0.1"))
+        with self.assertRaisesRegex(Exception, "read-only"):
+            _require_local_computer_control_admin(Mock(read_only=True), local_request)
+        remote_request = Mock(client=Mock(host="203.0.113.9"))
+        with self.assertRaisesRegex(Exception, "loopback"):
+            _require_local_computer_control_admin(Mock(read_only=False), remote_request)
+        with patch("no1.ports.web.routes.computer_control.require_admin", side_effect=Exception("admin access required")):
+            with self.assertRaisesRegex(Exception, "admin access required"):
+                _require_local_computer_control_admin(Mock(read_only=False), local_request)
 
     def test_active_recording_authorization_does_not_expire(self):
         with tempfile.TemporaryDirectory() as td:
@@ -112,10 +270,16 @@ class TestComputerControl(unittest.TestCase):
                 "recording_id": "rec_long",
                 "created_ts": time.time() - 7200,
             })
-            self.assertEqual(
-                requests.require_authorized(group.group_id, "req-long", "foreman")["recording_id"],
-                "rec_long",
-            )
+            authorized = requests.require_authorized(group.group_id, "req-long", "foreman")
+            self.assertEqual(authorized["recording_id"], "rec_long")
+            for key in (
+                "allow_high_risk",
+                "allow_publish",
+                "allow_trust",
+                "allow_unattended_triggers",
+                "allow_workflow_edit",
+            ):
+                self.assertFalse(authorized[key], key)
 
     def test_workflow_graph_and_secret_constraints(self):
         with self.assertRaises(ValueError):
@@ -346,7 +510,7 @@ class TestComputerControl(unittest.TestCase):
             ):
                 response, _ = try_handle_computer_control_op(
                     "computer_control",
-                    {"command": "setup", "action": "restart_session", "group_id": "_global"},
+                    {"command": "setup", "action": "restart_session", "group_id": "_global", "caller_surface": "local_web"},
                 )
             self.assertFalse(response.ok)
             self.assertEqual(response.error.code, "computer_control_busy")
@@ -372,7 +536,7 @@ class TestComputerControl(unittest.TestCase):
             ):
                 response, _ = try_handle_computer_control_op(
                     "computer_control",
-                    {"command": "setup", "action": "restart_session", "group_id": "_global"},
+                    {"command": "setup", "action": "restart_session", "group_id": "_global", "caller_surface": "local_web"},
                 )
             self.assertTrue(response.ok)
             self.assertTrue(response.result["result"]["session_running"])

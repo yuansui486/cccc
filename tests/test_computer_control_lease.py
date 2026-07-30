@@ -47,7 +47,7 @@ class TestComputerControlLeaseGuard(unittest.TestCase):
             ):
                 response, _ = try_handle_computer_control_op(
                     "computer_control",
-                    {"command": "lease", "action": "status", "group_id": "_global"},
+                    {"command": "lease", "action": "status", "group_id": "_global", "caller_surface": "local_web"},
                 )
             self.assertTrue(response.ok)
             self.assertFalse(response.result["result"]["active"])
@@ -65,7 +65,7 @@ class TestComputerControlLeaseGuard(unittest.TestCase):
             ):
                 response, _ = try_handle_computer_control_op(
                     "computer_control",
-                    {"command": "setup", "action": "upgrade", "group_id": "_global"},
+                    {"command": "setup", "action": "upgrade", "group_id": "_global", "caller_surface": "local_web"},
                 )
             self.assertFalse(response.ok)
             self.assertEqual(response.error.code, "computer_control_busy")

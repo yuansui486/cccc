@@ -39,10 +39,6 @@ CORE_BASIC_TOOLS: Tuple[str, ...] = (
     "onecolleague_agent_state",
     "onecolleague_memory",
     "onecolleague_experience",
-    "onecolleague_computer_control_catalog",
-    "onecolleague_computer_recording",
-    "onecolleague_computer_workflow",
-    "onecolleague_computer_run",
 )
 
 CORE_ADMIN_TOOLS: Tuple[str, ...] = (
@@ -56,9 +52,7 @@ CAPABILITY_ADMIN_TOOLS: Tuple[str, ...] = (
     "onecolleague_capability_uninstall",
 )
 
-# Pet keeps a dedicated minimal core surface. The mutation lane stays on
-# onecolleague_pet_decisions, with onecolleague_agent_state reserved for profile refresh.
-PET_CORE_TOOLS: Tuple[str, ...] = (
+VOICE_SECRETARY_CORE_TOOLS: Tuple[str, ...] = (
     "onecolleague_help",
     "onecolleague_bootstrap",
     "onecolleague_project_info",
@@ -66,25 +60,40 @@ PET_CORE_TOOLS: Tuple[str, ...] = (
     "onecolleague_inbox_mark_read",
     "onecolleague_context_get",
     "onecolleague_agent_state",
-)
-
-VOICE_SECRETARY_CORE_TOOLS: Tuple[str, ...] = PET_CORE_TOOLS + (
     "onecolleague_voice_secretary_document",
     "onecolleague_voice_secretary_composer",
     "onecolleague_voice_secretary_request",
 )
 
-WEB_MODEL_CORE_TOOLS: Tuple[str, ...] = CORE_BASIC_TOOLS + (
-    "onecolleague_runtime_wait_next_turn",
-    "onecolleague_runtime_complete_turn",
-    "onecolleague_code_exec",
-    "onecolleague_code_wait",
-    "onecolleague_repo_edit",
-    "onecolleague_apply_patch",
+LOCAL_COMPUTER_CONTROL_TOOLS: Tuple[str, ...] = (
+    "onecolleague_computer_control_catalog",
+    "onecolleague_computer_recording",
+    "onecolleague_computer_workflow",
+    "onecolleague_computer_run",
+)
+
+WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS: Tuple[str, ...] = (
     "onecolleague_shell",
     "onecolleague_exec_command",
     "onecolleague_write_stdin",
+    "onecolleague_code_exec",
+    "onecolleague_code_wait",
     "onecolleague_git",
+)
+
+WEB_MODEL_DENIED_CAPABILITY_TOOLS: Tuple[str, ...] = (
+    "onecolleague_capability_enable",
+    "onecolleague_capability_install",
+    "onecolleague_capability_use",
+)
+
+WEB_MODEL_CORE_TOOLS: Tuple[str, ...] = tuple(
+    name for name in CORE_BASIC_TOOLS if name not in WEB_MODEL_DENIED_CAPABILITY_TOOLS
+) + (
+    "onecolleague_runtime_wait_next_turn",
+    "onecolleague_runtime_complete_turn",
+    "onecolleague_repo_edit",
+    "onecolleague_apply_patch",
 )
 
 WEB_MODEL_FOREMAN_TOOLS: Tuple[str, ...] = WEB_MODEL_CORE_TOOLS + CORE_ADMIN_TOOLS
@@ -94,14 +103,20 @@ WEB_MODEL_FOREMAN_TOOLS: Tuple[str, ...] = WEB_MODEL_CORE_TOOLS + CORE_ADMIN_TOO
 # role-aware core schema. Built-in capability packs stay behind capability_use
 # instead of being eagerly listed for every Web Model actor.
 WEB_MODEL_ADVERTISED_EXCLUDED_TOOLS: Tuple[str, ...] = (
-    "onecolleague_pet_decisions",
     "onecolleague_voice_secretary_document",
     "onecolleague_voice_secretary_request",
     "onecolleague_voice_secretary_composer",
 )
 
 SPECIALIZED_CORE_TOOL_NAMES: Tuple[str, ...] = tuple(
-    sorted((set(PET_CORE_TOOLS) | set(VOICE_SECRETARY_CORE_TOOLS) | set(WEB_MODEL_CORE_TOOLS)) - set(CORE_TOOL_NAMES))
+    sorted(
+        (
+            set(VOICE_SECRETARY_CORE_TOOLS)
+            | set(WEB_MODEL_CORE_TOOLS)
+            | set(WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS)
+        )
+        - set(CORE_TOOL_NAMES)
+    )
 )
 
 
@@ -141,13 +156,11 @@ BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
         ),
         "tags": ("automation", "ops"),
     },
-    "pack:pet": {
-        "title": "Pet Decision Surface",
-        "description": "Structured Web Pet reminder decision storage for the internal pet actor.",
-        "tool_names": (
-            "onecolleague_pet_decisions",
-        ),
-        "tags": ("pet", "decision", "web-pet"),
+    "pack:computer-control-local": {
+        "title": "Local Computer Control",
+        "description": "High-risk computer control tools restricted to trusted local operator surfaces.",
+        "tool_names": LOCAL_COMPUTER_CONTROL_TOOLS,
+        "tags": ("computer-control", "local-only", "high-risk"),
     },
     "pack:context-advanced": {
         "title": "Context Advanced",
@@ -1174,14 +1187,11 @@ def web_model_advertised_tool_names(all_tool_names: Iterable[str], *, actor_role
 def resolve_core_tool_names(
     *,
     actor_role: str = "",
-    is_pet: bool = False,
     is_voice_secretary: bool = False,
     is_web_model: bool = False,
 ) -> Set[str]:
     if bool(is_voice_secretary):
         return set(VOICE_SECRETARY_CORE_TOOLS)
-    if bool(is_pet):
-        return set(PET_CORE_TOOLS)
     if bool(is_web_model):
         return set(WEB_MODEL_CORE_TOOLS)
     role = str(actor_role or "").strip().lower()
@@ -1194,13 +1204,11 @@ def resolve_visible_tool_names(
     enabled_capability_ids: Iterable[str],
     *,
     actor_role: str = "",
-    is_pet: bool = False,
     is_voice_secretary: bool = False,
     is_web_model: bool = False,
 ) -> Set[str]:
     visible = resolve_core_tool_names(
         actor_role=actor_role,
-        is_pet=is_pet,
         is_voice_secretary=is_voice_secretary,
         is_web_model=is_web_model,
     )

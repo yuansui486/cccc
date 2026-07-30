@@ -335,7 +335,7 @@ class TestAssistantOps(unittest.TestCase):
 
             self.assertTrue(state.ok, getattr(state, "error", None))
             assistants_by_id = (state.result or {}).get("assistants_by_id") if isinstance(state.result, dict) else {}
-            self.assertIn("pet", assistants_by_id)
+            self.assertNotIn("pet", assistants_by_id)
             self.assertIn("voice_secretary", assistants_by_id)
             self.assertFalse(bool(assistants_by_id["voice_secretary"].get("enabled")))
             self.assertEqual(assistants_by_id["voice_secretary"].get("lifecycle"), "disabled")
@@ -5195,7 +5195,7 @@ class TestAssistantOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_pet_settings_are_read_only_in_assistant_seam(self) -> None:
+    def test_retired_pet_assistant_is_not_addressable(self) -> None:
         _, cleanup = self._with_home()
         try:
             group_id = self._create_group()
@@ -5210,7 +5210,7 @@ class TestAssistantOps(unittest.TestCase):
             )
 
             self.assertFalse(update.ok)
-            self.assertEqual(update.error.code, "assistant_settings_read_only")
+            self.assertEqual(update.error.code, "assistant_not_found")
         finally:
             cleanup()
 

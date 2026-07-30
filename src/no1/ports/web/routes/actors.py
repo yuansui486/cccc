@@ -66,6 +66,76 @@ _READONLY_ACTOR_TTL_S = 0.8
 _STANDARD_WEB_HEADLESS_RUNTIMES = frozenset({"codex", "claude", "web_model"})
 
 
+def _resolve_terminal_attach_mode(query_params: Any, *, read_only: bool) -> tuple[str, bool]:
+    if read_only:
+        return "viewer", False
+    get_param = getattr(query_params, "get", None)
+    if not callable(get_param):
+        get_param = lambda _key, default=None: default
+    requested_mode = str(get_param("mode", "control") or "control").strip().lower()
+    if requested_mode not in {"control", "viewer"}:
+        requested_mode = "control"
+    takeover = str(get_param("takeover", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if requested_mode != "control":
+        takeover = False
+    return requested_mode, takeover
+
+
+def _decode_terminal_client_frame(data: bytes, *, terminal_writable: bool) -> tuple[str, Any]:
+    if not data:
+        return "ignore", None
+    opcode = data[:1]
+    payload = data[1:]
+    if opcode == b"0":
+        return ("input", payload) if terminal_writable else ("reject", "viewer_only")
+    if opcode == b"2":
+        if not terminal_writable:
+            return "reject", "viewer_only"
+        try:
+            resize_payload = json.loads(payload.decode("utf-8", errors="replace"))
+        except Exception:
+            resize_payload = {}
+        try:
+            cols = int(resize_payload.get("cols") or resize_payload.get("c") or 0)
+            rows = int(resize_payload.get("rows") or resize_payload.get("r") or 0)
+        except Exception:
+            cols = 0
+            rows = 0
+        return "resize", (cols, rows)
+    return "ignore", None
+
+
+def _terminal_attach_browser_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in result.items() if key != "writer_lease"}
+
+
+async def _resize_terminal_with_writer_lease(
+    *,
+    group_id: str,
+    actor_id: str,
+    cols: int,
+    rows: int,
+    writer_lease: str,
+) -> bool:
+    lease = str(writer_lease or "")
+    if not lease:
+        return False
+    resp = await asyncio.to_thread(
+        call_daemon,
+        {
+            "op": "term_resize",
+            "args": {
+                "group_id": group_id,
+                "actor_id": actor_id,
+                "cols": cols,
+                "rows": rows,
+                "writer_lease": lease,
+            },
+        },
+    )
+    return bool(isinstance(resp, dict) and resp.get("ok"))
+
+
 def _decorate_actor_runtime_session(group_id: str, actor: Dict[str, Any]) -> None:
     gid = str(group_id or "").strip()
     aid = str(actor.get("id") or "").strip()
@@ -1350,7 +1420,19 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             return
 
         try:
-            req = {"op": "term_attach", "args": {"group_id": group_id, "actor_id": actor_id}}
+            since = str(websocket.query_params.get("since") or "").strip()
+            requested_mode, takeover = _resolve_terminal_attach_mode(websocket.query_params, read_only=ctx.read_only)
+            req = {
+                "op": "term_attach",
+                "args": {
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "mode": requested_mode,
+                    "takeover": takeover,
+                },
+            }
+            if since:
+                req["args"]["since"] = since
             writer.write((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
             await writer.drain()
             line = await reader.readline()
@@ -1363,18 +1445,82 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                 await websocket.send_json({"ok": False, "error": err})
                 await websocket.close(code=1008)
                 return
+            result = resp.get("result") if isinstance(resp.get("result"), dict) else {}
+            terminal_writable = bool(result.get("terminal_writable"))
+            writer_lease = str(result.get("writer_lease") or "")
+            browser_result = _terminal_attach_browser_result(result)
+
+            def _terminal_json_frame(opcode: bytes, payload: Dict[str, Any]) -> bytes:
+                encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                return opcode + encoded
+
+            async def _send_input_rejected() -> None:
+                await websocket.send_bytes(
+                    _terminal_json_frame(
+                        b"4",
+                        {
+                            "type": "terminal.input_ack",
+                            "ok": False,
+                            "error": {
+                                "code": "viewer_only",
+                                "message": "This terminal connection is read-only; reconnect as control to write.",
+                            },
+                        },
+                    )
+                )
+
+            await websocket.send_bytes(_terminal_json_frame(b"3", browser_result))
 
             async def _pump_out() -> None:
                 while True:
                     data = await reader.read(65536)
                     if not data:
                         break
-                    await websocket.send_bytes(data)
+                    await websocket.send_bytes(b"1" + data)
 
             async def _pump_in() -> None:
+                async def _write_input(data: bytes) -> None:
+                    if ctx.read_only or not terminal_writable:
+                        await _send_input_rejected()
+                        return
+                    if data:
+                        writer.write(data)
+                        await writer.drain()
+
+                async def _resize(cols: int, rows: int) -> None:
+                    if ctx.read_only or not terminal_writable or not writer_lease:
+                        await _send_input_rejected()
+                        return
+                    if cols >= 10 and rows >= 2:
+                        resized = await _resize_terminal_with_writer_lease(
+                            group_id=group_id,
+                            actor_id=actor_id,
+                            cols=cols,
+                            rows=rows,
+                            writer_lease=writer_lease,
+                        )
+                        if not resized:
+                            await _send_input_rejected()
+
                 while True:
-                    raw = await websocket.receive_text()
-                    if not raw:
+                    message = await websocket.receive()
+                    if message.get("type") == "websocket.disconnect":
+                        break
+                    raw_bytes = message.get("bytes")
+                    if isinstance(raw_bytes, bytes):
+                        action, payload = _decode_terminal_client_frame(
+                            raw_bytes,
+                            terminal_writable=terminal_writable and not ctx.read_only,
+                        )
+                        if action == "input":
+                            await _write_input(payload)
+                        elif action == "resize":
+                            await _resize(*payload)
+                        elif action == "reject":
+                            await _send_input_rejected()
+                        continue
+                    raw = message.get("text")
+                    if not isinstance(raw, str) or not raw:
                         continue
                     obj: Any = None
                     try:
@@ -1385,27 +1531,17 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                         continue
                     t = str(obj.get("t") or "")
                     if t == "i":
-                        if ctx.read_only:
-                            continue
                         data = str(obj.get("d") or "")
-                        if data:
-                            writer.write(data.encode("utf-8", errors="replace"))
-                            await writer.drain()
+                        await _write_input(data.encode("utf-8", errors="replace"))
                         continue
                     if t == "r":
-                        if ctx.read_only:
-                            continue
                         try:
                             cols = int(obj.get("c") or 0)
                             rows = int(obj.get("r") or 0)
                         except Exception:
                             cols = 0
                             rows = 0
-                        if cols >= 10 and rows >= 2:
-                            await asyncio.to_thread(
-                                call_daemon,
-                                {"op": "term_resize", "args": {"group_id": group_id, "actor_id": actor_id, "cols": cols, "rows": rows}},
-                            )
+                        await _resize(cols, rows)
                         continue
 
             out_task = asyncio.create_task(_pump_out())

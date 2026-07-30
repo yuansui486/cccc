@@ -304,56 +304,6 @@ class TestMcpDynamicCapabilityTools(unittest.TestCase):
         self.assertEqual(caught.exception.code, "invalid_request")
         daemon_call.assert_not_called()
 
-    def test_list_tools_for_caller_fallback_uses_pet_minimal_surface(self) -> None:
-        from no1.contracts.v1 import DaemonRequest
-        from no1.daemon.server import handle_request
-        from no1.kernel.group import load_group
-        from no1.kernel.pet_actor import ensure_pet_actor
-        from no1.ports.mcp.server import list_tools_for_caller
-
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
-            create_resp, _ = handle_request(
-                DaemonRequest.model_validate({"op": "group_create", "args": {"title": "mcp-pet", "topic": "", "by": "user"}})
-            )
-            self.assertTrue(create_resp.ok, getattr(create_resp, "error", None))
-            group_id = str((create_resp.result or {}).get("group_id") or "").strip()
-            self.assertTrue(group_id)
-
-            add_resp, _ = handle_request(
-                DaemonRequest.model_validate(
-                    {
-                        "op": "actor_add",
-                        "args": {
-                            "group_id": group_id,
-                            "actor_id": "peer-1",
-                            "runtime": "codex",
-                            "runner": "headless",
-                            "by": "user",
-                        },
-                    }
-                )
-            )
-            self.assertTrue(add_resp.ok, getattr(add_resp, "error", None))
-
-            group = load_group(group_id)
-            self.assertIsNotNone(group)
-            ensure_pet_actor(group)
-
-            with patch.dict(os.environ, {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "pet-peer"}, clear=False), patch(
-                "no1.ports.mcp.server._call_daemon_or_raise",
-                side_effect=RuntimeError("daemon unavailable"),
-            ):
-                tools = list_tools_for_caller()
-
-        names = {str(item.get("name") or "") for item in tools if isinstance(item, dict)}
-        self.assertIn("onecolleague_help", names)
-        self.assertIn("onecolleague_context_get", names)
-        self.assertIn("onecolleague_agent_state", names)
-        self.assertIn("onecolleague_pet_decisions", names)
-        self.assertNotIn("onecolleague_message_send", names)
-        self.assertNotIn("onecolleague_message_reply", names)
-        self.assertNotIn("onecolleague_file", names)
-
     def test_list_tools_for_caller_fallback_uses_voice_secretary_surface(self) -> None:
         from no1.contracts.v1 import DaemonRequest
         from no1.daemon.server import handle_request

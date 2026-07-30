@@ -561,6 +561,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     home=str(ctx.home),
                     group_id=str(connector.get("group_id") or ""),
                     actor_id=str(connector.get("actor_id") or ""),
+                    source="web_model",
                 ):
                     return handle_mcp_request(item)
 
@@ -1120,8 +1121,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                             (runtime_visibility or {}).get("peer_runtime") or "visible"
                         ).strip().lower()
                         or "visible",
-                        "pet_runtime": str(
-                            (runtime_visibility or {}).get("pet_runtime") or "hidden"
+                        "assistant_runtime": str(
+                            (runtime_visibility or {}).get("assistant_runtime") or "hidden"
                         ).strip().lower()
                         or "hidden",
                     },
@@ -1502,8 +1503,8 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             patch.setdefault("terminal_ui", {})["scrollback_lines"] = int(req.terminal_ui_scrollback_lines)
         if req.peer_runtime_visibility is not None:
             patch.setdefault("runtime_visibility", {})["peer_runtime"] = str(req.peer_runtime_visibility)
-        if req.pet_runtime_visibility is not None:
-            patch.setdefault("runtime_visibility", {})["pet_runtime"] = str(req.pet_runtime_visibility)
+        if req.assistant_runtime_visibility is not None:
+            patch.setdefault("runtime_visibility", {})["assistant_runtime"] = str(req.assistant_runtime_visibility)
 
         resp = await ctx.daemon({"op": "observability_update", "args": {"by": req.by, "patch": patch}})
 
@@ -1842,6 +1843,31 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
             }
         )
 
+    @group_router.get("/terminal/history")
+    async def terminal_history(
+        group_id: str,
+        actor_id: str,
+        before: str = "",
+        limit_bytes: int = 64_000,
+        strip_ansi: bool = False,
+        compact: bool = False,
+    ) -> Dict[str, Any]:
+        """Read a cursor-based page from an actor's terminal history."""
+        return await ctx.daemon(
+            {
+                "op": "terminal_history",
+                "args": {
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "before": before,
+                    "limit_bytes": int(limit_bytes or 64_000),
+                    "strip_ansi": bool(strip_ansi),
+                    "compact": bool(compact),
+                    "by": "user",
+                },
+            }
+        )
+
     @group_router.post("/terminal/clear")
     async def terminal_clear(group_id: str, actor_id: str) -> Dict[str, Any]:
         """Clear (truncate) an actor's in-memory terminal transcript ring buffer."""
@@ -1974,6 +2000,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     home=str(ctx.home),
                     group_id=group_id,
                     actor_id=actor_id,
+                    source="local_web",
                 ):
                     return mcp_capability_use(
                         group_id=group_id,
@@ -2022,6 +2049,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
                     home=str(ctx.home),
                     group_id=group_id,
                     actor_id=actor_id,
+                    source="local_web",
                 ):
                     return mcp_capability_install(
                         group_id=group_id,

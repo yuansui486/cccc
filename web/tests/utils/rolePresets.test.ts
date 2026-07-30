@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_ROLE_PRESETS,
-  getDefaultPetPersonaSeed,
   getRolePresetApplyState,
   getRolePresetById,
 } from "../../src/utils/rolePresets";
@@ -70,12 +69,4 @@ describe("rolePresets", () => {
     expect(getRolePresetApplyState("existing draft", "")).toBe("no_change");
   });
 
-  it("uses a dedicated execution-focused default pet persona seed", () => {
-    const seed = getDefaultPetPersonaSeed();
-    expect(seed).toContain("You are the Web Pet for this group.");
-    expect(seed).toContain("Every pet review must end with exactly one decision write");
-    expect(seed).toContain("low-noise");
-    expect(seed).toContain("one current highest-value recommendation");
-    expect(seed).not.toContain("full current reminder list");
-  });
 });

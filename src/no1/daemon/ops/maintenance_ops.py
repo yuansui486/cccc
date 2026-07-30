@@ -23,6 +23,7 @@ def handle_term_resize(args: Dict[str, Any]) -> DaemonResponse:
     actor_id = str(args.get("actor_id") or "").strip()
     cols_raw = args.get("cols")
     rows_raw = args.get("rows")
+    writer_lease = str(args.get("writer_lease") or "").strip()
     try:
         cols = int(cols_raw) if isinstance(cols_raw, int) else int(str(cols_raw or "0"))
     except Exception:
@@ -40,7 +41,17 @@ def handle_term_resize(args: Dict[str, Any]) -> DaemonResponse:
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    pty_runner.SUPERVISOR.resize(group_id=group_id, actor_id=actor_id, cols=cols, rows=rows)
+    if not writer_lease:
+        return _error("terminal_writer_lease_required", "terminal writer lease is required")
+    resized = pty_runner.SUPERVISOR.resize_if_writer(
+        group_id=group_id,
+        actor_id=actor_id,
+        writer_lease=writer_lease,
+        cols=cols,
+        rows=rows,
+    )
+    if not resized:
+        return _error("terminal_not_writable", "terminal writer lease is no longer active")
     return DaemonResponse(ok=True, result={"group_id": group_id, "actor_id": actor_id, "cols": cols, "rows": rows})
 
 

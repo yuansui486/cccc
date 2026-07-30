@@ -932,3 +932,220 @@ class TestWebActorRoutesCache(unittest.TestCase):
                     self.assertEqual(actor_list_reads, 2)
         finally:
             cleanup()
+
+    def test_terminal_attach_mode_and_viewer_frames_fail_closed(self) -> None:
+        from no1.ports.web.routes.actors import (
+            _decode_terminal_client_frame,
+            _resolve_terminal_attach_mode,
+        )
+
+        self.assertEqual(
+            _resolve_terminal_attach_mode({"mode": "control", "takeover": "true"}, read_only=True),
+            ("viewer", False),
+        )
+        self.assertEqual(
+            _resolve_terminal_attach_mode({"mode": "control", "takeover": "true"}, read_only=False),
+            ("control", True),
+        )
+        self.assertEqual(_decode_terminal_client_frame(b"0hello", terminal_writable=False)[0], "reject")
+        self.assertEqual(
+            _decode_terminal_client_frame(b'2{"cols":120,"rows":40}', terminal_writable=False)[0],
+            "reject",
+        )
+        self.assertEqual(
+            _decode_terminal_client_frame(b'2{"cols":120,"rows":40}', terminal_writable=True),
+            ("resize", (120, 40)),
+        )
+
+    def test_terminal_attach_browser_result_does_not_expose_writer_lease(self) -> None:
+        from no1.ports.web.routes.actors import _terminal_attach_browser_result
+
+        result = _terminal_attach_browser_result(
+            {"terminal_writable": True, "writer_lease": "server-only", "replay_cursor": 12}
+        )
+
+        self.assertNotIn("writer_lease", result)
+        self.assertTrue(result["terminal_writable"])
+        self.assertEqual(result["replay_cursor"], 12)
+
+    def test_terminal_resize_forwards_current_lease_and_rejects_old_lease(self) -> None:
+        import asyncio
+
+        from no1.ports.web.routes.actors import _resize_terminal_with_writer_lease
+
+        requests: list[dict] = []
+
+        def fake_call_daemon(req: dict) -> dict:
+            requests.append(req)
+            args = req.get("args") if isinstance(req.get("args"), dict) else {}
+            return {"ok": args.get("writer_lease") == "current"}
+
+        with patch("no1.ports.web.routes.actors.call_daemon", side_effect=fake_call_daemon):
+            old = asyncio.run(
+                _resize_terminal_with_writer_lease(
+                    group_id="g1", actor_id="a1", cols=120, rows=40, writer_lease="old"
+                )
+            )
+            current = asyncio.run(
+                _resize_terminal_with_writer_lease(
+                    group_id="g1", actor_id="a1", cols=120, rows=40, writer_lease="current"
+                )
+            )
+            missing = asyncio.run(
+                _resize_terminal_with_writer_lease(
+                    group_id="g1", actor_id="a1", cols=120, rows=40, writer_lease=""
+                )
+            )
+
+        self.assertFalse(old)
+        self.assertTrue(current)
+        self.assertFalse(missing)
+        self.assertEqual([req["args"]["writer_lease"] for req in requests], ["old", "current"])
+
+    def test_terminal_websocket_viewer_rejects_input_and_resize(self) -> None:
+        import asyncio
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+            writes: list[bytes] = []
+
+            class Reader:
+                async def readline(self) -> bytes:
+                    return b'{"ok":true,"result":{"terminal_writable":false,"replay_cursor":0}}\n'
+
+                async def read(self, _size: int) -> bytes:
+                    await asyncio.sleep(3600)
+                    return b""
+
+            class Writer:
+                def write(self, data: bytes) -> None:
+                    writes.append(bytes(data))
+
+                async def drain(self) -> None:
+                    return None
+
+                def close(self) -> None:
+                    return None
+
+                async def wait_closed(self) -> None:
+                    return None
+
+            async def open_connection(_path: str):
+                return Reader(), Writer()
+
+            with patch(
+                "no1.ports.web.routes.actors.get_daemon_endpoint",
+                return_value={"transport": "unix", "path": "/tmp/test.sock"},
+            ), patch(
+                "no1.ports.web.routes.actors.asyncio.open_unix_connection",
+                side_effect=open_connection,
+            ), patch("no1.ports.web.routes.actors.call_daemon") as resize_call:
+                with self._client() as client:
+                    with client.websocket_connect(
+                        f"/api/v1/groups/{group_id}/actors/peer-1/term?mode=viewer&takeover=true"
+                    ) as ws:
+                        attach = ws.receive_bytes()
+                        self.assertEqual(attach[:1], b"3")
+                        self.assertNotIn("writer_lease", json.loads(attach[1:]))
+                        ws.send_bytes(b"0hello")
+                        self.assertEqual(ws.receive_bytes()[:1], b"4")
+                        ws.send_bytes(b'2{"cols":120,"rows":40}')
+                        self.assertEqual(ws.receive_bytes()[:1], b"4")
+
+            resize_call.assert_not_called()
+            self.assertEqual(len(writes), 1)
+            attach_request = json.loads(writes[0].decode())
+            self.assertEqual(attach_request["args"]["mode"], "viewer")
+            self.assertFalse(attach_request["args"]["takeover"])
+        finally:
+            cleanup()
+
+    def test_terminal_websocket_current_and_stale_resize_leases(self) -> None:
+        import asyncio
+
+        _, cleanup = self._with_home()
+        try:
+            group_id = self._create_group()
+
+            class Reader:
+                def __init__(self, lease: str) -> None:
+                    self.lease = lease
+
+                async def readline(self) -> bytes:
+                    return (
+                        json.dumps(
+                            {
+                                "ok": True,
+                                "result": {
+                                    "terminal_writable": True,
+                                    "writer_lease": self.lease,
+                                    "replay_cursor": 0,
+                                },
+                            }
+                        ).encode()
+                        + b"\n"
+                    )
+
+                async def read(self, _size: int) -> bytes:
+                    await asyncio.sleep(3600)
+                    return b""
+
+            class Writer:
+                def write(self, _data: bytes) -> None:
+                    return None
+
+                async def drain(self) -> None:
+                    return None
+
+                def close(self) -> None:
+                    return None
+
+                async def wait_closed(self) -> None:
+                    return None
+
+            leases = iter(("current", "old"))
+
+            async def open_connection(_path: str):
+                return Reader(next(leases)), Writer()
+
+            resize_requests: list[dict] = []
+            resized = threading.Event()
+
+            def fake_resize(req: dict) -> dict:
+                resize_requests.append(req)
+                resized.set()
+                args = req.get("args") if isinstance(req.get("args"), dict) else {}
+                return {"ok": args.get("writer_lease") == "current"}
+
+            with patch(
+                "no1.ports.web.routes.actors.get_daemon_endpoint",
+                return_value={"transport": "unix", "path": "/tmp/test.sock"},
+            ), patch(
+                "no1.ports.web.routes.actors.asyncio.open_unix_connection",
+                side_effect=open_connection,
+            ), patch("no1.ports.web.routes.actors.call_daemon", side_effect=fake_resize):
+                with self._client() as client:
+                    with client.websocket_connect(
+                        f"/api/v1/groups/{group_id}/actors/peer-1/term?mode=control&takeover=true"
+                    ) as ws:
+                        attach = ws.receive_bytes()
+                        self.assertNotIn("writer_lease", json.loads(attach[1:]))
+                        ws.send_bytes(b'2{"cols":120,"rows":40}')
+                        self.assertTrue(resized.wait(timeout=1))
+
+                    resized.clear()
+                    with client.websocket_connect(
+                        f"/api/v1/groups/{group_id}/actors/peer-1/term?mode=control&takeover=true"
+                    ) as ws:
+                        attach = ws.receive_bytes()
+                        self.assertNotIn("writer_lease", json.loads(attach[1:]))
+                        ws.send_bytes(b'2{"cols":120,"rows":40}')
+                        self.assertEqual(ws.receive_bytes()[:1], b"4")
+
+            self.assertEqual(
+                [req["args"]["writer_lease"] for req in resize_requests],
+                ["current", "old"],
+            )
+        finally:
+            cleanup()

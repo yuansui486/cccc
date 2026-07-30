@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import ipaddress
 import json
 import time
 import uuid
@@ -30,7 +31,7 @@ from ....computer_control.mcp import validate_workflow_tools
 from ....computer_control.compiler import compile_workflow, compile_or_raise
 from ....computer_control.elements import normalize_snapshot, resolve_locator
 from ....computer_control.triggers import next_cron_time, next_schedule_time, parse_at_timestamp, validate_trigger
-from ..schemas import RouteContext, require_admin, require_group, require_user
+from ..schemas import RouteContext, require_admin
 
 
 def _error(code: str, message: str, status: int = 400, details: Any = None) -> HTTPException:
@@ -50,15 +51,32 @@ def _emit(kind: str, **data: Any) -> None:
         pass
 
 
+def _require_local_computer_control_admin(ctx: RouteContext, request: Request) -> Any:
+    if ctx.read_only:
+        raise _error("permission_denied", "computer control is disabled in read-only mode", 403)
+    host = str(getattr(request.client, "host", "") or "").strip()
+    try:
+        is_local = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_local = host.lower() in {"localhost", "testclient"}
+    if not is_local:
+        raise _error("permission_denied", "computer control is restricted to loopback clients", 403)
+    return require_admin(request)
+
+
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
     service = _service(ctx)
-    global_router = APIRouter(prefix="/api/v1/computer-control", dependencies=[Depends(require_user)])
-    group_router = APIRouter(prefix="/api/v1/groups/{group_id}/computer-control", dependencies=[Depends(require_group)])
+
+    def require_local_admin(request: Request) -> Any:
+        return _require_local_computer_control_admin(ctx, request)
+
+    global_router = APIRouter(prefix="/api/v1/computer-control", dependencies=[Depends(require_local_admin)])
+    group_router = APIRouter(prefix="/api/v1/groups/{group_id}/computer-control", dependencies=[Depends(require_local_admin)])
 
     async def daemon_control(command: str, **payload: Any) -> Any:
         response = await asyncio.to_thread(
             call_daemon,
-            {"op": "computer_control", "args": {"command": command, **payload}},
+            {"op": "computer_control", "args": {"command": command, **payload, "caller_surface": "local_web"}},
             paths=DaemonPaths(ctx.home),
             # Computer operations and recordings are user-cancellable rather
             # than wall-clock limited; the MCP call itself owns cancellation.

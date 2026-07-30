@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { filterTerminalInputChunk } from "../../src/utils/terminalInputFilter";
+import { encodeTerminalInputFrame, parseTerminalBinaryFrame } from "../../src/utils/terminalConnection";
 
 const da1 = "\x1b[?1;2c";
 const color10 = "\x1b]10;rgb:1e1e/2929/3b3b\x1b\\";
@@ -31,5 +32,16 @@ describe("filterTerminalInputChunk", () => {
   it("preserves ordinary escape input and non-filtered runtimes", () => {
     expect(filterTerminalInputChunk("", "\x1b[A", "gemini")).toEqual({ data: "\x1b[A", pending: "" });
     expect(filterTerminalInputChunk("", da1, "bash")).toEqual({ data: da1, pending: "" });
+  });
+
+  it("frames only bytes left after fragmented provider response filtering", () => {
+    const first = filterTerminalInputChunk("", "\x1b[?1;", "neovate");
+    const second = filterTerminalInputChunk(first.pending, "2chello\r", "neovate");
+    const encoded = encodeTerminalInputFrame(second.data);
+    const buffer = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength) as ArrayBuffer;
+    const frame = parseTerminalBinaryFrame(buffer);
+
+    expect(frame?.type).toBe("input");
+    expect(new TextDecoder().decode(frame?.payload)).toBe("hello\r");
   });
 });

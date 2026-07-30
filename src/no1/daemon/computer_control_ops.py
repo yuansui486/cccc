@@ -13,6 +13,8 @@ from ..computer_control.elements import normalize_snapshot
 from ..computer_control.models import WorkflowDefinition
 from ..computer_control.services import get_services
 from ..contracts.v1 import DaemonError, DaemonResponse
+from ..kernel.actors import find_actor
+from ..kernel.group import load_group
 from ..paths import ensure_home
 
 
@@ -271,14 +273,14 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
     request = service.requests.require_authorized(group_id, request_id, actor_id)
     if str(request.get("mode") or "") != "create_and_run":
         raise PermissionError("该请求未授权 AI 编辑电脑控制工作流")
-    if action in {"create", "update", "update_triggers", "propose", "repair"} and request.get("allow_workflow_edit") is False:
+    if action in {"create", "update", "update_triggers", "propose", "repair"} and not bool(request.get("allow_workflow_edit")):
         raise PermissionError("用户未授权 AI 修改电脑控制工作流")
     if workflow_id and str(request.get("workflow_id") or "") not in {"", workflow_id}:
         raise PermissionError("该请求已绑定其他工作流")
 
     def finalize(value: Dict[str, Any]) -> Dict[str, Any]:
         version = int(value["version"])
-        if request.get("allow_publish") is False or request.get("allow_trust") is False:
+        if not bool(request.get("allow_publish")) or not bool(request.get("allow_trust")):
             return value
         return service.store.auto_finalize(group_id, str(value["manifest"]["workflow_id"]), version, fingerprint=fingerprint)
 
@@ -292,7 +294,7 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
         raise ValueError(f"workflow_id is required for action={action}")
     current = service.store.get(group_id, workflow_id)
     if action in {"update", "update_triggers"} and definition is not None:
-        if action == "update_triggers" and not all(request.get(key) is not False for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
+        if action == "update_triggers" and not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
             raise PermissionError("开启无人值守触发需要用户授权")
         value = service.store.update(
             group_id,
@@ -340,11 +342,11 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
         service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_updated")
         return value
     if action == "publish":
-        if request.get("allow_publish") is False:
+        if not bool(request.get("allow_publish")):
             raise PermissionError("用户未授权 AI 发布工作流")
         return service.store.publish(group_id, workflow_id, int(args.get("version") or current["version"]))
     if action == "trust":
-        if request.get("allow_trust") is False:
+        if not bool(request.get("allow_trust")):
             raise PermissionError("用户未授权 AI 授予长期信任")
         if not fingerprint:
             raise RuntimeError("Windows-MCP 尚未完成验证")
@@ -358,8 +360,22 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
     command = str(args.get("command") or "").strip()
     group_id = str(args.get("group_id") or "").strip()
     actor_id = str(args.get("actor_id") or "").strip()
+    caller_surface = str(args.get("caller_surface") or "").strip().lower()
+    if caller_surface not in {"local_mcp", "local_web"}:
+        return _error(
+            "permission_denied",
+            "computer control is restricted to trusted local surfaces",
+            details={"caller_surface": caller_surface or "missing"},
+        )
     if not group_id:
         return _error("invalid_request", "group_id is required")
+    if caller_surface == "local_mcp":
+        group = load_group(group_id)
+        actor = find_actor(group, actor_id) if group is not None and actor_id else None
+        if not isinstance(actor, dict) or actor_id == "user":
+            return _error("permission_denied", "computer control requires a bound local actor runtime")
+        if str(actor.get("runtime") or "").strip().lower() == "web_model":
+            return _error("permission_denied", "computer control is unavailable to Web Model actors")
     service = get_services(ensure_home())
     try:
         if command == "catalog":

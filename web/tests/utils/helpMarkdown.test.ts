@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildHelpMarkdown, parseHelpMarkdown, updateActorHelpNote, updatePetHelpNote } from "../../src/utils/helpMarkdown";
+import { buildHelpMarkdown, parseHelpMarkdown, updateActorHelpNote } from "../../src/utils/helpMarkdown";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const roundtripFixturePath = resolve(__dirname, "../../../tests/fixtures/help_markdown_pet_roundtrip.md");
 
-describe("helpMarkdown pet persona", () => {
-  it("parses and rebuilds the pet block without dropping other sections", () => {
+describe("helpMarkdown legacy tags", () => {
+  it("preserves a legacy pet block as an extra tagged block", () => {
     const markdown = `
 Shared guidance.
 
@@ -34,14 +34,14 @@ Actor note.
     expect(parsed.common).toBe("Shared guidance.");
     expect(parsed.foreman).toBe("Foreman note.");
     expect(parsed.peer).toBe("Peer note.");
-    expect(parsed.pet).toBe("Pet coordinator note.");
+    expect("pet" in parsed).toBe(false);
+    expect(parsed.extraTaggedBlocks).toEqual(["## @pet\n\nPet coordinator note."]);
     expect(parsed.actorNotes["peer-1"]).toBe("Actor note.");
 
     const rebuilt = buildHelpMarkdown({
       common: parsed.common,
       foreman: parsed.foreman,
       peer: parsed.peer,
-      pet: parsed.pet,
       actorNotes: parsed.actorNotes,
       actorOrder: ["peer-1"],
       extraTaggedBlocks: parsed.extraTaggedBlocks,
@@ -52,7 +52,7 @@ Actor note.
     expect(rebuilt).toContain("## @actor: peer-1");
   });
 
-  it("preserves pet persona when actor notes are updated", () => {
+  it("preserves a legacy pet block when actor notes are updated", () => {
     const markdown = `
 ## @pet
 
@@ -66,7 +66,7 @@ Old actor note.
     const updated = updateActorHelpNote(markdown, "peer-1", "New actor note.", ["peer-1"]);
     const parsed = parseHelpMarkdown(updated);
 
-    expect(parsed.pet).toBe("Keep the cat low-noise.");
+    expect(parsed.extraTaggedBlocks).toEqual(["## @pet\n\nKeep the cat low-noise."]);
     expect(parsed.actorNotes["peer-1"]).toBe("New actor note.");
   });
 
@@ -81,24 +81,6 @@ second line
     expect(parsed.actorNotes["peer-1"]).toBe("first line\nsecond line");
   });
 
-  it("updates the pet block without dropping actor notes", () => {
-    const markdown = `
-## @actor: peer-1
-
-Actor note.
-
-## @pet
-
-Old pet note.
-`.trim();
-
-    const updated = updatePetHelpNote(markdown, "New pet note.", ["peer-1"]);
-    const parsed = parseHelpMarkdown(updated);
-
-    expect(parsed.pet).toBe("New pet note.");
-    expect(parsed.actorNotes["peer-1"]).toBe("Actor note.");
-  });
-
   it("matches the shared roundtrip fixture used by backend tests", () => {
     const markdown = readFileSync(roundtripFixturePath, "utf8");
     const parsed = parseHelpMarkdown(markdown);
@@ -106,10 +88,11 @@ Old pet note.
     expect(parsed.common).toBe("Shared guidance.");
     expect(parsed.foreman).toBe("Foreman note.");
     expect(parsed.peer).toBe("Peer note.");
-    expect(parsed.pet).toBe("Pet note.");
+    expect("pet" in parsed).toBe(false);
     expect(parsed.actorNotes["peer-1"]).toBe("Actor note.");
     expect(parsed.actorNotes["reviewer-1"]).toBe("Reviewer note.");
     expect(parsed.extraTaggedBlocks).toEqual([
+      "## @pet\n\nPet note.",
       "## @role: observer\n\nObserver note.",
     ]);
 
@@ -117,7 +100,6 @@ Old pet note.
       common: parsed.common,
       foreman: parsed.foreman,
       peer: parsed.peer,
-      pet: parsed.pet,
       actorNotes: parsed.actorNotes,
       actorOrder: ["peer-1", "reviewer-1"],
       extraTaggedBlocks: parsed.extraTaggedBlocks,

@@ -4,6 +4,7 @@ import json
 import time
 from typing import Any, Dict, Optional
 
+from .models import computer_control_permissions
 from .storage import WorkflowStore
 
 
@@ -60,4 +61,4 @@ class ComputerRequestStore:
             created_ts = float(request.get("created_ts") or request.get("updated_ts") or 0)
             if created_ts <= 0 or time.time() - created_ts > self.AUTHORIZATION_TTL_SECONDS:
                 raise PermissionError("computer control request authorization has expired")
-        return request
+        return {**request, **computer_control_permissions(request)}

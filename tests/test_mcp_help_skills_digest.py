@@ -290,23 +290,101 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
 
         self.assertEqual(markdown.count("## Web Model Transport (Runtime)"), 1)
         self.assertIn("normal OneColleague agent", markdown)
-        self.assertIn("same bootstrap/help/message/coordination/capability rules", markdown)
+        self.assertIn("same bootstrap/help/message/coordination rules", markdown)
         self.assertIn("do not call `onecolleague_runtime_wait_next_turn` first", markdown)
         self.assertIn("remote MCP pull", markdown)
         self.assertIn("Web chat text alone is not a visible OneColleague reply", markdown)
         self.assertIn("you do not have OneColleague local access", markdown)
-        self.assertIn("`onecolleague_shell`", markdown)
-        self.assertIn("`onecolleague_git`", markdown)
+        self.assertIn("Local workspace access is scope-bound", markdown)
+        self.assertIn("`onecolleague_repo_edit`", markdown)
+        self.assertIn("Local command execution", markdown)
+        self.assertNotIn("`onecolleague_shell`", markdown)
+        self.assertNotIn("`onecolleague_git`", markdown)
+        self.assertNotIn("`onecolleague_code_exec`", markdown)
         self.assertIn("Delivered OneColleague attachments are blob references", markdown)
         self.assertIn("`onecolleague_file(action=\"read\", rel_path=...)`", markdown)
         self.assertIn("`onecolleague_file(action=\"send\", path=..., text=...)`", markdown)
-        self.assertIn("`COMMON_WORK_LOOPS`", markdown)
-        self.assertIn("`tool_names(\"repo\")`", markdown)
-        self.assertIn("`list_tools(\"repo\")`", markdown)
-        self.assertIn("`tool_help(\"repo\")`", markdown)
-        self.assertIn("`tool_help(\"repo\", {detail:\"schema\"})`", markdown)
         self.assertIn("`onecolleague_runtime_complete_turn`", markdown)
         self.assertNotIn("stale standalone web-model instructions", markdown)
+
+    def test_web_model_help_omits_unavailable_group_space_tools(self) -> None:
+        from no1.kernel.capabilities import (
+            LOCAL_COMPUTER_CONTROL_TOOLS,
+            WEB_MODEL_CORE_TOOLS,
+            WEB_MODEL_FOREMAN_TOOLS,
+        )
+        from no1.ports.mcp.handlers.onecolleague_core import (
+            _ONECOLLEAGUE_HELP_BUILTIN,
+            _ONECOLLEAGUE_TOOL_REFERENCE_RE,
+            _append_runtime_help_addenda,
+        )
+        from no1.ports.mcp.utils.help_markdown import _select_help_markdown
+
+        group = SimpleNamespace(
+            doc={
+                "actors": [
+                    {"id": "web-foreman", "runtime": "web_model"},
+                    {"id": "web-peer", "runtime": "web_model"},
+                ]
+            }
+        )
+        denied_tool_names = {
+            "onecolleague_shell",
+            "onecolleague_exec_command",
+            "onecolleague_write_stdin",
+            "onecolleague_code_exec",
+            "onecolleague_code_wait",
+            "onecolleague_git",
+            "onecolleague_capability_enable",
+            "onecolleague_capability_install",
+            "onecolleague_capability_use",
+            "onecolleague_space",
+            *LOCAL_COMPUTER_CONTROL_TOOLS,
+        }
+        preserved_tool_names = (
+            "onecolleague_repo",
+            "onecolleague_repo_edit",
+            "onecolleague_apply_patch",
+            "onecolleague_message_send",
+            "onecolleague_context_get",
+        )
+
+        for role, actor_id in (("foreman", "web-foreman"), ("peer", "web-peer")):
+            for lane, work_bound, memory_bound in (("work", True, False), ("memory", False, True)):
+                for pack_enabled in (False, True):
+                    with self.subTest(role=role, lane=lane, pack_enabled=pack_enabled), patch(
+                        "no1.ports.mcp.handlers.onecolleague_core.load_group",
+                        return_value=group,
+                    ), patch(
+                        "no1.ports.mcp.handlers.onecolleague_core._call_daemon_or_raise",
+                        return_value={
+                            "enabled_capabilities": ["pack:space"] if pack_enabled else [],
+                            "active_capsule_skills": [
+                                {"capability_id": "skill:test", "capsule_preview": "call onecolleague_shell"}
+                            ],
+                        },
+                    ), patch(
+                        "no1.ports.mcp.handlers.onecolleague_core.get_group_space_prompt_state",
+                        return_value={
+                            "provider": "notebooklm",
+                            "mode": "active",
+                            "work_bound": work_bound,
+                            "memory_bound": memory_bound,
+                        },
+                    ):
+                        selected = _select_help_markdown(_ONECOLLEAGUE_HELP_BUILTIN, role=role, actor_id=actor_id)
+                        markdown = _append_runtime_help_addenda(selected, group_id="g1", actor_id=actor_id)
+
+                    self.assertNotIn("## Group Space (Runtime)", markdown)
+                    self.assertNotIn("## Capability", markdown)
+                    self.assertNotIn("## Active Skills (Runtime)", markdown)
+                    for tool_name in denied_tool_names:
+                        self.assertNotIn(tool_name, markdown)
+                    for tool_name in preserved_tool_names:
+                        self.assertIn(tool_name, markdown)
+                    referenced_tools = set(_ONECOLLEAGUE_TOOL_REFERENCE_RE.findall(markdown))
+                    allowed = set(WEB_MODEL_FOREMAN_TOOLS if role == "foreman" else WEB_MODEL_CORE_TOOLS)
+                    self.assertLessEqual(referenced_tools, allowed)
 
     def test_onecolleague_help_includes_context_hygiene(self) -> None:
         from no1.ports.mcp.server import handle_tool_call

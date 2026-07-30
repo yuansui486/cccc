@@ -29,14 +29,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Kernel/util imports needed by routing
-from ...kernel.actors import find_actor, get_effective_role, is_pet_actor, is_voice_secretary_actor
+from ...kernel.actors import find_actor, get_effective_role, is_internal_actor, is_voice_secretary_actor
 from ...kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ...kernel.group import load_group
 from ...kernel.capabilities import (
     BUILTIN_CAPABILITY_PACKS,
     CAPABILITY_ADMIN_TOOLS,
     CORE_ADMIN_TOOLS,
+    LOCAL_COMPUTER_CONTROL_TOOLS,
     WEB_MODEL_CORE_TOOLS,
+    WEB_MODEL_DENIED_CAPABILITY_TOOLS,
+    WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS,
     resolve_visible_tool_names,
     web_model_advertised_tool_names,
 )
@@ -304,6 +307,9 @@ _WEB_MODEL_PACK_TOOL_NAMES = frozenset(
     if str(name or "").strip() in _BUILTIN_MCP_TOOL_NAMES
 )
 _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES = frozenset(WEB_MODEL_CORE_TOOLS)
+_WEB_MODEL_HARD_DENIED_TOOLS = frozenset(WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS) | frozenset(
+    WEB_MODEL_DENIED_CAPABILITY_TOOLS
+)
 _BUILTIN_MCP_TOOL_DISPLAY_NAMES = frozenset(_display_tool_name(name) for name in _BUILTIN_MCP_TOOL_NAMES)
 _CAPABILITY_USE_NESTED_BUILTIN_CALL: ContextVar[bool] = ContextVar(
     "onecolleague_capability_use_nested_builtin_call",
@@ -346,15 +352,8 @@ def _require_web_model_actor(group_id: str, actor_id: str) -> None:
 
 
 def _authorize_web_model_builtin_tool_call(name: str) -> None:
-    """Keep Web Model schema stable while enforcing actor role at call time."""
+    """Restrict Web Model calls to the actor's closed advertised tool set."""
     tool_name = str(name or "").strip()
-    if tool_name in CODE_MODE_TOOL_ALIAS_NAMES and not code_mode_enabled():
-        raise MCPError(
-            code="code_mode_disabled",
-            message=f"{tool_name} is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
-        )
-    if tool_name not in _BUILTIN_MCP_TOOL_NAMES:
-        return
     runtime_ctx = _runtime_context()
     gid = str(runtime_ctx.group_id or "").strip()
     aid = str(runtime_ctx.actor_id or "").strip()
@@ -371,19 +370,27 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
         return
     if str(actor.get("runtime") or "").strip().lower() != "web_model":
         return
+    if tool_name in _WEB_MODEL_HARD_DENIED_TOOLS:
+        raise MCPError(
+            code="permission_denied",
+            message=f"{tool_name} is unavailable to Web Model actors",
+            details={"group_id": gid, "actor_id": aid, "tool_name": tool_name},
+        )
+    if tool_name in CODE_MODE_TOOL_ALIAS_NAMES and not code_mode_enabled():
+        raise MCPError(
+            code="code_mode_disabled",
+            message=f"{tool_name} is disabled by ONECOLLEAGUE_WEB_MODEL_CODE_MODE=0",
+        )
     try:
         role = str(get_effective_role(group, aid) or "").strip().lower()
     except Exception:
         role = "peer"
-    if (
-        role == "foreman"
-        and bool(_CAPABILITY_USE_NESTED_BUILTIN_CALL.get())
-        and tool_name in _WEB_MODEL_PACK_TOOL_NAMES
-    ):
-        return
-    if role == "foreman" and tool_name in _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES:
-        return
-    if tool_name in _WEB_MODEL_PEER_ALLOWED_TOOL_NAMES:
+    allowed_names = (
+        _WEB_MODEL_FOREMAN_ADVERTISED_TOOL_NAMES
+        if role == "foreman"
+        else _WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES.intersection(_WEB_MODEL_PEER_ALLOWED_TOOL_NAMES)
+    )
+    if tool_name in allowed_names:
         return
     if role == "foreman":
         raise MCPError(
@@ -398,6 +405,50 @@ def _authorize_web_model_builtin_tool_call(name: str) -> None:
     )
 
 
+_LOCAL_COMPUTER_CONTROL_TOOLS = frozenset(LOCAL_COMPUTER_CONTROL_TOOLS)
+
+
+def _local_computer_control_actor_allowed(runtime_ctx: Any, actor: Any) -> bool:
+    return bool(
+        str(getattr(runtime_ctx, "source", "") or "").strip().lower() == "local_mcp"
+        and str(getattr(runtime_ctx, "group_id", "") or "").strip()
+        and str(getattr(runtime_ctx, "actor_id", "") or "").strip() not in {"", "user"}
+        and isinstance(actor, dict)
+        and not is_internal_actor(actor)
+        and str(actor.get("runtime") or "").strip().lower() != "web_model"
+    )
+
+
+def _authorize_local_computer_control_tool_call(name: str) -> tuple[str, str]:
+    if name not in _LOCAL_COMPUTER_CONTROL_TOOLS:
+        raise MCPError(code="permission_denied", message="unknown computer-control tool")
+    runtime_ctx = _runtime_context()
+    gid = str(runtime_ctx.group_id or "").strip()
+    aid = str(runtime_ctx.actor_id or "").strip()
+    source = str(runtime_ctx.source or "").strip().lower()
+    if source != "local_mcp":
+        raise MCPError(
+            code="permission_denied",
+            message="computer control is restricted to trusted local MCP actors",
+            details={"source": source or "missing", "tool_name": name},
+        )
+    if not gid or not aid or aid == "user":
+        raise MCPError(
+            code="permission_denied",
+            message="computer control requires a bound local actor runtime",
+            details={"group_id": gid, "actor_id": aid},
+        )
+    group = load_group(gid)
+    actor = find_actor(group, aid) if group is not None else None
+    if not isinstance(actor, dict):
+        raise MCPError(code="permission_denied", message="computer control actor binding is invalid")
+    if str(actor.get("runtime") or "").strip().lower() == "web_model":
+        raise MCPError(code="permission_denied", message="computer control is unavailable to Web Model actors")
+    if not _local_computer_control_actor_allowed(runtime_ctx, actor):
+        raise MCPError(code="permission_denied", message="computer control requires a standard local actor")
+    return gid, aid
+
+
 def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if name in {
         "onecolleague_computer_control_catalog",
@@ -405,16 +456,17 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         "onecolleague_computer_workflow",
         "onecolleague_computer_run",
     }:
+        gid, aid = _authorize_local_computer_control_tool_call(name)
         payload = dict(arguments)
-        payload["group_id"] = _resolve_group_id(arguments)
+        payload["group_id"] = gid
+        payload["actor_id"] = aid
+        payload["caller_surface"] = "local_mcp"
         payload["command"] = {
             "onecolleague_computer_control_catalog": "catalog",
             "onecolleague_computer_recording": "recording",
             "onecolleague_computer_workflow": "workflow",
             "onecolleague_computer_run": "run",
         }[name]
-        if name != "onecolleague_computer_control_catalog":
-            payload["actor_id"] = _resolve_self_actor_id(arguments)
         # Computer-control calls are cancellable but intentionally unbounded;
         # large recordings and runs must not be cut off by the IPC bridge.
         timeout = None
@@ -772,7 +824,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                     except Exception:
                         role = None
                 actor = _safe_find_actor(g, aid)
-                actor_is_pet = bool(isinstance(actor, dict) and is_pet_actor(actor))
                 actor_is_voice_secretary = aid == "voice-secretary" or bool(isinstance(actor, dict) and is_voice_secretary_actor(actor))
                 if actor_is_voice_secretary:
                     role = "voice_secretary"
@@ -784,7 +835,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                                 pf.content,
                                 role=role,
                                 actor_id=aid,
-                                include_pet=actor_is_pet,
                                 include_voice_secretary=actor_is_voice_secretary,
                             ),
                             group_id=gid,
@@ -799,7 +849,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                                 _ONECOLLEAGUE_HELP_BUILTIN,
                                 role=role,
                                 actor_id=aid,
-                                include_pet=actor_is_pet,
                                 include_voice_secretary=actor_is_voice_secretary,
                             ),
                             group_id=gid,
@@ -947,27 +996,6 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val_reply,
         )
-
-    if name == "onecolleague_pet_decisions":
-        gid = _resolve_group_id(arguments)
-        aid = _resolve_self_actor_id(arguments)
-        action = str(arguments.get("action") or "get").strip().lower()
-        if action == "get":
-            return _call_daemon_or_raise({"op": "pet_decisions_get", "args": {"group_id": gid, "actor_id": aid}})
-        if action == "replace":
-            return _call_daemon_or_raise(
-                {
-                    "op": "pet_decisions_replace",
-                    "args": {
-                        "group_id": gid,
-                        "actor_id": aid,
-                        "decisions": list(arguments.get("decisions") or []) if isinstance(arguments.get("decisions"), list) else [],
-                    },
-                }
-            )
-        if action == "clear":
-            return _call_daemon_or_raise({"op": "pet_decisions_clear", "args": {"group_id": gid, "actor_id": aid}})
-        raise MCPError(code="invalid_request", message="onecolleague_pet_decisions action must be get|replace|clear")
 
     if name == "onecolleague_voice_secretary_document":
         gid = _resolve_group_id(arguments)
@@ -1498,6 +1526,9 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         gid = _resolve_group_id(arguments)
         by = _resolve_caller_actor_id(arguments)
         actor_id = str(arguments.get("actor_id") or by).strip()
+        nested_tool_name = canonical_mcp_tool_name(str(arguments.get("tool_name") or ""))
+        if nested_tool_name:
+            _authorize_web_model_builtin_tool_call(nested_tool_name)
         raw_tool_args = arguments.get("tool_arguments")
         tool_args = dict(raw_tool_args) if isinstance(raw_tool_args, dict) else {}
         return capability_use(
@@ -1505,7 +1536,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             by=by,
             actor_id=actor_id,
             capability_id=str(arguments.get("capability_id") or ""),
-            tool_name=str(arguments.get("tool_name") or ""),
+            tool_name=nested_tool_name,
             tool_arguments=tool_args,
             scope=str(arguments.get("scope") or "session"),
             ttl_seconds=min(max(int(arguments.get("ttl_seconds") or 3600), 60), 24 * 3600),
@@ -1882,9 +1913,9 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
 
     # Determine actor role for admin tool gating.
     actor_role = ""
-    actor_is_pet = False
     actor_is_voice_secretary = False
     actor_is_web_model = False
+    local_computer_control_allowed = False
     builtin_enabled_fallback: List[str] = []
     if gid and aid and aid != "user":
         actor_is_voice_secretary = aid == VOICE_SECRETARY_ACTOR_ID
@@ -1893,9 +1924,9 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
             actor_role = str(get_effective_role(group, aid) or "").strip().lower()
             actor = find_actor(group, aid)
             if isinstance(actor, dict):
-                actor_is_pet = is_pet_actor(actor)
                 actor_is_voice_secretary = actor_is_voice_secretary or is_voice_secretary_actor(actor)
                 actor_is_web_model = str(actor.get("runtime") or "").strip().lower() == "web_model"
+                local_computer_control_allowed = _local_computer_control_actor_allowed(runtime_ctx, actor)
                 autoload = actor.get("capability_autoload") if isinstance(actor.get("capability_autoload"), list) else []
                 builtin_enabled_fallback = [
                     str(cap_id or "").strip()
@@ -1933,11 +1964,15 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                 resolve_visible_tool_names(
                     builtin_enabled_fallback,
                     actor_role=actor_role,
-                    is_pet=actor_is_pet,
                     is_voice_secretary=actor_is_voice_secretary,
                     is_web_model=actor_is_web_model,
                 )
             ) - admin_excluded
+
+    if local_computer_control_allowed:
+        visible.update(_LOCAL_COMPUTER_CONTROL_TOOLS)
+    else:
+        visible.difference_update(_LOCAL_COMPUTER_CONTROL_TOOLS)
 
     dynamic_raw = state.get("dynamic_tools") if isinstance(state, dict) else []
     dynamic_specs: List[Dict[str, Any]] = []
@@ -1947,6 +1982,8 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                 continue
             dname = str(item.get("name") or "").strip()
             if not dname:
+                continue
+            if dname in _LOCAL_COMPUTER_CONTROL_TOOLS and not local_computer_control_allowed:
                 continue
             schema = item.get("inputSchema")
             if not isinstance(schema, dict):
