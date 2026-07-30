@@ -12,8 +12,14 @@ from ..computer_control.lease import LeaseConflict
 from ..computer_control.elements import normalize_snapshot
 from ..computer_control.models import WorkflowDefinition
 from ..computer_control.authorization import (
+    RecordingStartClaim,
     request_id_requiring_turn_binding,
     requires_live_turn_claim,
+)
+from ..computer_control.derived_authority import (
+    DerivedAuthorityClaim,
+    DerivedAuthorityStore,
+    RecordingStopOwnerClaim,
 )
 from ..computer_control.requests import ComputerRequestStore
 from ..computer_control.services import get_services
@@ -25,6 +31,8 @@ from ..kernel.ledger_index import lookup_event_by_id
 from ..paths import ensure_home
 from .messaging.turn_provenance import (
     consume_turn_grant_receipt,
+    get_actor_turn_generation,
+    get_daemon_turn_issuer_epoch,
     load_event_turn_provenance,
     validate_turn_grant_receipt,
 )
@@ -59,7 +67,16 @@ def _infrastructure_details(service: Any) -> Dict[str, Any]:
     }
 
 
-def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) -> Any:
+def _recording(
+    service: Any,
+    args: Dict[str, Any],
+    group_id: str,
+    actor_id: str,
+    *,
+    start_claim: Optional[RecordingStartClaim],
+    authority: Optional[DerivedAuthorityClaim],
+    stop_claim: Optional[RecordingStopOwnerClaim],
+) -> Any:
     action = str(args.get("action") or "").strip().lower()
     recording_id = str(args.get("recording_id") or "").strip()
     if action == "start":
@@ -67,6 +84,7 @@ def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str)
             group_id,
             actor_id=actor_id,
             request_id=str(args.get("request_id") or "").strip(),
+            start_claim=start_claim,
             name=str(args.get("name") or "电脑控制工作流"),
             description=str(args.get("description") or ""),
             inputs=args.get("inputs") if isinstance(args.get("inputs"), dict) else {},
@@ -77,17 +95,24 @@ def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str)
             group_id,
             recording_id,
             actor_id=actor_id,
+            authority=authority,
             compact=args.get("full") is not True,
             evidence_offset=int(args.get("evidence_offset") or 0),
             evidence_limit=int(args.get("evidence_limit") or 20),
         )
     if action == "resume":
-        return service.recordings.resume(group_id, recording_id, actor_id=actor_id)
+        return service.recordings.resume(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            authority=authority,
+        )
     if action == "call":
         return service.recordings.call(
             group_id,
             recording_id,
             actor_id=actor_id,
+            authority=authority,
             tool=str(args.get("tool") or "").strip(),
             arguments=args.get("arguments") if isinstance(args.get("arguments"), dict) else {},
             workflow_arguments=args.get("workflow_arguments") if isinstance(args.get("workflow_arguments"), dict) else None,
@@ -107,6 +132,7 @@ def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str)
             group_id,
             recording_id,
             actor_id=actor_id,
+            authority=authority,
             duration_seconds=float(args.get("duration_seconds") or 0),
             title=str(args.get("title") or ""),
         )
@@ -115,15 +141,24 @@ def _recording(service: Any, args: Dict[str, Any], group_id: str, actor_id: str)
             group_id,
             recording_id,
             actor_id=actor_id,
+            authority=authority,
             step_id=str(args.get("step_id") or ""),
             patch=args.get("patch") if isinstance(args.get("patch"), dict) else {},
         )
     if action == "undo":
-        return service.recordings.undo(group_id, recording_id, actor_id=actor_id)
+        return service.recordings.undo(group_id, recording_id, actor_id=actor_id, authority=authority)
     if action == "commit":
-        return service.recordings.commit(group_id, recording_id, actor_id=actor_id)
+        return service.recordings.commit(group_id, recording_id, actor_id=actor_id, authority=authority)
     if action == "abort":
-        return service.recordings.abort(
+        if str(args.get("caller_surface") or "").strip().lower() == "local_mcp":
+            return service.recordings.abort(
+                group_id,
+                recording_id,
+                actor_id=actor_id,
+                stop_claim=stop_claim,
+                reason=str(args.get("reason") or "aborted"),
+            )
+        return service.recordings.abort_local_admin(
             group_id,
             recording_id,
             actor_id=actor_id,
@@ -300,7 +335,12 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
         value = service.store.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
         workflow_id = str(value["manifest"]["workflow_id"])
         value = finalize(value)
-        service.requests.update(group_id, request_id, workflow_id=workflow_id, status="draft_created")
+        service.requests.mark_workflow_created(
+            group_id,
+            request_id,
+            created_workflow_id=workflow_id,
+            status="draft_created",
+        )
         return value
     if not workflow_id:
         raise ValueError(f"workflow_id is required for action={action}")
@@ -383,6 +423,9 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
         )
     if not group_id:
         return _error("invalid_request", "group_id is required")
+    recording_start_authority: Optional[RecordingStartClaim] = None
+    recording_authority: Optional[DerivedAuthorityClaim] = None
+    recording_stop_owner: Optional[RecordingStopOwnerClaim] = None
     if caller_surface == "local_mcp":
         group = load_group(group_id)
         actor = find_actor(group, actor_id) if group is not None and actor_id else None
@@ -415,7 +458,14 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                 assert group is not None
                 request_store = ComputerRequestStore(WorkflowStore(ensure_home()))
 
-                def activate_request(claim: Dict[str, Any]) -> Dict[str, Any]:
+                def activate_request(claim: Any) -> Any:
+                    if command == "recording" and action == "start":
+                        return request_store.activate_recording_start_for_turn_claim(
+                            group_id,
+                            request_id,
+                            actor_id,
+                            claim=claim,
+                        )
                     request = request_store.require_authorized(group_id, request_id, actor_id)
                     event_id = str(request.get("event_id") or "").strip()
                     ledger_event = lookup_event_by_id(group.ledger_path, event_id) if event_id else None
@@ -435,7 +485,11 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                     turn_grant_receipt=args.get("turn_grant_receipt"),
                     consumer=activate_request,
                 )
-                if not isinstance(activated, dict):
+                if command == "recording" and action == "start":
+                    if not isinstance(activated, RecordingStartClaim):
+                        raise PermissionError("computer control turn grant is no longer current")
+                    recording_start_authority = activated
+                elif not isinstance(activated, dict):
                     raise PermissionError("computer control turn grant is no longer current")
         except PermissionError as exc:
             return _error("permission_denied", str(exc), details={"retryable": False})
@@ -449,6 +503,57 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                 "retryable": bool(getattr(exc, "retryable", False)),
             }
             return _error(str(getattr(exc, "code", "computer_control_failed")), str(exc), details=details)
+    if command == "recording" and action not in {"start", "abort"}:
+        try:
+            authority_store = DerivedAuthorityStore(
+                ensure_home(),
+                issuer_epoch_provider=get_daemon_turn_issuer_epoch,
+                generation_provider=get_actor_turn_generation,
+            )
+            if action == "resume":
+                recording_authority = authority_store.validate_suspended_receipt(
+                    args.get("recording_authority_receipt"),
+                    expected_group_id=group_id,
+                    expected_actor_id=actor_id,
+                    expected_resource_id=str(args.get("recording_id") or "").strip(),
+                    expected_kind="recording",
+                )
+            elif action == "get":
+                recording_authority = authority_store.validate_read_receipt(
+                    args.get("recording_authority_receipt"),
+                    expected_group_id=group_id,
+                    expected_actor_id=actor_id,
+                    expected_resource_id=str(args.get("recording_id") or "").strip(),
+                    expected_kind="recording",
+                )
+            else:
+                recording_authority = authority_store.validate_active_receipt(
+                    args.get("recording_authority_receipt"),
+                    expected_group_id=group_id,
+                    expected_actor_id=actor_id,
+                    expected_resource_id=str(args.get("recording_id") or "").strip(),
+                    expected_kind="recording",
+                )
+        except PermissionError as exc:
+            return _error("permission_denied", str(exc), details={"retryable": False})
+        except Exception as exc:
+            return _error("permission_denied", str(exc), details={"retryable": False})
+    if caller_surface == "local_mcp" and command == "recording" and action == "abort":
+        try:
+            recording_stop_owner = DerivedAuthorityStore(
+                ensure_home(),
+                issuer_epoch_provider=get_daemon_turn_issuer_epoch,
+                generation_provider=get_actor_turn_generation,
+            ).validate_recording_stop_owner(
+                expected_group_id=group_id,
+                expected_actor_id=actor_id,
+                expected_resource_id=str(args.get("recording_id") or "").strip(),
+                expected_kind="recording",
+            )
+        except PermissionError as exc:
+            return _error("permission_denied", str(exc), details={"retryable": False})
+        except Exception as exc:
+            return _error("permission_denied", str(exc), details={"retryable": False})
     service = get_services(ensure_home())
     try:
         if command == "catalog":
@@ -554,7 +659,17 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                 return _ok({"released": released})
             return _error("invalid_request", f"unsupported setup action: {action}")
         if command == "recording":
-            return _ok(_recording(service, args, group_id, actor_id))
+            return _ok(
+                _recording(
+                    service,
+                    args,
+                    group_id,
+                    actor_id,
+                    start_claim=recording_start_authority,
+                    authority=recording_authority,
+                    stop_claim=recording_stop_owner,
+                )
+            )
         if command == "workflow":
             return _ok(_workflow(service, args, group_id, actor_id))
         if command == "run":

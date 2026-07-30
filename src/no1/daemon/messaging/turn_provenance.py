@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import re
@@ -10,6 +11,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, TypeVar
 
@@ -33,10 +35,78 @@ _DAEMON_ISSUER_EPOCH = f"daemon_{uuid.uuid4().hex}"
 _STATE_LOCK = threading.Lock()
 _ACTOR_LOCKS: dict[tuple[str, str], threading.RLock] = {}
 _ClaimResult = TypeVar("_ClaimResult")
+_TURN_GRANT_CLAIM_SEAL = object()
 
 
 class TurnDeliveryBusyError(RuntimeError):
     code = "turn_delivery_busy"
+
+
+class ValidatedTurnGrantClaim(Mapping[str, Any]):
+    """A process-local bearer proof bound to one exact persisted grant."""
+
+    __slots__ = ("_seal", "_group", "_actor_id", "_grant", "_consumer_thread_id")
+
+    def __init__(self, *, _seal: object, group: Group, actor_id: str, grant: dict[str, Any]):
+        if _seal is not _TURN_GRANT_CLAIM_SEAL:
+            raise TypeError("turn grant claims can only be created by receipt validation")
+        self._seal = _seal
+        self._group = group
+        self._actor_id = str(actor_id or "").strip()
+        self._grant = copy.deepcopy(grant)
+        self._consumer_thread_id: Optional[int] = None
+
+    def __getitem__(self, key: str) -> Any:
+        return copy.deepcopy(self._grant[key])
+
+    def __iter__(self):
+        return iter(self._grant)
+
+    def __len__(self) -> int:
+        return len(self._grant)
+
+    def consume_current(
+        self,
+        consumer: Callable[["ValidatedTurnGrantClaim"], _ClaimResult],
+        *,
+        now: Optional[float] = None,
+    ) -> Optional[_ClaimResult]:
+        if self._seal is not _TURN_GRANT_CLAIM_SEAL or not callable(consumer):
+            return None
+        at = float(time.time() if now is None else now)
+        with _actor_lock(self._group.group_id, self._actor_id):
+            if not _validated_claim_is_current_unlocked(self, now=at):
+                return None
+            previous_consumer = self._consumer_thread_id
+            self._consumer_thread_id = threading.get_ident()
+            try:
+                return consumer(self)
+            finally:
+                self._consumer_thread_id = previous_consumer
+
+    def require_fresh_current(self) -> None:
+        """Recheck time-sensitive root facts inside the active actor-lock consumer."""
+
+        if (
+            self._seal is not _TURN_GRANT_CLAIM_SEAL
+            or self._consumer_thread_id != threading.get_ident()
+            or not _validated_claim_is_current_unlocked(self, now=float(time.time()))
+        ):
+            raise PermissionError("turn grant claim is no longer current")
+
+
+def require_validated_turn_grant_claim(value: Any) -> ValidatedTurnGrantClaim:
+    """Reject persisted mappings where a process-local root capability is required."""
+
+    if not isinstance(value, ValidatedTurnGrantClaim) or value._seal is not _TURN_GRANT_CLAIM_SEAL:
+        raise PermissionError("validated turn grant claim is required")
+    return value
+
+
+def get_daemon_turn_issuer_epoch() -> str:
+    """Return the process-local issuer used to invalidate persisted bearer secrets."""
+
+    return _DAEMON_ISSUER_EPOCH
 
 
 def _actor_lock(group_id: str, actor_id: str) -> threading.RLock:
@@ -226,6 +296,20 @@ def _load_state(group: Group, actor_id: str) -> dict[str, Any]:
         return {}
     state = read_json(path)
     return state if isinstance(state, dict) else {}
+
+
+def get_actor_turn_generation(group_or_id: Group | str, actor_id: str) -> int:
+    """Read an atomic raw generation snapshot without joining actor lock order."""
+
+    group = group_or_id if isinstance(group_or_id, Group) else load_group(str(group_or_id or "").strip())
+    aid = str(actor_id or "").strip()
+    if group is None or not aid:
+        return 0
+    state = _load_state(group, aid)
+    try:
+        return max(0, int(state.get("generation") or 0))
+    except Exception:
+        return 0
 
 
 def _abandon_stale_issuer_state(
@@ -880,13 +964,51 @@ def get_current_turn_grant(
         return dict(grant)
 
 
+def _validated_claim_is_current_unlocked(
+    claim: ValidatedTurnGrantClaim,
+    *,
+    now: float,
+) -> bool:
+    if (
+        claim._seal is not _TURN_GRANT_CLAIM_SEAL
+        or claim._group.group_id != str(claim._grant.get("group_id") or "")
+        or claim._actor_id != str(claim._grant.get("actor_id") or "")
+    ):
+        return False
+    state = _load_state(claim._group, claim._actor_id)
+    state = _abandon_stale_issuer_state(claim._group, claim._actor_id, state, now=now)
+    grant = state.get("current_grant") if isinstance(state.get("current_grant"), dict) else None
+    if grant is None:
+        return False
+    try:
+        expires_at = float(grant.get("expires_at_epoch") or 0.0)
+        generation = int(grant.get("generation") or 0)
+    except Exception:
+        return False
+    if expires_at <= now:
+        invalidate_turn_grant(claim._group, claim._actor_id, reason="ttl_expired", now=now)
+        return False
+    return bool(
+        grant == claim._grant
+        and str(grant.get("issuer_epoch") or "") == _DAEMON_ISSUER_EPOCH
+        and str(grant.get("group_id") or "") == claim._group.group_id
+        and str(grant.get("actor_id") or "") == claim._actor_id
+        and generation > 0
+        and generation == int(state.get("generation") or -1)
+        and str(grant.get("attempt_id") or "").strip()
+        and _normalized_event_ids(grant.get("event_ids") or [])
+        and _normalized_binding(grant.get("binding"))
+        and _normalized_binding(grant.get("authorization_binding"))
+    )
+
+
 def _claim_from_receipt_unlocked(
     group: Group,
     actor_id: str,
     receipt: Any,
     *,
     now: float,
-) -> Optional[dict[str, Any]]:
+) -> Optional[ValidatedTurnGrantClaim]:
     if not isinstance(receipt, dict):
         return None
     state = _load_state(group, actor_id)
@@ -934,7 +1056,12 @@ def _claim_from_receipt_unlocked(
         or not hmac.compare_digest(presented_digest, stored_digest)
     ):
         return None
-    return dict(grant)
+    return ValidatedTurnGrantClaim(
+        _seal=_TURN_GRANT_CLAIM_SEAL,
+        group=group,
+        actor_id=actor_id,
+        grant=grant,
+    )
 
 
 def validate_turn_grant_receipt(
@@ -943,7 +1070,7 @@ def validate_turn_grant_receipt(
     *,
     turn_grant_receipt: Any,
     now: Optional[float] = None,
-) -> Optional[dict[str, Any]]:
+) -> Optional[ValidatedTurnGrantClaim]:
     """Validate one presented bearer receipt against the exact live grant."""
 
     group = group_or_id if isinstance(group_or_id, Group) else load_group(str(group_or_id or "").strip())
@@ -960,7 +1087,7 @@ def consume_turn_grant_receipt(
     actor_id: str,
     *,
     turn_grant_receipt: Any,
-    consumer: Callable[[dict[str, Any]], _ClaimResult],
+    consumer: Callable[[ValidatedTurnGrantClaim], _ClaimResult],
     now: Optional[float] = None,
 ) -> Optional[_ClaimResult]:
     """Run a short claim consumer while the exact actor generation is locked."""

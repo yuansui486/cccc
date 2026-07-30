@@ -9,6 +9,19 @@ from no1.daemon.computer_control_ops import try_handle_computer_control_op
 
 
 class TestComputerControlLeaseGuard(unittest.TestCase):
+    def test_legacy_authority_free_lease_remains_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            lease = ComputerControlLease(Path(td))
+            acquired = lease.acquire(group_id="g", actor_id="actor", run_id="run")
+            self.assertNotIn("authority", acquired)
+            self.assertEqual(
+                lease.require(group_id="g", actor_id="actor", run_id="run")["run_id"],
+                "run",
+            )
+            lease.heartbeat(group_id="g", actor_id="actor", run_id="run")
+            self.assertTrue(lease.release(run_id="run"))
+            self.assertFalse(lease.status()["active"])
+
     def test_long_operation_heartbeats_until_exit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             lease = ComputerControlLease(Path(td))

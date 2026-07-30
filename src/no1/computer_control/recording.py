@@ -10,6 +10,12 @@ from typing import Any, Callable, Dict, Optional
 
 from ..util.fs import atomic_write_text
 from .audit import audit
+from .authorization import RecordingStartClaim
+from .derived_authority import (
+    DerivedAuthorityClaim,
+    DerivedAuthorityStore,
+    RecordingStopOwnerClaim,
+)
 from .lease import ComputerControlLease
 from .mcp import MCPOutcomeUnknown, WindowsMCPSession, normalize_tool_result, validate_arguments_against_schema
 from .models import WorkflowDefinition
@@ -23,12 +29,14 @@ from .elements import element_at_point, element_center, locator_from_element, no
 class RecordingStore:
     MAX_TOOL_CALLS = 100
     MAX_CONSECUTIVE_FAILURES = 3
+    IDLE_SUSPEND_SECONDS = 300.0
 
     def __init__(
         self,
         home: Path,
         workflows: WorkflowStore,
         requests: ComputerRequestStore,
+        authorities: DerivedAuthorityStore,
         lease: ComputerControlLease,
         session: WindowsMCPSession,
         fingerprint_provider: Optional[Callable[[], str]] = None,
@@ -37,13 +45,17 @@ class RecordingStore:
         self.home = home
         self.workflows = workflows
         self.requests = requests
+        self.authorities = authorities
         self.lease = lease
         self.session = session
         self.fingerprint_provider = fingerprint_provider or (lambda: "")
         self.observation_provider = observation_provider
         self._lock = threading.RLock()
-        self._active: Dict[str, tuple[str, str, str]] = {}
+        self._active: Dict[str, tuple[str, str, str, DerivedAuthorityClaim]] = {}
         self._inflight: set[str] = set()
+        self._terminating: Dict[str, tuple[DerivedAuthorityClaim, DerivedAuthorityClaim, str]] = {}
+        self._suspend_pending: Dict[str, tuple[str, str, DerivedAuthorityClaim, str]] = {}
+        self._suspend_recovered_recordings()
         self._watchdog = threading.Thread(target=self._watch, name="onecolleague-recording-watchdog", daemon=True)
         self._watchdog.start()
 
@@ -81,7 +93,7 @@ class RecordingStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(path, json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
 
-    def get(
+    def _read(
         self,
         group_id: str,
         recording_id: str,
@@ -101,6 +113,64 @@ class RecordingStore:
             raise PermissionError("recording belongs to another actor")
         return self._compact(value, evidence_offset=evidence_offset, evidence_limit=evidence_limit) if compact else value
 
+    def _validated_claim(
+        self,
+        authority: Any,
+        *,
+        group_id: str,
+        actor_id: str,
+        recording_id: str,
+        suspended: bool = False,
+    ) -> DerivedAuthorityClaim:
+        claim = (
+            self.authorities.validate_suspended_claim(authority)
+            if suspended
+            else self.authorities.validate_active_claim(authority)
+        )
+        if (
+            claim.kind != "recording"
+            or claim.group_id != group_id
+            or claim.actor_id != actor_id
+            or claim.resource_id != recording_id
+        ):
+            raise PermissionError("recording authority does not match this resource")
+        return claim
+
+    def get(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+        compact: bool = False,
+        evidence_offset: int = 0,
+        evidence_limit: int = 20,
+    ) -> Dict[str, Any]:
+        if authority.state == "suspended":
+            self._validated_claim(
+                authority,
+                group_id=group_id,
+                actor_id=actor_id,
+                recording_id=recording_id,
+                suspended=True,
+            )
+        else:
+            self._validated_claim(
+                authority,
+                group_id=group_id,
+                actor_id=actor_id,
+                recording_id=recording_id,
+            )
+        return self._read(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            compact=compact,
+            evidence_offset=evidence_offset,
+            evidence_limit=evidence_limit,
+        )
+
     @staticmethod
     def _compact(value: Dict[str, Any], *, evidence_offset: int = 0, evidence_limit: int = 20) -> Dict[str, Any]:
         offset = max(0, int(evidence_offset))
@@ -119,14 +189,187 @@ class RecordingStore:
             time.sleep(5)
             with self._lock:
                 active = list(self._active.items())
-            for recording_id, (group_id, actor_id, request_id) in active:
+            for recording_id, (group_id, actor_id, request_id, authority) in active:
                 try:
-                    value = self.get(group_id, recording_id, actor_id=actor_id)
+                    value = self._read(group_id, recording_id, actor_id=actor_id)
                     if value.get("status") == "exploring":
-                        self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=recording_id)
+                        idle = time.time() - float(value.get("last_activity_at") or 0)
+                        if idle >= self.IDLE_SUSPEND_SECONDS and recording_id not in self._inflight:
+                            self.suspend(
+                                group_id,
+                                recording_id,
+                                actor_id=actor_id,
+                                authority=authority,
+                            )
+                        else:
+                            self.lease.heartbeat(
+                                group_id=group_id,
+                                actor_id=actor_id,
+                                run_id=recording_id,
+                                authority=authority,
+                            )
                 except Exception:
                     with self._lock:
-                        self._active.pop(recording_id, None)
+                        if recording_id in self._inflight:
+                            self._suspend_pending[recording_id] = (
+                                group_id,
+                                actor_id,
+                                authority,
+                                "heartbeat_failed",
+                            )
+                            continue
+                    try:
+                        self.suspend(
+                            group_id,
+                            recording_id,
+                            actor_id=actor_id,
+                            authority=authority,
+                            reason="heartbeat_failed",
+                        )
+                    except Exception:
+                        with self._lock:
+                            self._active.pop(recording_id, None)
+
+    def _finish_suspend_locked(self, recording_id: str) -> None:
+        pending = self._suspend_pending.get(recording_id)
+        if pending is None or recording_id in self._inflight or recording_id in self._terminating:
+            return
+        group_id, actor_id, authority, reason = pending
+        self._suspend_pending.pop(recording_id, None)
+        self.suspend(
+            group_id,
+            recording_id,
+            actor_id=actor_id,
+            authority=authority,
+            reason=reason,
+        )
+
+    def _suspend_recovered_recordings(self) -> None:
+        groups_root = self.home / "groups"
+        if not groups_root.exists():
+            return
+        for group_path in groups_root.iterdir():
+            if not group_path.is_dir():
+                continue
+            recordings_root = group_path / "state" / "computer-control" / "recordings"
+            existing_resource_ids = frozenset(
+                path.stem for path in recordings_root.glob("rec_*.json")
+            )
+            self.authorities.revoke_orphan_pending_recordings(
+                group_id=group_path.name,
+                existing_resource_ids=existing_resource_ids,
+            )
+        for path in groups_root.glob("*/state/computer-control/recordings/rec_*.json"):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(value, dict) or value.get("status") not in {
+                "initializing",
+                "exploring",
+                "terminating",
+            }:
+                continue
+            group_id = path.parents[3].name
+            recording_id = path.stem
+            if (
+                str(value.get("group_id") or "") != group_id
+                or str(value.get("recording_id") or "") != recording_id
+            ):
+                continue
+            actor_id = str(value.get("actor_id") or "")
+            authority_state = str(
+                self.authorities.persisted_record(group_id, recording_id).get("state") or ""
+            )
+            if value.get("status") == "initializing":
+                self._finish_recovered_stop(
+                    value,
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    recording_id=recording_id,
+                    terminal_status="start_failed",
+                )
+                continue
+            if value.get("status") == "terminating" or authority_state in {"terminating", "revoked"}:
+                self._finish_recovered_stop(
+                    value,
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    recording_id=recording_id,
+                    terminal_status="aborted",
+                )
+                continue
+            if authority_state == "active":
+                self.authorities.suspend_after_restart(
+                    group_id=group_id,
+                    resource_id=recording_id,
+                )
+            elif authority_state != "suspended":
+                self._finish_recovered_stop(
+                    value,
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    recording_id=recording_id,
+                    terminal_status="start_failed",
+                )
+                continue
+            self._release_recovered_recording_lease(group_id, actor_id, recording_id)
+            value.update(
+                {
+                    "status": "suspended",
+                    "suspend_reason": "service_restart",
+                    "suspended_at": time.time(),
+                    "updated_at": time.time(),
+                }
+            )
+            self._write(group_id, value)
+
+    def _finish_recovered_stop(
+        self,
+        value: Dict[str, Any],
+        *,
+        group_id: str,
+        actor_id: str,
+        recording_id: str,
+        terminal_status: str,
+    ) -> None:
+        if terminal_status == "start_failed":
+            transition = self.authorities.begin_failed_start(
+                group_id=group_id,
+                actor_id=actor_id,
+                resource_id=recording_id,
+            )
+        else:
+            transition = self.authorities.begin_stop(
+                group_id=group_id,
+                actor_id=actor_id,
+                resource_id=recording_id,
+            )
+        self._release_recovered_recording_lease(group_id, actor_id, recording_id)
+        if transition.current.state == "terminating":
+            self.authorities.finish_stop(transition.current)
+        value.update({"status": terminal_status, "updated_at": time.time()})
+        if terminal_status == "aborted":
+            value["abort_reason"] = str(value.get("abort_reason") or "service_restart")
+        else:
+            value["failure_reason"] = str(value.get("failure_reason") or "service_restart")
+        self._write(group_id, value)
+
+    def _release_recovered_recording_lease(
+        self,
+        group_id: str,
+        actor_id: str,
+        recording_id: str,
+    ) -> None:
+        try:
+            self.lease.release_recording_for_stop(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=recording_id,
+            )
+        except PermissionError as exc:
+            if str(exc) != "computer_control_lease_authority_required":
+                raise
 
     def start(
         self,
@@ -134,26 +377,38 @@ class RecordingStore:
         *,
         actor_id: str,
         request_id: str,
+        start_claim: RecordingStartClaim,
         name: str,
         description: str = "",
         inputs: Optional[Dict[str, Any]] = None,
         triggers: Optional[list[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
+        if (
+            not isinstance(start_claim, RecordingStartClaim)
+            or start_claim.group_id != group_id
+            or start_claim.actor_id != actor_id
+            or start_claim.request_id != request_id
+        ):
+            raise PermissionError("validated recording start claim is required")
         request = self.requests.require_authorized(group_id, request_id, actor_id)
         if str(request.get("mode") or "") != "create_and_run":
             raise PermissionError("request does not authorize workflow recording")
+        if str(request.get("recording_id") or "").strip():
+            raise PermissionError("request has already derived a recording authority")
         if any(bool(item.get("enabled")) for item in (triggers or []) if isinstance(item, dict)):
-            if not all(bool(request.get(key)) for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")):
+            if not all(
+                bool(start_claim.permission_snapshot.get(key))
+                for key in ("allow_publish", "allow_trust", "allow_unattended_triggers")
+            ):
                 raise PermissionError("enabled unattended triggers are not authorized")
         recording_id = "rec_" + uuid.uuid4().hex[:16]
-        self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=recording_id)
         now = time.time()
         value = {
             "recording_id": recording_id,
             "group_id": group_id,
             "actor_id": actor_id,
             "request_id": request_id,
-            "status": "exploring",
+            "status": "initializing",
             "name": str(name or "电脑控制工作流")[:200],
             "description": str(description or "")[:2000],
             "inputs": inputs if isinstance(inputs, dict) else {},
@@ -163,17 +418,66 @@ class RecordingStore:
             "failures": [],
             "warnings": [],
             "metrics": {"successful_calls": 0, "failed_calls": 0, "tool_calls": 0, "consecutive_failures": 0, "transport_restarts": 0},
-            "high_risk_approved": str(request.get("status") or "") == "approved" or bool(request.get("high_risk_approved")),
             "created_at": now,
             "last_activity_at": now,
             "updated_at": now,
         }
-        self._write(group_id, value)
+        issue = self.authorities.begin_recording(
+            group_id=group_id,
+            actor_id=actor_id,
+            resource_id=recording_id,
+            request_id=request_id,
+            start_claim=start_claim,
+        )
+        active_authority: Optional[DerivedAuthorityClaim] = None
+        reserved = False
+        active_lease = False
+        try:
+            self._write(group_id, value)
+            self.lease.reserve(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=recording_id,
+                authority=issue.claim,
+            )
+            reserved = True
+            active_authority = self.authorities.activate(issue.claim)
+            self.lease.activate_reservation(pending=issue.claim, active=active_authority)
+            active_lease = True
+            value.update({"status": "exploring", "updated_at": time.time()})
+            self._write(group_id, value)
+            self.requests.mark_recording_started(
+                group_id,
+                request_id,
+                recording_id=recording_id,
+                status="exploring",
+            )
+        except Exception:
+            if active_lease and active_authority is not None:
+                try:
+                    self.lease.release(run_id=recording_id, authority=active_authority)
+                except Exception:
+                    pass
+            elif reserved:
+                try:
+                    self.lease.cancel_reservation(authority=issue.claim)
+                except Exception:
+                    pass
+            try:
+                self.authorities.revoke(active_authority or issue.claim)
+            except Exception:
+                pass
+            value.update({"status": "start_failed", "updated_at": time.time()})
+            try:
+                self._write(group_id, value)
+            except Exception:
+                pass
+            raise
+        assert active_authority is not None
         with self._lock:
-            self._active[recording_id] = (group_id, actor_id, request_id)
-        self.requests.update(group_id, request_id, status="exploring", recording_id=recording_id)
+            self._active[recording_id] = (group_id, actor_id, request_id, active_authority)
         audit(self.home, "recording.started", group_id=group_id, actor_id=actor_id, details={"recording_id": recording_id, "request_id": request_id})
-        return value
+        return {**value, "operation_receipt": issue.receipt}
 
     @staticmethod
     def _summary(value: Any) -> Any:
@@ -229,25 +533,69 @@ class RecordingStore:
 
         return self._summary(visit(value))
 
-    def _active_recording(self, group_id: str, recording_id: str, actor_id: str) -> Dict[str, Any]:
-        value = self.get(group_id, recording_id, actor_id=actor_id)
+    def _active_recording(
+        self,
+        group_id: str,
+        recording_id: str,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+    ) -> Dict[str, Any]:
+        claim = self._validated_claim(
+            authority,
+            group_id=group_id,
+            actor_id=actor_id,
+            recording_id=recording_id,
+        )
+        value = self._read(group_id, recording_id, actor_id=actor_id)
         if value.get("status") != "exploring":
             raise ValueError("recording is not active")
-        self.requests.require_authorized(group_id, str(value["request_id"]), actor_id)
-        self.lease.require(group_id=group_id, actor_id=actor_id, run_id=recording_id)
+        self.lease.require(
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=recording_id,
+            authority=claim,
+        )
         return value
 
-    def resume(self, group_id: str, recording_id: str, *, actor_id: str) -> Dict[str, Any]:
+    def resume(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+    ) -> Dict[str, Any]:
         with self._lock:
-            value = self.get(group_id, recording_id, actor_id=actor_id)
+            suspended = self._validated_claim(
+                authority,
+                group_id=group_id,
+                actor_id=actor_id,
+                recording_id=recording_id,
+                suspended=True,
+            )
+            value = self._read(group_id, recording_id, actor_id=actor_id)
             if value.get("status") != "suspended":
                 raise ValueError("只有已暂停的录制可以继续")
-            self.requests.require_authorized(group_id, str(value["request_id"]), actor_id)
-            self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=recording_id)
+            active = self.authorities.resume(suspended)
+            try:
+                self.lease.acquire(
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    run_id=recording_id,
+                    authority=active,
+                )
+            except Exception:
+                self.authorities.suspend(active)
+                raise
             now = time.time()
             value.update({"status": "exploring", "requires_snapshot_baseline": True, "resumed_at": now, "last_activity_at": now, "updated_at": now})
-            self._write(group_id, value)
-            self._active[recording_id] = (group_id, actor_id, str(value["request_id"]))
+            try:
+                self._write(group_id, value)
+            except Exception:
+                self.lease.release(run_id=recording_id, authority=active)
+                self.authorities.suspend(active)
+                raise
+            self._active[recording_id] = (group_id, actor_id, str(value["request_id"]), active)
             return self._compact(value)
 
     def call(
@@ -256,6 +604,7 @@ class RecordingStore:
         recording_id: str,
         *,
         actor_id: str,
+        authority: DerivedAuthorityClaim,
         tool: str,
         arguments: Dict[str, Any],
         record: bool = True,
@@ -268,7 +617,7 @@ class RecordingStore:
     ) -> Dict[str, Any]:
         signature = json.dumps({"tool": tool, "arguments": arguments}, ensure_ascii=False, sort_keys=True, default=str)
         with self._lock:
-            value = self._active_recording(group_id, recording_id, actor_id)
+            value = self._active_recording(group_id, recording_id, actor_id, authority)
             metrics = value.setdefault("metrics", {})
             if int(metrics.get("tool_calls") or 0) >= self.MAX_TOOL_CALLS:
                 raise RuntimeError("录制已达到 100 次工具调用上限，请整理步骤后提交")
@@ -289,10 +638,9 @@ class RecordingStore:
                 raise ValueError(f"找不到 Windows-MCP 工具：{tool}")
             schema = catalog_item.get("inputSchema") if isinstance(catalog_item.get("inputSchema"), dict) else {}
             with self._lock:
-                value = self._active_recording(group_id, recording_id, actor_id)
-            request = self.requests.require_authorized(group_id, str(value["request_id"]), actor_id)
+                value = self._active_recording(group_id, recording_id, actor_id, authority)
             risk = classify_tool(tool, arguments)
-            if risk == "high" and not bool(request.get("allow_high_risk")) and not bool(value.get("high_risk_approved")):
+            if risk == "high" and not bool(authority.permission_snapshot.get("allow_high_risk")):
                 raise PermissionError("high-risk tool requires approval")
             template_args = workflow_arguments if workflow_arguments is not None else arguments
             resolved = WorkflowRunner._resolve(template_args, WorkflowRunner._effective_input_values(value["inputs"]), {})
@@ -385,7 +733,9 @@ class RecordingStore:
                         after_snapshot = None
             except Exception as exc:
                 with self._lock:
-                    value = self.get(group_id, recording_id, actor_id=actor_id)
+                    value = self._read(group_id, recording_id, actor_id=actor_id)
+                if value.get("status") != "exploring":
+                    raise
                 failure = {
                     "tool": tool,
                     "risk": risk,
@@ -407,7 +757,13 @@ class RecordingStore:
                     raise
                 raise
             with self._lock:
-                value = self.get(group_id, recording_id, actor_id=actor_id)
+                self._validated_claim(
+                    authority,
+                    group_id=group_id,
+                    actor_id=actor_id,
+                    recording_id=recording_id,
+                )
+                value = self._read(group_id, recording_id, actor_id=actor_id)
             evidence_id = "ev_" + uuid.uuid4().hex[:12]
             stored_result = self._evidence_result(group_id, recording_id, evidence_id, result)
             evidence = {
@@ -482,7 +838,12 @@ class RecordingStore:
             value["last_activity_at"] = time.time()
             value["updated_at"] = time.time()
             self._write(group_id, value)
-            self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=recording_id)
+            self.lease.heartbeat(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=recording_id,
+                authority=authority,
+            )
             audit(
                 self.home,
                 "recording.call_succeeded",
@@ -503,10 +864,21 @@ class RecordingStore:
         finally:
             with self._lock:
                 self._inflight.discard(recording_id)
+                self._finish_abort_locked(group_id, recording_id, actor_id)
+                self._finish_suspend_locked(recording_id)
 
-    def wait(self, group_id: str, recording_id: str, *, actor_id: str, duration_seconds: float, title: str = "") -> Dict[str, Any]:
+    def wait(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+        duration_seconds: float,
+        title: str = "",
+    ) -> Dict[str, Any]:
         with self._lock:
-            self._active_recording(group_id, recording_id, actor_id)
+            self._active_recording(group_id, recording_id, actor_id, authority)
             if recording_id in self._inflight:
                 raise RuntimeError("该录制正在执行另一个电脑操作")
             self._inflight.add(recording_id)
@@ -514,7 +886,7 @@ class RecordingStore:
         try:
             time.sleep(duration)
             with self._lock:
-                value = self._active_recording(group_id, recording_id, actor_id)
+                value = self._active_recording(group_id, recording_id, actor_id, authority)
             value["steps"].append({
                 "id": f"step_{len(value['steps']) + 1}",
                 "type": "wait",
@@ -524,16 +896,32 @@ class RecordingStore:
             value["last_activity_at"] = time.time()
             value["updated_at"] = time.time()
             self._write(group_id, value)
-            self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=recording_id)
+            self.lease.heartbeat(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=recording_id,
+                authority=authority,
+            )
             return self._compact(value)
         finally:
             with self._lock:
                 self._inflight.discard(recording_id)
+                self._finish_abort_locked(group_id, recording_id, actor_id)
+                self._finish_suspend_locked(recording_id)
 
-    def update_step(self, group_id: str, recording_id: str, *, actor_id: str, step_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
+    def update_step(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+        step_id: str,
+        patch: Dict[str, Any],
+    ) -> Dict[str, Any]:
         allowed = {"title", "arguments", "success_condition", "timeout_seconds", "retries", "adaptive"}
         with self._lock:
-            value = self._active_recording(group_id, recording_id, actor_id)
+            value = self._active_recording(group_id, recording_id, actor_id, authority)
             step = next((item for item in value["steps"] if item.get("id") == step_id), None)
             if step is None:
                 raise KeyError(step_id)
@@ -543,9 +931,16 @@ class RecordingStore:
             self._write(group_id, value)
             return value
 
-    def undo(self, group_id: str, recording_id: str, *, actor_id: str) -> Dict[str, Any]:
+    def undo(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+    ) -> Dict[str, Any]:
         with self._lock:
-            value = self._active_recording(group_id, recording_id, actor_id)
+            value = self._active_recording(group_id, recording_id, actor_id, authority)
             if not value["steps"]:
                 raise ValueError("recording has no step to undo")
             removed = value["steps"].pop()
@@ -572,58 +967,171 @@ class RecordingStore:
                 raise ValueError("unattended workflows require at least one machine-verifiable success condition")
         return definition
 
-    def commit(self, group_id: str, recording_id: str, *, actor_id: str) -> Dict[str, Any]:
+    def commit(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+    ) -> Dict[str, Any]:
         with self._lock:
-            value = self._active_recording(group_id, recording_id, actor_id)
+            value = self._active_recording(group_id, recording_id, actor_id, authority)
             if not value["steps"]:
                 raise ValueError("cannot commit an empty recording")
             definition = self._definition(value)
             request_id = str(value["request_id"])
-            for manifest in self.workflows.list(group_id, include_archived=True):
-                if manifest.get("source_request_id") == request_id and not manifest.get("published_version"):
-                    self.workflows.archive(group_id, str(manifest["workflow_id"]))
-            created = self.workflows.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
-            workflow_id = str(created["manifest"]["workflow_id"])
-            request = self.requests.require_authorized(group_id, request_id, actor_id)
-            if bool(request.get("allow_publish")) and bool(request.get("allow_trust")):
-                created = self.workflows.auto_finalize(
-                    group_id,
-                    workflow_id,
-                    int(created["version"]),
-                    fingerprint=str(self.fingerprint_provider() or ""),
-                )
-            value.update({"status": "committed", "workflow_id": workflow_id, "committed_at": time.time(), "updated_at": time.time()})
+            terminating = self.authorities.begin_termination(authority)
+            value.update({"status": "terminating", "updated_at": time.time()})
             self._write(group_id, value)
-            self.lease.release(run_id=recording_id)
-            self._active.pop(recording_id, None)
-            self.requests.update(group_id, request_id, status="draft_created", workflow_id=workflow_id)
-            audit(self.home, "recording.committed", group_id=group_id, actor_id=actor_id, details={"recording_id": recording_id, "workflow_id": workflow_id, "step_count": len(value["steps"])})
-            return {"recording": value, "workflow": created}
-
-    def abort(self, group_id: str, recording_id: str, *, actor_id: str, reason: str = "aborted") -> Dict[str, Any]:
-        with self._lock:
-            value = self.get(group_id, recording_id, actor_id=actor_id)
-            if value.get("status") == "exploring":
-                value.update({"status": "aborted", "abort_reason": reason, "updated_at": time.time()})
-                self._write(group_id, value)
             try:
-                self.lease.release(run_id=recording_id)
-            except PermissionError:
-                pass
-            self._active.pop(recording_id, None)
-            audit(self.home, "recording.aborted", group_id=group_id, actor_id=actor_id, details={"recording_id": recording_id, "reason": reason})
-            return value
+                for manifest in self.workflows.list(group_id, include_archived=True):
+                    if manifest.get("source_request_id") == request_id and not manifest.get("published_version"):
+                        self.workflows.archive(group_id, str(manifest["workflow_id"]))
+                created = self.workflows.create(group_id, definition, created_by=actor_id, source_request_id=request_id)
+                workflow_id = str(created["manifest"]["workflow_id"])
+                if bool(authority.permission_snapshot.get("allow_publish")) and bool(
+                    authority.permission_snapshot.get("allow_trust")
+                ):
+                    created = self.workflows.auto_finalize(
+                        group_id,
+                        workflow_id,
+                        int(created["version"]),
+                        fingerprint=str(self.fingerprint_provider() or ""),
+                    )
+                self.lease.release(run_id=recording_id, authority=authority)
+                self.authorities.revoke(terminating)
+                value.update({"status": "committed", "workflow_id": workflow_id, "committed_at": time.time(), "updated_at": time.time()})
+                self._write(group_id, value)
+                self._active.pop(recording_id, None)
+                self.requests.mark_workflow_created(
+                    group_id,
+                    request_id,
+                    created_workflow_id=workflow_id,
+                    status="draft_created",
+                )
+                audit(self.home, "recording.committed", group_id=group_id, actor_id=actor_id, details={"recording_id": recording_id, "workflow_id": workflow_id, "step_count": len(value["steps"])})
+                return {"recording": value, "workflow": created}
+            except Exception:
+                try:
+                    self.lease.release(run_id=recording_id, authority=authority)
+                except Exception:
+                    pass
+                try:
+                    self.authorities.revoke(terminating)
+                except Exception:
+                    pass
+                value.update({"status": "commit_failed", "updated_at": time.time()})
+                try:
+                    self._write(group_id, value)
+                except Exception:
+                    pass
+                self._active.pop(recording_id, None)
+                raise
 
-    def suspend(self, group_id: str, recording_id: str, *, actor_id: str, reason: str = "recording_idle") -> Dict[str, Any]:
+    def abort(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        stop_claim: RecordingStopOwnerClaim,
+        reason: str = "aborted",
+    ) -> Dict[str, Any]:
+        self.authorities.require_recording_stop_owner_claim(
+            stop_claim,
+            expected_group_id=group_id,
+            expected_actor_id=actor_id,
+            expected_resource_id=recording_id,
+        )
+        return self._abort_owned(group_id, recording_id, actor_id=actor_id, reason=reason)
+
+    def abort_local_admin(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        reason: str = "aborted",
+    ) -> Dict[str, Any]:
+        return self._abort_owned(group_id, recording_id, actor_id=actor_id, reason=reason)
+
+    def _abort_owned(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        reason: str,
+    ) -> Dict[str, Any]:
         with self._lock:
-            value = self.get(group_id, recording_id, actor_id=actor_id)
+            value = self._read(group_id, recording_id, actor_id=actor_id)
+            if value.get("status") in {"aborted", "committed", "commit_failed", "start_failed"}:
+                return value
+            if recording_id in self._terminating:
+                self._finish_abort_locked(group_id, recording_id, actor_id)
+                return self._read(group_id, recording_id, actor_id=actor_id)
+            transition = self.authorities.begin_stop(
+                group_id=group_id,
+                actor_id=actor_id,
+                resource_id=recording_id,
+            )
+            value.update({"status": "terminating", "abort_reason": reason, "updated_at": time.time()})
+            self._write(group_id, value)
+            self._terminating[recording_id] = (transition.previous, transition.current, reason)
+            self._finish_abort_locked(group_id, recording_id, actor_id)
+            return self._read(group_id, recording_id, actor_id=actor_id)
+
+    def _finish_abort_locked(self, group_id: str, recording_id: str, actor_id: str) -> None:
+        pending = self._terminating.get(recording_id)
+        if pending is None or recording_id in self._inflight:
+            return
+        previous, terminating, reason = pending
+        if previous.state == "active":
+            self.lease.release(run_id=recording_id, authority=previous)
+        else:
+            self.lease.release_recording_for_stop(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=recording_id,
+            )
+        if terminating.state == "terminating":
+            self.authorities.finish_stop(terminating)
+        value = self._read(group_id, recording_id, actor_id=actor_id)
+        value.update({"status": "aborted", "abort_reason": reason, "updated_at": time.time()})
+        self._write(group_id, value)
+        self._active.pop(recording_id, None)
+        self._terminating.pop(recording_id, None)
+        self._suspend_pending.pop(recording_id, None)
+        audit(self.home, "recording.aborted", group_id=group_id, actor_id=actor_id, details={"recording_id": recording_id, "reason": reason})
+
+    def suspend(
+        self,
+        group_id: str,
+        recording_id: str,
+        *,
+        actor_id: str,
+        authority: DerivedAuthorityClaim,
+        reason: str = "recording_idle",
+    ) -> Dict[str, Any]:
+        with self._lock:
+            active = self._validated_claim(
+                authority,
+                group_id=group_id,
+                actor_id=actor_id,
+                recording_id=recording_id,
+            )
+            if recording_id in self._inflight:
+                raise RuntimeError("recording operation is still in flight")
+            value = self._read(group_id, recording_id, actor_id=actor_id)
             if value.get("status") == "exploring":
                 value.update({"status": "suspended", "suspend_reason": reason, "suspended_at": time.time(), "updated_at": time.time()})
-                self._write(group_id, value)
             try:
-                self.lease.release(run_id=recording_id)
+                self.lease.release(run_id=recording_id, authority=active)
             except PermissionError:
                 pass
+            self.authorities.suspend(active)
+            self._write(group_id, value)
             self._active.pop(recording_id, None)
             audit(self.home, "recording.suspended", group_id=group_id, actor_id=actor_id, details={"recording_id": recording_id, "reason": reason})
             return self._compact(value)

@@ -3,12 +3,14 @@ import base64
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from no1.computer_control.lease import ComputerControlLease, LeaseConflict
+from no1.computer_control.derived_authority import DerivedAuthorityStore
 from no1.computer_control.mcp import (
     MCPOutcomeUnknown,
     MCPToolExecutionError,
@@ -45,6 +47,95 @@ from no1.ports.web.routes.computer_control import _require_local_computer_contro
 
 class TestComputerControl(unittest.TestCase):
     @staticmethod
+    def _recording_security(
+        home: Path,
+        requests: ComputerRequestStore,
+        group_id: str,
+        request_id: str,
+        actor_id: str,
+    ):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            get_actor_turn_generation,
+            get_current_turn_grant,
+            get_daemon_turn_issuer_epoch,
+            invalidate_turn_grant,
+            turn_delivery_grant_receipt,
+            validate_turn_grant_receipt,
+        )
+        from no1.kernel.group import load_group
+        from no1.kernel.ledger import append_event
+
+        group = load_group(group_id)
+        if group is None:
+            raise AssertionError("recording security fixture requires a persisted group")
+        request = requests.get(group_id, request_id) or {}
+        provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+        event_request = {
+            key: value
+            for key, value in request.items()
+            if key
+            in {
+                "request_id",
+                "actor_id",
+                "mode",
+                "workflow_id",
+                "allow_high_risk",
+                "allow_publish",
+                "allow_trust",
+                "allow_unattended_triggers",
+                "allow_workflow_edit",
+            }
+        }
+        event = append_event(
+            group.ledger_path,
+            kind="chat.message",
+            group_id=group_id,
+            scope_key="",
+            by="user",
+            data=ChatMessageData(
+                text="record",
+                to=[actor_id],
+                computer_control_request=event_request,
+                turn_provenance=provenance,
+            ).model_dump(),
+        )
+        requests.update(
+            group_id,
+            request_id,
+            event_id=str(event["id"]),
+            local_request_id=str(provenance.local_request_id),
+        )
+        if get_current_turn_grant(group, actor_id) is not None:
+            invalidate_turn_grant(group, actor_id, reason="test_next_root")
+        attempt = begin_turn_delivery_attempt(
+            group,
+            actor_id=actor_id,
+            event_ids=[str(event["id"])],
+            binding={"transport": "test"},
+        )
+        receipt = turn_delivery_grant_receipt(attempt)
+        finalize_turn_delivery_attempt(group, actor_id=actor_id, attempt=attempt)
+        root = validate_turn_grant_receipt(group, actor_id, turn_grant_receipt=receipt)
+        if root is None:
+            raise AssertionError("recording security fixture failed to validate root")
+        start_claim = requests.activate_recording_start_for_turn_claim(
+            group_id,
+            request_id,
+            actor_id,
+            claim=root,
+        )
+        authorities = DerivedAuthorityStore(
+            home,
+            issuer_epoch_provider=get_daemon_turn_issuer_epoch,
+            generation_provider=get_actor_turn_generation,
+        )
+        return authorities, start_claim
+
+    @staticmethod
     def _message_workflow() -> dict:
         return {
             "name": "send message",
@@ -78,6 +169,65 @@ class TestComputerControl(unittest.TestCase):
         self.assertIn("WorkflowNode", schema["$defs"])
         self.assertIn("duration_seconds", schema["$defs"]["WorkflowNode"]["properties"])
         self.assertIn("top-level edges", definition_schema["description"])
+
+    def test_activated_workflow_create_preserves_request_target_and_records_created_resource(self):
+        from no1.daemon.computer_control_ops import _workflow
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="activated-workflow-create", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-create",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "workflow_id": "",
+                    "status": "accepted",
+                    "allow_workflow_edit": True,
+                    "created_ts": time.time(),
+                },
+            )
+            requests._append_turn_activation(
+                group.group_id,
+                "req-create",
+                activation={"authority_id": "turnauth_create"},
+            )
+            service = Mock()
+            service.store = store
+            service.requests = requests
+            service.setup.status.return_value = {}
+            service.session.catalog_sync.return_value = [{"name": "Type"}]
+            definition = self._message_workflow()
+            definition["nodes"][1]["arguments"]["label"] = 1
+
+            created = _workflow(
+                service,
+                {
+                    "action": "create",
+                    "request_id": "req-create",
+                    "definition": definition,
+                },
+                group.group_id,
+                "foreman",
+            )
+
+            workflow_id = str(created["manifest"]["workflow_id"])
+            request = requests.get(group.group_id, "req-create") or {}
+            self.assertTrue(workflow_id)
+            self.assertEqual(request["workflow_id"], "")
+            self.assertEqual(request["created_workflow_id"], workflow_id)
+            self.assertEqual(request["status"], "draft_created")
+            before_rebind = requests._path(group.group_id).read_bytes()
+            with self.assertRaisesRegex(PermissionError, "lifecycle resource is immutable"):
+                requests.mark_workflow_created(
+                    group.group_id,
+                    "req-create",
+                    created_workflow_id="wf_other",
+                )
+            self.assertEqual(requests._path(group.group_id).read_bytes(), before_rebind)
 
     def test_workflow_validation_rejects_common_agent_aliases(self):
         invalid_next = self._message_workflow()
@@ -407,11 +557,14 @@ class TestComputerControl(unittest.TestCase):
             fake.requests = requests
 
             def recording_start(*_args, **_kwargs):
+                from no1.computer_control.authorization import RecordingStartClaim
+
                 activated = requests.get(group.group_id, "req-order") or {}
                 self.assertEqual(
                     (activated.get("turn_authorization") or {}).get("generation"),
                     (receipt or {}).get("generation"),
                 )
+                self.assertIsInstance(_kwargs.get("start_claim"), RecordingStartClaim)
                 return {"recording_id": "rec-order", "status": "exploring"}
 
             fake.recordings.start.side_effect = recording_start
@@ -436,6 +589,250 @@ class TestComputerControl(unittest.TestCase):
             self.assertTrue((persisted.get("turn_authorization") or {}).get("secret_digest"))
             self.assertNotIn(str((receipt or {}).get("authorization_secret") or ""), persisted_text)
             self.assertNotIn("authorization_secret", persisted_text)
+
+    def test_daemon_recording_operation_receipt_replaces_root_until_generation_changes(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="recording-derived", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            request_payload = {
+                "request_id": "req-derived",
+                "actor_id": "peer",
+                "mode": "create_and_run",
+                "workflow_id": "",
+            }
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(
+                    text="record",
+                    to=["peer"],
+                    computer_control_request=request_payload,
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            requests = ComputerRequestStore(WorkflowStore(Path(td)))
+            requests.append(
+                group.group_id,
+                {
+                    **request_payload,
+                    "event_id": str(event["id"]),
+                    "local_request_id": str(provenance.local_request_id),
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "codex_app"},
+            )
+            root_receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+
+            started, _ = try_handle_computer_control_op(
+                "computer_control",
+                {
+                    "command": "recording",
+                    "action": "start",
+                    "group_id": group.group_id,
+                    "actor_id": "peer",
+                    "request_id": "req-derived",
+                    "name": "derived",
+                    "caller_surface": "local_mcp",
+                    "turn_grant_receipt": root_receipt,
+                },
+            )
+            self.assertTrue(started.ok, started.error)
+            started_value = started.result["result"]
+            operation_receipt = started_value["operation_receipt"]
+            recording_id = started_value["recording_id"]
+
+            loaded, _ = try_handle_computer_control_op(
+                "computer_control",
+                {
+                    "command": "recording",
+                    "action": "get",
+                    "group_id": group.group_id,
+                    "actor_id": "peer",
+                    "recording_id": recording_id,
+                    "caller_surface": "local_mcp",
+                    "recording_authority_receipt": operation_receipt,
+                },
+            )
+            self.assertTrue(loaded.ok, loaded.error)
+            self.assertEqual(loaded.result["result"]["recording_id"], recording_id)
+
+            other_group = create_group(load_registry(), title="receipt-cross-group", topic="")
+            other_authority_root = (
+                other_group.path / "state" / "computer-control" / "derived-authorities"
+            )
+            traversal_group = f"../../receipt_escape_{Path(td).name}"
+            traversal_root = (
+                Path(td)
+                / "groups"
+                / traversal_group
+                / "state"
+                / "computer-control"
+                / "derived-authorities"
+            ).resolve()
+            self.assertFalse(other_authority_root.exists())
+            self.assertFalse(traversal_root.exists())
+            for label, forged_group, forbidden_root in (
+                ("cross_group", other_group.group_id, other_authority_root),
+                ("path_traversal", traversal_group, traversal_root),
+            ):
+                with self.subTest(label=label), patch(
+                    "no1.daemon.computer_control_ops.get_services"
+                ) as get_services:
+                    rejected, _ = try_handle_computer_control_op(
+                        "computer_control",
+                        {
+                            "command": "recording",
+                            "action": "get",
+                            "group_id": group.group_id,
+                            "actor_id": "peer",
+                            "recording_id": recording_id,
+                            "caller_surface": "local_mcp",
+                            "recording_authority_receipt": {
+                                **operation_receipt,
+                                "group_id": forged_group,
+                            },
+                        },
+                    )
+                self.assertFalse(rejected.ok)
+                self.assertEqual(rejected.error.code, "permission_denied")
+                get_services.assert_not_called()
+                self.assertFalse(forbidden_root.exists())
+
+            persisted = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (group.path / "state" / "computer-control").rglob("*.json*")
+            )
+            self.assertNotIn(operation_receipt["authorization_secret"], persisted)
+            next_attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "codex_app"},
+            )
+            self.assertGreater(next_attempt["generation"], operation_receipt["generation"])
+            with patch("no1.daemon.computer_control_ops.get_services") as get_services:
+                rejected, _ = try_handle_computer_control_op(
+                    "computer_control",
+                    {
+                        "command": "recording",
+                        "action": "get",
+                        "group_id": group.group_id,
+                        "actor_id": "peer",
+                        "recording_id": recording_id,
+                        "caller_surface": "local_mcp",
+                        "recording_authority_receipt": operation_receipt,
+                    },
+                )
+            self.assertFalse(rejected.ok)
+            self.assertEqual(rejected.error.code, "permission_denied")
+            get_services.assert_not_called()
+
+    def test_daemon_recording_abort_requires_exact_stop_owner_before_services(self):
+        from no1.kernel.actors import add_actor
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-stop-owner", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            add_actor(group, actor_id="other", title="Other", runtime="codex", runner="headless")
+            group.save()
+            other_group = create_group(load_registry(), title="recording-stop-owner-other", topic="")
+            add_actor(other_group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            other_group.save()
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-stop-owner",
+                    "actor_id": "peer",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-stop-owner", "peer"
+            )
+            lease = ComputerControlLease(home)
+            recordings = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = recordings.start(
+                group.group_id,
+                actor_id="peer",
+                request_id="req-stop-owner",
+                start_claim=start_claim,
+                name="stop owner",
+            )
+            recording_id = started["recording_id"]
+            with patch.object(recordings, "_read") as read_recording, patch.object(
+                authorities, "begin_stop"
+            ) as begin_stop:
+                with self.assertRaisesRegex(PermissionError, "stop owner claim is required"):
+                    recordings.abort(
+                        group.group_id,
+                        recording_id,
+                        actor_id="peer",
+                        stop_claim=None,
+                    )
+            read_recording.assert_not_called()
+            begin_stop.assert_not_called()
+            authority_path = next(
+                (store.state_root(group.group_id) / "derived-authorities").glob("*.json")
+            )
+            recording_path = store.state_root(group.group_id) / "recordings" / f"{recording_id}.json"
+
+            def snapshot() -> tuple[bytes, bytes, bytes]:
+                return (
+                    authority_path.read_bytes(),
+                    recording_path.read_bytes(),
+                    lease.path.read_bytes(),
+                )
+
+            before = snapshot()
+            for label, candidate_group, candidate_actor in (
+                ("cross_actor", group.group_id, "other"),
+                ("cross_group", other_group.group_id, "peer"),
+            ):
+                with self.subTest(label=label), patch(
+                    "no1.daemon.computer_control_ops.get_services"
+                ) as get_services:
+                    rejected, _ = try_handle_computer_control_op(
+                        "computer_control",
+                        {
+                            "command": "recording",
+                            "action": "abort",
+                            "group_id": candidate_group,
+                            "actor_id": candidate_actor,
+                            "recording_id": recording_id,
+                            "caller_surface": "local_mcp",
+                        },
+                    )
+                self.assertFalse(rejected.ok)
+                self.assertEqual(rejected.error.code, "permission_denied")
+                get_services.assert_not_called()
+                self.assertEqual(snapshot(), before)
 
     def test_daemon_rejects_request_fact_tampering_before_services(self):
         from no1.contracts.v1 import ChatMessageData
@@ -663,6 +1060,45 @@ class TestComputerControl(unittest.TestCase):
             request_text = (group.path / "state" / "computer-control" / "requests.jsonl").read_text(encoding="utf-8")
             self.assertNotIn(str((receipt or {}).get("authorization_secret") or ""), request_text)
             self.assertNotIn("authorization_secret", request_text)
+            for field, value in (
+                ("actor_id", "other"),
+                ("mode", "run_existing"),
+                ("workflow_id", "wf_escalated"),
+                ("event_id", "event_other"),
+                ("local_request_id", "localreq_other"),
+                ("allow_high_risk", True),
+                ("allow_publish", True),
+                ("allow_trust", True),
+                ("allow_unattended_triggers", True),
+                ("allow_workflow_edit", True),
+            ):
+                for operation in ("append", "update"):
+                    with self.subTest(operation=operation, immutable_field=field):
+                        before = requests._path(group.group_id).read_bytes()
+                        with self.assertRaisesRegex(PermissionError, "facts are immutable"):
+                            if operation == "append":
+                                requests.append(
+                                    group.group_id,
+                                    {"request_id": "req-local", field: value},
+                                )
+                            else:
+                                requests.update(group.group_id, "req-local", **{field: value})
+                        self.assertEqual(requests._path(group.group_id).read_bytes(), before)
+            lifecycle = requests.mark_recording_started(
+                group.group_id,
+                "req-local",
+                recording_id="rec_lifecycle",
+                status="exploring",
+            )
+            self.assertEqual(lifecycle["recording_id"], "rec_lifecycle")
+            before_lifecycle_change = requests._path(group.group_id).read_bytes()
+            with self.assertRaisesRegex(PermissionError, "lifecycle resource is immutable"):
+                requests.mark_recording_started(
+                    group.group_id,
+                    "req-local",
+                    recording_id="rec_other",
+                )
+            self.assertEqual(requests._path(group.group_id).read_bytes(), before_lifecycle_change)
 
             for label, patch_value in (
                 ("legacy", {"local_request_id": ""}),
@@ -693,6 +1129,125 @@ class TestComputerControl(unittest.TestCase):
                         provenance=candidate_provenance,
                         ledger_event=None,
                     )
+
+    def test_request_activation_is_atomic_with_public_append_across_store_instances(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            load_event_turn_provenance,
+            turn_delivery_grant_receipt,
+            validate_turn_grant_receipt,
+        )
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="request-activation-race", topic="")
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            request_payload = {
+                "request_id": "req-race",
+                "actor_id": "peer",
+                "mode": "create_and_run",
+                "workflow_id": "",
+            }
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(
+                    text="record",
+                    to=["peer"],
+                    computer_control_request=request_payload,
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            store = WorkflowStore(Path(td))
+            seed = ComputerRequestStore(store)
+            seed.append(
+                group.group_id,
+                {
+                    **request_payload,
+                    "event_id": str(event["id"]),
+                    "local_request_id": str(provenance.local_request_id),
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "pty"},
+            )
+            receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+            claim = validate_turn_grant_receipt(group, "peer", turn_grant_receipt=receipt)
+            self.assertIsNotNone(claim)
+            writer = ComputerRequestStore(store)
+            activator = ComputerRequestStore(store)
+            writer_read = threading.Event()
+            allow_writer = threading.Event()
+            activation_done = threading.Event()
+            writer_errors = []
+            activation_errors = []
+            original_read = writer._get_unlocked
+            intercepted = False
+
+            def blocked_read(group_id, request_id):
+                nonlocal intercepted
+                value = original_read(group_id, request_id)
+                if request_id == "req-race" and not intercepted:
+                    intercepted = True
+                    writer_read.set()
+                    allow_writer.wait(5)
+                return value
+
+            def append_permission() -> None:
+                try:
+                    writer.append(
+                        group.group_id,
+                        {"request_id": "req-race", "allow_publish": True},
+                    )
+                except Exception as exc:
+                    writer_errors.append(exc)
+
+            def activate() -> None:
+                try:
+                    activator.activate_for_turn_claim(
+                        group.group_id,
+                        "req-race",
+                        "peer",
+                        claim=claim,
+                        provenance=load_event_turn_provenance(group, str(event["id"])),
+                        ledger_event=event,
+                    )
+                except Exception as exc:
+                    activation_errors.append(exc)
+                finally:
+                    activation_done.set()
+
+            with patch.object(writer, "_get_unlocked", side_effect=blocked_read):
+                writer_thread = threading.Thread(target=append_permission)
+                writer_thread.start()
+                self.assertTrue(writer_read.wait(2))
+                activation_thread = threading.Thread(target=activate)
+                activation_thread.start()
+                self.assertFalse(activation_done.wait(0.1))
+                allow_writer.set()
+                writer_thread.join(5)
+                activation_thread.join(5)
+
+            self.assertFalse(writer_thread.is_alive())
+            self.assertFalse(activation_thread.is_alive())
+            self.assertFalse(writer_errors)
+            self.assertEqual(len(activation_errors), 1)
+            self.assertIsInstance(activation_errors[0], PermissionError)
+            final = seed.get(group.group_id, "req-race") or {}
+            self.assertTrue(final["allow_publish"])
+            self.assertNotIn("turn_authorization", final)
 
     def test_request_store_rejects_public_authority_writes_without_disk_changes(self):
         with tempfile.TemporaryDirectory() as td:
@@ -753,10 +1308,14 @@ class TestComputerControl(unittest.TestCase):
             requests.append(group.group_id, {
                 "request_id": "req-long",
                 "actor_id": "foreman",
-                "status": "exploring",
-                "recording_id": "rec_long",
+                "status": "accepted",
                 "created_ts": time.time() - 7200,
             })
+            requests.mark_recording_started(
+                group.group_id,
+                "req-long",
+                recording_id="rec_long",
+            )
             authorized = requests.require_authorized(group.group_id, "req-long", "foreman")
             self.assertEqual(authorized["recording_id"], "rec_long")
             for key in (
@@ -1095,10 +1654,14 @@ class TestComputerControl(unittest.TestCase):
                     "allow_high_risk": True,
                 },
             )
+            authorities, start_claim = self._recording_security(
+                Path(td), requests, group.group_id, "req-image", "foreman"
+            )
             recordings = RecordingStore(
                 Path(td),
                 store,
                 requests,
+                authorities,
                 ComputerControlLease(Path(td)),
                 ImageSession(),
             )
@@ -1106,12 +1669,21 @@ class TestComputerControl(unittest.TestCase):
                 group.group_id,
                 actor_id="foreman",
                 request_id="req-image",
+                start_claim=start_claim,
                 name="capture",
+            )
+            authority = authorities.validate_active_receipt(
+                recording["operation_receipt"],
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording["recording_id"],
+                expected_kind="recording",
             )
             response = recordings.call(
                 group.group_id,
                 recording["recording_id"],
                 actor_id="foreman",
+                authority=authority,
                 tool="Screenshot",
                 arguments={},
                 record=False,
@@ -1126,6 +1698,661 @@ class TestComputerControl(unittest.TestCase):
             os.environ.pop("CCCC_HOME", None)
         else:
             os.environ["CCCC_HOME"] = old
+
+    def test_recording_start_failure_rolls_back_authority_lease_and_resource(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-start-rollback")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-rollback",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-rollback", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            session = Mock()
+            recordings = RecordingStore(home, store, requests, authorities, lease, session)
+
+            with patch.object(lease, "activate_reservation", side_effect=RuntimeError("activate failed")):
+                with self.assertRaisesRegex(RuntimeError, "activate failed"):
+                    recordings.start(
+                        group.group_id,
+                        actor_id="foreman",
+                        request_id="req-rollback",
+                        start_claim=start_claim,
+                        name="rollback",
+                    )
+
+            recording_files = list((store.state_root(group.group_id) / "recordings").glob("rec_*.json"))
+            self.assertEqual(len(recording_files), 1)
+            self.assertEqual(json.loads(recording_files[0].read_text(encoding="utf-8"))["status"], "start_failed")
+            authority_files = list(
+                (store.state_root(group.group_id) / "derived-authorities").glob("*.json")
+            )
+            self.assertEqual(len(authority_files), 1)
+            self.assertEqual(json.loads(authority_files[0].read_text(encoding="utf-8"))["state"], "revoked")
+            self.assertFalse(lease.status()["active"])
+            self.assertFalse(recordings._active)
+            session.catalog_sync.assert_not_called()
+
+    def test_recording_root_claim_derives_only_one_resource_after_abort(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-single-derivation", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-single",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-single", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            recordings = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = recordings.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-single",
+                start_claim=start_claim,
+                name="single",
+            )
+            recording_id = started["recording_id"]
+            stop_claim = authorities.validate_recording_stop_owner(
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            recordings.abort(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                stop_claim=stop_claim,
+            )
+            authority_root = store.state_root(group.group_id) / "derived-authorities"
+            recording_root = store.state_root(group.group_id) / "recordings"
+
+            def snapshot() -> tuple[dict[str, bytes], dict[str, bytes], bytes | None]:
+                return (
+                    {path.name: path.read_bytes() for path in authority_root.glob("*.json")},
+                    {path.name: path.read_bytes() for path in recording_root.glob("*.json")},
+                    lease.path.read_bytes() if lease.path.exists() else None,
+                )
+
+            before = snapshot()
+            with self.assertRaisesRegex(PermissionError, "root claim"):
+                authorities.begin_recording(
+                    group_id=group.group_id,
+                    actor_id="foreman",
+                    resource_id="rec_parallel",
+                    request_id="req-single",
+                    start_claim=start_claim,
+                )
+            self.assertEqual(snapshot(), before)
+            with self.assertRaisesRegex(PermissionError, "already derived"):
+                recordings.start(
+                    group.group_id,
+                    actor_id="foreman",
+                    request_id="req-single",
+                    start_claim=start_claim,
+                    name="parallel",
+                )
+            self.assertEqual(snapshot(), before)
+
+    def test_recording_service_restart_suspends_and_same_generation_receipt_can_resume(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-restart")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-restart",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-restart", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            first = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = first.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-restart",
+                start_claim=start_claim,
+                name="restart",
+            )
+            recording_id = started["recording_id"]
+            receipt = started["operation_receipt"]
+            self.assertTrue(lease.status()["active"])
+
+            restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            suspended = restarted._read(group.group_id, recording_id, actor_id="foreman")
+            self.assertEqual(suspended["status"], "suspended")
+            self.assertEqual(suspended["suspend_reason"], "service_restart")
+            self.assertFalse(lease.status()["active"])
+            self.assertFalse(restarted._active)
+            suspended_claim = authorities.validate_suspended_receipt(
+                receipt,
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            resumed = restarted.resume(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                authority=suspended_claim,
+            )
+            self.assertEqual(resumed["status"], "exploring")
+            self.assertTrue(lease.status()["active"])
+
+    def test_recording_restart_finishes_suspended_authority_prefix_and_can_resume(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-suspended-prefix", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-suspended-prefix",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-suspended-prefix", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            first = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = first.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-suspended-prefix",
+                start_claim=start_claim,
+                name="suspended prefix",
+            )
+            recording_id = started["recording_id"]
+            active = authorities.validate_active_receipt(
+                started["operation_receipt"],
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            authorities.suspend(active)
+            first._active.clear()
+            self.assertTrue(lease.status()["active"])
+
+            restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+
+            recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
+            self.assertEqual(recovered["status"], "suspended")
+            self.assertFalse(lease.status()["active"])
+            suspended = authorities.validate_suspended_receipt(
+                started["operation_receipt"],
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            resumed = restarted.resume(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                authority=suspended,
+            )
+            self.assertEqual(resumed["status"], "exploring")
+
+    def test_recording_restart_treats_terminating_authority_as_stop_prefix(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-terminating-prefix", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-terminating-prefix",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-terminating-prefix", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            first = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = first.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-terminating-prefix",
+                start_claim=start_claim,
+                name="terminating prefix",
+            )
+            recording_id = started["recording_id"]
+            authorities.begin_stop(
+                group_id=group.group_id,
+                actor_id="foreman",
+                resource_id=recording_id,
+            )
+            first._active.clear()
+            self.assertTrue(lease.status()["active"])
+
+            restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+
+            recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
+            self.assertEqual(recovered["status"], "aborted")
+            self.assertEqual(
+                authorities.persisted_record(group.group_id, recording_id)["state"],
+                "revoked",
+            )
+            self.assertFalse(lease.status()["active"])
+
+    def test_recording_restart_converges_initializing_and_orphan_pending_prefixes(self):
+        for phase in ("orphan_pending", "initializing_pending", "initializing_active"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as td, patch.dict(
+                os.environ, {"CCCC_HOME": td}, clear=False
+            ):
+                home = Path(td)
+                group = create_group(load_registry(), title=f"recording-{phase}", topic="")
+                store = WorkflowStore(home)
+                requests = ComputerRequestStore(store)
+                request_id = f"req-{phase}"
+                requests.append(
+                    group.group_id,
+                    {
+                        "request_id": request_id,
+                        "actor_id": "foreman",
+                        "mode": "create_and_run",
+                        "status": "accepted",
+                        "created_ts": time.time(),
+                    },
+                )
+                authorities, start_claim = self._recording_security(
+                    home, requests, group.group_id, request_id, "foreman"
+                )
+                lease = ComputerControlLease(home)
+                recording_id = "rec_" + phase.replace("_", "")
+                issue = authorities.begin_recording(
+                    group_id=group.group_id,
+                    actor_id="foreman",
+                    resource_id=recording_id,
+                    request_id=request_id,
+                    start_claim=start_claim,
+                )
+                if phase != "orphan_pending":
+                    recording_path = store.state_root(group.group_id) / "recordings" / f"{recording_id}.json"
+                    recording_path.parent.mkdir(parents=True)
+                    recording_path.write_text(
+                        json.dumps(
+                            {
+                                "recording_id": recording_id,
+                                "group_id": group.group_id,
+                                "actor_id": "foreman",
+                                "request_id": request_id,
+                                "status": "initializing",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    lease.reserve(
+                        group_id=group.group_id,
+                        actor_id="foreman",
+                        run_id=recording_id,
+                        authority=issue.claim,
+                    )
+                    if phase == "initializing_active":
+                        active = authorities.activate(issue.claim)
+                        lease.activate_reservation(pending=issue.claim, active=active)
+
+                restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+
+                self.assertEqual(
+                    authorities.persisted_record(group.group_id, recording_id)["state"],
+                    "revoked",
+                )
+                self.assertFalse(lease.status()["active"])
+                if phase == "orphan_pending":
+                    self.assertFalse(
+                        (store.state_root(group.group_id) / "recordings" / f"{recording_id}.json").exists()
+                    )
+                else:
+                    recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
+                    self.assertEqual(recovered["status"], "start_failed")
+
+    def test_recording_restart_does_not_release_other_group_with_same_resource_id(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-owner-g1", topic="")
+            other_group = create_group(load_registry(), title="recording-owner-g2", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-owner-g1",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-owner-g1", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            first = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = first.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-owner-g1",
+                start_claim=start_claim,
+                name="owner g1",
+            )
+            recording_id = started["recording_id"]
+            active_g1 = authorities.validate_active_receipt(
+                started["operation_receipt"],
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            self.assertTrue(lease.release(run_id=recording_id, authority=active_g1))
+            first._active.clear()
+
+            other_requests = ComputerRequestStore(store)
+            other_requests.append(
+                other_group.group_id,
+                {
+                    "request_id": "req-owner-g2",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            other_authorities, other_start_claim = self._recording_security(
+                home, other_requests, other_group.group_id, "req-owner-g2", "foreman"
+            )
+            other_issue = other_authorities.begin_recording(
+                group_id=other_group.group_id,
+                actor_id="foreman",
+                resource_id=recording_id,
+                request_id="req-owner-g2",
+                start_claim=other_start_claim,
+            )
+            other_active = other_authorities.activate(other_issue.claim)
+            lease.acquire(
+                group_id=other_group.group_id,
+                actor_id="foreman",
+                run_id=recording_id,
+                authority=other_active,
+            )
+
+            restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+
+            self.assertEqual(
+                restarted._read(group.group_id, recording_id, actor_id="foreman")["status"],
+                "suspended",
+            )
+            lease_value = lease.status()["lease"]
+            self.assertEqual(lease_value["group_id"], other_group.group_id)
+            self.assertEqual(lease_value["actor_id"], "foreman")
+            self.assertEqual(lease_value["run_id"], recording_id)
+
+    def test_recording_restart_finishes_revoked_terminating_crash_prefix(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-stop-recovery", topic="")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-stop-recovery",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-stop-recovery", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            first = RecordingStore(home, store, requests, authorities, lease, Mock())
+            started = first.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-stop-recovery",
+                start_claim=start_claim,
+                name="stop recovery",
+            )
+            recording_id = started["recording_id"]
+            active = authorities.validate_active_receipt(
+                started["operation_receipt"],
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            value = first._read(group.group_id, recording_id, actor_id="foreman")
+            value.update(
+                {
+                    "status": "terminating",
+                    "abort_reason": "user_abort",
+                    "updated_at": time.time(),
+                }
+            )
+            first._write(group.group_id, value)
+            first._active.clear()
+            self.assertTrue(lease.release(run_id=recording_id, authority=active))
+            terminating = authorities.begin_termination(active)
+            authorities.revoke(terminating)
+
+            restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+
+            recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
+            self.assertEqual(recovered["status"], "aborted")
+            self.assertEqual(recovered["abort_reason"], "user_abort")
+            self.assertEqual(
+                authorities.persisted_record(group.group_id, recording_id)["state"],
+                "revoked",
+            )
+            self.assertFalse(lease.status()["active"])
+
+    def test_recording_restart_ignores_payload_identity_that_disagrees_with_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            recordings_root = (
+                home / "groups" / "g_path" / "state" / "computer-control" / "recordings"
+            )
+            recordings_root.mkdir(parents=True)
+            traversal_group = f"../../recording_escape_{home.name}"
+            outside_root = (
+                home
+                / "groups"
+                / traversal_group
+                / "state"
+                / "computer-control"
+                / "derived-authorities"
+            ).resolve()
+            (recordings_root / "rec_group.json").write_text(
+                json.dumps(
+                    {
+                        "group_id": traversal_group,
+                        "recording_id": "rec_group",
+                        "actor_id": "foreman",
+                        "status": "terminating",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (recordings_root / "rec_path.json").write_text(
+                json.dumps(
+                    {
+                        "group_id": "g_path",
+                        "recording_id": "rec_other",
+                        "actor_id": "foreman",
+                        "status": "exploring",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            authorities = Mock()
+            lease = Mock()
+            workflows = WorkflowStore(home)
+            requests = ComputerRequestStore(workflows)
+            self.assertFalse(outside_root.exists())
+
+            RecordingStore(home, workflows, requests, authorities, lease, Mock())
+
+            authorities.begin_stop.assert_not_called()
+            authorities.suspend_after_restart.assert_not_called()
+            lease.release_recording_for_stop.assert_not_called()
+            self.assertFalse(outside_root.exists())
+
+    def test_recording_abort_waits_for_inflight_before_releasing_old_lease_lineage(self):
+        class BlockingSession:
+            transport_restarts = 0
+
+            def __init__(self):
+                self.entered = threading.Event()
+                self.release = threading.Event()
+
+            def catalog_sync(self):
+                return [{"name": "Snapshot"}]
+
+            def call_tool_sync(self, name, arguments, *, timeout):
+                self.entered.set()
+                self.release.wait(5)
+                return {"content": [{"type": "text", "text": "done"}]}
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="recording-abort")
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            requests.append(
+                group.group_id,
+                {
+                    "request_id": "req-abort",
+                    "actor_id": "foreman",
+                    "mode": "create_and_run",
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            authorities, start_claim = self._recording_security(
+                home, requests, group.group_id, "req-abort", "foreman"
+            )
+            lease = ComputerControlLease(home)
+            session = BlockingSession()
+            recordings = RecordingStore(home, store, requests, authorities, lease, session)
+            started = recordings.start(
+                group.group_id,
+                actor_id="foreman",
+                request_id="req-abort",
+                start_claim=start_claim,
+                name="abort",
+            )
+            recording_id = started["recording_id"]
+            receipt = started["operation_receipt"]
+            authority = authorities.validate_active_receipt(
+                receipt,
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            errors = []
+
+            def invoke() -> None:
+                try:
+                    recordings.call(
+                        group.group_id,
+                        recording_id,
+                        actor_id="foreman",
+                        authority=authority,
+                        tool="Snapshot",
+                        arguments={},
+                        record=False,
+                    )
+                except Exception as exc:
+                    errors.append(exc)
+
+            worker = threading.Thread(target=invoke)
+            worker.start()
+            self.assertTrue(session.entered.wait(2))
+            stop_claim = authorities.validate_recording_stop_owner(
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            stopping = recordings.abort(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                stop_claim=stop_claim,
+                reason="user_abort",
+            )
+            self.assertEqual(stopping["status"], "terminating")
+            self.assertTrue(lease.status()["active"])
+            with self.assertRaises(PermissionError):
+                authorities.validate_active_receipt(
+                    receipt,
+                    expected_group_id=group.group_id,
+                    expected_actor_id="foreman",
+                    expected_resource_id=recording_id,
+                    expected_kind="recording",
+                )
+
+            session.release.set()
+            worker.join(5)
+            self.assertFalse(worker.is_alive())
+            self.assertTrue(errors)
+            self.assertEqual(
+                recordings._read(group.group_id, recording_id, actor_id="foreman")["status"],
+                "aborted",
+            )
+            self.assertFalse(lease.status()["active"])
+            with self.assertRaises(PermissionError):
+                authorities.validate_active_receipt(
+                    receipt,
+                    expected_group_id=group.group_id,
+                    expected_actor_id="foreman",
+                    expected_resource_id=recording_id,
+                    expected_kind="recording",
+                )
 
     def test_computer_artifacts_are_exposed_as_mcp_images_with_path_containment(self):
         old = os.environ.get("CCCC_HOME")
@@ -1223,44 +2450,94 @@ class TestComputerControl(unittest.TestCase):
                 "created_ts": time.time(),
                 "allow_high_risk": True,
             })
+            authorities, start_claim = self._recording_security(
+                Path(td), requests, group.group_id, "req-record", "foreman"
+            )
             session = FakeSession()
-            recordings = RecordingStore(Path(td), store, requests, ComputerControlLease(Path(td)), session)
+            recordings = RecordingStore(
+                Path(td),
+                store,
+                requests,
+                authorities,
+                ComputerControlLease(Path(td)),
+                session,
+            )
             value = recordings.start(
                 group.group_id,
                 actor_id="foreman",
                 request_id="req-record",
+                start_claim=start_claim,
                 name="recorded task",
                 inputs={"message": {"type": "string", "default": "hello"}},
             )
             recording_id = value["recording_id"]
-            suspended = recordings.suspend(group.group_id, recording_id, actor_id="foreman")
+            operation_receipt = value["operation_receipt"]
+            authority = authorities.validate_active_receipt(
+                operation_receipt,
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            suspended = recordings.suspend(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                authority=authority,
+            )
             self.assertEqual(suspended["status"], "suspended")
-            resumed = recordings.resume(group.group_id, recording_id, actor_id="foreman")
+            suspended_authority = authorities.validate_suspended_receipt(
+                operation_receipt,
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
+            resumed = recordings.resume(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                authority=suspended_authority,
+            )
+            authority = authorities.validate_active_receipt(
+                operation_receipt,
+                expected_group_id=group.group_id,
+                expected_actor_id="foreman",
+                expected_resource_id=recording_id,
+                expected_kind="recording",
+            )
             self.assertTrue(resumed["requires_snapshot_baseline"])
             with self.assertRaisesRegex(RuntimeError, "Snapshot"):
-                recordings.call(group.group_id, recording_id, actor_id="foreman", tool="Type", arguments={"text": "early"})
-            recordings.call(group.group_id, recording_id, actor_id="foreman", tool="Snapshot", arguments={}, record=False)
-            self.assertEqual(len(recordings.get(group.group_id, recording_id)["steps"]), 0)
+                recordings.call(group.group_id, recording_id, actor_id="foreman", authority=authority, tool="Type", arguments={"text": "early"})
+            recordings.call(group.group_id, recording_id, actor_id="foreman", authority=authority, tool="Snapshot", arguments={}, record=False)
+            self.assertEqual(len(recordings.get(group.group_id, recording_id, actor_id="foreman", authority=authority)["steps"]), 0)
             with self.assertRaisesRegex(ValueError, "do not resolve"):
                 recordings.call(
                     group.group_id,
                     recording_id,
                     actor_id="foreman",
+                    authority=authority,
                     tool="Type",
                     arguments={"text": "different"},
                     workflow_arguments={"text": "${inputs.message}"},
                 )
             with self.assertRaisesRegex(RuntimeError, "failed"):
-                recordings.call(group.group_id, recording_id, actor_id="foreman", tool="Type", arguments={"fail": True})
+                recordings.call(group.group_id, recording_id, actor_id="foreman", authority=authority, tool="Type", arguments={"fail": True})
             recordings.call(
                 group.group_id,
                 recording_id,
                 actor_id="foreman",
+                authority=authority,
                 tool="Type",
                 arguments={"text": "hello"},
                 workflow_arguments={"text": "${inputs.message}"},
             )
-            committed = recordings.commit(group.group_id, recording_id, actor_id="foreman")
+            committed = recordings.commit(
+                group.group_id,
+                recording_id,
+                actor_id="foreman",
+                authority=authority,
+            )
             self.assertEqual(len(committed["recording"]["steps"]), 1)
             self.assertEqual(committed["workflow"]["definition"]["nodes"][1]["arguments"]["text"], "${inputs.message}")
             runner = WorkflowRunner(Path(td), store, ComputerControlLease(Path(td)), session)

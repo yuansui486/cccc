@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .lease import ComputerControlLease
+from .derived_authority import DerivedAuthorityStore
 from .mcp import WindowsMCPSetup, WindowsMCPSession
 from .runtime import WorkflowRunner
 from .recording import RecordingStore
@@ -13,6 +14,10 @@ from .scheduler import ComputerControlScheduler
 from .storage import WorkflowStore
 from .picker import ElementPickerManager
 from .observation import ElementObservationService
+from ..daemon.messaging.turn_provenance import (
+    get_actor_turn_generation,
+    get_daemon_turn_issuer_epoch,
+)
 
 
 class ComputerControlServices:
@@ -20,6 +25,11 @@ class ComputerControlServices:
         self.home = home
         self.store = WorkflowStore(home)
         self.requests = ComputerRequestStore(self.store)
+        self.authorities = DerivedAuthorityStore(
+            home,
+            issuer_epoch_provider=get_daemon_turn_issuer_epoch,
+            generation_provider=get_actor_turn_generation,
+        )
         self.lease = ComputerControlLease(home)
         self.session = WindowsMCPSession()
         self.setup = WindowsMCPSetup(home, self.session, self.store, self.lease)
@@ -33,6 +43,7 @@ class ComputerControlServices:
             home,
             self.store,
             self.requests,
+            self.authorities,
             self.lease,
             self.session,
             fingerprint_provider=lambda: str(self.setup.status().get("fingerprint") or ""),

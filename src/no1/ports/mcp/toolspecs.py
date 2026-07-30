@@ -98,6 +98,42 @@ _TURN_GRANT_RECEIPT = {
         "authorization_secret",
     ],
 }
+_RECORDING_AUTHORITY_RECEIPT = {
+    "type": "object",
+    "description": "Bearer receipt returned by recording.start and required for this recording's later actions.",
+    "properties": {
+        "v": {"type": "integer", "const": 1},
+        "issuer_epoch": {"type": "string"},
+        "kind": {"type": "string", "const": "recording"},
+        "authority_id": {"type": "string"},
+        "group_id": {"type": "string"},
+        "actor_id": {"type": "string"},
+        "resource_id": {"type": "string"},
+        "request_id": {"type": "string"},
+        "generation": {"type": "integer", "minimum": 1},
+        "scope_digest": {"type": "string"},
+        "root_authority_id": {"type": "string"},
+        "root_attempt_id": {"type": "string"},
+        "root_generation": {"type": "integer", "minimum": 1},
+        "authorization_secret": {"type": "string", "minLength": 32},
+    },
+    "required": [
+        "v",
+        "issuer_epoch",
+        "kind",
+        "authority_id",
+        "group_id",
+        "actor_id",
+        "resource_id",
+        "request_id",
+        "generation",
+        "scope_digest",
+        "root_authority_id",
+        "root_attempt_id",
+        "root_generation",
+        "authorization_secret",
+    ],
+}
 
 
 def _computer_workflow_input_schema() -> dict:
@@ -1402,6 +1438,7 @@ MCP_TOOLS = [
             **_COMMON_GROUP,
             **_COMMON_ACTOR,
             "turn_grant_receipt": copy.deepcopy(_TURN_GRANT_RECEIPT),
+            "recording_authority_receipt": copy.deepcopy(_RECORDING_AUTHORITY_RECEIPT),
             "action": {
                 "type": "string",
                 "enum": ["start", "call", "wait", "get", "resume", "update_step", "undo", "commit", "abort"],

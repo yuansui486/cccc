@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Tuple
 
+from ..daemon.messaging.turn_provenance import (
+    ValidatedTurnGrantClaim,
+    require_validated_turn_grant_claim,
+)
 from .models import computer_control_permissions
 
 
@@ -12,12 +18,89 @@ _STATUS_ONLY_ACTIONS = {
     ("lease", "status"),
     ("setup", "status"),
 }
+_START_CLAIM_SEAL = object()
+
+
+@dataclass(frozen=True, init=False)
+class RecordingStartClaim:
+    issuer_epoch: str
+    root_authority_id: str
+    root_attempt_id: str
+    generation: int
+    group_id: str
+    actor_id: str
+    request_id: str
+    permission_snapshot: Mapping[str, bool]
+    _seal: object
+    _root_claim: ValidatedTurnGrantClaim
+
+    def __init__(
+        self,
+        *,
+        _seal: object,
+        request: Dict[str, Any],
+        claim: ValidatedTurnGrantClaim,
+    ):
+        if _seal is not _START_CLAIM_SEAL:
+            raise TypeError("recording start claims can only be created by authorization")
+        root_claim = require_validated_turn_grant_claim(claim)
+        binding = claim.get("authorization_binding")
+        object.__setattr__(self, "issuer_epoch", str(claim.get("issuer_epoch") or ""))
+        object.__setattr__(
+            self,
+            "root_authority_id",
+            str(binding.get("authority_id") or "") if isinstance(binding, dict) else "",
+        )
+        object.__setattr__(self, "root_attempt_id", str(claim.get("attempt_id") or ""))
+        object.__setattr__(self, "generation", int(claim.get("generation") or 0))
+        object.__setattr__(self, "group_id", str(request.get("group_id") or ""))
+        object.__setattr__(self, "actor_id", str(request.get("actor_id") or ""))
+        object.__setattr__(self, "request_id", str(request.get("request_id") or ""))
+        object.__setattr__(
+            self,
+            "permission_snapshot",
+            MappingProxyType(computer_control_permissions(request)),
+        )
+        object.__setattr__(self, "_seal", _seal)
+        object.__setattr__(self, "_root_claim", root_claim)
+
+    def consume_current(self, consumer):
+        if self._seal is not _START_CLAIM_SEAL:
+            return None
+        return self._root_claim.consume_current(lambda _claim: consumer(self))
+
+    def require_fresh_current(self) -> None:
+        if self._seal is not _START_CLAIM_SEAL:
+            raise PermissionError("recording start claim is invalid")
+        self._root_claim.require_fresh_current()
+
+
+def _recording_start_authorization(
+    request: Dict[str, Any],
+    initial_request: Dict[str, Any],
+    ledger_event: Any,
+    provenance: Any,
+    claim: ValidatedTurnGrantClaim,
+) -> Tuple[Dict[str, Any], RecordingStartClaim]:
+    """Seal a persisted user request and its live root into one start capability."""
+
+    root_claim = require_validated_turn_grant_claim(claim)
+    validate_request_event_binding(request, initial_request, ledger_event)
+    activation = request_turn_authorization(request, root_claim, provenance)
+    activated = {**request, "turn_authorization": activation}
+    return activation, RecordingStartClaim(
+        _seal=_START_CLAIM_SEAL,
+        request=activated,
+        claim=root_claim,
+    )
 
 
 def requires_live_turn_claim(command: str, action: str = "") -> bool:
     command_name = str(command or "").strip().lower()
     action_name = str(action or "").strip().lower()
     if command_name == "workflow" and action_name in _WORKFLOW_METADATA_ACTIONS:
+        return False
+    if command_name == "recording" and action_name != "start":
         return False
     if (command_name, action_name) in _STATUS_ONLY_ACTIONS:
         return False
@@ -92,9 +175,10 @@ def validate_request_event_binding(
 
 def request_turn_authorization(
     request: Dict[str, Any],
-    claim: Dict[str, Any],
+    claim: ValidatedTurnGrantClaim,
     provenance: Any,
 ) -> Dict[str, Any]:
+    claim = require_validated_turn_grant_claim(claim)
     request_id = str(request.get("request_id") or "").strip()
     request_group_id = str(request.get("group_id") or "").strip()
     request_actor_id = str(request.get("actor_id") or "").strip()
