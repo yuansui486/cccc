@@ -24,6 +24,7 @@ import { useAppTabState } from "./hooks/useAppTabState";
 import * as api from "./services/api";
 import { getEffectiveComposerDestGroupId } from "./stores/useComposerStore";
 import { getChatSession } from "./stores/useUIStore";
+import { computerControlApi } from "./services/api/computerControl";
 import { buildReplyComposerState } from "./utils/chatReply";
 import { subscribeCapabilityChanged } from "./utils/capabilityEvents";
 import { filterVisibleRuntimeActors } from "./utils/runtimeVisibility";
@@ -433,6 +434,15 @@ export default function App() {
       document.removeEventListener("visibilitychange", refreshOnVisible);
     };
   }, [doneHubHasSession, doneHubInitialized, refreshDoneHub]);
+
+  // Warm Windows-MCP in the background as soon as the main application is
+  // usable. The computer-control page still owns visible diagnostics and
+  // recovery actions, but opening that page is no longer required to start
+  // installation.
+  React.useEffect(() => {
+    if (!doneHubInitialized || (!doneHubConnected && !doneHubHasSession)) return;
+    void computerControlApi.ensureInBackground().catch(() => undefined);
+  }, [doneHubConnected, doneHubHasSession, doneHubInitialized]);
 
   const doneHub = useMemo(() => ({
     status: doneHubStatus,

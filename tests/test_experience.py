@@ -36,7 +36,7 @@ class TestProjectExperience(unittest.TestCase):
             group = self._group(workspace)
             path = workspace / EXPERIENCE_FILENAME
             self.assertTrue(path.exists())
-            self.assertIn("# Project Experience", path.read_text(encoding="utf-8"))
+            self.assertIn("# 项目经验", path.read_text(encoding="utf-8"))
 
             path.write_text("# Existing\n\nKeep me.\n", encoding="utf-8")
             self._group(workspace, title="another-team")

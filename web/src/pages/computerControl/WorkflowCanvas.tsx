@@ -95,7 +95,11 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
       className="bg-[var(--color-bg-secondary)]"
     >
       <Background gap={20} size={1} color="var(--color-border)" />
-      <Controls showInteractive={false} />
+      <Controls
+        position="bottom-left"
+        showInteractive={false}
+        className="!bottom-5 !left-5 !m-0 [&>button]:!h-10 [&>button]:!w-10 [&>button]:!border-[var(--color-border)] [&>button]:!bg-[var(--color-bg-primary)] [&>button]:hover:!bg-[var(--color-bg-secondary)]"
+      />
       <MiniMap pannable zoomable className="!hidden !border !border-[var(--color-border)] !bg-[var(--color-bg-primary)] lg:!block" nodeColor={(node) => {
         const model = (node.data as { model?: { type?: WorkflowNodeKind } }).model;
         return model?.type ? kindMeta[model.type].color : "#64748b";

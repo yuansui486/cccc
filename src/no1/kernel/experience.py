@@ -14,21 +14,21 @@ from .prompt_files import resolve_active_scope_root
 EXPERIENCE_FILENAME = "EXPERIENCE.md"
 MAX_EXPERIENCE_BYTES = 512 * 1024
 
-DEFAULT_EXPERIENCE_TEMPLATE = """# Project Experience
+DEFAULT_EXPERIENCE_TEMPLATE = """# 项目经验
 
-> Shared, verified lessons for this project. Keep entries concise and reusable.
-> Do not store secrets, credentials, raw logs, or unverified guesses here.
+> 记录本项目中已经验证、可复用的经验，内容保持简洁明确。
+> 不要保存密钥、凭据、原始日志或未经验证的猜测。
 
-## Lessons
+## 经验条目
 
-<!-- Suggested entry format:
-### YYYY-MM-DD - Short title
-- Situation:
-- Symptom:
-- Root cause:
-- Resolution:
-- Verification:
-- Applies to:
+<!-- 建议使用以下格式：
+### YYYY-MM-DD - 简短标题
+- 情况：
+- 现象：
+- 根因：
+- 解决方案：
+- 验证结果：
+- 适用范围：
 -->
 """
 

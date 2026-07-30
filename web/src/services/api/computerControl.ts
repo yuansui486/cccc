@@ -178,8 +178,18 @@ export type RecoveryContext = {
 const root = "/api/v1/computer-control";
 const groupRoot = (groupId: string) => `/api/v1/groups/${encodeURIComponent(groupId)}/computer-control`;
 
+let backgroundEnsurePromise: Promise<ApiResponse<ComputerSetup>> | null = null;
+
+function ensureInBackground(): Promise<ApiResponse<ComputerSetup>> {
+  if (!backgroundEnsurePromise) {
+    backgroundEnsurePromise = apiJson<ComputerSetup>(`${root}/setup/ensure?force=false`, { method: "POST" });
+  }
+  return backgroundEnsurePromise;
+}
+
 export const computerControlApi = {
   ensure: (force = false) => apiJson<ComputerSetup>(`${root}/setup/ensure?force=${force}`, { method: "POST" }),
+  ensureInBackground,
   status: () => apiJson<ComputerSetup>(`${root}/setup/status`),
   repair: () => apiJson<ComputerSetup>(`${root}/setup/repair`, { method: "POST" }),
   upgrade: () => apiJson<ComputerSetup>(`${root}/setup/upgrade`, { method: "POST" }),
@@ -200,7 +210,7 @@ export const computerControlApi = {
   rollback: (groupId: string, workflowId: string, version: number) => apiJson<WorkflowRecord>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/versions/${version}/rollback`, { method: "POST" }),
   proposals: (groupId: string, workflowId: string) => apiJson<{ proposals: OptimizationProposal[] }>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/optimization-proposals`),
   decideProposal: (groupId: string, workflowId: string, proposalId: string, decision: "accept" | "reject") => apiJson<OptimizationProposal>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/optimization-proposals/${encodeURIComponent(proposalId)}/${decision}`, { method: "POST" }),
-  publish: (groupId: string, workflowId: string, version: number) => apiJson<WorkflowManifest>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/publish`, { method: "POST", body: JSON.stringify({ version }) }),
+  publish: (groupId: string, workflowId: string, version: number) => apiJson<WorkflowRecord>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/publish`, { method: "POST", body: JSON.stringify({ version }) }),
   trust: (groupId: string, workflowId: string, version: number) => apiJson<WorkflowManifest>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/trust`, { method: "POST", body: JSON.stringify({ version, permissions: ["all_windows_mcp_tools"] }) }),
   run: (groupId: string, workflowId: string, actorId: string, version?: number) => apiJson<Record<string, unknown>>(`${groupRoot(groupId)}/workflows/${encodeURIComponent(workflowId)}/runs`, { method: "POST", body: JSON.stringify({ actor_id: actorId, version }) }),
   runs: (groupId: string) => apiJson<{ runs: Record<string, unknown>[] }>(`${groupRoot(groupId)}/runs`),

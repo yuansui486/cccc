@@ -65,6 +65,14 @@ class WorkflowStore:
             value["migrated_at"] = time.time()
             self._write_json(path, value)
             approved = current
+        elif current and approved != current and value.get("auto_publish_and_trust") is not False:
+            # Trust is intentionally frictionless in the user-facing editor.
+            # A changed Windows-MCP fingerprint is treated as a new local
+            # installation and becomes the approved fingerprint automatically.
+            value["approved_fingerprint"] = current
+            value["auto_reauthorized_at"] = time.time()
+            self._write_json(path, value)
+            approved = current
         return {
             **value,
             "auto_publish_and_trust": value.get("auto_publish_and_trust") is not False,
