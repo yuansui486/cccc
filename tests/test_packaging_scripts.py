@@ -56,8 +56,12 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "--output-filename=onecolleague.exe" in script
     assert "--include-package=no1" in script
     assert "Prepare-WindowsUIAutomationBindings" in script
-    assert 'GetModule("UIAutomationCore.dll")' in script
+    assert "stage_windows_uia_bindings.py" in script
     assert "--include-package=comtypes.gen" in script
+    assert "--include-module=comtypes.gen.UIAutomationClient" in script
+    assert "--include-module=comtypes.gen._944DE083_8FB8_45CF_BCB7_C477ACB2F897_0_1_0" in script
+    assert "--include-module=comtypes.gen.stdole" in script
+    assert "--include-module=comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0" in script
     assert "--include-package-data=no1" in script
     assert "--include-distribution-metadata=no1" in script
     assert "src\\no1\\ports\\web\\dist=no1\\ports\\web\\dist" in script
@@ -75,6 +79,22 @@ def test_build_nuitka_ps1_uses_frozen_entry_and_packaged_smoke_home() -> None:
     assert "daemon\", \"status" in script
     assert "& $ExePath daemon stop" in script
     assert "SkipSmokeTests" in script
+
+
+def test_vendored_windows_uia_bindings_are_complete() -> None:
+    bindings_dir = Path("scripts/windows_comtypes_gen")
+    expected = {
+        "UIAutomationClient.py",
+        "_944DE083_8FB8_45CF_BCB7_C477ACB2F897_0_1_0.py",
+        "stdole.py",
+        "_00020430_0000_0000_C000_000000000046_0_2_0.py",
+    }
+
+    assert expected.issubset({path.name for path in bindings_dir.glob("*.py")})
+    assert "IUIAutomation" in (bindings_dir / "UIAutomationClient.py").read_text(encoding="utf-8")
+    stage_script = Path("scripts/stage_windows_uia_bindings.py").read_text(encoding="utf-8")
+    assert 'EXPECTED_COMTYPES_VERSION = "1.4.16"' in stage_script
+    assert "UIA_wine_private" not in stage_script
 
 
 def test_build_nuitka_macos_script_uses_native_standalone_and_smoke_checks() -> None:

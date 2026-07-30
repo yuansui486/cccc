@@ -107,16 +107,9 @@ function Prepare-WindowsUIAutomationBindings {
     [string]$PythonPath
   )
 
-  $probe = @"
-import comtypes.client
-module = comtypes.client.GetModule("UIAutomationCore.dll")
-assert getattr(module, "IUIAutomation", None), "missing IUIAutomation"
-assert getattr(module, "CUIAutomation8", None) or getattr(module, "CUIAutomation", None), "missing CUIAutomation class"
-import comtypes.gen.UIAutomationClient as generated
-assert getattr(generated, "IUIAutomation", None), "generated UIAutomationClient is invalid"
-print("UIAutomation bindings:", generated.__file__)
-"@
-  Invoke-CheckedNative -FilePath $PythonPath -ArgumentList @("-c", $probe) -WorkingDirectory $rootDir
+  $stageScript = Join-Path $rootDir "scripts\stage_windows_uia_bindings.py"
+  Test-PathExists -Path $stageScript -Message "Missing vendored UIAutomation staging script"
+  Invoke-CheckedNative -FilePath $PythonPath -ArgumentList @($stageScript) -WorkingDirectory $rootDir
 }
 
 function Resolve-ProjectPython {
@@ -244,6 +237,10 @@ $nuitkaArgs = @(
   "--output-folder-name=no1.frozen_entry.dist",
   "--include-package=no1",
   "--include-package=comtypes.gen",
+  "--include-module=comtypes.gen.UIAutomationClient",
+  "--include-module=comtypes.gen._944DE083_8FB8_45CF_BCB7_C477ACB2F897_0_1_0",
+  "--include-module=comtypes.gen.stdole",
+  "--include-module=comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0",
   "--include-package-data=no1",
   "--include-distribution-metadata=no1",
   "--include-data-dir=src\no1\ports\web\dist=no1\ports\web\dist",
