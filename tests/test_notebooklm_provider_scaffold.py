@@ -8,6 +8,45 @@ from unittest.mock import patch
 
 
 class TestNotebookLMProviderScaffold(unittest.TestCase):
+    def test_delete_source_treats_vendor_none_as_success(self) -> None:
+        import asyncio
+
+        from no1.providers.notebooklm.adapter import _delete_source_async
+
+        class _FakeSources:
+            async def delete(self, notebook_id: str, source_id: str):
+                self.called_with = (notebook_id, source_id)
+                return None
+
+        class _FakeClient:
+            def __init__(self) -> None:
+                self.sources = _FakeSources()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        fake_client = _FakeClient()
+
+        async def _fake_build_client(*, auth_payload, timeout_seconds):
+            _ = auth_payload, timeout_seconds
+            return fake_client
+
+        with patch("no1.providers.notebooklm.adapter._build_client", side_effect=_fake_build_client):
+            out = asyncio.run(
+                _delete_source_async(
+                    notebook_id="nb_1",
+                    source_id="src_1",
+                    auth_payload={},
+                    timeout_seconds=10.0,
+                )
+            )
+
+        self.assertEqual(fake_client.sources.called_with, ("nb_1", "src_1"))
+        self.assertTrue(out.get("deleted"))
+
     def test_health_check_accepts_explicit_auth_even_without_real_env_flag(self) -> None:
         from no1.providers.notebooklm.compat import NotebookLMCompatStatus
         from no1.providers.notebooklm.health import notebooklm_health_check

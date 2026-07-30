@@ -1329,12 +1329,12 @@ async def _delete_source_async(
 ) -> Dict[str, Any]:
     client = await _build_client(auth_payload=auth_payload, timeout_seconds=timeout_seconds)
     async with client:
-        ok = await client.sources.delete(notebook_id, source_id)
+        await client.sources.delete(notebook_id, source_id)
     return {
         "provider": "notebooklm",
         "remote_space_id": notebook_id,
         "source_id": source_id,
-        "deleted": bool(ok),
+        "deleted": True,
     }
 
 

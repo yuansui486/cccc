@@ -881,7 +881,7 @@ class TestGroupSpaceOps(unittest.TestCase):
             cleanup_stub()
             cleanup()
 
-    def test_space_sources_list_refresh_delete_with_stub(self) -> None:
+    def test_space_sources_list_refresh_and_real_delete(self) -> None:
         _, cleanup = self._with_home()
         cleanup_stub = self._with_env("CCCC_NOTEBOOKLM_STUB", "1")
         try:
@@ -928,20 +928,41 @@ class TestGroupSpaceOps(unittest.TestCase):
             refreshed_result = refreshed.result if isinstance(refreshed.result, dict) else {}
             self.assertEqual(str(refreshed_result.get("action") or ""), "refresh")
 
-            deleted, _ = self._call(
-                "group_space_sources",
-                {
-                    "group_id": gid,
-                    "provider": "notebooklm",
-                    "lane": "work",
-                    "action": "delete",
-                    "source_id": "src_abc",
-                    "by": "user",
-                },
-            )
+            class _RealAdapter:
+                def delete_source(self, *, remote_space_id: str, source_id: str, auth_json_raw: str | None = None):
+                    _ = auth_json_raw
+                    return {
+                        "provider": "notebooklm",
+                        "remote_space_id": remote_space_id,
+                        "source_id": source_id,
+                        "deleted": True,
+                    }
+
+            with patch(
+                "no1.daemon.space.group_space_provider.notebooklm_real_enabled",
+                return_value=True,
+            ), patch(
+                "no1.daemon.space.group_space_provider.get_notebooklm_adapter",
+                return_value=_RealAdapter(),
+            ):
+                deleted, _ = self._call(
+                    "group_space_sources",
+                    {
+                        "group_id": gid,
+                        "provider": "notebooklm",
+                        "lane": "work",
+                        "action": "delete",
+                        "source_id": "src_abc",
+                        "by": "user",
+                    },
+                )
             self.assertTrue(deleted.ok, getattr(deleted, "error", None))
             deleted_result = deleted.result if isinstance(deleted.result, dict) else {}
             self.assertEqual(str(deleted_result.get("action") or ""), "delete")
+            provider_delete_result = (
+                deleted_result.get("delete_result") if isinstance(deleted_result.get("delete_result"), dict) else {}
+            )
+            self.assertTrue(provider_delete_result.get("deleted"))
         finally:
             cleanup_stub()
             cleanup()
