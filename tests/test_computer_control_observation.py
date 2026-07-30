@@ -24,6 +24,25 @@ from no1.kernel.registry import load_registry
 
 
 class TestComputerControlObservation(unittest.TestCase):
+    def test_frozen_uia_loader_sets_comtypes_frozen_marker_for_import(self) -> None:
+        self.assertFalse(hasattr(sys, "frozen"))
+        generated = SimpleNamespace(IUIAutomation=object(), CUIAutomation8=object())
+        observed_markers = []
+
+        def import_module(_name):
+            observed_markers.append(getattr(sys, "frozen", None))
+            return generated
+
+        with patch.object(observation_module, "is_frozen_executable", return_value=True), patch.object(
+            observation_module.importlib,
+            "import_module",
+            side_effect=import_module,
+        ):
+            self.assertIs(observation_module._load_uia_client_module(), generated)
+
+        self.assertEqual(observed_markers, [True])
+        self.assertFalse(hasattr(sys, "frozen"))
+
     def test_frozen_uia_loader_never_generates_missing_bindings(self) -> None:
         with patch.object(observation_module, "is_frozen_executable", return_value=True), patch.object(
             observation_module.importlib,

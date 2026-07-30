@@ -124,8 +124,17 @@ class UIAUnavailableError(RuntimeError):
 
 def _load_uia_client_module() -> Any:
     """Load a bundled UIA typelib, generating it only in source installs."""
+    marker_missing = is_frozen_executable() and not hasattr(sys, "frozen")
+    if marker_missing:
+        # comtypes otherwise rejects pre-generated bindings when the target
+        # machine's system DLL timestamp differs from the build machine.
+        sys.frozen = True  # type: ignore[attr-defined]
     try:
-        return importlib.import_module("comtypes.gen.UIAutomationClient")
+        try:
+            return importlib.import_module("comtypes.gen.UIAutomationClient")
+        finally:
+            if marker_missing:
+                delattr(sys, "frozen")
     except Exception as bundled_error:
         if is_frozen_executable():
             raise UIAUnavailableError(
