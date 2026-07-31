@@ -65,6 +65,71 @@ class TestGroupBridgeRegistration(unittest.TestCase):
 
         self.assertEqual(normalize_url("HTTPS://Hub.Example.com:443/api/"), "https://hub.example.com/api")
         self.assertEqual(normalize_url("http://hub.example.com:80/"), "http://hub.example.com")
+        self.assertEqual(
+            normalize_url("HTTPS://[2001:0DB8:0:0:0:0:0:1]:443/api/"),
+            "https://[2001:db8::1]/api",
+        )
+        self.assertEqual(
+            normalize_url("http://[2001:db8::1]:80/"),
+            "http://[2001:db8::1]",
+        )
+        self.assertEqual(
+            normalize_url("https://[2001:db8::1]:8443/api/"),
+            "https://[2001:db8::1]:8443/api",
+        )
+        self.assertNotEqual(
+            normalize_url("https://[2001:db8::1]:8443/"),
+            normalize_url("https://[2001:db8::1:8443]/"),
+        )
+
+    def test_ipv6_session_upsert_reload_and_target_lookup_share_one_natural_key(self) -> None:
+        from no1.kernel.group_bridge.registration import (
+            get_registration_by_target,
+            load_registrations,
+            upsert_registration,
+        )
+
+        common = dict(
+            transport="group_bridge_session",
+            remote_group_id="remote-group",
+            remote_peer_id="remote-peer",
+            _approved_by_pairing=True,
+        )
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            first = upsert_registration(
+                "local-group",
+                "HTTPS://[2001:0DB8:0:0:0:0:0:1]:443/api/",
+                home=home,
+                **common,
+            )
+            replay = upsert_registration(
+                "local-group",
+                "https://[2001:db8::1]/api",
+                home=home,
+                **common,
+            )
+            other = upsert_registration(
+                "local-group",
+                "https://[2001:db8::1:8443]/api",
+                home=home,
+                **common,
+            )
+
+            self.assertEqual(first["registration_id"], replay["registration_id"])
+            self.assertEqual(first["url"], "https://[2001:db8::1]/api")
+            self.assertNotEqual(first["registration_id"], other["registration_id"])
+            loaded = load_registrations(home)
+            self.assertEqual(set(loaded), {first["registration_id"], other["registration_id"]})
+            found = get_registration_by_target(
+                "https://[2001:0db8::1]:443/api/",
+                "local-group",
+                home,
+                transport="group_bridge_session",
+                remote_group_id="remote-group",
+                remote_peer_id="remote-peer",
+            )
+            self.assertEqual(found, replay)
 
     def test_rejects_raw_secret_without_echo_or_file(self) -> None:
         from no1.kernel.group_bridge.registration import list_registrations, upsert_registration

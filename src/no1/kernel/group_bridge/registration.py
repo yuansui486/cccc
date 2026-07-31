@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import ipaddress
 import json
 import re
 import secrets
@@ -63,6 +64,8 @@ def normalize_url(url: str) -> str:
     host = (parts.hostname or "").lower()
     if not scheme or not host:
         return raw
+    if ":" in host:
+        host = f"[{ipaddress.IPv6Address(host).compressed}]"
     port = parts.port
     if port is not None and _DEFAULT_PORTS.get(scheme) == port:
         port = None
