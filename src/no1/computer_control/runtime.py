@@ -14,6 +14,20 @@ from typing import Any, Dict, List, Optional
 
 from ..util.fs import atomic_write_text
 from .lease import ComputerControlLease, LeaseConflict
+from .authorization import (
+    RunStartClaim,
+    normalized_run_inputs,
+    run_inputs_digest,
+    workflow_definition_digest,
+)
+from .run_authority import (
+    RunAuthorityStore,
+    RunExecutionClaim,
+    RunOperationClaim,
+    RunReadClaim,
+    RunStopOwnerClaim,
+    RunTerminationClaim,
+)
 from .mcp import (
     MCPOutcomeUnknown,
     MCPUnavailable,
@@ -23,11 +37,25 @@ from .mcp import (
     validate_workflow_tools,
 )
 from .models import WorkflowDefinition
+from .requests import ComputerRequestStore
 from .storage import WorkflowStore
 from .elements import element_center, locator_from_element, normalize_snapshot, resolve_locator
 
 REF_RE = re.compile(r"^\$\{(inputs|steps)\.([A-Za-z0-9_.-]+)\}$")
 SECRET_RE = re.compile(r"^\$\{secret:([A-Za-z_][A-Za-z0-9_]*)\}$")
+_LEGACY_EXECUTION_SEAL = object()
+
+
+@dataclass(frozen=True)
+class _LegacyExecution:
+    _seal: object = _LEGACY_EXECUTION_SEAL
+
+
+@dataclass
+class _ManualExecution:
+    authorities: RunAuthorityStore
+    claim: RunExecutionClaim
+    termination: RunTerminationClaim | None = None
 
 
 class ElementResolutionError(ValueError):
@@ -84,37 +112,280 @@ class ObservationContext:
 
 
 class WorkflowRunner:
-    def __init__(self, home: Path, store: WorkflowStore, lease: ComputerControlLease, session: WindowsMCPSession, fingerprint_provider: Optional[Any] = None, observation_provider: Optional[Any] = None):
+    def __init__(
+        self,
+        home: Path,
+        store: WorkflowStore,
+        lease: ComputerControlLease,
+        session: WindowsMCPSession,
+        fingerprint_provider: Optional[Any] = None,
+        observation_provider: Optional[Any] = None,
+        *,
+        run_authorities: Optional[RunAuthorityStore] = None,
+        requests: Optional[ComputerRequestStore] = None,
+    ):
         self.home = home
         self.store = store
         self.lease = lease
         self.session = session
         self.fingerprint_provider = fingerprint_provider or (lambda: "")
         self.observation_provider = observation_provider
+        self.run_authorities = run_authorities
+        self.requests = requests
         self._observation_contexts: Dict[str, ObservationContext] = {}
         self._tasks: Dict[str, asyncio.Task[None]] = {}
         self._cancelled: set[str] = set()
+        self._manual_executions: Dict[str, _ManualExecution] = {}
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self._sync_thread: threading.Thread | None = None
         self._sync_lock = threading.Lock()
+        if self.run_authorities is not None:
+            self._recover_manual_runs_after_restart()
 
     class _ExternalLeaseLost(RuntimeError):
         def __init__(self, lease: Optional[Dict[str, Any]] = None):
             super().__init__("computer control is now occupied by another group")
             self.lease = lease or {}
 
-    async def _heartbeat_loop(self, run: Dict[str, Any], lost: asyncio.Event) -> None:
+    def _recover_manual_runs_after_restart(self) -> None:
+        assert self.run_authorities is not None
+        for candidate in self.run_authorities.restart_candidates():
+            expected = {
+                "expected_group_id": candidate["group_id"],
+                "expected_actor_id": candidate["actor_id"],
+                "expected_resource_id": candidate["resource_id"],
+                "expected_authority_id": candidate["authority_id"],
+                "expected_execution_id": candidate["execution_id"],
+            }
+            try:
+                if candidate["control_state"] == "revoked":
+                    claim = self.run_authorities.prepare_terminal_reconciliation(**expected)
+                    self.run_authorities.finish_terminal_reconciliation(claim)
+                else:
+                    claim = self.run_authorities.prepare_restart_recovery(**expected)
+                    self.lease.release_run_after_restart(authority=claim)
+                    self.run_authorities.finish_restart_recovery(claim)
+            except (PermissionError, OSError):
+                continue
+
+    def _require_execution(
+        self,
+        run: Dict[str, Any],
+        execution: _LegacyExecution | _ManualExecution,
+    ) -> None:
+        origin = str(run.get("origin") or "legacy_internal")
+        if isinstance(execution, _LegacyExecution):
+            if execution._seal is not _LEGACY_EXECUTION_SEAL or origin != "legacy_internal":
+                raise PermissionError("manual actor run requires execution authority")
+            return
+        if not isinstance(execution, _ManualExecution) or origin != "manual_actor":
+            raise PermissionError("validated manual run execution authority is required")
+        execution.claim.require_current()
+        expected = execution.authorities.run_anchor_for_execution_claim(execution.claim)
+        if run.get("run_authority") != expected:
+            raise PermissionError("manual actor run authority anchor is invalid")
+
+    def _require_provider_call(
+        self,
+        run: Dict[str, Any],
+        execution: _LegacyExecution | _ManualExecution,
+    ) -> None:
+        """Revalidate both authority and exact desktop ownership per RPC."""
+        self._require_execution(run, execution)
+        group_id = str(run["group_id"])
+        actor_id = str(run["actor_id"])
+        run_id = str(run["run_id"])
+        if isinstance(execution, _ManualExecution):
+            self.lease.require_run(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=run_id,
+                authority=execution.claim,
+            )
+        else:
+            self.lease.require(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=run_id,
+                allow_observe=False,
+            )
+
+    def _write_execution(
+        self,
+        group_id: str,
+        run: Dict[str, Any],
+        execution: _LegacyExecution | _ManualExecution,
+    ) -> None:
+        self._require_execution(run, execution)
+        self._write_unchecked(group_id, run)
+
+    def _write_manual_operation(
+        self,
+        group_id: str,
+        run: Dict[str, Any],
+        operation_claim: RunOperationClaim,
+    ) -> None:
+        if self.run_authorities is None:
+            raise PermissionError("run authority store is unavailable")
+        expected = self.run_authorities.run_anchor_for_operation_claim(operation_claim)
+        if (
+            str(run.get("origin") or "") != "manual_actor"
+            or run.get("run_authority") != expected
+        ):
+            raise PermissionError("manual actor run authority anchor is invalid")
+        self._write_unchecked(group_id, run)
+
+    def _transition_manual(
+        self,
+        run: Dict[str, Any],
+        execution: _LegacyExecution | _ManualExecution,
+        state: str,
+    ) -> None:
+        if not isinstance(execution, _ManualExecution):
+            return
+        if state == "running" and execution.claim.state != "running":
+            execution.claim = execution.authorities.mark_running(execution.claim)
+        elif state == "waiting_recovery":
+            execution.claim = execution.authorities.mark_waiting_recovery(execution.claim)
+        elif state == "waiting_approval":
+            execution.claim = execution.authorities.mark_waiting_approval(execution.claim)
+        elif state == "awaiting_verification":
+            execution.claim = execution.authorities.mark_awaiting_verification(execution.claim)
+
+    def _finalize_manual_execution(
+        self,
+        group_id: str,
+        run: Dict[str, Any],
+        execution: _ManualExecution,
+    ) -> None:
+        status = str(run.get("status") or "")
+        if execution.termination is not None:
+            run["status"] = "cancelled"
+            self.lease.release_run(run_id=str(run["run_id"]), authority=execution.termination)
+            execution.authorities.mark_cancelled(execution.termination)
+        elif status == "awaiting_verification":
+            if execution.claim.state != "awaiting_verification":
+                self._transition_manual(run, execution, "awaiting_verification")
+            self.lease.release_run(run_id=str(run["run_id"]), authority=execution.claim)
+        else:
+            terminal_status = (
+                "completed"
+                if status == "completed"
+                else "failed"
+                if status == "failed"
+                else "interrupted"
+            )
+            run["status"] = terminal_status
+            self.lease.release_run(run_id=str(run["run_id"]), authority=execution.claim)
+            def finalize(require_current: Any) -> str:
+                if terminal_status != "completed":
+                    return terminal_status
+                authorization = (
+                    run.get("authorization")
+                    if isinstance(run.get("authorization"), dict)
+                    else {}
+                )
+                has_request_authorization = bool(
+                    str(authorization.get("request_id") or "").strip()
+                )
+                finalized: Dict[str, Any] = {}
+                try:
+                    if has_request_authorization and authorization.get("allow_publish") is not False:
+                        require_current()
+                        finalized["published"] = self.store.publish(
+                            group_id,
+                            str(run["workflow_id"]),
+                            int(run["version"]),
+                        )
+                    fingerprint = str(self.fingerprint_provider() or "")
+                    if (
+                        has_request_authorization
+                        and authorization.get("allow_trust") is not False
+                        and fingerprint
+                    ):
+                        require_current()
+                        finalized["trusted"] = self.store.trust(
+                            group_id,
+                            str(run["workflow_id"]),
+                            int(run["version"]),
+                            fingerprint=fingerprint,
+                            permissions=["all_windows_mcp_tools"],
+                        )
+                    run["finalization"] = {
+                        "published": "published" in finalized,
+                        "trusted": "trusted" in finalized,
+                        "unattended_triggers_authorized": has_request_authorization
+                        and authorization.get("allow_unattended_triggers") is not False,
+                    }
+                    return "completed"
+                except Exception as exc:
+                    run["finalization"] = {
+                        "published": "published" in finalized,
+                        "trusted": "trusted" in finalized,
+                        "unattended_triggers_authorized": has_request_authorization
+                        and authorization.get("allow_unattended_triggers") is not False,
+                    }
+                    run.update(
+                        {
+                            "status": "failed",
+                            "error": {
+                                "code": "finalization_failed",
+                                "layer": "runtime",
+                                "message": str(exc)[:2000],
+                                "retryable": True,
+                            },
+                            "finished_at": time.time(),
+                            "updated_at": time.time(),
+                        }
+                    )
+                    return "failed"
+
+            try:
+                execution.authorities.finish_execution_with_callback(
+                    execution.claim,
+                    finalize,
+                )
+            except PermissionError:
+                if execution.termination is None:
+                    raise
+                run["status"] = "cancelled"
+                execution.authorities.mark_cancelled(execution.termination)
+        self._write_unchecked(group_id, run)
+        if str(run.get("status") or "") != "awaiting_verification":
+            self._manual_executions.pop(str(run["run_id"]), None)
+
+    async def _heartbeat_loop(
+        self,
+        run: Dict[str, Any],
+        lost: asyncio.Event,
+        execution: _LegacyExecution | _ManualExecution,
+    ) -> None:
         group_id, actor_id, run_id = str(run["group_id"]), str(run["actor_id"]), str(run["run_id"])
         while not lost.is_set():
             try:
                 await asyncio.sleep(max(1.0, float(self.lease.HEARTBEAT_SECONDS) / 2))
                 if lost.is_set():
                     return
-                self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=run_id)
+                if isinstance(execution, _ManualExecution):
+                    self._require_execution(run, execution)
+                    self.lease.heartbeat_run(
+                        group_id=group_id,
+                        actor_id=actor_id,
+                        run_id=run_id,
+                        authority=execution.claim,
+                    )
+                else:
+                    self._require_execution(run, execution)
+                    self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=run_id)
                 run["lease"] = {"last_heartbeat_at": time.time(), "status": "owned"}
             except asyncio.CancelledError:
                 raise
             except PermissionError:
+                if isinstance(execution, _ManualExecution):
+                    run["lease"] = {"status": "lost"}
+                    run["status"] = "external_blocked"
+                    lost.set()
+                    return
                 current = self.lease.status().get("lease")
                 if not isinstance(current, dict) or str(current.get("run_id") or "") == run_id:
                     try:
@@ -422,10 +693,12 @@ class WorkflowRunner:
 
     async def _resolve_element_action(
         self,
+        run: Dict[str, Any],
         node: Any,
         arguments: Dict[str, Any],
         event: Dict[str, Any],
         *,
+        execution: _LegacyExecution | _ManualExecution,
         tool_override: str = "",
     ) -> Dict[str, Any]:
         """Resolve an action target from a fresh UI tree before mutating input."""
@@ -438,12 +711,14 @@ class WorkflowRunner:
             # expose a UI target (real Windows-MCP Click/Type schemas reject
             # such calls during the normal workflow validation).
             return arguments
+        self._require_provider_call(run, execution)
         snapshot_result = await self.session.call_tool("Snapshot", {}, timeout=None)
         snapshot = normalize_snapshot(snapshot_result)
         self._validate_element_argument_shape(tool_name, arguments, {})
         target_override = event.get("target") if isinstance(event.get("target"), dict) else None
         target = target_override if target_override is not None else getattr(node, "target", None)
         locator = target.model_dump(mode="json") if hasattr(target, "model_dump") else dict(target) if isinstance(target, dict) else None
+        self._require_provider_call(run, execution)
         snapshot = await self._enhance_observation(snapshot, locator)
         match: Dict[str, Any] = {"status": "not_found", "matches": [], "match_count": 0, "confidence": "none"}
         if locator and str(locator.get("strategy") or "uia") != "position":
@@ -514,6 +789,7 @@ class WorkflowRunner:
                 retryable=True,
             )
         output = dict(arguments)
+        self._require_provider_call(run, execution)
         catalog = await self._catalog()
         item = next((item for item in catalog if str(item.get("name") or "") == tool_name), {})
         schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {}
@@ -591,10 +867,15 @@ class WorkflowRunner:
     def _recovery_path(self, group_id: str, run_id: str, recovery_id: str) -> Path:
         return self.store.state_root(group_id) / "recoveries" / run_id / f"{recovery_id}.json"
 
-    def _write(self, group_id: str, run: Dict[str, Any]) -> None:
+    def _write_unchecked(self, group_id: str, run: Dict[str, Any]) -> None:
         path = self._run_path(group_id, str(run["run_id"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(path, json.dumps(run, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+
+    def _write(self, group_id: str, run: Dict[str, Any]) -> None:
+        if str(run.get("origin") or "legacy_internal") == "manual_actor":
+            raise PermissionError("manual actor run requires execution authority")
+        self._write_unchecked(group_id, run)
 
     @staticmethod
     def _emit(kind: str, **data: Any) -> None:
@@ -605,7 +886,7 @@ class WorkflowRunner:
         except Exception:
             pass
 
-    def get(self, group_id: str, run_id: str) -> Dict[str, Any]:
+    def _get_unchecked(self, group_id: str, run_id: str) -> Dict[str, Any]:
         error: BaseException | None = None
         value: Any = None
         for attempt in range(3):
@@ -627,6 +908,68 @@ class WorkflowRunner:
             raise KeyError(run_id)
         return value
 
+    def get(self, group_id: str, run_id: str) -> Dict[str, Any]:
+        run = self._get_unchecked(group_id, run_id)
+        if str(run.get("origin") or "legacy_internal") == "manual_actor":
+            raise PermissionError("manual actor run requires operation authority")
+        return run
+
+    def get_manual(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        actor_id: str,
+        operation_claim: Optional[RunOperationClaim],
+    ) -> Dict[str, Any]:
+        if self.run_authorities is None or not isinstance(operation_claim, RunOperationClaim):
+            raise PermissionError("validated run operation claim is required")
+        operation_claim.require_current()
+        expected_anchor = self.run_authorities.run_anchor_for_operation_claim(operation_claim)
+        run = self._get_unchecked(group_id, run_id)
+        if (
+            str(run.get("origin") or "") != "manual_actor"
+            or operation_claim.group_id != group_id
+            or operation_claim.actor_id != actor_id
+            or operation_claim.resource_id != run_id
+            or str(run.get("group_id") or "") != group_id
+            or str(run.get("actor_id") or "") != actor_id
+            or str(run.get("run_id") or "") != run_id
+            or str(run.get("workflow_id") or "") != operation_claim.workflow_id
+            or int(run.get("version") or 0) != operation_claim.version
+            or run.get("run_authority") != expected_anchor
+        ):
+            raise PermissionError("manual actor run authority does not match")
+        return run
+
+    def get_manual_read(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        actor_id: str,
+        read_claim: Optional[RunReadClaim],
+    ) -> Dict[str, Any]:
+        if self.run_authorities is None or not isinstance(read_claim, RunReadClaim):
+            raise PermissionError("validated run read claim is required")
+        read_claim.require_current()
+        expected_anchor = self.run_authorities.run_anchor_for_read_claim(read_claim)
+        run = self._get_unchecked(group_id, run_id)
+        if (
+            str(run.get("origin") or "") != "manual_actor"
+            or read_claim.group_id != group_id
+            or read_claim.actor_id != actor_id
+            or read_claim.resource_id != run_id
+            or str(run.get("group_id") or "") != group_id
+            or str(run.get("actor_id") or "") != actor_id
+            or str(run.get("run_id") or "") != run_id
+            or str(run.get("workflow_id") or "") != read_claim.workflow_id
+            or int(run.get("version") or 0) != read_claim.version
+            or run.get("run_authority") != expected_anchor
+        ):
+            raise PermissionError("manual actor run read authority does not match")
+        return run
+
     def list(self, group_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         root = self.store.state_root(group_id) / "runs"
         if not root.exists():
@@ -637,7 +980,7 @@ class WorkflowRunner:
                 value = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if isinstance(value, dict):
+            if isinstance(value, dict) and str(value.get("origin") or "legacy_internal") != "manual_actor":
                 result.append(value)
         return result
 
@@ -649,6 +992,61 @@ class WorkflowRunner:
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(path, json.dumps({"approved": bool(approved), "decided_at": time.time()}, ensure_ascii=False) + "\n")
         return {"run_id": run_id, "node_id": node_id, "approved": bool(approved)}
+
+    def decide_approval_manual(
+        self,
+        group_id: str,
+        run_id: str,
+        node_id: str,
+        *,
+        actor_id: str,
+        operation_claim: Optional[RunOperationClaim],
+        approved: bool,
+    ) -> Dict[str, Any]:
+        self.get_manual(
+            group_id,
+            run_id,
+            actor_id=actor_id,
+            operation_claim=operation_claim,
+        )
+        assert isinstance(operation_claim, RunOperationClaim)
+
+        def decide(expected_anchor: Dict[str, Any]) -> Dict[str, Any]:
+            run = self._get_unchecked(group_id, run_id)
+            if (
+                str(run.get("origin") or "") != "manual_actor"
+                or operation_claim.group_id != group_id
+                or operation_claim.actor_id != actor_id
+                or operation_claim.resource_id != run_id
+                or str(run.get("group_id") or "") != group_id
+                or str(run.get("actor_id") or "") != actor_id
+                or str(run.get("run_id") or "") != run_id
+                or str(run.get("workflow_id") or "") != operation_claim.workflow_id
+                or int(run.get("version") or 0) != operation_claim.version
+                or run.get("run_authority") != expected_anchor
+            ):
+                raise PermissionError("manual actor run authority does not match")
+            if (
+                str(run.get("status") or "") != "waiting_approval"
+                or str(run.get("current_node_id") or "") != node_id
+            ):
+                raise ValueError("run is not waiting for approval on this node")
+            path = self._approval_path(group_id, run_id, node_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(
+                path,
+                json.dumps(
+                    {"approved": bool(approved), "decided_at": time.time()},
+                    ensure_ascii=False,
+                )
+                + "\n",
+            )
+            return {"run_id": run_id, "node_id": node_id, "approved": bool(approved)}
+
+        return self.run_authorities.perform_operation_with_callback(
+            operation_claim,
+            decide,
+        )
 
     def submit_recovery(
         self,
@@ -699,6 +1097,104 @@ class WorkflowRunner:
             self._write(group_id, run)
         return {"run_id": run_id, "recovery_id": recovery_id, "accepted": True}
 
+    def submit_recovery_manual(
+        self,
+        group_id: str,
+        run_id: str,
+        recovery_id: str = "",
+        *,
+        actor_id: str,
+        operation_claim: Optional[RunOperationClaim],
+        tool: str = "",
+        arguments: Optional[Dict[str, Any]] = None,
+        resolution: str = "retry",
+        node_id: str = "",
+        target: Optional[Dict[str, Any]] = None,
+        idempotency_key: str = "",
+    ) -> Dict[str, Any]:
+        self.get_manual(
+            group_id,
+            run_id,
+            actor_id=actor_id,
+            operation_claim=operation_claim,
+        )
+        resolution = str(resolution or "retry").strip().lower()
+        if resolution not in {"reobserve", "retry", "repair_step", "replace_target", "skip", "cancel"}:
+            raise ValueError("unsupported recovery resolution")
+        key = str(idempotency_key or "").strip()
+        assert isinstance(operation_claim, RunOperationClaim)
+
+        def submit(expected_anchor: Dict[str, Any]) -> Dict[str, Any]:
+            run = self._get_unchecked(group_id, run_id)
+            if (
+                str(run.get("origin") or "") != "manual_actor"
+                or operation_claim.group_id != group_id
+                or operation_claim.actor_id != actor_id
+                or operation_claim.resource_id != run_id
+                or str(run.get("group_id") or "") != group_id
+                or str(run.get("actor_id") or "") != actor_id
+                or str(run.get("run_id") or "") != run_id
+                or str(run.get("workflow_id") or "") != operation_claim.workflow_id
+                or int(run.get("version") or 0) != operation_claim.version
+                or run.get("run_authority") != expected_anchor
+            ):
+                raise PermissionError("manual actor run authority does not match")
+            recovery = run.get("recovery") if isinstance(run.get("recovery"), dict) else {}
+            if str(run.get("status") or "") != "recovering":
+                raise ValueError("run is not waiting for this recovery")
+            current_recovery_id = str(recovery.get("recovery_id") or "")
+            if (
+                not current_recovery_id.startswith("recovery_")
+                or len(current_recovery_id) != len("recovery_") + 12
+                or any(character not in "0123456789abcdef" for character in current_recovery_id[9:])
+            ):
+                raise PermissionError("manual run recovery identity is invalid")
+            if recovery_id and current_recovery_id != recovery_id:
+                raise ValueError("recovery context has changed; refresh and retry")
+            if key and str(recovery.get("resolved_idempotency_key") or "") == key:
+                return {
+                    "run_id": run_id,
+                    "recovery_id": current_recovery_id,
+                    "accepted": True,
+                    "idempotent": True,
+                }
+            path = self._recovery_path(group_id, run_id, current_recovery_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            original_arguments = (
+                recovery.get("arguments")
+                if isinstance(recovery.get("arguments"), dict)
+                else {}
+            )
+            value = {
+                "tool": str(tool or recovery.get("tool") or "").strip(),
+                "arguments": arguments
+                if isinstance(arguments, dict)
+                else dict(original_arguments),
+                "target": target if isinstance(target, dict) else recovery.get("target"),
+                "resolution": resolution,
+                "node_id": node_id or recovery.get("node_id"),
+                "actor_id": actor_id,
+                "idempotency_key": key,
+                "submitted_at": time.time(),
+            }
+            atomic_write_text(
+                path,
+                json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            )
+            if key:
+                recovery["resolved_idempotency_key"] = key
+                self._write_unchecked(group_id, run)
+            return {
+                "run_id": run_id,
+                "recovery_id": current_recovery_id,
+                "accepted": True,
+            }
+
+        return self.run_authorities.perform_operation_with_callback(
+            operation_claim,
+            submit,
+        )
+
     def recovery_context(self, group_id: str, run_id: str) -> Dict[str, Any]:
         run = self.get(group_id, run_id)
         recovery = run.get("recovery") if isinstance(run.get("recovery"), dict) else None
@@ -706,15 +1202,50 @@ class WorkflowRunner:
             return {"run_id": run_id, "pending": False, "status": run.get("status"), "run": run}
         return {"run_id": run_id, "pending": str(run.get("status") or "") == "recovering", "status": run.get("status"), "recovery": recovery}
 
-    async def _wait_for_recovery(self, run: Dict[str, Any], event: Dict[str, Any], *, error: Exception, attempt: int, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def recovery_context_manual(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        actor_id: str,
+        operation_claim: Optional[RunOperationClaim],
+    ) -> Dict[str, Any]:
+        run = self.get_manual(
+            group_id,
+            run_id,
+            actor_id=actor_id,
+            operation_claim=operation_claim,
+        )
+        recovery = run.get("recovery") if isinstance(run.get("recovery"), dict) else None
+        if not recovery:
+            return {"run_id": run_id, "pending": False, "status": run.get("status"), "run": run}
+        return {
+            "run_id": run_id,
+            "pending": str(run.get("status") or "") == "recovering",
+            "status": run.get("status"),
+            "recovery": recovery,
+        }
+
+    async def _wait_for_recovery(
+        self,
+        run: Dict[str, Any],
+        event: Dict[str, Any],
+        *,
+        error: Exception,
+        attempt: int,
+        execution: _LegacyExecution | _ManualExecution,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         group_id, run_id = str(run["group_id"]), str(run["run_id"])
         recovery_id = "recovery_" + uuid.uuid4().hex[:12]
         observation: Any = None
         try:
+            self._require_provider_call(run, execution)
             observation = normalize_tool_result("Snapshot", await self.session.call_tool("Snapshot", {}, timeout=None))
             observation = self._redact_result(observation)
         except Exception as observation_error:
             observation = {"error": str(observation_error)[:1000]}
+        self._require_provider_call(run, execution)
         catalog = await self._catalog()
         active_tool = str(event.get("tool") or "")
         tool_schema = next(
@@ -743,10 +1274,11 @@ class WorkflowRunner:
             "delivery_status": "pending",
         }
         run["status"] = "recovering"
+        self._transition_manual(run, execution, "waiting_recovery")
         run["recovery"] = recovery
         event["status"] = "recovering"
         event["recovery_id"] = recovery_id
-        self._write(group_id, run)
+        self._write_execution(group_id, run, execution)
         self._emit("recovery.required", group_id=group_id, run_id=run_id, actor_id=run.get("actor_id"), **recovery)
         delivered = False
         try:
@@ -786,7 +1318,7 @@ class WorkflowRunner:
             recovery["delivery_error"] = str(delivery_error)[:1000]
         recovery["delivery_status"] = "delivered" if delivered else "failed"
         run["recovery"] = recovery
-        self._write(group_id, run)
+        self._write_execution(group_id, run, execution)
         self._emit("recovery.delivery", group_id=group_id, run_id=run_id, recovery_id=recovery_id, status=recovery["delivery_status"])
         if not delivered:
             raise RuntimeError("AI 自适应恢复通知无法投递：执行智能体未运行或当前不可接收消息")
@@ -800,18 +1332,27 @@ class WorkflowRunner:
                 except (OSError, ValueError):
                     patch = {}
                 if isinstance(patch, dict) and isinstance(patch.get("arguments"), dict):
+                    self._transition_manual(run, execution, "running")
                     run["status"] = "running"
                     run.pop("recovery", None)
                     event["status"] = "running"
-                    self._write(group_id, run)
+                    self._write_execution(group_id, run, execution)
                     return patch
             await asyncio.sleep(0.5)
 
-    async def _wait_for_approval(self, run: Dict[str, Any], node_id: str, *, timeout: Optional[float] = None) -> None:
+    async def _wait_for_approval(
+        self,
+        run: Dict[str, Any],
+        node_id: str,
+        *,
+        execution: _LegacyExecution | _ManualExecution,
+        timeout: Optional[float] = None,
+    ) -> None:
         group_id, run_id = str(run["group_id"]), str(run["run_id"])
         path = self._approval_path(group_id, run_id, node_id)
         run["status"] = "waiting_approval"
-        self._write(group_id, run)
+        self._transition_manual(run, execution, "waiting_approval")
+        self._write_execution(group_id, run, execution)
         self._emit("run.approval_required", group_id=group_id, run_id=run_id, node_id=node_id)
         while True:
             if run_id in self._cancelled:
@@ -822,8 +1363,9 @@ class WorkflowRunner:
                 except (OSError, ValueError):
                     decision = {}
                 if decision.get("approved") is True:
+                    self._transition_manual(run, execution, "running")
                     run["status"] = "running"
-                    self._write(group_id, run)
+                    self._write_execution(group_id, run, execution)
                     return
                 raise PermissionError("用户已拒绝该电脑操作")
             await asyncio.sleep(0.5)
@@ -864,6 +1406,7 @@ class WorkflowRunner:
         if isinstance(trigger_context, dict) and isinstance(trigger_context.get("evidence"), dict):
             trigger["evidence"] = dict(trigger_context["evidence"])
         run = {
+            "origin": "legacy_internal",
             "run_id": run_id,
             "group_id": group_id,
             "workflow_id": workflow_id,
@@ -903,10 +1446,238 @@ class WorkflowRunner:
             version=selected["version"],
             trigger=trigger or None,
         )
-        task = asyncio.create_task(self._execute(run, definition, effective_inputs))
+        task = asyncio.create_task(
+            self._execute(run, definition, effective_inputs, _LegacyExecution())
+        )
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
         return run
+
+    def start_manual_sync(
+        self,
+        group_id: str,
+        workflow_id: str,
+        *,
+        actor_id: str,
+        version: Optional[int],
+        inputs: Dict[str, Any],
+        request_id: str,
+        start_claim: RunStartClaim,
+    ) -> Dict[str, Any]:
+        loop = self._ensure_sync_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            self.start_manual(
+                group_id,
+                workflow_id,
+                actor_id=actor_id,
+                version=version,
+                inputs=inputs,
+                request_id=request_id,
+                start_claim=start_claim,
+            ),
+            loop,
+        )
+        return future.result()
+
+    async def start_manual(
+        self,
+        group_id: str,
+        workflow_id: str,
+        *,
+        actor_id: str,
+        version: Optional[int],
+        inputs: Dict[str, Any],
+        request_id: str,
+        start_claim: RunStartClaim,
+    ) -> Dict[str, Any]:
+        if self.run_authorities is None:
+            raise PermissionError("run authority store is unavailable")
+        if self.requests is None:
+            raise PermissionError("computer control request store is unavailable")
+        normalized_inputs = normalized_run_inputs(inputs)
+        selected = self.store.get(group_id, workflow_id, version=version)
+        selected_version = int(selected.get("version") or 0)
+        actual_definition_digest = workflow_definition_digest(selected.get("definition"))
+        if (
+            start_claim.group_id != group_id
+            or start_claim.actor_id != actor_id
+            or start_claim.request_id != request_id
+            or start_claim.workflow_id != workflow_id
+            or start_claim.version != selected_version
+            or start_claim.definition_digest != actual_definition_digest
+            or start_claim.inputs_digest != run_inputs_digest(normalized_inputs)
+        ):
+            raise PermissionError("run start claim does not match the selected execution scope")
+        definition = WorkflowDefinition.model_validate(
+            {key: value for key, value in selected["definition"].items() if key != "change_note"}
+        )
+        for node in definition.nodes:
+            node_id = str(node.id)
+            if (
+                node_id in {".", ".."}
+                or "/" in node_id
+                or "\\" in node_id
+                or "\x00" in node_id
+                or Path(node_id).is_absolute()
+            ):
+                raise PermissionError("manual workflow node id must be a single path segment")
+        run_id = "run_" + uuid.uuid4().hex[:16]
+        issue = self.run_authorities.begin_run(
+            group_id=group_id,
+            actor_id=actor_id,
+            resource_id=run_id,
+            request_id=request_id,
+            start_claim=start_claim,
+        )
+        now = time.time()
+        run = {
+            "origin": "manual_actor",
+            "run_id": run_id,
+            "group_id": group_id,
+            "workflow_id": workflow_id,
+            "version": int(selected["version"]),
+            "actor_id": actor_id,
+            "status": "initializing",
+            "current_node_id": None,
+            "started_at": now,
+            "updated_at": now,
+            "events": [],
+            "metrics": {
+                "replay_success": False,
+                "transport_restarts": 0,
+                "transport_restarts_at_start": int(
+                    getattr(self.session, "transport_restarts", 0)
+                ),
+            },
+            "authorization": {
+                "request_id": request_id,
+                **dict(issue.operation_claim.permission_snapshot),
+            },
+            "run_authority": self.run_authorities.run_anchor_for_execution_claim(
+                issue.execution_seed
+            ),
+        }
+        reserved = False
+        accepted = None
+        active_lease = False
+        execution: _ManualExecution | None = None
+        try:
+            self._write_unchecked(group_id, run)
+            self.lease.reserve_run(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=run_id,
+                authority=issue.execution_seed,
+            )
+            reserved = True
+            self.requests.mark_run_started(
+                group_id,
+                request_id,
+                run_id=run_id,
+                status="initializing",
+            )
+            accepted = self.run_authorities.accept_execution(issue.execution_seed)
+            self.lease.activate_run_reservation(
+                pending=issue.execution_seed,
+                active=accepted.execution_claim,
+            )
+            active_lease = True
+            execution = _ManualExecution(self.run_authorities, accepted.execution_claim)
+            self._manual_executions[run_id] = execution
+            self._require_execution(run, execution)
+            self._require_provider_call(run, execution)
+            start_catalog = await self._catalog()
+            if start_catalog:
+                validate_workflow_tools(definition, start_catalog)
+            self._require_provider_call(run, execution)
+            self._transition_manual(run, execution, "running")
+            run["status"] = "running"
+            run["updated_at"] = time.time()
+            self._write_execution(group_id, run, execution)
+            effective_inputs = self._effective_inputs(definition, normalized_inputs)
+            task = asyncio.create_task(self._execute(run, definition, effective_inputs, execution))
+            self._tasks[run_id] = task
+            task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
+            self._emit(
+                "run.started",
+                group_id=group_id,
+                run_id=run_id,
+                workflow_id=workflow_id,
+                actor_id=actor_id,
+                version=selected["version"],
+            )
+            return {**run, "run_authority_receipt": issue.receipt}
+        except Exception as start_error:
+            self._manual_executions.pop(run_id, None)
+            rollback_errors: List[str] = []
+
+            def attempt_rollback(label: str, callback: Any) -> bool:
+                try:
+                    callback()
+                except Exception as cleanup_error:
+                    rollback_errors.append(
+                        f"{label}: {type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+                    return False
+                return True
+
+            authority_closed = False
+            if accepted is not None:
+                rollback_claim = execution.claim if execution is not None else accepted.execution_claim
+                if active_lease:
+                    lease_closed = attempt_rollback(
+                        "release active run lease",
+                        lambda: self.lease.release_run(
+                            run_id=run_id,
+                            authority=rollback_claim,
+                        ),
+                    )
+                elif reserved:
+                    lease_closed = attempt_rollback(
+                        "cancel accepted run reservation",
+                        lambda: self.lease.cancel_accepted_run_reservation(
+                            pending=issue.execution_seed,
+                            active=accepted.execution_claim,
+                        ),
+                    )
+                else:
+                    lease_closed = True
+                if lease_closed:
+                    authority_closed = attempt_rollback(
+                        "fail accepted run authority",
+                        lambda: self.run_authorities.fail_accepted_start(rollback_claim),
+                    )
+            else:
+                if reserved:
+                    lease_closed = attempt_rollback(
+                        "cancel pending run reservation",
+                        lambda: self.lease.cancel_run_reservation(
+                            authority=issue.execution_seed
+                        ),
+                    )
+                else:
+                    lease_closed = True
+                if lease_closed:
+                    authority_closed = attempt_rollback(
+                        "revoke pending run authority",
+                        lambda: self.run_authorities.revoke_pending(issue.operation_claim),
+                    )
+            if authority_closed:
+                run.update({"status": "start_failed", "updated_at": time.time()})
+                if self._run_path(group_id, run_id).exists():
+                    attempt_rollback(
+                        "write start-failed run projection",
+                        lambda: self._write_unchecked(group_id, run),
+                    )
+            if rollback_errors:
+                try:
+                    start_error.add_note(
+                        "manual run rollback incomplete; restart recovery will reconcile: "
+                        + "; ".join(rollback_errors)
+                    )
+                except Exception:
+                    pass
+            raise
 
     @staticmethod
     def _effective_inputs(definition: WorkflowDefinition, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1011,7 +1782,13 @@ class WorkflowRunner:
 
         return visit(value)
 
-    async def _execute(self, run: Dict[str, Any], definition: WorkflowDefinition, inputs: Dict[str, Any]) -> None:
+    async def _execute(
+        self,
+        run: Dict[str, Any],
+        definition: WorkflowDefinition,
+        inputs: Dict[str, Any],
+        execution: _LegacyExecution | _ManualExecution,
+    ) -> None:
         group_id, run_id, actor_id = run["group_id"], run["run_id"], run["actor_id"]
         nodes = {node.id: node for node in definition.nodes}
         outgoing: Dict[str, List[Any]] = {node_id: [] for node_id in nodes}
@@ -1026,7 +1803,7 @@ class WorkflowRunner:
             else None
         )
         lease_lost = asyncio.Event()
-        heartbeat_task = asyncio.create_task(self._heartbeat_loop(run, lease_lost))
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop(run, lease_lost, execution))
         try:
             while True:
                 if run_id in self._cancelled:
@@ -1040,16 +1817,23 @@ class WorkflowRunner:
                 event = {"node_id": current, "type": node.type, "status": "running", "started_at": time.time()}
                 run["events"].append(event)
                 run["updated_at"] = time.time()
-                self._write(group_id, run)
+                self._write_execution(group_id, run, execution)
                 self._emit("node.started", group_id=group_id, run_id=run_id, workflow_id=run.get("workflow_id"), node_id=current, node_type=node.type)
                 result: Any = None
                 branch = "next"
                 if node.type == "action":
-                    self.lease.require(group_id=group_id, actor_id=actor_id, run_id=run_id, allow_observe=False)
+                    self._require_provider_call(run, execution)
                     logical_arguments = self._resolve(node.arguments, inputs, steps)
-                    arguments = await self._resolve_element_action(node, dict(logical_arguments), event)
+                    arguments = await self._resolve_element_action(
+                        run,
+                        node,
+                        dict(logical_arguments),
+                        event,
+                        execution=execution,
+                    )
                     event["arguments"] = self._redact_result(arguments)
                     event["target"] = node.target.model_dump(mode="json") if node.target is not None else None
+                    self._require_provider_call(run, execution)
                     live_catalog = await self._catalog()
                     catalog_item = next((item for item in live_catalog if str(item.get("name") or "") == node.tool), {})
                     if catalog_item:
@@ -1069,7 +1853,9 @@ class WorkflowRunner:
                     configured_attempts = node.retries + 1
                     for attempt in range(configured_attempts):
                         try:
+                            self._require_provider_call(run, execution)
                             await self._validate_observation_before_call(event, active_tool)
+                            self._require_provider_call(run, execution)
                             result = normalize_tool_result(active_tool, await self.session.call_tool(active_tool, arguments, timeout=node.timeout_seconds))
                             self._consume_observation_context(event, "consumed_success")
                             last_error = None
@@ -1087,7 +1873,13 @@ class WorkflowRunner:
                                 # Snapshot labels/handles/bounds belong to one
                                 # call only. Every retry starts from business
                                 # arguments and creates a new observation.
-                                arguments = await self._resolve_element_action(node, dict(logical_arguments), event)
+                                arguments = await self._resolve_element_action(
+                                    run,
+                                    node,
+                                    dict(logical_arguments),
+                                    event,
+                                    execution=execution,
+                                )
                                 event["arguments"] = self._redact_result(arguments)
                                 if catalog_item:
                                     try:
@@ -1102,7 +1894,14 @@ class WorkflowRunner:
                     recovery_attempt = 0
                     while last_error is not None and node.adaptive and recovery_attempt < 3:
                         recovery_attempt += 1
-                        patch = await self._wait_for_recovery(run, event, error=last_error, attempt=recovery_attempt, arguments=node.arguments)
+                        patch = await self._wait_for_recovery(
+                            run,
+                            event,
+                            error=last_error,
+                            attempt=recovery_attempt,
+                            execution=execution,
+                            arguments=node.arguments,
+                        )
                         resolution = str(patch.get("resolution") or "retry").strip().lower()
                         if resolution == "cancel":
                             raise asyncio.CancelledError()
@@ -1112,6 +1911,7 @@ class WorkflowRunner:
                             last_error = None
                             break
                         patched_tool = str(patch.get("tool") or active_tool).strip() or active_tool
+                        self._require_provider_call(run, execution)
                         catalog_names = {str(item.get("name") or "") for item in await self._catalog() if isinstance(item, dict)}
                         if catalog_names and patched_tool not in catalog_names:
                             last_error = ValueError(f"unknown Windows-MCP tool in recovery: {patched_tool}")
@@ -1128,10 +1928,19 @@ class WorkflowRunner:
                         if isinstance(patch.get("target"), dict):
                             event["target"] = patch["target"]
                         if patched_tool.lower() in {"click", "type"}:
-                            arguments = await self._resolve_element_action(node, arguments, event, tool_override=patched_tool)
+                            arguments = await self._resolve_element_action(
+                                run,
+                                node,
+                                arguments,
+                                event,
+                                execution=execution,
+                                tool_override=patched_tool,
+                            )
                         event["tool"] = active_tool
                         try:
+                            self._require_provider_call(run, execution)
                             await self._validate_observation_before_call(event, active_tool)
+                            self._require_provider_call(run, execution)
                             result = normalize_tool_result(active_tool, await self.session.call_tool(active_tool, arguments, timeout=node.timeout_seconds))
                             self._consume_observation_context(event, "consumed_success")
                             recovered_arguments = patch.get("arguments")
@@ -1152,8 +1961,10 @@ class WorkflowRunner:
                         event["lease_warning"] = "电脑控制租约在动作完成后失联；后续写操作已暂停"
                     if node.tool.lower() in {"click", "type"}:
                         try:
+                            self._require_provider_call(run, execution)
                             after_snapshot = normalize_snapshot(await self.session.call_tool("Snapshot", {}, timeout=None))
                             target_locator = event.get("target") if isinstance(event.get("target"), dict) else None
+                            self._require_provider_call(run, execution)
                             after_snapshot = await self._enhance_observation(after_snapshot, target_locator)
                             event["post_action_observation"] = {
                                 "observation_id": after_snapshot.get("observation_id"),
@@ -1211,8 +2022,12 @@ class WorkflowRunner:
                 elif node.type == "approval":
                     event["status"] = "waiting_approval"
                     event["message"] = "等待用户确认后继续"
-                    self._write(group_id, run)
-                    await self._wait_for_approval(run, current)
+                    self._write_execution(group_id, run, execution)
+                    await self._wait_for_approval(
+                        run,
+                        current,
+                        execution=execution,
+                    )
                 stored_result = self._store_artifacts(group_id, run_id, current, result) if definition.save_screenshots else result
                 event.update({"status": "completed", "finished_at": time.time(), "result": self._redact_result(stored_result)})
                 self._emit("node.completed", group_id=group_id, run_id=run_id, workflow_id=run.get("workflow_id"), node_id=current, node_type=node.type)
@@ -1229,6 +2044,7 @@ class WorkflowRunner:
             final_evidence_ok = True
             if definition.save_screenshots:
                 try:
+                    self._require_provider_call(run, execution)
                     screenshot = normalize_tool_result(
                         "Screenshot",
                         await self.session.call_tool(
@@ -1251,20 +2067,6 @@ class WorkflowRunner:
                 run["status"] = "awaiting_verification"
                 return
             if definition.auto_verify:
-                authorization = run.get("authorization") if isinstance(run.get("authorization"), dict) else {}
-                has_request_authorization = bool(str(authorization.get("request_id") or "").strip())
-                finalized: Dict[str, Any] = {}
-                if has_request_authorization and authorization.get("allow_publish") is not False:
-                    finalized["published"] = self.store.publish(group_id, str(run["workflow_id"]), int(run["version"]))
-                fingerprint = str(self.fingerprint_provider() or "")
-                if has_request_authorization and authorization.get("allow_trust") is not False and fingerprint:
-                    finalized["trusted"] = self.store.trust(
-                        group_id,
-                        str(run["workflow_id"]),
-                        int(run["version"]),
-                        fingerprint=fingerprint,
-                        permissions=["all_windows_mcp_tools"],
-                    )
                 run["verification"] = {
                     "passed": True,
                     "summary": "所有步骤和最终证据已完成",
@@ -1272,12 +2074,42 @@ class WorkflowRunner:
                     "verified_at": time.time(),
                     "automatic": True,
                 }
-                run["finalization"] = {
-                    "published": "published" in finalized,
-                    "trusted": "trusted" in finalized,
-                    "unattended_triggers_authorized": has_request_authorization and authorization.get("allow_unattended_triggers") is not False,
-                }
-                run["status"] = "published" if finalized else "verified"
+                if isinstance(execution, _ManualExecution):
+                    run["status"] = "completed"
+                else:
+                    authorization = (
+                        run.get("authorization")
+                        if isinstance(run.get("authorization"), dict)
+                        else {}
+                    )
+                    has_request_authorization = bool(
+                        str(authorization.get("request_id") or "").strip()
+                    )
+                    finalized: Dict[str, Any] = {}
+                    if has_request_authorization and authorization.get("allow_publish") is not False:
+                        finalized["published"] = self.store.publish(
+                            group_id, str(run["workflow_id"]), int(run["version"])
+                        )
+                    fingerprint = str(self.fingerprint_provider() or "")
+                    if (
+                        has_request_authorization
+                        and authorization.get("allow_trust") is not False
+                        and fingerprint
+                    ):
+                        finalized["trusted"] = self.store.trust(
+                            group_id,
+                            str(run["workflow_id"]),
+                            int(run["version"]),
+                            fingerprint=fingerprint,
+                            permissions=["all_windows_mcp_tools"],
+                        )
+                    run["finalization"] = {
+                        "published": "published" in finalized,
+                        "trusted": "trusted" in finalized,
+                        "unattended_triggers_authorized": has_request_authorization
+                        and authorization.get("allow_unattended_triggers") is not False,
+                    }
+                    run["status"] = "published" if finalized else "verified"
             else:
                 run["status"] = "awaiting_verification"
         except self._ExternalLeaseLost as exc:
@@ -1346,7 +2178,10 @@ class WorkflowRunner:
             )
             metrics.pop("transport_restarts_at_start", None)
             run["metrics"] = metrics
-            self._write(group_id, run)
+            if isinstance(execution, _ManualExecution):
+                self._finalize_manual_execution(group_id, run, execution)
+            else:
+                self._write_execution(group_id, run, execution)
             try:
                 from ..kernel.events import publish_event
 
@@ -1357,10 +2192,11 @@ class WorkflowRunner:
             except Exception:
                 pass
             self._cancelled.discard(run_id)
-            try:
-                self.lease.release(run_id=run_id)
-            except PermissionError:
-                pass
+            if isinstance(execution, _LegacyExecution):
+                try:
+                    self.lease.release(run_id=run_id)
+                except PermissionError:
+                    pass
 
     @staticmethod
     def _redact_result(value: Any) -> Any:
@@ -1409,6 +2245,81 @@ class WorkflowRunner:
     def cancel_sync(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
         loop = self._ensure_sync_loop()
         future = asyncio.run_coroutine_threadsafe(self.cancel(group_id, run_id, emergency=emergency), loop)
+        return future.result()
+
+    async def cancel_manual(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        stop_claim: Optional[RunStopOwnerClaim],
+        emergency: bool = False,
+    ) -> Dict[str, Any]:
+        if self.run_authorities is None or not isinstance(stop_claim, RunStopOwnerClaim):
+            raise PermissionError("validated run stop-owner claim is required")
+        if stop_claim.group_id != group_id or stop_claim.resource_id != run_id:
+            raise PermissionError("run stop-owner claim does not match the expected resource")
+        execution = self._manual_executions.get(run_id)
+        if not isinstance(execution, _ManualExecution):
+            raise PermissionError("manual actor run execution is unavailable")
+        holder: Dict[str, Dict[str, Any]] = {}
+
+        def validate_live(expected_anchor: Dict[str, Any]) -> None:
+            run = self._get_unchecked(group_id, run_id)
+            if (
+                self._manual_executions.get(run_id) is not execution
+                or str(run.get("origin") or "") != "manual_actor"
+                or str(run.get("group_id") or "") != group_id
+                or str(run.get("actor_id") or "") != stop_claim.actor_id
+                or str(run.get("run_id") or "") != run_id
+                or run.get("run_authority") != expected_anchor
+            ):
+                raise PermissionError("manual actor run execution is unavailable")
+            holder["run"] = run
+
+        def on_started(claim: RunTerminationClaim) -> None:
+            execution.termination = claim
+            self._cancelled.add(run_id)
+
+        self.run_authorities.begin_cancel_for_execution(
+            stop_claim,
+            execution.claim,
+            validate_live=validate_live,
+            on_started=on_started,
+        )
+        run = holder["run"]
+        task = self._tasks.get(run_id)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+        else:
+            run.update({"status": "cancelled", "finished_at": time.time(), "updated_at": time.time()})
+            self._finalize_manual_execution(group_id, run, execution)
+        if emergency:
+            await self.session.stop()
+        return self._get_unchecked(group_id, run_id)
+
+    def cancel_manual_sync(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        stop_claim: Optional[RunStopOwnerClaim],
+        emergency: bool = False,
+    ) -> Dict[str, Any]:
+        loop = self._ensure_sync_loop()
+        future = asyncio.run_coroutine_threadsafe(
+            self.cancel_manual(
+                group_id,
+                run_id,
+                stop_claim=stop_claim,
+                emergency=emergency,
+            ),
+            loop,
+        )
         return future.result()
 
     def verify(
@@ -1485,4 +2396,122 @@ class WorkflowRunner:
         self._emit("run.verified", group_id=group_id, run_id=run_id, workflow_id=run.get("workflow_id"), passed=bool(passed), status=run["status"])
         if temporary_lease:
             self.lease.release(run_id=run_id)
+        return run
+
+    def verify_manual(
+        self,
+        group_id: str,
+        run_id: str,
+        *,
+        actor_id: str,
+        operation_claim: Optional[RunOperationClaim],
+        passed: bool,
+        summary: str,
+        evidence_ids: List[str],
+        fingerprint: str,
+    ) -> Dict[str, Any]:
+        run = self.get_manual(
+            group_id,
+            run_id,
+            actor_id=actor_id,
+            operation_claim=operation_claim,
+        )
+        execution = self._manual_executions.get(run_id)
+        if (
+            not isinstance(execution, _ManualExecution)
+            or execution.authorities is not self.run_authorities
+            or self.run_authorities is None
+            or self.run_authorities.run_anchor_for_execution_claim(execution.claim)
+            != run.get("run_authority")
+        ):
+            raise PermissionError("manual actor run execution is unavailable")
+        if str(run.get("status") or "") != "awaiting_verification":
+            raise ValueError("run is not awaiting verification")
+        failure_markers = [
+            item
+            for item in (run.get("events") if isinstance(run.get("events"), list) else [])
+            if isinstance(item, dict)
+            and (
+                str(item.get("status") or "") in {"failed", "recovering"}
+                or self._contains_failure_marker(item.get("result"))
+                or self._contains_failure_marker(item.get("error"))
+            )
+        ]
+        if passed and (
+            failure_markers
+            or run.get("error")
+            or not bool((run.get("metrics") or {}).get("replay_success"))
+        ):
+            raise ValueError("该运行包含失败步骤，不能验证为成功")
+        assert isinstance(operation_claim, RunOperationClaim)
+        if passed and not fingerprint:
+            authorization = run.get("authorization") if isinstance(run.get("authorization"), dict) else {}
+            if authorization.get("allow_trust") is not False:
+                raise ValueError("Windows-MCP fingerprint is unavailable")
+
+        def finalize(require_current: Any) -> str:
+            run["verification"] = {
+                "passed": bool(passed),
+                "summary": str(summary or "")[:2000],
+                "evidence_ids": [str(item)[:200] for item in evidence_ids[:100]],
+                "verified_by": actor_id,
+                "verified_at": time.time(),
+            }
+            if not passed:
+                run["status"] = "failed"
+                return "failed"
+            authorization = (
+                run.get("authorization")
+                if isinstance(run.get("authorization"), dict)
+                else {}
+            )
+            finalized: Dict[str, Any] = {}
+            try:
+                if authorization.get("allow_publish") is not False:
+                    require_current()
+                    finalized["published"] = self.store.publish(
+                        group_id,
+                        str(run["workflow_id"]),
+                        int(run["version"]),
+                    )
+                if authorization.get("allow_trust") is not False:
+                    require_current()
+                    finalized["trusted"] = self.store.trust(
+                        group_id,
+                        str(run["workflow_id"]),
+                        int(run["version"]),
+                        fingerprint=fingerprint,
+                        permissions=["all_windows_mcp_tools"],
+                    )
+                run["status"] = "completed"
+                target = "completed"
+            except Exception as exc:
+                run.update(
+                    {
+                        "status": "failed",
+                        "error": {
+                            "code": "finalization_failed",
+                            "layer": "runtime",
+                            "message": str(exc)[:2000],
+                            "retryable": True,
+                        },
+                        "finished_at": time.time(),
+                    }
+                )
+                target = "failed"
+            run["finalization"] = {
+                "published": "published" in finalized,
+                "trusted": "trusted" in finalized,
+                "unattended_triggers_authorized": authorization.get("allow_unattended_triggers") is not False,
+            }
+            return target
+
+        execution.authorities.finish_execution_with_callback(
+            execution.claim,
+            finalize,
+            operation_claim=operation_claim,
+        )
+        run["updated_at"] = time.time()
+        self._write_unchecked(group_id, run)
+        self._manual_executions.pop(run_id, None)
         return run

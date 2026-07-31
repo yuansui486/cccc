@@ -47,6 +47,7 @@ class ComputerRequestStore:
             "run_authority",
             "recording_id",
             "created_workflow_id",
+            "run_id",
         }
     )
     IMMUTABLE_ACTIVATED_FIELDS = frozenset(
@@ -196,7 +197,7 @@ class ComputerRequestStore:
     ) -> Dict[str, Any]:
         resource = str(resource_id or "").strip()
         lifecycle_status = str(status or "").strip()
-        if field not in {"recording_id", "created_workflow_id"} or not resource or not lifecycle_status:
+        if field not in {"recording_id", "created_workflow_id", "run_id"} or not resource or not lifecycle_status:
             raise PermissionError("computer control lifecycle resource is invalid")
         with self._locked(group_id):
             current = self._get_unlocked(group_id, request_id)
@@ -244,6 +245,22 @@ class ComputerRequestStore:
             request_id,
             field="created_workflow_id",
             resource_id=created_workflow_id,
+            status=status,
+        )
+
+    def mark_run_started(
+        self,
+        group_id: str,
+        request_id: str,
+        *,
+        run_id: str,
+        status: str = "running",
+    ) -> Dict[str, Any]:
+        return self._mark_lifecycle_resource(
+            group_id,
+            request_id,
+            field="run_id",
+            resource_id=run_id,
             status=status,
         )
 

@@ -26,6 +26,7 @@ from no1.computer_control.requests import ComputerRequestStore
 from no1.computer_control.recording import RecordingStore
 from no1.computer_control.risk import annotate_catalog, workflow_risk
 from no1.computer_control.runtime import WorkflowRunner
+from no1.computer_control.services import ComputerControlServices
 from no1.computer_control.storage import RevisionConflict, WorkflowStore
 from no1.computer_control.triggers import should_confirm_element, validate_trigger
 from no1.daemon.messaging.actor_turn_rendering import build_actor_delivery_text
@@ -43,6 +44,101 @@ from no1.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS
 from no1.ports.mcp import main as mcp_main
 from no1.daemon.computer_control_ops import try_handle_computer_control_op
 from no1.ports.web.routes.computer_control import _require_local_computer_control_admin
+
+
+class TestComputerControlServiceConstruction(unittest.TestCase):
+    def test_runner_receives_the_service_run_authority_store(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            services = ComputerControlServices(Path(td))
+            self.assertIs(services.runner.run_authorities, services.run_authorities)
+
+
+class TestComputerControlRunSurfaceDispatch(unittest.TestCase):
+    @staticmethod
+    def _service() -> Mock:
+        service = Mock()
+        service.runner.get.return_value = {
+            "origin": "legacy_internal",
+            "actor_id": "actor",
+            "authorization": {},
+        }
+        service.runner.cancel_sync.return_value = {"status": "cancelled"}
+        service.runner.recovery_context.return_value = {"status": "recovering"}
+        service.runner.verify.return_value = {
+            "status": "verified",
+            "authorization": {},
+        }
+        service.runner.submit_recovery.return_value = {"accepted": True}
+        service.runner.decide_approval.return_value = {"approved": True}
+        service.setup.status.return_value = {"fingerprint": "fp"}
+        return service
+
+    def test_local_web_legacy_run_actions_keep_the_legacy_state_machine(self) -> None:
+        service = self._service()
+        actions = ("status", "cancel", "recovery", "verify", "recover", "approve")
+        with patch("no1.daemon.computer_control_ops.get_services", return_value=service):
+            for action in actions:
+                with self.subTest(action=action):
+                    response, _ = try_handle_computer_control_op(
+                        "computer_control",
+                        {
+                            "command": "run",
+                            "action": action,
+                            "group_id": "g",
+                            "actor_id": "actor",
+                            "run_id": "legacy-run",
+                            "node_id": "approval",
+                            "caller_surface": "local_web",
+                        },
+                    )
+                    self.assertTrue(response.ok, response.error)
+        service.runner.cancel_sync.assert_called_once()
+        service.runner.recovery_context.assert_called_once()
+        service.runner.verify.assert_called_once()
+        service.runner.submit_recovery.assert_called_once()
+        service.runner.decide_approval.assert_called_once()
+        service.runner.cancel_manual_sync.assert_not_called()
+        service.runner.recovery_context_manual.assert_not_called()
+        service.runner.verify_manual.assert_not_called()
+        service.runner.submit_recovery_manual.assert_not_called()
+        service.runner.decide_approval_manual.assert_not_called()
+
+    def test_local_web_manual_run_is_rejected_before_any_mutator(self) -> None:
+        service = self._service()
+        service.runner.get.side_effect = PermissionError(
+            "manual actor run requires operation authority"
+        )
+        actions = ("status", "cancel", "recovery", "verify", "recover", "approve")
+        with patch("no1.daemon.computer_control_ops.get_services", return_value=service):
+            for action in actions:
+                with self.subTest(action=action):
+                    response, _ = try_handle_computer_control_op(
+                        "computer_control",
+                        {
+                            "command": "run",
+                            "action": action,
+                            "group_id": "g",
+                            "actor_id": "actor",
+                            "run_id": "manual-run",
+                            "node_id": "approval",
+                            "caller_surface": "local_web",
+                        },
+                    )
+                    self.assertFalse(response.ok)
+                    self.assertEqual(response.error.code, "permission_denied")
+        for method in (
+            service.runner.cancel_sync,
+            service.runner.recovery_context,
+            service.runner.verify,
+            service.runner.submit_recovery,
+            service.runner.decide_approval,
+            service.runner.cancel_manual_sync,
+            service.runner.recovery_context_manual,
+            service.runner.verify_manual,
+            service.runner.submit_recovery_manual,
+            service.runner.decide_approval_manual,
+        ):
+            method.assert_not_called()
 
 
 class TestComputerControl(unittest.TestCase):
@@ -934,6 +1030,7 @@ class TestComputerControl(unittest.TestCase):
                     self.assertNotIn("turn_authorization", persisted)
 
     def test_trusted_workflow_start_still_uses_live_turn_claim(self):
+        from no1.computer_control.authorization import RunStartClaim
         from no1.contracts.v1 import ChatMessageData
         from no1.daemon.messaging.turn_provenance import (
             begin_turn_delivery_attempt,
@@ -945,17 +1042,55 @@ class TestComputerControl(unittest.TestCase):
         from no1.kernel.ledger import append_event
 
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
             group = create_group(load_registry(), title="trusted-run-claim", topic="")
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
+            store = WorkflowStore(home)
+            created = store.create(
+                group.group_id,
+                WorkflowDefinition.model_validate(self._message_workflow()),
+            )
+            workflow_id = str(created["manifest"]["workflow_id"])
+            store.publish(group.group_id, workflow_id, 1)
+            store.trust(
+                group.group_id,
+                workflow_id,
+                1,
+                fingerprint="fp-current",
+                permissions=["all_windows_mcp_tools"],
+            )
+            requests = ComputerRequestStore(store)
             provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            request = {
+                "request_id": "req-trusted-run",
+                "actor_id": "peer",
+                "mode": "run_existing",
+                "workflow_id": workflow_id,
+                "inputs": {},
+            }
             event = append_event(
                 group.ledger_path,
                 kind="chat.message",
                 group_id=group.group_id,
                 scope_key="",
                 by="user",
-                data=ChatMessageData(text="run trusted", to=["peer"], turn_provenance=provenance).model_dump(),
+                data=ChatMessageData(
+                    text="run trusted",
+                    to=["peer"],
+                    computer_control_request=request,
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            requests.append(
+                group.group_id,
+                {
+                    **request,
+                    "event_id": str(event["id"]),
+                    "local_request_id": str(provenance.local_request_id),
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
             )
             attempt = begin_turn_delivery_attempt(
                 group,
@@ -967,13 +1102,14 @@ class TestComputerControl(unittest.TestCase):
             finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
 
             fake = Mock()
+            fake.requests = requests
             fake.setup.status.return_value = {"fingerprint": "fp-current"}
-            fake.store.get.return_value = {
-                "manifest": {
-                    "trusted": {"1": {"fingerprint": "fp-current"}},
-                }
+            fake.store = store
+            fake.runner.start_manual_sync.return_value = {
+                "origin": "manual_actor",
+                "run_id": "run-trusted",
+                "status": "running",
             }
-            fake.runner.start_sync.return_value = {"run_id": "run-trusted", "status": "running"}
             with patch("no1.daemon.computer_control_ops.get_services", return_value=fake):
                 response, _ = try_handle_computer_control_op(
                     "computer_control",
@@ -982,17 +1118,83 @@ class TestComputerControl(unittest.TestCase):
                         "action": "start",
                         "group_id": group.group_id,
                         "actor_id": "peer",
-                        "workflow_id": "wf-trusted",
+                        "workflow_id": workflow_id,
                         "version": 1,
+                        "request_id": "req-trusted-run",
+                        "inputs": {},
                         "caller_surface": "local_mcp",
                         "turn_grant_receipt": receipt,
                     },
                 )
             self.assertTrue(response.ok, response.error)
-            fake.runner.start_sync.assert_called_once()
-            fake.requests.require_authorized.assert_not_called()
+            fake.runner.start_manual_sync.assert_called_once()
+            self.assertIsInstance(
+                fake.runner.start_manual_sync.call_args.kwargs["start_claim"],
+                RunStartClaim,
+            )
 
-    def test_untrusted_mcp_run_start_preserves_legacy_run_id_writeback(self):
+    def test_manual_run_start_missing_request_is_rejected_before_service_construction(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            group = create_group(load_registry(), title="missing-run-request", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(
+                    text="run without request id",
+                    to=["peer"],
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "test"},
+            )
+            receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+            with patch("no1.daemon.computer_control_ops.get_services") as get_services, patch(
+                "no1.daemon.computer_control_ops.ComputerRequestStore"
+            ) as request_store, patch(
+                "no1.daemon.computer_control_ops.WorkflowStore"
+            ) as workflow_store:
+                response, _ = try_handle_computer_control_op(
+                    "computer_control",
+                    {
+                        "command": "run",
+                        "action": "start",
+                        "group_id": group.group_id,
+                        "actor_id": "peer",
+                        "workflow_id": "wf_missing",
+                        "version": 1,
+                        "caller_surface": "local_mcp",
+                        "turn_grant_receipt": receipt,
+                    },
+                )
+            self.assertFalse(response.ok)
+            self.assertEqual(response.error.code, "permission_denied")
+            get_services.assert_not_called()
+            request_store.assert_not_called()
+            workflow_store.assert_not_called()
+
+    def test_untrusted_mcp_run_start_uses_manual_origin_and_private_run_projection(self):
+        from no1.computer_control.authorization import RunStartClaim
         from no1.contracts.v1 import ChatMessageData
         from no1.daemon.messaging.turn_provenance import (
             begin_turn_delivery_attempt,
@@ -1009,13 +1211,19 @@ class TestComputerControl(unittest.TestCase):
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
             store = WorkflowStore(home)
+            created = store.create(
+                group.group_id,
+                WorkflowDefinition.model_validate(self._message_workflow()),
+            )
+            workflow_id = str(created["manifest"]["workflow_id"])
             requests = ComputerRequestStore(store)
             provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
             request = {
                 "request_id": "req-untrusted-run",
                 "actor_id": "peer",
                 "mode": "create_and_run",
-                "workflow_id": "wf-untrusted",
+                "workflow_id": "",
+                "inputs": {},
                 "allow_high_risk": True,
             }
             event = append_event(
@@ -1041,6 +1249,12 @@ class TestComputerControl(unittest.TestCase):
                     "created_ts": time.time(),
                 },
             )
+            requests.mark_workflow_created(
+                group.group_id,
+                "req-untrusted-run",
+                created_workflow_id=workflow_id,
+                status="draft_created",
+            )
             attempt = begin_turn_delivery_attempt(
                 group,
                 actor_id="peer",
@@ -1053,12 +1267,19 @@ class TestComputerControl(unittest.TestCase):
             fake = Mock()
             fake.requests = requests
             fake.setup.status.return_value = {"fingerprint": "fp-current"}
-            fake.store.get.side_effect = lambda _group_id, _workflow_id, version=None: {
-                "manifest": {"published_version": 1, "trusted": {}},
-                "version": int(version or 1),
-                "definition": self._message_workflow(),
-            }
-            fake.runner.start_sync.return_value = {"run_id": "run-untrusted", "status": "running"}
+            fake.store = store
+
+            def start_manual_sync(*args, **kwargs):
+                self.assertIsInstance(kwargs.get("start_claim"), RunStartClaim)
+                requests.mark_run_started(
+                    group.group_id,
+                    "req-untrusted-run",
+                    run_id="run-untrusted",
+                    status="running",
+                )
+                return {"origin": "manual_actor", "run_id": "run-untrusted", "status": "running"}
+
+            fake.runner.start_manual_sync.side_effect = start_manual_sync
 
             def call_computer_control_daemon(message, *, timeout_s=None):
                 self.assertIsNone(timeout_s)
@@ -1083,7 +1304,7 @@ class TestComputerControl(unittest.TestCase):
                     "onecolleague_computer_run",
                     {
                         "action": "start",
-                        "workflow_id": "wf-untrusted",
+                        "workflow_id": workflow_id,
                         "version": 1,
                         "request_id": "req-untrusted-run",
                         "inputs": {},
@@ -1093,7 +1314,8 @@ class TestComputerControl(unittest.TestCase):
 
             self.assertTrue(result.get("ok"))
             self.assertEqual((result.get("result") or {}).get("run_id"), "run-untrusted")
-            fake.runner.start_sync.assert_called_once()
+            fake.runner.start_manual_sync.assert_called_once()
+            self.assertEqual((result.get("result") or {}).get("origin"), "manual_actor")
             persisted = requests.get(group.group_id, "req-untrusted-run") or {}
             self.assertEqual(persisted.get("status"), "running")
             self.assertEqual(persisted.get("run_id"), "run-untrusted")
@@ -1205,6 +1427,35 @@ class TestComputerControl(unittest.TestCase):
                     recording_id="rec_other",
                 )
             self.assertEqual(requests._path(group.group_id).read_bytes(), before_lifecycle_change)
+            run_lifecycle = requests.mark_run_started(
+                group.group_id,
+                "req-local",
+                run_id="run_lifecycle",
+                status="initializing",
+            )
+            self.assertEqual(run_lifecycle["run_id"], "run_lifecycle")
+            before_run_idempotent = requests._path(group.group_id).read_bytes()
+            same_run = requests.mark_run_started(
+                group.group_id,
+                "req-local",
+                run_id="run_lifecycle",
+                status="running",
+            )
+            self.assertEqual(same_run["run_id"], "run_lifecycle")
+            self.assertEqual(
+                requests._path(group.group_id).read_bytes(),
+                before_run_idempotent,
+            )
+            with self.assertRaisesRegex(PermissionError, "lifecycle resource is immutable"):
+                requests.mark_run_started(
+                    group.group_id,
+                    "req-local",
+                    run_id="run_other",
+                )
+            self.assertEqual(
+                requests._path(group.group_id).read_bytes(),
+                before_run_idempotent,
+            )
 
             for label, patch_value in (
                 ("legacy", {"local_request_id": ""}),

@@ -258,6 +258,8 @@ def requires_live_turn_claim(command: str, action: str = "") -> bool:
         return False
     if command_name == "recording" and action_name != "start":
         return False
+    if command_name == "run" and action_name != "start":
+        return False
     if (command_name, action_name) in _STATUS_ONLY_ACTIONS:
         return False
     return True
