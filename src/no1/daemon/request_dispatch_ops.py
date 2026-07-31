@@ -44,6 +44,7 @@ from .actors.web_model_browser_ops import try_handle_web_model_browser_op
 from .memory.memory_ops import try_handle_memory_op
 from .computer_control_ops import try_handle_computer_control_op
 from .experience_ops import try_handle_experience_op
+from .group_bridge.ops import try_handle_group_bridge_op
 
 
 @dataclass(frozen=True)
@@ -388,6 +389,16 @@ def dispatch_request(
     inbox_ack_resp = try_handle_inbox_ack_op(op, args)
     if inbox_ack_resp is not None:
         return inbox_ack_resp, False
+
+    group_bridge_resp = try_handle_group_bridge_op(
+        op,
+        args,
+        dispatch_send=lambda send_args: recurse(
+            deps.daemon_request_factory(op="send", args=send_args)
+        ),
+    )
+    if group_bridge_resp is not None:
+        return group_bridge_resp, False
 
     maintenance_resp = try_handle_maintenance_op(
         op,

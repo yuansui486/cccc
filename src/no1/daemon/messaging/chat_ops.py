@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -17,7 +20,13 @@ from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
 from ...kernel.inbox import find_event_with_chat_ack, get_quote_text_from_message_data, is_message_for_actor
 from ...kernel.context import ContextStorage
-from ...kernel.ledger import append_event, read_last_lines
+from ...kernel.ledger import (
+    MAX_CHAT_TEXT_BYTES,
+    LedgerEventConflictError,
+    append_event,
+    append_event_once,
+    read_last_lines,
+)
 from ...kernel.messaging import (
     default_reply_recipients,
     enabled_recipient_actor_ids,
@@ -60,6 +69,7 @@ from .actor_turn_rendering import (
 from ..context.context_ops import handle_context_sync
 from .install_slash_command import INSTALL_CAPABILITY_ID, parse_install_slash_command, render_install_command_task
 from .turn_provenance import (
+    INGRESS_GROUP_BRIDGE,
     TRUSTED_INGRESS_ARG,
     build_reply_turn_provenance,
     build_send_turn_provenance,
@@ -67,6 +77,187 @@ from .turn_provenance import (
 )
 
 logger = logging.getLogger("no1.daemon.server")
+
+_GROUP_BRIDGE_DELIVERY_CLAIM_ARG = "__group_bridge_delivery_claim"
+_GROUP_BRIDGE_DELIVERY_FIELDS = frozenset(
+    {
+        "group_id",
+        "text",
+        "format",
+        "priority",
+        "reply_required",
+        "collaboration_required",
+        "by",
+        "to",
+        "attachments",
+        "refs",
+        "path",
+        "quote_text",
+        "source_platform",
+        "source_user_id",
+        "src_group_id",
+        "src_event_id",
+        "client_id",
+        TRUSTED_INGRESS_ARG,
+        _GROUP_BRIDGE_DELIVERY_CLAIM_ARG,
+    }
+)
+_GROUP_BRIDGE_DELIVERY_ID_PATTERN = re.compile(r"gbs_[0-9a-f]{32}")
+_GROUP_BRIDGE_CLAIM_LOCK = threading.Lock()
+
+
+class _GroupBridgeDeliveryClaim:
+    __slots__ = ("__weakref__",)
+
+    def __repr__(self) -> str:
+        return "<sealed GroupBridgeDeliveryClaim>"
+
+    def __copy__(self) -> object:
+        raise TypeError("Group Bridge delivery claims cannot be copied")
+
+    def __deepcopy__(self, _memo: object) -> object:
+        raise TypeError("Group Bridge delivery claims cannot be copied")
+
+    def __reduce__(self) -> object:
+        raise TypeError("Group Bridge delivery claims cannot be serialized")
+
+
+_GroupBridgeProjection = tuple[object, ...]
+_GroupBridgeClaimState = tuple[int, _GroupBridgeProjection, bool]
+_GROUP_BRIDGE_CLAIMS: weakref.WeakKeyDictionary[_GroupBridgeDeliveryClaim, _GroupBridgeClaimState] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _closed_identity(value: object) -> bool:
+    return (
+        type(value) is str
+        and bool(value)
+        and value == value.strip()
+        and len(value) <= 512
+        and not any(ord(char) <= 0x20 or ord(char) == 0x7F for char in value)
+    )
+
+
+def _group_bridge_delivery_projection(
+    args: object,
+    *,
+    includes_claim: bool,
+) -> Optional[_GroupBridgeProjection]:
+    if type(args) is not dict:
+        return None
+    expected_fields = (
+        _GROUP_BRIDGE_DELIVERY_FIELDS
+        if includes_claim
+        else _GROUP_BRIDGE_DELIVERY_FIELDS - {_GROUP_BRIDGE_DELIVERY_CLAIM_ARG}
+    )
+    if set(args) != expected_fields:
+        return None
+    text = args.get("text")
+    delivery_id = args.get("src_event_id")
+    try:
+        text_bytes = (
+            len(text.encode("utf-8"))
+            if type(text) is str and len(text) <= MAX_CHAT_TEXT_BYTES
+            else 0
+        )
+    except UnicodeError:
+        return None
+    valid = (
+        _closed_identity(args.get("group_id"))
+        and type(text) is str
+        and bool(text)
+        and len(text) <= MAX_CHAT_TEXT_BYTES
+        and text_bytes <= MAX_CHAT_TEXT_BYTES
+        and type(args.get("format")) is str
+        and args.get("format") in ("plain", "markdown")
+        and type(args.get("priority")) is str
+        and args.get("priority") in ("normal", "attention")
+        and type(args.get("reply_required")) is bool
+        and args.get("collaboration_required") is False
+        and type(args.get("by")) is str
+        and args.get("by") == "system"
+        and type(args.get("to")) is list
+        and len(args["to"]) == 1
+        and type(args["to"][0]) is str
+        and args["to"][0] == "user"
+        and type(args.get("attachments")) is list
+        and not args["attachments"]
+        and type(args.get("refs")) is list
+        and not args["refs"]
+        and type(args.get("path")) is str
+        and args.get("path") == ""
+        and type(args.get("quote_text")) is str
+        and args.get("quote_text") == ""
+        and type(args.get("source_platform")) is str
+        and args.get("source_platform") == "group_bridge_session"
+        and _closed_identity(args.get("source_user_id"))
+        and _closed_identity(args.get("src_group_id"))
+        and type(delivery_id) is str
+        and _GROUP_BRIDGE_DELIVERY_ID_PATTERN.fullmatch(delivery_id) is not None
+        and type(args.get("client_id")) is str
+        and args.get("client_id") == delivery_id
+        and type(args.get(TRUSTED_INGRESS_ARG)) is str
+        and args.get(TRUSTED_INGRESS_ARG) == INGRESS_GROUP_BRIDGE
+    )
+    if not valid:
+        return None
+    return (
+        args["group_id"],
+        text,
+        args["format"],
+        args["priority"],
+        args["reply_required"],
+        args["collaboration_required"],
+        args["by"],
+        tuple(args["to"]),
+        tuple(args["attachments"]),
+        tuple(args["refs"]),
+        args["path"],
+        args["quote_text"],
+        args["source_platform"],
+        args["source_user_id"],
+        args["src_group_id"],
+        delivery_id,
+        args["client_id"],
+        args[TRUSTED_INGRESS_ARG],
+    )
+
+
+def _issue_group_bridge_delivery_claim(args: Dict[str, Any]) -> _GroupBridgeDeliveryClaim:
+    projection = _group_bridge_delivery_projection(args, includes_claim=False)
+    if projection is None:
+        raise ValueError("Group Bridge delivery projection is invalid")
+    claim = _GroupBridgeDeliveryClaim()
+    with _GROUP_BRIDGE_CLAIM_LOCK:
+        _GROUP_BRIDGE_CLAIMS[claim] = (os.getpid(), projection, False)
+    return claim
+
+
+def _consume_group_bridge_delivery_claim(value: object, args: Dict[str, Any]) -> bool:
+    if type(value) is not _GroupBridgeDeliveryClaim:
+        return False
+    with _GROUP_BRIDGE_CLAIM_LOCK:
+        state = _GROUP_BRIDGE_CLAIMS.get(value)
+        if state is None:
+            return False
+        pid, expected, used = state
+        if used or pid != os.getpid():
+            return False
+        _GROUP_BRIDGE_CLAIMS[value] = (pid, expected, True)
+        actual = _group_bridge_delivery_projection(args, includes_claim=True)
+        if actual is None or actual != expected:
+            return False
+        return True
+
+
+def _consume_valid_group_bridge_delivery(args: Dict[str, Any]) -> tuple[bool, Optional[DaemonResponse]]:
+    if _GROUP_BRIDGE_DELIVERY_CLAIM_ARG not in args:
+        return False, None
+    claim = args.get(_GROUP_BRIDGE_DELIVERY_CLAIM_ARG)
+    if not _consume_group_bridge_delivery_claim(claim, args):
+        return False, _error("invalid_group_bridge_delivery", "Group Bridge delivery claim is invalid")
+    return True, None
 
 
 def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) -> DaemonResponse:
@@ -325,12 +516,16 @@ def handle_send(
     automation_on_new_message: Callable[[Any], None],
     clear_pending_system_notifies: Callable[[str, set[str]], None],
 ) -> DaemonResponse:
+    group_bridge_delivery, group_bridge_error = _consume_valid_group_bridge_delivery(args)
+    if group_bridge_error is not None:
+        return group_bridge_error
     group_id = str(args.get("group_id") or "").strip()
     text = str(args.get("text") or "")
     by = str(args.get("by") or "user").strip()
     priority = str(args.get("priority") or "normal").strip() or "normal"
     reply_required = coerce_bool(args.get("reply_required"))
     collaboration_required = coerce_bool(args.get("collaboration_required"))
+    message_format = args["format"] if group_bridge_delivery else "plain"
     computer_control_request_raw = args.get("computer_control_request")
     computer_control_request: Optional[Dict[str, Any]] = None
     if isinstance(computer_control_request_raw, dict):
@@ -392,7 +587,7 @@ def handle_send(
     if computer_control_request is not None:
         to_tokens = [str(computer_control_request["actor_id"])]
     to_explicitly_set = len(to_tokens) > 0
-    install_slash_command = parse_install_slash_command(text)
+    install_slash_command = None if group_bridge_delivery else parse_install_slash_command(text)
 
     if priority not in ("normal", "attention"):
         return _error("invalid_priority", "priority must be 'normal' or 'attention'")
@@ -402,7 +597,7 @@ def handle_send(
     group = load_group(group_id)
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
-    if client_id:
+    if client_id and not group_bridge_delivery:
         existing = _tracked_send_existing_result(group, client_id=client_id, by=by)
         if existing is not None:
             return DaemonResponse(ok=True, result=existing)
@@ -499,36 +694,53 @@ def handle_send(
     if not text.strip() and not attachments:
         return _error("empty_message", "message text cannot be empty")
 
-    event = append_event(
-        group.ledger_path,
-        kind="chat.message",
-        group_id=group.group_id,
-        scope_key=scope_key,
-        by=by,
-        data=ChatMessageData(
-            text=text,
-            format="plain",
-            priority=priority,
-            reply_required=reply_required,
-            collaboration_required=collaboration_required,
-            computer_control_request=computer_control_request,
-            quote_text=quote_text or None,
-            to=to,
-            refs=refs,
-            attachments=attachments,
-            source_platform=source_platform or None,
-            source_user_name=source_user_name or None,
-            source_user_id=source_user_id or None,
-            mention_user_ids=mention_user_ids or None,
-            **build_sender_snapshot(group, by=by),
-            src_group_id=src_group_id or None,
-            src_event_id=src_event_id or None,
-            dst_group_id=dst_group_id or None,
-            dst_to=dst_to if dst_group_id else None,
-            client_id=client_id or None,
-            turn_provenance=build_send_turn_provenance(args),
-        ).model_dump(),
-    )
+    event_data = ChatMessageData(
+        text=text,
+        format=message_format,
+        priority=priority,
+        reply_required=reply_required,
+        collaboration_required=collaboration_required,
+        computer_control_request=computer_control_request,
+        quote_text=quote_text or None,
+        to=to,
+        refs=refs,
+        attachments=attachments,
+        source_platform=source_platform or None,
+        source_user_name=source_user_name or None,
+        source_user_id=source_user_id or None,
+        mention_user_ids=mention_user_ids or None,
+        **build_sender_snapshot(group, by=by),
+        src_group_id=src_group_id or None,
+        src_event_id=src_event_id or None,
+        dst_group_id=dst_group_id or None,
+        dst_to=dst_to if dst_group_id else None,
+        client_id=client_id or None,
+        turn_provenance=build_send_turn_provenance(args),
+    ).model_dump()
+    group_bridge_replayed = False
+    if group_bridge_delivery:
+        try:
+            event, replayed = append_event_once(
+                group.ledger_path,
+                event_id=client_id,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by=by,
+                data=event_data,
+            )
+        except LedgerEventConflictError:
+            return _error("group_bridge_delivery_conflict", "Group Bridge delivery identity conflicts with the ledger")
+        group_bridge_replayed = replayed
+    else:
+        event = append_event(
+            group.ledger_path,
+            kind="chat.message",
+            group_id=group.group_id,
+            scope_key=scope_key,
+            by=by,
+            data=event_data,
+        )
     if computer_control_request is not None:
         event_data = event.get("data") if isinstance(event.get("data"), dict) else {}
         event_provenance = (
@@ -691,11 +903,21 @@ def handle_send(
         skip_actor_ids=skip_headless_notify_actor_ids,
     )
 
-    try:
-        automation_on_new_message(group)
-    except Exception:
-        pass
-    return DaemonResponse(ok=True, result={"event": event})
+    if not group_bridge_delivery:
+        try:
+            automation_on_new_message(group)
+        except Exception:
+            pass
+    result: Dict[str, Any] = {"event": event}
+    if group_bridge_delivery:
+        result.update(
+            {
+                "event_id": client_id,
+                "replayed": group_bridge_replayed,
+                "message_sent": True,
+            }
+        )
+    return DaemonResponse(ok=True, result=result)
 
 
 def handle_tracked_send(
