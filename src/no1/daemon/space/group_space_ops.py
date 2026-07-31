@@ -62,7 +62,13 @@ from .group_space_sync import (
     sync_group_space_files,
 )
 from .group_space_projection import sync_group_space_projection
-from .group_space_runtime import acquire_space_provider_write, execute_space_job, retry_space_job, run_space_query
+from .group_space_runtime import (
+    acquire_space_provider_write,
+    execute_space_job,
+    retry_space_job,
+    run_space_query,
+    space_query_error_details,
+)
 from .group_space_store import (
     cancel_space_job,
     describe_space_provider_credential_state,
@@ -1693,7 +1699,7 @@ def handle_group_space_query(args: Dict[str, Any]) -> DaemonResponse:
                     "answer": "",
                     "references": [],
                     **disabled_diag,
-                    "error": {"code": "space_provider_disabled", "message": "provider is disabled"},
+                    "error": space_query_error_details(code="space_provider_disabled"),
                 },
             )
         query_lane_key = _space_lane_key(

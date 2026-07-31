@@ -34,6 +34,45 @@ _WRITE_LOCKS_GUARD = threading.Lock()
 _PROVIDER_WRITE_SEMAPHORE: threading.BoundedSemaphore | None = None
 _PROVIDER_WRITE_SEMAPHORE_LIMIT: int = 0
 
+_QUERY_ERROR_PROFILES: Dict[str, tuple[str, str, str, bool]] = {
+    "space_provider_disabled": (
+        "Space provider is disabled.",
+        "provider_configuration",
+        "enable_provider",
+        False,
+    ),
+    "space_provider_not_configured": (
+        "Space provider credentials are not configured.",
+        "provider_configuration",
+        "configure_provider",
+        False,
+    ),
+    "space_provider_auth_invalid": (
+        "Space provider authentication is invalid or expired.",
+        "provider_authentication",
+        "reauthenticate_provider",
+        False,
+    ),
+    "space_provider_compat_mismatch": (
+        "Space provider compatibility check failed.",
+        "provider_compatibility",
+        "update_provider",
+        False,
+    ),
+    "space_provider_rate_limited": (
+        "Space provider rate limit was reached.",
+        "provider_upstream",
+        "retry_query_later",
+        True,
+    ),
+    "space_provider_timeout": (
+        "Space provider query timed out.",
+        "provider_transport",
+        "retry_query",
+        True,
+    ),
+}
+
 
 def _provider_write_limit() -> int:
     import os
@@ -126,6 +165,33 @@ def _classify_error(exc: Exception) -> Dict[str, Any]:
         "message": str(exc) or "provider error",
         "transient": True,
         "degrade_provider": False,
+    }
+
+
+def space_query_error_details(*, code: Any, transient: bool = False) -> Dict[str, Any]:
+    """Project provider failures without exposing upstream response or credential text."""
+
+    candidate = str(code or "space_provider_upstream_error").strip()
+    normalized = (
+        candidate
+        if candidate in _QUERY_ERROR_PROFILES or candidate == "space_provider_upstream_error"
+        else "space_provider_upstream_error"
+    )
+    profile = _QUERY_ERROR_PROFILES.get(normalized)
+    if profile is not None:
+        message, layer, next_action, fixed_retryable = profile
+        retryable = bool(fixed_retryable)
+    else:
+        retryable = bool(transient)
+        message = "Space provider query failed."
+        layer = "provider_upstream"
+        next_action = "retry_query" if retryable else "inspect_provider"
+    return {
+        "code": normalized,
+        "message": message,
+        "layer": layer,
+        "next_action": next_action,
+        "retryable": retryable,
     }
 
 
@@ -266,12 +332,16 @@ def run_space_query(
         }
     except Exception as exc:
         err = _classify_error(exc)
+        public_error = space_query_error_details(
+            code=err.get("code"),
+            transient=bool(err.get("transient")),
+        )
         if err["degrade_provider"]:
             set_space_provider_state(
                 provider,
                 enabled=True,
                 mode="degraded",
-                last_error=err["message"],
+                last_error=str(public_error["message"]),
                 touch_health=True,
             )
         state = get_space_provider_state(provider)
@@ -279,7 +349,7 @@ def run_space_query(
             "answer": "",
             "references": [],
             "degraded": True,
-            "error": {"code": str(err["code"]), "message": str(err["message"])},
+            "error": public_error,
             "provider_mode": str(state.get("mode") or "degraded"),
         }
 
