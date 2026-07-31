@@ -118,6 +118,7 @@ def _web_mode() -> Literal["normal", "exhibit"]:
 
 
 _PUBLIC_API_PATHS = frozenset({"/api/v1/health", "/api/v1/branding"})
+_GROUP_BRIDGE_SESSION_RECEIVE_PATH = "/api/group-bridge/session/receive"
 
 
 def _is_public_ui_path(request: Request) -> bool:
@@ -136,6 +137,7 @@ def _is_public_path(request: Request) -> bool:
     return (
         _is_public_ui_path(request)
         or path in _PUBLIC_API_PATHS
+        or path == _GROUP_BRIDGE_SESSION_RECEIVE_PATH
         or path.startswith("/api/v1/branding/assets/")
         or path.startswith("/mcp/web-model/")
         or path.startswith("/nomcp/s/")
@@ -511,6 +513,7 @@ def create_app() -> FastAPI:
     from .routes.nomcp import create_routers as create_nomcp_routers
     from .routes.studio import create_routers as create_studio_routers
     from .routes.computer_control import create_routers as create_computer_control_routers
+    from .routes.group_bridge import create_routers as create_group_bridge_routers
 
     route_ctx = RouteContext(
         home=home,
@@ -540,6 +543,8 @@ def create_app() -> FastAPI:
     for router in create_studio_routers(route_ctx):
         app.include_router(router)
     for router in create_computer_control_routers(route_ctx):
+        app.include_router(router)
+    for router in create_group_bridge_routers(route_ctx):
         app.include_router(router)
     register_im_routes(app, ctx=route_ctx)
     for router in create_access_token_routers(route_ctx):

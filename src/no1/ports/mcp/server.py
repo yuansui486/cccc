@@ -5,6 +5,7 @@ Static MCP surface (role and capability-pack visibility may hide some tools):
 - onecolleague_help / onecolleague_bootstrap / onecolleague_project_info
 - onecolleague_inbox_list / onecolleague_inbox_mark_read
 - onecolleague_message_send / onecolleague_message_reply
+- onecolleague_group_bridge_session_send
 - onecolleague_file / onecolleague_repo / onecolleague_repo_edit / onecolleague_apply_patch / onecolleague_shell / onecolleague_exec_command / onecolleague_write_stdin / onecolleague_git / onecolleague_voice_secretary_document / onecolleague_voice_secretary_request / onecolleague_group / onecolleague_actor / onecolleague_runtime_list
 - onecolleague_capability_search / onecolleague_capability_enable / onecolleague_capability_state / onecolleague_capability_install / onecolleague_capability_use
 - onecolleague_space / onecolleague_automation
@@ -87,6 +88,7 @@ from .handlers.onecolleague_messaging import (  # noqa: F401
     message_send,
     tracked_send,
 )
+from .group_bridge import group_bridge_session_send  # noqa: F401
 from .handlers.onecolleague_repo import (  # noqa: F401
     apply_codex_patch_tool,
     exec_command_tool,
@@ -933,6 +935,31 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         raise MCPError(code="invalid_request", message="onecolleague_inbox_mark_read action must be 'read' or 'read_all'")
 
     # --- Messaging ---
+    if name == "onecolleague_group_bridge_session_send":
+        allowed_fields = {
+            "group_id",
+            "actor_id",
+            "local_endpoint",
+            "remote_group_id",
+            "remote_peer_id",
+            "remote_endpoint",
+            "client_nonce",
+            "payload",
+        }
+        if set(arguments) - allowed_fields:
+            raise MCPError(code="invalid_request", message="Group Bridge session arguments are invalid")
+        gid = _resolve_group_id(arguments)
+        _resolve_self_actor_id(arguments)
+        return group_bridge_session_send(
+            group_id=gid,
+            local_endpoint=str(arguments.get("local_endpoint") or ""),
+            remote_group_id=str(arguments.get("remote_group_id") or ""),
+            remote_peer_id=str(arguments.get("remote_peer_id") or ""),
+            remote_endpoint=str(arguments.get("remote_endpoint") or ""),
+            client_nonce=str(arguments.get("client_nonce") or ""),
+            payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+        )
+
     if name == "onecolleague_message_send":
         gid = _resolve_group_id(arguments)
         aid = _resolve_self_actor_id(arguments)
@@ -1987,6 +2014,12 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
                     is_web_model=actor_is_web_model,
                 )
             ) - admin_excluded
+
+    # Group Bridge session send is a local MCP management surface, not a
+    # capability-pack or Web Model tool. It remains hidden from remote actor
+    # surfaces while being discoverable to the authenticated local caller.
+    if str(runtime_ctx.source or "").strip().lower() == "local_mcp":
+        visible.add("onecolleague_group_bridge_session_send")
 
     if local_computer_control_allowed:
         visible.update(_LOCAL_COMPUTER_CONTROL_TOOLS)

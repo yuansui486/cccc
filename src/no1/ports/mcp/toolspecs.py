@@ -256,6 +256,37 @@ MCP_TOOLS = [
         ),
     },
     {
+        "name": "onecolleague_group_bridge_session_send",
+        "description": (
+            "Send one signed Group Bridge session message through the daemon owner. "
+            "Messages scope only; this does not provide remote read, full, shell, or exec access."
+        ),
+        "annotations": {"readOnlyHint": False},
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "local_endpoint": {"type": "string"},
+                "remote_group_id": {"type": "string"},
+                "remote_peer_id": {"type": "string"},
+                "remote_endpoint": {"type": "string", "default": ""},
+                "client_nonce": {"type": "string"},
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string"},
+                        "format": {"type": "string", "enum": ["plain", "markdown"], "default": "plain"},
+                        "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
+                        "reply_required": {"type": "boolean", "default": False},
+                    },
+                    "required": ["text"],
+                },
+            },
+            required=["local_endpoint", "remote_group_id", "remote_peer_id", "client_nonce", "payload"],
+        ),
+    },
+    {
         "name": "onecolleague_message_send",
         "description": "Send a visible chat message. Choose `to` deliberately; use @all only when the whole group needs it.",
         "inputSchema": _obj(
