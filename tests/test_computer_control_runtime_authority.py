@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -11,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import no1.computer_control.runtime as runtime_module
+import no1.computer_control.run_authority as run_authority_module
 from no1.computer_control.lease import ComputerControlLease
 from no1.computer_control.models import WorkflowDefinition
 from no1.computer_control.requests import ComputerRequestStore
@@ -187,6 +190,20 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
                 return run
             time.sleep(0.01)
         raise AssertionError("manual run did not reach a stable state")
+
+    @staticmethod
+    def _fixed_uuid(hex_value: str):
+        return type("FixedUUID", (), {"hex": hex_value})()
+
+    @staticmethod
+    def _wait_current_node(runner: WorkflowRunner, run_id: str, node_id: str) -> dict:
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            run = runner._get_unchecked("g", run_id)
+            if run.get("current_node_id") == node_id:
+                return run
+            time.sleep(0.01)
+        raise AssertionError(f"run did not reach node {node_id}")
 
     def test_auto_completion_uses_matching_terminal_state_and_restart_is_idempotent(self) -> None:
         workflow = self._workflow()
@@ -539,6 +556,812 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
         )
         runner.cancel_manual_sync("g", started["run_id"], stop_claim=stop)
 
+    def test_legacy_and_manual_forced_run_id_collisions_are_zero_effect(self) -> None:
+        workflow = self._workflow(
+            "namespace-collision",
+            auto_verify=False,
+            nodes=[
+                {"id": "start", "type": "start"},
+                {"id": "wait", "type": "wait", "duration_seconds": 30},
+                {"id": "end", "type": "end"},
+            ],
+            edges=[
+                {"source": "start", "target": "wait"},
+                {"source": "wait", "target": "end"},
+            ],
+        )
+        workflow_id = str(workflow["manifest"]["workflow_id"])
+        fixed = self._fixed_uuid("a" * 32)
+        request, claim = self._start_claim(workflow, request_id="req-manual-first")
+        manual_runner = self._runner()
+        with patch.object(runtime_module.uuid, "uuid4", return_value=fixed):
+            manual = manual_runner.start_manual_sync(
+                "g",
+                workflow_id,
+                actor_id="actor",
+                version=1,
+                inputs=request["inputs"],
+                request_id=request["request_id"],
+                start_claim=claim,
+            )
+        self._wait_current_node(manual_runner, manual["run_id"], "wait")
+        run_path = manual_runner._run_path("g", manual["run_id"])
+        authority_path = self.authorities._path("g", manual["run_id"])
+        before = (run_path.read_bytes(), authority_path.read_bytes(), self.lease.path.read_bytes())
+        catalog_before = self.session.catalog_calls
+        with patch.object(runtime_module.uuid, "uuid4", return_value=fixed):
+            with self.assertRaisesRegex(PermissionError, "already exists"):
+                manual_runner.start_sync(
+                    "g",
+                    workflow_id,
+                    actor_id="actor",
+                    version=1,
+                    inputs={},
+                )
+        self.assertEqual(
+            (run_path.read_bytes(), authority_path.read_bytes(), self.lease.path.read_bytes()),
+            before,
+        )
+        self.assertEqual(self.session.catalog_calls, catalog_before)
+        stop = self.authorities.validate_stop_owner(
+            expected_group_id="g",
+            expected_actor_id="actor",
+            expected_resource_id=manual["run_id"],
+        )
+        manual_runner.cancel_manual_sync("g", manual["run_id"], stop_claim=stop)
+
+        fixed = self._fixed_uuid("b" * 32)
+        legacy_runner = self._runner()
+        with patch.object(runtime_module.uuid, "uuid4", return_value=fixed):
+            legacy = legacy_runner.start_sync(
+                "g",
+                workflow_id,
+                actor_id="actor",
+                version=1,
+                inputs={},
+            )
+        self._wait_current_node(legacy_runner, legacy["run_id"], "wait")
+        request, claim = self._start_claim(workflow, request_id="req-legacy-first")
+        request_path = self.requests._path("g")
+        run_path = legacy_runner._run_path("g", legacy["run_id"])
+        before = (request_path.read_bytes(), run_path.read_bytes(), self.lease.path.read_bytes())
+        catalog_before = self.session.catalog_calls
+        with patch.object(runtime_module.uuid, "uuid4", return_value=fixed):
+            with self.assertRaisesRegex(PermissionError, "already exists"):
+                legacy_runner.start_manual_sync(
+                    "g",
+                    workflow_id,
+                    actor_id="actor",
+                    version=1,
+                    inputs=request["inputs"],
+                    request_id=request["request_id"],
+                    start_claim=claim,
+                )
+        self.assertEqual(
+            (request_path.read_bytes(), run_path.read_bytes(), self.lease.path.read_bytes()),
+            before,
+        )
+        self.assertEqual(self.session.catalog_calls, catalog_before)
+        self.assertEqual(list(self.authorities._root("g").glob("*.json")), [authority_path])
+        legacy_runner.cancel_sync("g", legacy["run_id"])
+
+    def test_legacy_start_rejects_invalid_run_id_and_busy_lease_before_provider(self) -> None:
+        workflow = self._workflow("legacy-invalid-run-id")
+        workflow_id = str(workflow["manifest"]["workflow_id"])
+        runner = self._runner()
+        for index, invalid_hex in enumerate(
+            ("/absolute1234567", "../escape123456", "dir/escape12345", "dir\\escape12345")
+        ):
+            with self.subTest(index=index):
+                with patch.object(
+                    runtime_module.uuid,
+                    "uuid4",
+                    return_value=self._fixed_uuid(invalid_hex),
+                ):
+                    with self.assertRaisesRegex(PermissionError, "single path segment"):
+                        runner.start_sync(
+                            "g",
+                            workflow_id,
+                            actor_id="actor",
+                            version=1,
+                            inputs={},
+                        )
+                self.assertFalse(self.lease.status()["active"])
+                self.assertEqual(self.session.catalog_calls, 0)
+                self.assertEqual(runner._tasks, {})
+                self.assertEqual(runner._legacy_executions, {})
+
+        self.lease.acquire(group_id="other", actor_id="other", run_id="other")
+        lease_before = self.lease.path.read_bytes()
+        fixed = self._fixed_uuid("c" * 32)
+        with patch.object(runtime_module.uuid, "uuid4", return_value=fixed):
+            with self.assertRaises(Exception) as raised:
+                runner.start_sync(
+                    "g",
+                    workflow_id,
+                    actor_id="actor",
+                    version=1,
+                    inputs={},
+                )
+        self.assertEqual(type(raised.exception).__name__, "LeaseConflict")
+        self.assertEqual(self.lease.path.read_bytes(), lease_before)
+        self.assertFalse(runner._run_path("g", "run_" + "c" * 16).exists())
+        self.assertEqual(self.session.catalog_calls, 0)
+        self.assertEqual(runner._tasks, {})
+        self.assertEqual(runner._legacy_executions, {})
+        self.lease.release(run_id="other")
+
+        reservation_claim, reserved_run = self.authorities.allocate_legacy_run(
+            group_id="g",
+            actor_id="reserved",
+            resource_id="reserved_run",
+            initial_run={
+                "origin": "legacy_internal",
+                "status": "initializing",
+                "group_id": "g",
+                "actor_id": "reserved",
+                "run_id": "reserved_run",
+            },
+            reserve_lease=lambda allocation: self.lease.reserve_legacy_run(
+                group_id="g",
+                actor_id="reserved",
+                run_id="reserved_run",
+                allocation=allocation,
+            ),
+            cancel_reservation=lambda allocation: self.lease.cancel_legacy_run_reservation(
+                allocation=allocation
+            ),
+        )
+        reservation_before = self.lease.path.read_bytes()
+        reserved_path = self.authorities._run_path("g", "reserved_run")
+        reserved_before = reserved_path.read_bytes()
+        fixed = self._fixed_uuid("e" * 32)
+        with patch.object(runtime_module.uuid, "uuid4", return_value=fixed):
+            with self.assertRaises(Exception) as raised:
+                runner.start_sync(
+                    "g",
+                    workflow_id,
+                    actor_id="actor",
+                    version=1,
+                    inputs={},
+                )
+        self.assertEqual(type(raised.exception).__name__, "LeaseConflict")
+        self.assertEqual(self.lease.path.read_bytes(), reservation_before)
+        self.assertEqual(reserved_path.read_bytes(), reserved_before)
+        self.assertEqual(reserved_run["legacy_allocation"], reservation_claim.public_identity())
+        self.assertFalse(runner._run_path("g", "run_" + "e" * 16).exists())
+        self.assertEqual(self.session.catalog_calls, 0)
+        self.assertTrue(
+            self.lease.cancel_legacy_run_reservation(allocation=reservation_claim)
+        )
+
+    def test_legacy_start_failure_releases_exact_lease_then_projects_start_failed(self) -> None:
+        class FailingSession(_Session):
+            async def catalog(self):
+                self.catalog_calls += 1
+                raise RuntimeError("catalog failed")
+
+        workflow = self._workflow("legacy-start-failure")
+        runner = WorkflowRunner(
+            self.home,
+            self.store,
+            self.lease,
+            FailingSession(),
+            run_authorities=self.authorities,
+            requests=self.requests,
+        )
+        with patch.object(
+            runtime_module.uuid,
+            "uuid4",
+            return_value=self._fixed_uuid("d" * 32),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "catalog failed"):
+                runner.start_sync(
+                    "g",
+                    str(workflow["manifest"]["workflow_id"]),
+                    actor_id="actor",
+                    version=1,
+                    inputs={},
+                )
+        run_id = "run_" + "d" * 16
+        run = runner._get_unchecked("g", run_id)
+        self.assertEqual(run["status"], "start_failed")
+        self.assertFalse(self.lease.status()["active"])
+        self.assertEqual(runner._tasks, {})
+        self.assertEqual(runner._legacy_executions, {})
+
+    def test_process_local_run_indexes_are_exact_tuple_and_identity_guarded(self) -> None:
+        runner = self._runner()
+        key_a = runner._run_key("g", "actor", "same")
+        key_b = runner._run_key("other", "actor", "same")
+        task_a = object()
+        task_b = object()
+        replacement = object()
+        runner._tasks[key_a] = task_a  # type: ignore[assignment]
+        runner._tasks[key_b] = task_b  # type: ignore[assignment]
+        self.assertFalse(runner._remove_current(runner._tasks, key_a, replacement))
+        self.assertIs(runner._tasks[key_a], task_a)
+        self.assertIs(runner._tasks[key_b], task_b)
+        self.assertTrue(runner._remove_current(runner._tasks, key_a, task_a))
+        self.assertIs(runner._tasks[key_b], task_b)
+
+        runner._cancelled.update((key_a, key_b))
+        runner._cancelled.discard(key_a)
+        self.assertEqual(runner._cancelled, {key_b})
+
+        execution_a = object()
+        execution_b = object()
+        runner._legacy_executions[key_a] = execution_a  # type: ignore[assignment]
+        runner._legacy_executions[key_b] = execution_b  # type: ignore[assignment]
+        self.assertFalse(
+            runner._remove_current(runner._legacy_executions, key_a, replacement)
+        )
+        self.assertIs(runner._legacy_executions[key_b], execution_b)
+
+    def test_legacy_approval_and_recovery_writes_are_linearized_with_cancel(self) -> None:
+        def start_control(kind: str, suffix: str):
+            if kind == "approval":
+                workflow = self._workflow(
+                    f"legacy-approval-{suffix}",
+                    auto_verify=False,
+                    nodes=[
+                        {"id": "start", "type": "start"},
+                        {"id": "approve", "type": "approval"},
+                        {"id": "end", "type": "end"},
+                    ],
+                    edges=[
+                        {"source": "start", "target": "approve"},
+                        {"source": "approve", "target": "end"},
+                    ],
+                )
+            else:
+                workflow = self._workflow(
+                    f"legacy-recovery-{suffix}",
+                    auto_verify=False,
+                    nodes=[
+                        {"id": "start", "type": "start"},
+                        {"id": "wait", "type": "wait", "duration_seconds": 30},
+                        {"id": "end", "type": "end"},
+                    ],
+                    edges=[
+                        {"source": "start", "target": "wait"},
+                        {"source": "wait", "target": "end"},
+                    ],
+                )
+            runner = self._runner()
+            started = runner.start_sync(
+                "g",
+                str(workflow["manifest"]["workflow_id"]),
+                actor_id="actor",
+                version=1,
+                inputs={},
+            )
+            run_id = str(started["run_id"])
+            if kind == "approval":
+                deadline = time.time() + 5
+                while time.time() < deadline:
+                    run = runner._get_unchecked("g", run_id)
+                    if run.get("status") == "waiting_approval":
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(run.get("status"), "waiting_approval")
+                control_path = runner._approval_path("g", run_id, "approve")
+
+                def operate():
+                    return runner.decide_approval(
+                        "g", run_id, "approve", approved=True
+                    )
+
+            else:
+                run = self._wait_current_node(runner, run_id, "wait")
+                execution = runner._legacy_executions[
+                    runner._run_key("g", "actor", run_id)
+                ]
+                recovery_id = "recovery_linearized"
+                run.update(
+                    {
+                        "status": "recovering",
+                        "recovery": {
+                            "recovery_id": recovery_id,
+                            "node_id": "wait",
+                            "tool": "Click",
+                            "arguments": {},
+                        },
+                        "updated_at": time.time(),
+                    }
+                )
+                runner._write_execution("g", run, execution)
+                control_path = runner._recovery_path("g", run_id, recovery_id)
+
+                def operate():
+                    return runner.submit_recovery(
+                        "g",
+                        run_id,
+                        recovery_id,
+                        actor_id="actor",
+                        resolution="retry",
+                    )
+
+            return runner, run_id, control_path, operate
+
+        for kind in ("approval", "recovery"):
+            with self.subTest(kind=kind, order="operation-first"):
+                runner, run_id, control_path, operate = start_control(
+                    kind, "operation-first"
+                )
+                entered = threading.Event()
+                release = threading.Event()
+                original_atomic_write = runtime_module.atomic_write_text
+
+                def blocking_write(path, value):
+                    if Path(path) == control_path:
+                        entered.set()
+                        self.assertTrue(release.wait(5))
+                    return original_atomic_write(path, value)
+
+                operation_results: list[dict] = []
+                operation_errors: list[BaseException] = []
+                cancel_results: list[dict] = []
+                cancel_errors: list[BaseException] = []
+
+                def run_operation() -> None:
+                    try:
+                        operation_results.append(operate())
+                    except BaseException as exc:
+                        operation_errors.append(exc)
+
+                def run_cancel() -> None:
+                    try:
+                        cancel_results.append(runner.cancel_sync("g", run_id))
+                    except BaseException as exc:
+                        cancel_errors.append(exc)
+
+                with patch.object(runtime_module, "atomic_write_text", blocking_write):
+                    operation_thread = threading.Thread(target=run_operation)
+                    operation_thread.start()
+                    self.assertTrue(entered.wait(5))
+                    cancel_thread = threading.Thread(target=run_cancel)
+                    cancel_thread.start()
+                    time.sleep(0.05)
+                    self.assertTrue(cancel_thread.is_alive())
+                    release.set()
+                    operation_thread.join(5)
+                    cancel_thread.join(5)
+                self.assertEqual(operation_errors, [])
+                self.assertEqual(cancel_errors, [])
+                self.assertTrue(operation_results[0]["accepted"] if kind == "recovery" else operation_results[0]["approved"])
+                self.assertEqual(cancel_results[0]["status"], "cancelled")
+                self.assertTrue(control_path.exists())
+
+            with self.subTest(kind=kind, order="cancel-first"):
+                runner, run_id, control_path, operate = start_control(kind, "cancel-first")
+                entered = threading.Event()
+                release = threading.Event()
+                original_release = self.lease.release_legacy_run
+
+                def blocking_release(*, allocation):
+                    result = original_release(allocation=allocation)
+                    entered.set()
+                    self.assertTrue(release.wait(5))
+                    return result
+
+                cancel_results = []
+                operation_errors = []
+
+                def run_cancel() -> None:
+                    cancel_results.append(runner.cancel_sync("g", run_id))
+
+                def run_operation() -> None:
+                    try:
+                        operate()
+                    except BaseException as exc:
+                        operation_errors.append(exc)
+
+                with patch.object(
+                    self.lease,
+                    "release_legacy_run",
+                    side_effect=blocking_release,
+                ):
+                    cancel_thread = threading.Thread(target=run_cancel)
+                    cancel_thread.start()
+                    self.assertTrue(entered.wait(5))
+                    operation_thread = threading.Thread(target=run_operation)
+                    operation_thread.start()
+                    operation_thread.join(5)
+                    self.assertFalse(operation_thread.is_alive())
+                    self.assertEqual(len(operation_errors), 1)
+                    self.assertIsInstance(operation_errors[0], PermissionError)
+                    self.assertFalse(control_path.exists())
+                    release.set()
+                    cancel_thread.join(5)
+                self.assertEqual(cancel_results[0]["status"], "cancelled")
+                self.assertFalse(control_path.exists())
+
+    def test_legacy_verify_and_cancel_have_one_terminal_result(self) -> None:
+        def start_verification(suffix: str):
+            workflow = self._workflow(
+                f"legacy-verify-{suffix}",
+                auto_verify=False,
+            )
+            runner = self._runner()
+            started = runner.start_sync(
+                "g",
+                str(workflow["manifest"]["workflow_id"]),
+                actor_id="actor",
+                version=1,
+                inputs={},
+                authorization={
+                    "request_id": f"legacy-verify-{suffix}",
+                    "allow_publish": True,
+                    "allow_trust": False,
+                },
+            )
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                run = runner._get_unchecked("g", started["run_id"])
+                if run.get("status") == "awaiting_verification":
+                    return runner, str(started["run_id"])
+                time.sleep(0.01)
+            raise AssertionError("legacy run did not await verification")
+
+        runner, run_id = start_verification("operation-first")
+        entered = threading.Event()
+        release = threading.Event()
+        original_publish = self.store.publish
+
+        def blocking_publish(*args, **kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return original_publish(*args, **kwargs)
+
+        verify_results: list[dict] = []
+        verify_errors: list[BaseException] = []
+        cancel_errors: list[BaseException] = []
+
+        def run_verify() -> None:
+            try:
+                verify_results.append(
+                    runner.verify(
+                        "g",
+                        run_id,
+                        actor_id="actor",
+                        passed=True,
+                        summary="verified",
+                        evidence_ids=[],
+                        fingerprint="fp",
+                    )
+                )
+            except BaseException as exc:
+                verify_errors.append(exc)
+
+        def run_cancel() -> None:
+            try:
+                runner.cancel_sync("g", run_id)
+            except BaseException as exc:
+                cancel_errors.append(exc)
+
+        with patch.object(self.store, "publish", side_effect=blocking_publish):
+            verify_thread = threading.Thread(target=run_verify)
+            verify_thread.start()
+            self.assertTrue(entered.wait(5))
+            cancel_thread = threading.Thread(target=run_cancel)
+            cancel_thread.start()
+            time.sleep(0.05)
+            self.assertTrue(cancel_thread.is_alive())
+            release.set()
+            verify_thread.join(5)
+            cancel_thread.join(5)
+        self.assertEqual(verify_errors, [])
+        self.assertEqual(verify_results[0]["status"], "published")
+        self.assertEqual(len(cancel_errors), 1)
+        self.assertIsInstance(cancel_errors[0], PermissionError)
+        self.assertEqual(runner._get_unchecked("g", run_id)["status"], "published")
+
+        runner, run_id = start_verification("cancel-first")
+        entered = threading.Event()
+        release = threading.Event()
+        original_release = self.lease.release_legacy_run
+
+        def blocking_release(*, allocation):
+            result = original_release(allocation=allocation)
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return result
+
+        cancel_results: list[dict] = []
+        verify_errors = []
+
+        with patch.object(
+            self.lease,
+            "release_legacy_run",
+            side_effect=blocking_release,
+        ), patch.object(self.store, "publish", wraps=self.store.publish) as publish:
+            cancel_thread = threading.Thread(
+                target=lambda: cancel_results.append(runner.cancel_sync("g", run_id))
+            )
+            cancel_thread.start()
+            self.assertTrue(entered.wait(5))
+            verify_thread = threading.Thread(target=run_verify)
+            verify_thread.start()
+            verify_thread.join(5)
+            self.assertFalse(verify_thread.is_alive())
+            self.assertEqual(len(verify_errors), 1)
+            self.assertIsInstance(verify_errors[0], PermissionError)
+            publish.assert_not_called()
+            release.set()
+            cancel_thread.join(5)
+        self.assertEqual(cancel_results[0]["status"], "cancelled")
+        self.assertEqual(runner._get_unchecked("g", run_id)["status"], "cancelled")
+
+    def test_legacy_restart_controls_require_future_daemon_owner_recovery(self) -> None:
+        workflow = self._workflow(
+            "legacy-restart-boundary",
+            auto_verify=False,
+            nodes=[
+                {"id": "start", "type": "start"},
+                {"id": "approve", "type": "approval"},
+                {"id": "end", "type": "end"},
+            ],
+            edges=[
+                {"source": "start", "target": "approve"},
+                {"source": "approve", "target": "end"},
+            ],
+        )
+        runner = self._runner()
+        started = runner.start_sync(
+            "g",
+            str(workflow["manifest"]["workflow_id"]),
+            actor_id="actor",
+            version=1,
+            inputs={},
+        )
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            run = runner._get_unchecked("g", started["run_id"])
+            if run.get("status") == "waiting_approval":
+                break
+            time.sleep(0.01)
+        self.assertEqual(run.get("status"), "waiting_approval")
+
+        script = f"""
+import json
+from pathlib import Path
+from no1.computer_control.lease import ComputerControlLease
+from no1.computer_control.runtime import WorkflowRunner
+from no1.computer_control.storage import WorkflowStore
+
+class Session:
+    transport_restarts = 0
+    async def catalog(self): return []
+    async def call_tool(self, name, arguments, *, timeout): return {{}}
+    async def stop(self): return None
+
+home = Path({str(self.home)!r})
+runner = WorkflowRunner(home, WorkflowStore(home), ComputerControlLease(home), Session())
+rejected = []
+calls = (
+    lambda: runner.decide_approval('g', {started['run_id']!r}, 'approve', approved=True),
+    lambda: runner.submit_recovery('g', {started['run_id']!r}, actor_id='actor'),
+    lambda: runner.verify('g', {started['run_id']!r}, actor_id='actor', passed=False, summary='', evidence_ids=[], fingerprint=''),
+)
+for call in calls:
+    try:
+        call()
+    except PermissionError:
+        rejected.append(True)
+print(json.dumps({{'rejected': len(rejected)}}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path.cwd(),
+            env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")},
+            text=True,
+            capture_output=True,
+            timeout=20,
+            check=True,
+        )
+        self.assertEqual(json.loads(result.stdout.strip()), {"rejected": 3})
+        self.assertFalse(
+            runner._approval_path("g", started["run_id"], "approve").exists()
+        )
+        runner.cancel_sync("g", started["run_id"])
+
+    def test_legacy_operation_failure_prefixes_are_retryable_and_conservative(self) -> None:
+        approval = self._workflow(
+            "legacy-callback-failure",
+            auto_verify=False,
+            nodes=[
+                {"id": "start", "type": "start"},
+                {"id": "approve", "type": "approval"},
+                {"id": "end", "type": "end"},
+            ],
+            edges=[
+                {"source": "start", "target": "approve"},
+                {"source": "approve", "target": "end"},
+            ],
+        )
+        runner = self._runner()
+        started = runner.start_sync(
+            "g",
+            str(approval["manifest"]["workflow_id"]),
+            actor_id="actor",
+            version=1,
+            inputs={},
+        )
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            run = runner._get_unchecked("g", started["run_id"])
+            if run.get("status") == "waiting_approval":
+                break
+            time.sleep(0.01)
+        self.assertEqual(run.get("status"), "waiting_approval")
+        run_path = runner._run_path("g", started["run_id"])
+        control_path = runner._approval_path("g", started["run_id"], "approve")
+        before = (run_path.read_bytes(), self.lease.path.read_bytes())
+        cancelled_before = set(runner._cancelled)
+
+        def fail_control_write(path, _value):
+            if Path(path) == control_path:
+                raise OSError("approval write failed")
+            raise AssertionError(f"unexpected write: {path}")
+
+        with patch.object(runtime_module, "atomic_write_text", fail_control_write):
+            with self.assertRaisesRegex(OSError, "approval write failed"):
+                runner.decide_approval(
+                    "g", started["run_id"], "approve", approved=True
+                )
+        self.assertEqual((run_path.read_bytes(), self.lease.path.read_bytes()), before)
+        self.assertEqual(runner._cancelled, cancelled_before)
+        self.assertFalse(control_path.exists())
+        runner.cancel_sync("g", started["run_id"])
+
+        recovery = self._workflow(
+            "legacy-projection-failure",
+            auto_verify=False,
+            nodes=[
+                {"id": "start", "type": "start"},
+                {"id": "wait", "type": "wait", "duration_seconds": 30},
+                {"id": "end", "type": "end"},
+            ],
+            edges=[
+                {"source": "start", "target": "wait"},
+                {"source": "wait", "target": "end"},
+            ],
+        )
+        runner = self._runner()
+        started = runner.start_sync(
+            "g",
+            str(recovery["manifest"]["workflow_id"]),
+            actor_id="actor",
+            version=1,
+            inputs={},
+        )
+        run_id = str(started["run_id"])
+        run = self._wait_current_node(runner, run_id, "wait")
+        execution = runner._legacy_executions[
+            runner._run_key("g", "actor", run_id)
+        ]
+        recovery_id = "recovery_projection_failure"
+        run.update(
+            {
+                "status": "recovering",
+                "recovery": {
+                    "recovery_id": recovery_id,
+                    "node_id": "wait",
+                    "tool": "Click",
+                    "arguments": {},
+                },
+                "updated_at": time.time(),
+            }
+        )
+        runner._write_execution("g", run, execution)
+        run_path = runner._run_path("g", run_id)
+        control_path = runner._recovery_path("g", run_id, recovery_id)
+        before = (run_path.read_bytes(), self.lease.path.read_bytes())
+        cancelled_before = set(runner._cancelled)
+        original_authority_write = run_authority_module.atomic_write_text
+
+        def fail_projection(path, value):
+            if Path(path) == run_path:
+                raise OSError("run projection failed")
+            return original_authority_write(path, value)
+
+        with patch.object(
+            run_authority_module,
+            "atomic_write_text",
+            side_effect=fail_projection,
+        ):
+            with self.assertRaisesRegex(OSError, "run projection failed"):
+                runner.submit_recovery(
+                    "g",
+                    run_id,
+                    recovery_id,
+                    actor_id="actor",
+                    resolution="retry",
+                    idempotency_key="retryable-prefix",
+                )
+        self.assertTrue(control_path.exists())
+        self.assertEqual((run_path.read_bytes(), self.lease.path.read_bytes()), before)
+        self.assertEqual(runner._cancelled, cancelled_before)
+        retried = runner.submit_recovery(
+            "g",
+            run_id,
+            recovery_id,
+            actor_id="actor",
+            resolution="retry",
+            idempotency_key="retryable-prefix",
+        )
+        self.assertTrue(retried["accepted"])
+        self.assertEqual(
+            runner._get_unchecked("g", run_id)["recovery"][
+                "resolved_idempotency_key"
+            ],
+            "retryable-prefix",
+        )
+        runner.cancel_sync("g", run_id)
+
+    def test_legacy_cancel_retries_after_terminal_projection_failure(self) -> None:
+        workflow = self._workflow(
+            "legacy-cancel-projection-failure",
+            auto_verify=False,
+            nodes=[
+                {"id": "start", "type": "start"},
+                {"id": "approve", "type": "approval"},
+                {"id": "end", "type": "end"},
+            ],
+            edges=[
+                {"source": "start", "target": "approve"},
+                {"source": "approve", "target": "end"},
+            ],
+        )
+        runner = self._runner()
+        started = runner.start_sync(
+            "g",
+            str(workflow["manifest"]["workflow_id"]),
+            actor_id="actor",
+            version=1,
+            inputs={},
+        )
+        run_id = str(started["run_id"])
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            run = runner._get_unchecked("g", run_id)
+            if run.get("status") == "waiting_approval":
+                break
+            time.sleep(0.01)
+        self.assertEqual(run.get("status"), "waiting_approval")
+        run_path = runner._run_path("g", run_id)
+        run_before = run_path.read_bytes()
+        key = runner._run_key("g", "actor", run_id)
+        execution = runner._legacy_executions[key]
+        original_authority_write = run_authority_module.atomic_write_text
+
+        def fail_cancelled_projection(path, value):
+            if Path(path) == run_path and json.loads(value).get("status") == "cancelled":
+                raise OSError("cancel terminal write failed")
+            return original_authority_write(path, value)
+
+        with patch.object(
+            run_authority_module,
+            "atomic_write_text",
+            side_effect=fail_cancelled_projection,
+        ):
+            with self.assertRaisesRegex(OSError, "cancel terminal write failed"):
+                runner.cancel_sync("g", run_id)
+        self.assertEqual(run_path.read_bytes(), run_before)
+        self.assertFalse(self.lease.status()["active"])
+        self.assertIn(key, runner._cancelled)
+        self.assertIs(runner._legacy_executions[key], execution)
+        deadline = time.time() + 5
+        while key in runner._tasks and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertNotIn(key, runner._tasks)
+
+        terminal = runner.cancel_sync("g", run_id)
+        self.assertEqual(terminal["status"], "cancelled")
+        self.assertNotIn(key, runner._cancelled)
+        self.assertNotIn(key, runner._legacy_executions)
+
     def test_cancel_wrong_identity_or_missing_live_execution_has_zero_authority_change(self) -> None:
         workflow = self._workflow(
             "waiting",
@@ -573,13 +1396,14 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
         with self.assertRaises(PermissionError):
             runner.cancel_manual_sync("wrong", started["run_id"], stop_claim=stop)
         self.assertEqual(self.authorities.persisted_record("g", started["run_id"]), before)
-        execution = runner._manual_executions.pop(started["run_id"])
+        run_key = runner._run_key("g", "actor", started["run_id"])
+        execution = runner._manual_executions.pop(run_key)
         try:
             with self.assertRaises(PermissionError):
                 runner.cancel_manual_sync("g", started["run_id"], stop_claim=stop)
             self.assertEqual(self.authorities.persisted_record("g", started["run_id"]), before)
         finally:
-            runner._manual_executions[started["run_id"]] = execution
+            runner._manual_executions[run_key] = execution
             runner.cancel_manual_sync("g", started["run_id"], stop_claim=stop)
 
     def test_finalize_and_cancel_are_serialized_at_publish(self) -> None:
@@ -876,7 +1700,9 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
             start_claim=claim,
         )
         self.assertTrue(entered.wait(5))
-        execution = runner._manual_executions[started["run_id"]]
+        execution = runner._manual_executions[
+            runner._run_key("g", "actor", started["run_id"])
+        ]
         self.assertTrue(
             self.lease.release_run(run_id=started["run_id"], authority=execution.claim)
         )
@@ -925,7 +1751,8 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
         while not runner._manual_executions and time.time() < deadline:
             time.sleep(0.01)
         self.assertEqual(len(runner._manual_executions), 1)
-        run_id, execution = next(iter(runner._manual_executions.items()))
+        run_key, execution = next(iter(runner._manual_executions.items()))
+        run_id = run_key[2]
         self.assertTrue(self.lease.release_run(run_id=run_id, authority=execution.claim))
         release.set()
         thread.join(5)
@@ -1186,7 +2013,9 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertEqual(run.get("current_node_id"), "wait")
-            execution = runner._manual_executions[started["run_id"]]
+            execution = runner._manual_executions[
+                runner._run_key("g", "actor", started["run_id"])
+            ]
             execution.claim = self.authorities.mark_waiting_recovery(execution.claim)
             recovery_id = "recovery_123456abcdef"
             run.update(

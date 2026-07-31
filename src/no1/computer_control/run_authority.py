@@ -30,12 +30,18 @@ _TERMINATION_SEAL = object()
 _STOP_OWNER_SEAL = object()
 _RECOVERY_SEAL = object()
 _TERMINAL_RECONCILIATION_SEAL = object()
+_LEGACY_ALLOCATION_SEAL = object()
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: Dict[str, threading.RLock] = {}
 _RECORD_INTEGRITIES_GUARD = threading.Lock()
 _RECORD_INTEGRITIES: Dict[tuple[str, str], str] = {}
 _CLAIM_OWNERS_GUARD = threading.Lock()
 _CLAIM_OWNERS: Dict[int, tuple[weakref.ReferenceType[Any], str]] = {}
+_LEGACY_ALLOCATION_OWNERS_GUARD = threading.Lock()
+_LEGACY_ALLOCATION_OWNERS: Dict[
+    int,
+    tuple[weakref.ReferenceType[Any], str, Mapping[str, str]],
+] = {}
 _CONTROL_STATES = frozenset({"pending", "active", "terminating", "revoked"})
 _EXECUTION_STATES = frozenset(
     {
@@ -202,6 +208,100 @@ def _require_run_claim_owner(claim: Any, authority_home: str) -> None:
         )
     if not valid:
         raise PermissionError("run authority claim belongs to another home")
+
+
+def _discard_legacy_allocation_owner(
+    identity: int,
+    reference: weakref.ReferenceType[Any],
+) -> None:
+    with _LEGACY_ALLOCATION_OWNERS_GUARD:
+        current = _LEGACY_ALLOCATION_OWNERS.get(identity)
+        if current is not None and current[0] is reference:
+            _LEGACY_ALLOCATION_OWNERS.pop(identity, None)
+
+
+@dataclass(frozen=True, init=False)
+class LegacyRunAllocationClaim:
+    authority_home: str
+    allocation_id: str
+    group_id: str
+    actor_id: str
+    resource_id: str
+    _seal: object
+
+    def __init__(self, identity: Mapping[str, str]):
+        for field in (
+            "authority_home",
+            "allocation_id",
+            "group_id",
+            "actor_id",
+            "resource_id",
+        ):
+            object.__setattr__(self, field, str(identity.get(field) or ""))
+        object.__setattr__(self, "_seal", _LEGACY_ALLOCATION_SEAL)
+
+    def public_identity(self) -> Dict[str, str]:
+        return {
+            "allocation_id": self.allocation_id,
+            "group_id": self.group_id,
+            "actor_id": self.actor_id,
+            "resource_id": self.resource_id,
+        }
+
+
+def _bind_legacy_allocation_owner(
+    claim: LegacyRunAllocationClaim,
+    identity: Mapping[str, str],
+) -> None:
+    private_identity = MappingProxyType(
+        {
+            field: str(identity.get(field) or "")
+            for field in (
+                "authority_home",
+                "allocation_id",
+                "group_id",
+                "actor_id",
+                "resource_id",
+            )
+        }
+    )
+    reference = weakref.ref(
+        claim,
+        lambda released, key=id(claim): _discard_legacy_allocation_owner(key, released),
+    )
+    with _LEGACY_ALLOCATION_OWNERS_GUARD:
+        _LEGACY_ALLOCATION_OWNERS[id(claim)] = (
+            reference,
+            private_identity["authority_home"],
+            private_identity,
+        )
+
+
+def _require_legacy_allocation_owner(
+    claim: Any,
+    authority_home: str,
+) -> Dict[str, str]:
+    if (
+        not isinstance(claim, LegacyRunAllocationClaim)
+        or claim._seal is not _LEGACY_ALLOCATION_SEAL
+    ):
+        raise PermissionError("validated legacy run allocation claim is required")
+    with _LEGACY_ALLOCATION_OWNERS_GUARD:
+        current = _LEGACY_ALLOCATION_OWNERS.get(id(claim))
+        private_identity = (
+            dict(current[2])
+            if current is not None
+            and current[0]() is claim
+            and current[1] == authority_home
+            else None
+        )
+    public_identity = {
+        "authority_home": claim.authority_home,
+        **claim.public_identity(),
+    }
+    if private_identity is None or public_identity != private_identity:
+        raise PermissionError("legacy run allocation claim belongs to another home")
+    return private_identity
 
 
 @dataclass(frozen=True, init=False)
@@ -777,6 +877,215 @@ class RunAuthorityStore:
             raise PermissionError("run recovery path is invalid")
         return path
 
+    def require_legacy_allocation_claim(
+        self,
+        claim: Any,
+        *,
+        group_id: str = "",
+        actor_id: str = "",
+        resource_id: str = "",
+    ) -> Dict[str, str]:
+        identity = _require_legacy_allocation_owner(claim, self.authority_home)
+        if any(
+            expected and identity[field] != expected
+            for field, expected in (
+                ("group_id", str(group_id or "")),
+                ("actor_id", str(actor_id or "")),
+                ("resource_id", str(resource_id or "")),
+            )
+        ):
+            raise PermissionError("legacy run allocation claim does not match")
+        return {
+            field: identity[field]
+            for field in ("allocation_id", "group_id", "actor_id", "resource_id")
+        }
+
+    @staticmethod
+    def _legacy_allocation_anchor(identity: Mapping[str, str]) -> Dict[str, str]:
+        return {
+            field: str(identity.get(field) or "")
+            for field in ("allocation_id", "group_id", "actor_id", "resource_id")
+        }
+
+    def _require_legacy_run_current_unlocked(
+        self,
+        identity: Mapping[str, str],
+    ) -> Dict[str, Any]:
+        expected_anchor = self._legacy_allocation_anchor(identity)
+        path = self._run_path(identity["group_id"], identity["resource_id"])
+        current = self._read(path)
+        if (
+            str(current.get("origin") or "") != "legacy_internal"
+            or str(current.get("group_id") or "") != identity["group_id"]
+            or str(current.get("actor_id") or "") != identity["actor_id"]
+            or str(current.get("run_id") or "") != identity["resource_id"]
+            or current.get("legacy_allocation") != expected_anchor
+        ):
+            raise PermissionError("legacy run allocation is no longer current")
+        return current
+
+    def _write_legacy_run_unlocked(
+        self,
+        identity: Mapping[str, str],
+        projection: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        value = dict(projection)
+        expected_anchor = self._legacy_allocation_anchor(identity)
+        if (
+            str(value.get("origin") or "") != "legacy_internal"
+            or str(value.get("group_id") or "") != identity["group_id"]
+            or str(value.get("actor_id") or "") != identity["actor_id"]
+            or str(value.get("run_id") or "") != identity["resource_id"]
+            or value.get("legacy_allocation") != expected_anchor
+        ):
+            raise PermissionError("legacy run allocation projection does not match")
+        path = self._run_path(identity["group_id"], identity["resource_id"])
+        atomic_write_text(
+            path,
+            json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        )
+        return value
+
+    def require_legacy_run_current(
+        self,
+        claim: LegacyRunAllocationClaim,
+    ) -> Dict[str, Any]:
+        identity = self.require_legacy_allocation_claim(claim)
+        with self._locked(identity["group_id"]):
+            return self._require_legacy_run_current_unlocked(identity)
+
+    @staticmethod
+    def _require_synchronous_legacy_callback_result(
+        result: Any,
+        message: str,
+    ) -> Any:
+        if not inspect.isawaitable(result):
+            return result
+        close = getattr(result, "close", None)
+        if callable(close):
+            close()
+        raise TypeError(message)
+
+    def perform_legacy_operation_with_callback(
+        self,
+        claim: LegacyRunAllocationClaim,
+        *,
+        validate_current: Callable[[Dict[str, Any]], Any],
+        require_lease: Optional[Callable[[LegacyRunAllocationClaim], Any]],
+        callback: Callable[[Dict[str, Any]], Any],
+        write_run: bool = False,
+    ) -> Any:
+        identity = self.require_legacy_allocation_claim(claim)
+        if not callable(validate_current) or not callable(callback):
+            raise TypeError("legacy run operation callbacks are required")
+        if require_lease is not None and not callable(require_lease):
+            raise TypeError("legacy run operation lease callback must be callable")
+        with self._locked(identity["group_id"]):
+            current = self._require_legacy_run_current_unlocked(identity)
+            self._require_synchronous_legacy_callback_result(
+                validate_current(current),
+                "legacy run operation validator must be synchronous",
+            )
+            if require_lease is not None:
+                self._require_synchronous_legacy_callback_result(
+                    require_lease(claim),
+                    "legacy run operation lease callback must be synchronous",
+                )
+            result = self._require_synchronous_legacy_callback_result(
+                callback(current),
+                "legacy run operation callback must be synchronous",
+            )
+            if write_run:
+                self._write_legacy_run_unlocked(identity, current)
+            return result
+
+    def allocate_legacy_run(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        resource_id: str,
+        initial_run: Mapping[str, Any],
+        reserve_lease: Callable[[LegacyRunAllocationClaim], Any],
+        cancel_reservation: Callable[[LegacyRunAllocationClaim], Any],
+    ) -> tuple[LegacyRunAllocationClaim, Dict[str, Any]]:
+        group = self._required(group_id, "group_id")
+        actor = self._required(actor_id, "actor_id")
+        resource = self._required(resource_id, "resource_id")
+        if not callable(reserve_lease) or not callable(cancel_reservation):
+            raise TypeError("legacy run allocation lease callbacks are required")
+        authority_path = self._path(group, resource)
+        run_path = self._run_path(group, resource)
+        value = dict(initial_run)
+        if (
+            str(value.get("origin") or "") != "legacy_internal"
+            or str(value.get("status") or "") != "initializing"
+            or str(value.get("group_id") or "") != group
+            or str(value.get("actor_id") or "") != actor
+            or str(value.get("run_id") or "") != resource
+            or "legacy_allocation" in value
+        ):
+            raise PermissionError("legacy run initializing projection is invalid")
+
+        with self._locked(group):
+            if authority_path.exists() or run_path.exists():
+                raise PermissionError("run resource already exists")
+            private_identity = {
+                "authority_home": self.authority_home,
+                "allocation_id": f"legacyalloc_{secrets.token_hex(24)}",
+                "group_id": group,
+                "actor_id": actor,
+                "resource_id": resource,
+            }
+            claim = LegacyRunAllocationClaim(private_identity)
+            _bind_legacy_allocation_owner(claim, private_identity)
+            value["legacy_allocation"] = self._legacy_allocation_anchor(private_identity)
+            try:
+                reservation = reserve_lease(claim)
+                if inspect.isawaitable(reservation):
+                    close = getattr(reservation, "close", None)
+                    if callable(close):
+                        close()
+                    raise TypeError(
+                        "legacy run allocation lease callback must be synchronous"
+                    )
+                run_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(
+                    run_path,
+                    json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                )
+            except BaseException as allocation_error:
+                try:
+                    cleanup = cancel_reservation(claim)
+                    if inspect.isawaitable(cleanup):
+                        close = getattr(cleanup, "close", None)
+                        if callable(close):
+                            close()
+                        raise TypeError(
+                            "legacy run allocation cleanup callback must be synchronous"
+                        )
+                except BaseException as cleanup_error:
+                    try:
+                        allocation_error.add_note(
+                            "legacy allocation reservation cleanup failed: "
+                            f"{type(cleanup_error).__name__}: {cleanup_error}"
+                        )
+                    except Exception:
+                        pass
+                raise
+            return claim, value
+
+    def write_legacy_run(
+        self,
+        claim: LegacyRunAllocationClaim,
+        value: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        identity = self.require_legacy_allocation_claim(claim)
+        projection = dict(value)
+        with self._locked(identity["group_id"]):
+            self._require_legacy_run_current_unlocked(identity)
+            return self._write_legacy_run_unlocked(identity, projection)
+
     @contextmanager
     def _locked(self, group_id: str) -> Iterator[None]:
         root = self._root(group_id)
@@ -1315,8 +1624,9 @@ class RunAuthorityStore:
                 "operation_expires_at_epoch": now + self.OPERATION_TTL_SECONDS,
             }
             path = self._path(group, resource)
+            run_path = self._run_path(group, resource)
             with self._locked(group):
-                if self._read(path):
+                if path.exists() or run_path.exists():
                     raise PermissionError("run authority already exists for this resource")
                 derivation = {
                     "kind": "run",

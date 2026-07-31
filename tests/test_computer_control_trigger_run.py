@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from no1.computer_control.lease import ComputerControlLease
 from no1.computer_control.runtime import WorkflowRunner
 
 
@@ -24,24 +25,7 @@ class _TriggerStore:
         }
 
     def state_root(self, group_id):
-        return self.root / group_id / "state"
-
-
-class _TriggerLease:
-    def acquire(self, **kwargs):
-        return kwargs
-
-    def require(self, **kwargs):
-        return kwargs
-
-    def heartbeat(self, **kwargs):
-        return kwargs
-
-    def release(self, **kwargs):
-        return True
-
-    def status(self):
-        return {"active": False}
+        return self.root / "groups" / group_id / "state" / "computer-control"
 
 
 class _TriggerSession:
@@ -57,7 +41,7 @@ class TestComputerControlTriggerRun(unittest.IsolatedAsyncioTestCase):
             runner = WorkflowRunner(
                 Path(td),
                 _TriggerStore(Path(td)),
-                _TriggerLease(),
+                ComputerControlLease(Path(td)),
                 _TriggerSession(),
             )
             run = await runner.start(

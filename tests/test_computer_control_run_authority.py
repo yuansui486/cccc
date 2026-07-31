@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -216,6 +217,35 @@ class TestRunAuthorityKernel(unittest.TestCase):
         )
         return path
 
+    @staticmethod
+    def _legacy_initial_run(resource_id: str) -> dict:
+        return {
+            "origin": "legacy_internal",
+            "status": "initializing",
+            "group_id": "g",
+            "actor_id": "actor",
+            "run_id": resource_id,
+            "workflow_id": "workflow_legacy",
+            "version": 1,
+        }
+
+    def _allocate_legacy(self, resource_id: str = "run_1"):
+        return self.authorities.allocate_legacy_run(
+            group_id="g",
+            actor_id="actor",
+            resource_id=resource_id,
+            initial_run=self._legacy_initial_run(resource_id),
+            reserve_lease=lambda claim: self.lease.reserve_legacy_run(
+                group_id="g",
+                actor_id="actor",
+                run_id=resource_id,
+                allocation=claim,
+            ),
+            cancel_reservation=lambda claim: self.lease.cancel_legacy_run_reservation(
+                allocation=claim
+            ),
+        )
+
     def _recover_in_fresh_process(self, claim, *, terminal: bool = False) -> dict:
         record = self.authorities.persisted_record(claim.group_id, claim.resource_id)
         config = {
@@ -310,6 +340,220 @@ print(json.dumps({{
             check=True,
         )
         return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_manual_and_legacy_share_one_locked_run_namespace(self) -> None:
+        start_claim = self._prepare_start_claim()
+        allocation, run = self._allocate_legacy()
+        run_path = self.workflows.state_root("g") / "runs" / "run_1.json"
+        run_before = run_path.read_bytes()
+        lease_before = self.lease_path.read_bytes()
+
+        with self.assertRaisesRegex(PermissionError, "already exists"):
+            self.authorities.begin_run(
+                group_id="g",
+                actor_id="actor",
+                resource_id="run_1",
+                request_id="request_1",
+                start_claim=start_claim,
+            )
+        with self.assertRaisesRegex(PermissionError, "already exists"):
+            self._allocate_legacy()
+
+        self.assertEqual(run_path.read_bytes(), run_before)
+        self.assertEqual(self.lease_path.read_bytes(), lease_before)
+        self.assertEqual(run["legacy_allocation"]["allocation_id"], allocation.allocation_id)
+        self.assertEqual(
+            self.lease.status()["lease"]["legacy_allocation"],
+            run["legacy_allocation"],
+        )
+        self.assertEqual(list(self.derived_root.glob("*.json")), [])
+
+    def test_legacy_allocation_rejects_orphan_authority_or_run_marker(self) -> None:
+        for resource_id, marker in (
+            ("run_authority_marker", "authority"),
+            ("run_path_marker", "run"),
+        ):
+            with self.subTest(marker=marker):
+                authority_path = self.authorities._path("g", resource_id)
+                run_path = self.authorities._run_path("g", resource_id)
+                marker_path = authority_path if marker == "authority" else run_path
+                marker_path.parent.mkdir(parents=True, exist_ok=True)
+                marker_path.write_bytes(b"marker\n")
+                before = marker_path.read_bytes()
+                with self.assertRaisesRegex(PermissionError, "already exists"):
+                    self._allocate_legacy(resource_id)
+                self.assertEqual(marker_path.read_bytes(), before)
+                self.assertFalse(self.lease.status()["active"])
+
+    def test_legacy_allocation_holds_authority_lock_while_waiting_for_lease(self) -> None:
+        start_claim = self._prepare_start_claim()
+        reserve_entered = threading.Event()
+        allocation_done = threading.Event()
+        allocation_errors: list[BaseException] = []
+        manual_errors: list[BaseException] = []
+
+        def allocate() -> None:
+            try:
+                self.authorities.allocate_legacy_run(
+                    group_id="g",
+                    actor_id="actor",
+                    resource_id="run_1",
+                    initial_run=self._legacy_initial_run("run_1"),
+                    reserve_lease=lambda claim: (
+                        reserve_entered.set(),
+                        self.lease.reserve_legacy_run(
+                            group_id="g",
+                            actor_id="actor",
+                            run_id="run_1",
+                            allocation=claim,
+                        ),
+                    )[1],
+                    cancel_reservation=lambda claim: self.lease.cancel_legacy_run_reservation(
+                        allocation=claim
+                    ),
+                )
+            except BaseException as exc:
+                allocation_errors.append(exc)
+            finally:
+                allocation_done.set()
+
+        def begin_manual() -> None:
+            try:
+                self.authorities.begin_run(
+                    group_id="g",
+                    actor_id="actor",
+                    resource_id="run_1",
+                    request_id="request_1",
+                    start_claim=start_claim,
+                )
+            except BaseException as exc:
+                manual_errors.append(exc)
+
+        with self.lease._locked():
+            allocation_thread = threading.Thread(target=allocate)
+            allocation_thread.start()
+            self.assertTrue(reserve_entered.wait(5))
+            manual_thread = threading.Thread(target=begin_manual)
+            manual_thread.start()
+            time.sleep(0.05)
+            self.assertFalse(allocation_done.is_set())
+            self.assertTrue(manual_thread.is_alive())
+
+        allocation_thread.join(5)
+        manual_thread.join(5)
+        self.assertFalse(allocation_thread.is_alive())
+        self.assertFalse(manual_thread.is_alive())
+        self.assertEqual(allocation_errors, [])
+        self.assertEqual(len(manual_errors), 1)
+        self.assertIsInstance(manual_errors[0], PermissionError)
+        self.assertTrue(self.lease.status()["active"])
+
+    def test_legacy_write_rejects_replaced_disk_anchor_without_changes(self) -> None:
+        allocation, run = self._allocate_legacy()
+        run_path = self.authorities._run_path("g", "run_1")
+        replaced = json.loads(run_path.read_text(encoding="utf-8"))
+        replaced["legacy_allocation"]["allocation_id"] = "legacyalloc_" + "a" * 48
+        self._write_json(run_path, replaced)
+        before = run_path.read_bytes()
+        run["status"] = "running"
+        with self.assertRaisesRegex(PermissionError, "no longer current"):
+            self.authorities.write_legacy_run(allocation, run)
+        self.assertEqual(run_path.read_bytes(), before)
+
+    def test_legacy_operation_rejects_awaitable_callbacks_without_body_effects(self) -> None:
+        allocation, _ = self._allocate_legacy()
+        self.lease.activate_legacy_run_reservation(allocation=allocation)
+        run_path = self.authorities._run_path("g", "run_1")
+        effects: list[str] = []
+
+        async def async_body(_value):
+            effects.append("executed")
+
+        callbacks = (
+            {
+                "validate_current": async_body,
+                "require_lease": lambda claim: self.lease.require_legacy_run(
+                    allocation=claim
+                ),
+                "callback": lambda _current: None,
+                "message": "validator must be synchronous",
+            },
+            {
+                "validate_current": lambda _current: None,
+                "require_lease": async_body,
+                "callback": lambda _current: None,
+                "message": "lease callback must be synchronous",
+            },
+            {
+                "validate_current": lambda _current: None,
+                "require_lease": lambda claim: self.lease.require_legacy_run(
+                    allocation=claim
+                ),
+                "callback": async_body,
+                "message": "callback must be synchronous",
+            },
+        )
+        for case in callbacks:
+            with self.subTest(message=case["message"]):
+                before = (run_path.read_bytes(), self.lease_path.read_bytes())
+                with self.assertRaisesRegex(TypeError, case["message"]):
+                    self.authorities.perform_legacy_operation_with_callback(
+                        allocation,
+                        validate_current=case["validate_current"],
+                        require_lease=case["require_lease"],
+                        callback=case["callback"],
+                        write_run=True,
+                    )
+                self.assertEqual((run_path.read_bytes(), self.lease_path.read_bytes()), before)
+                self.assertEqual(effects, [])
+
+    def test_legacy_allocation_preserves_reservation_error_and_cleanup_prefix(self) -> None:
+        original = RuntimeError("reserve callback failed after write")
+
+        def reserve_then_fail(claim):
+            self.lease.reserve_legacy_run(
+                group_id="g",
+                actor_id="actor",
+                run_id="run_1",
+                allocation=claim,
+            )
+            raise original
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.authorities.allocate_legacy_run(
+                group_id="g",
+                actor_id="actor",
+                resource_id="run_1",
+                initial_run=self._legacy_initial_run("run_1"),
+                reserve_lease=reserve_then_fail,
+                cancel_reservation=lambda claim: self.lease.cancel_legacy_run_reservation(
+                    allocation=claim
+                ),
+            )
+        self.assertIs(raised.exception, original)
+        self.assertFalse(self.lease.status()["active"])
+        self.assertFalse(self.authorities._run_path("g", "run_1").exists())
+
+        cleanup_error = RuntimeError("cleanup failed")
+
+        def cleanup_then_fail(_claim):
+            raise cleanup_error
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.authorities.allocate_legacy_run(
+                group_id="g",
+                actor_id="actor",
+                resource_id="run_1",
+                initial_run=self._legacy_initial_run("run_1"),
+                reserve_lease=reserve_then_fail,
+                cancel_reservation=cleanup_then_fail,
+            )
+        self.assertIs(raised.exception, original)
+        self.assertTrue(
+            any("cleanup failed" in note for note in getattr(original, "__notes__", []))
+        )
+        self.assertTrue(self.lease.status()["active"])
+        self.assertFalse(self.authorities._run_path("g", "run_1").exists())
 
     def test_real_request_issues_exact_scope_and_secret_is_receipt_only(self) -> None:
         inputs = {"message": "hello", "nested": {"count": 2}}

@@ -12,10 +12,12 @@ from ..util.file_lock import acquire_lockfile, release_lockfile
 from ..util.fs import atomic_write_text
 from .derived_authority import DerivedAuthorityClaim
 from .run_authority import (
+    LegacyRunAllocationClaim,
     RunExecutionClaim,
     RunExecutionSeedClaim,
     RunRecoveryClaim,
     RunTerminationClaim,
+    _require_legacy_allocation_owner,
     _require_run_claim_owner,
 )
 
@@ -226,6 +228,88 @@ class ComputerControlLease:
         return cls._run_authority_identity(value)
 
     @staticmethod
+    def _legacy_allocation_identity(value: Any) -> Dict[str, str]:
+        if not isinstance(value, dict):
+            return {}
+        identity = value.get("legacy_allocation")
+        if not isinstance(identity, dict) or set(identity) != {
+            "allocation_id",
+            "group_id",
+            "actor_id",
+            "resource_id",
+        }:
+            return {}
+        normalized = {
+            field: str(identity.get(field) or "")
+            for field in ("allocation_id", "group_id", "actor_id", "resource_id")
+        }
+        if (
+            not normalized["allocation_id"].startswith("legacyalloc_")
+            or len(normalized["allocation_id"]) != len("legacyalloc_") + 48
+            or any(
+                character not in "0123456789abcdef"
+                for character in normalized["allocation_id"][len("legacyalloc_") :]
+            )
+            or not normalized["group_id"]
+            or not normalized["actor_id"]
+            or not normalized["resource_id"]
+        ):
+            return {}
+        return normalized
+
+    def _legacy_claim_identity(
+        self,
+        claim: Any,
+        *,
+        group_id: str = "",
+        actor_id: str = "",
+        run_id: str = "",
+    ) -> Dict[str, str]:
+        try:
+            private = _require_legacy_allocation_owner(claim, self.authority_home)
+        except PermissionError as exc:
+            raise PermissionError("computer_control_lease_allocation_required") from exc
+        identity = {
+            field: private[field]
+            for field in ("allocation_id", "group_id", "actor_id", "resource_id")
+        }
+        if any(
+            expected and identity[field] != expected
+            for field, expected in (
+                ("group_id", str(group_id or "")),
+                ("actor_id", str(actor_id or "")),
+                ("resource_id", str(run_id or "")),
+            )
+        ):
+            raise PermissionError("computer_control_lease_allocation_required")
+        return identity
+
+    def _legacy_lease_matches(
+        self,
+        lease: Any,
+        identity: Dict[str, str],
+        *,
+        reservation: Optional[bool],
+    ) -> bool:
+        if not isinstance(lease, dict):
+            return False
+        if reservation is True and lease.get("reservation") is not True:
+            return False
+        if reservation is False and lease.get("reservation") is True:
+            return False
+        return bool(
+            self._legacy_allocation_identity(lease) == identity
+            and all(
+                str(lease.get(field) or "") == expected
+                for field, expected in (
+                    ("group_id", identity["group_id"]),
+                    ("actor_id", identity["actor_id"]),
+                    ("run_id", identity["resource_id"]),
+                )
+            )
+        )
+
+    @staticmethod
     def _claim_identity(
         authority: Optional[DerivedAuthorityClaim],
         *,
@@ -328,6 +412,8 @@ class ComputerControlLease:
             if authority_identity and not self._lineage_allows_unlocked(authority_identity):
                 raise PermissionError("computer_control_lease_authority_required")
             if self._active(current, now):
+                if self._legacy_allocation_identity(current):
+                    raise LeaseConflict(current or {})
                 same_owner = isinstance(current, dict) and all(
                     str(current.get(key) or "") == expected
                     for key, expected in (
@@ -356,6 +442,152 @@ class ComputerControlLease:
                 lease["authority"] = authority_identity
             atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
             return lease
+
+    def reserve_legacy_run(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+        allocation: LegacyRunAllocationClaim,
+    ) -> Dict[str, Any]:
+        identity = self._legacy_claim_identity(
+            allocation,
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=run_id,
+        )
+        now = time.time()
+        with self._locked():
+            current = self._read_unlocked()
+            if not self._active(current, now) and isinstance(current, dict):
+                self._retire_authority_unlocked(current)
+                self.path.unlink(missing_ok=True)
+                current = None
+            if self._active(current, now):
+                raise LeaseConflict(current or {})
+            lease = {
+                "group_id": group_id,
+                "actor_id": actor_id,
+                "run_id": run_id,
+                "observe_only": False,
+                "owner_pid": os.getpid(),
+                "acquired_at": now,
+                "heartbeat_at": now,
+                "expires_at": now + self.TTL_SECONDS,
+                "legacy_allocation": identity,
+                "reservation": True,
+            }
+            atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
+            return lease
+
+    def activate_legacy_run_reservation(
+        self,
+        *,
+        allocation: LegacyRunAllocationClaim,
+    ) -> Dict[str, Any]:
+        identity = self._legacy_claim_identity(allocation)
+        with self._locked():
+            lease = self._read_unlocked()
+            if (
+                not self._active(lease)
+                or not self._legacy_lease_matches(
+                    lease,
+                    identity,
+                    reservation=True,
+                )
+            ):
+                raise PermissionError("computer_control_lease_allocation_required")
+            now = time.time()
+            lease.pop("reservation", None)
+            lease["heartbeat_at"] = now
+            lease["expires_at"] = now + self.TTL_SECONDS
+            atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
+            return lease
+
+    def cancel_legacy_run_reservation(
+        self,
+        *,
+        allocation: LegacyRunAllocationClaim,
+    ) -> bool:
+        identity = self._legacy_claim_identity(allocation)
+        with self._locked():
+            lease = self._read_unlocked()
+            if not lease:
+                return False
+            if (
+                not self._legacy_lease_matches(
+                    lease,
+                    identity,
+                    reservation=True,
+                )
+            ):
+                return False
+            self.path.unlink(missing_ok=True)
+            return True
+
+    def require_legacy_run(
+        self,
+        *,
+        allocation: LegacyRunAllocationClaim,
+    ) -> Dict[str, Any]:
+        identity = self._legacy_claim_identity(allocation)
+        with self._locked():
+            lease = self._read_unlocked()
+            if (
+                not self._active(lease)
+                or not self._legacy_lease_matches(
+                    lease,
+                    identity,
+                    reservation=False,
+                )
+            ):
+                raise PermissionError("computer_control_lease_allocation_required")
+            return lease
+
+    def heartbeat_legacy_run(
+        self,
+        *,
+        allocation: LegacyRunAllocationClaim,
+    ) -> Dict[str, Any]:
+        identity = self._legacy_claim_identity(allocation)
+        now = time.time()
+        with self._locked():
+            lease = self._read_unlocked()
+            if (
+                not self._active(lease, now)
+                or not self._legacy_lease_matches(
+                    lease,
+                    identity,
+                    reservation=False,
+                )
+            ):
+                raise PermissionError("computer_control_lease_allocation_required")
+            lease["heartbeat_at"] = now
+            lease["expires_at"] = now + self.TTL_SECONDS
+            atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
+            return lease
+
+    def release_legacy_run(
+        self,
+        *,
+        allocation: LegacyRunAllocationClaim,
+    ) -> bool:
+        identity = self._legacy_claim_identity(allocation)
+        with self._locked():
+            lease = self._read_unlocked()
+            if not lease:
+                return False
+            if (
+                not self._legacy_lease_matches(
+                    lease,
+                    identity,
+                    reservation=False,
+                )
+            ):
+                return False
+            self.path.unlink(missing_ok=True)
+            return True
 
     def reserve(
         self,
@@ -759,9 +991,13 @@ class ComputerControlLease:
     ) -> Dict[str, Any]:
         status = self.status()
         lease = status.get("lease") if status.get("active") else None
-        if not isinstance(lease, dict) or any(
+        if (
+            not isinstance(lease, dict)
+            or self._legacy_allocation_identity(lease)
+            or any(
             str(lease.get(key) or "") != expected
             for key, expected in (("group_id", group_id), ("actor_id", actor_id), ("run_id", run_id))
+            )
         ):
             raise PermissionError("computer_control_lease_required")
         if self._lease_authority_identity(lease) != self._claim_identity(
@@ -794,7 +1030,11 @@ class ComputerControlLease:
         )
         with self._locked():
             lease = self._read_unlocked()
-            if not self._active(lease, now) or not isinstance(lease, dict):
+            if (
+                not self._active(lease, now)
+                or not isinstance(lease, dict)
+                or self._legacy_allocation_identity(lease)
+            ):
                 raise PermissionError("computer_control_lease_required")
             if any(str(lease.get(k) or "") != v for k, v in (("group_id", group_id), ("actor_id", actor_id), ("run_id", run_id))):
                 raise PermissionError("computer_control_lease_required")
@@ -816,6 +1056,8 @@ class ComputerControlLease:
             lease = self._read_unlocked()
             if not lease:
                 return False
+            if not force and self._legacy_allocation_identity(lease):
+                raise PermissionError("computer_control_lease_allocation_required")
             if not force and str(lease.get("run_id") or "") != run_id:
                 raise PermissionError("computer_control_lease_owner_required")
             lease_authority = self._lease_authority_identity(lease)

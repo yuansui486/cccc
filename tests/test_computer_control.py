@@ -3052,12 +3052,70 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(run["status"], "failed")
             self.assertEqual(run["events"][-1]["status"], "failed")
             self.assertIn("loc or label", run["events"][-1]["error"]["message"])
-
-            run.update({"status": "awaiting_verification", "metrics": {"replay_success": True}, "error": None})
-            run["events"][-1].update({"status": "completed", "result": {"isError": True}})
-            runner._write(group.group_id, run)
-            with self.assertRaisesRegex(ValueError, "失败步骤"):
+            run_path = runner._run_path(group.group_id, run["run_id"])
+            terminal_before = run_path.read_bytes()
+            terminal_variants = []
+            for changes in (
+                {"status": "awaiting_verification"},
+                {"group_id": "other"},
+                {"origin": "manual_actor"},
+            ):
+                variant = json.loads(json.dumps(run))
+                variant.update(changes)
+                variant["metrics"] = {"replay_success": True}
+                variant["error"] = None
+                variant["events"][-1].update(
+                    {"status": "completed", "result": {"isError": True}}
+                )
+                terminal_variants.append(variant)
+            for variant in terminal_variants:
+                with self.subTest(terminal_variant=variant["origin"], group=variant["group_id"]):
+                    with self.assertRaises(AttributeError):
+                        runner._write(group.group_id, variant)
+                    self.assertEqual(run_path.read_bytes(), terminal_before)
+            with self.assertRaises(PermissionError):
                 runner.verify(group.group_id, run["run_id"], actor_id="a", passed=True, summary="", evidence_ids=[], fingerprint="fp")
+            persisted = runner.get(group.group_id, run["run_id"])
+            self.assertEqual(persisted["status"], "failed")
+            self.assertEqual(persisted["events"][-1]["status"], "failed")
+
+            active_definition = WorkflowDefinition.model_validate({
+                "name": "active raw writer guard",
+                "auto_verify": False,
+                "nodes": [
+                    {"id": "s", "type": "start"},
+                    {"id": "w", "type": "wait", "duration_seconds": 30},
+                    {"id": "e", "type": "end"},
+                ],
+                "edges": [{"source": "s", "target": "w"}, {"source": "w", "target": "e"}],
+            })
+            active_workflow = store.create(group.group_id, active_definition)
+            active = runner.start_sync(
+                group.group_id,
+                active_workflow["manifest"]["workflow_id"],
+                actor_id="a",
+                version=1,
+                inputs={},
+            )
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                active = runner.get(group.group_id, active["run_id"])
+                if active.get("current_node_id") == "w":
+                    break
+                time.sleep(0.02)
+            self.assertEqual(active.get("current_node_id"), "w")
+            active_path = runner._run_path(group.group_id, active["run_id"])
+            active_before = active_path.read_bytes()
+            active_variant = json.loads(json.dumps(active))
+            active_variant.update(
+                {"origin": "manual_actor", "group_id": "other", "status": "completed"}
+            )
+            for write_group in (group.group_id, "other"):
+                with self.subTest(active_write_group=write_group):
+                    with self.assertRaises(AttributeError):
+                        runner._write(write_group, active_variant)
+                    self.assertEqual(active_path.read_bytes(), active_before)
+            runner.cancel_sync(group.group_id, active["run_id"])
         if old is None:
             os.environ.pop("CCCC_HOME", None)
         else:

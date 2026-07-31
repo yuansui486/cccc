@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..util.fs import atomic_write_text
-from .lease import ComputerControlLease, LeaseConflict
+from .lease import ComputerControlLease
 from .authorization import (
     RunStartClaim,
     normalized_run_inputs,
@@ -21,6 +21,7 @@ from .authorization import (
     workflow_definition_digest,
 )
 from .run_authority import (
+    LegacyRunAllocationClaim,
     RunAuthorityStore,
     RunExecutionClaim,
     RunOperationClaim,
@@ -48,6 +49,7 @@ _LEGACY_EXECUTION_SEAL = object()
 
 @dataclass(frozen=True)
 class _LegacyExecution:
+    allocation: LegacyRunAllocationClaim
     _seal: object = _LEGACY_EXECUTION_SEAL
 
 
@@ -131,11 +133,17 @@ class WorkflowRunner:
         self.fingerprint_provider = fingerprint_provider or (lambda: "")
         self.observation_provider = observation_provider
         self.run_authorities = run_authorities
+        self.run_namespace = run_authorities or RunAuthorityStore(
+            home,
+            issuer_epoch_provider=lambda: "legacy_namespace",
+            generation_provider=lambda _group_id, _actor_id: 1,
+        )
         self.requests = requests
         self._observation_contexts: Dict[str, ObservationContext] = {}
-        self._tasks: Dict[str, asyncio.Task[None]] = {}
-        self._cancelled: set[str] = set()
-        self._manual_executions: Dict[str, _ManualExecution] = {}
+        self._tasks: Dict[tuple[str, str, str], asyncio.Task[None]] = {}
+        self._cancelled: set[tuple[str, str, str]] = set()
+        self._legacy_executions: Dict[tuple[str, str, str], _LegacyExecution] = {}
+        self._manual_executions: Dict[tuple[str, str, str], _ManualExecution] = {}
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self._sync_thread: threading.Thread | None = None
         self._sync_lock = threading.Lock()
@@ -146,6 +154,36 @@ class WorkflowRunner:
         def __init__(self, lease: Optional[Dict[str, Any]] = None):
             super().__init__("computer control is now occupied by another group")
             self.lease = lease or {}
+
+    @staticmethod
+    def _run_key(group_id: str, actor_id: str, run_id: str) -> tuple[str, str, str]:
+        return (str(group_id), str(actor_id), str(run_id))
+
+    @staticmethod
+    def _require_run_path_segment(run_id: str) -> str:
+        resource = str(run_id or "")
+        if (
+            not resource
+            or len(resource) > 200
+            or resource in {".", ".."}
+            or "/" in resource
+            or "\\" in resource
+            or "\x00" in resource
+            or Path(resource).is_absolute()
+        ):
+            raise PermissionError("computer control run id must be a single path segment")
+        return resource
+
+    @staticmethod
+    def _remove_current(
+        values: Dict[tuple[str, str, str], Any],
+        key: tuple[str, str, str],
+        expected: Any,
+    ) -> bool:
+        if values.get(key) is not expected:
+            return False
+        values.pop(key, None)
+        return True
 
     def _recover_manual_runs_after_restart(self) -> None:
         assert self.run_authorities is not None
@@ -177,6 +215,14 @@ class WorkflowRunner:
         if isinstance(execution, _LegacyExecution):
             if execution._seal is not _LEGACY_EXECUTION_SEAL or origin != "legacy_internal":
                 raise PermissionError("manual actor run requires execution authority")
+            current = self.run_namespace.require_legacy_run_current(
+                execution.allocation
+            )
+            if any(
+                str(run.get(field) or "") != str(current.get(field) or "")
+                for field in ("group_id", "actor_id", "run_id")
+            ) or run.get("legacy_allocation") != current.get("legacy_allocation"):
+                raise PermissionError("legacy run allocation anchor is invalid")
             return
         if not isinstance(execution, _ManualExecution) or origin != "manual_actor":
             raise PermissionError("validated manual run execution authority is required")
@@ -203,11 +249,8 @@ class WorkflowRunner:
                 authority=execution.claim,
             )
         else:
-            self.lease.require(
-                group_id=group_id,
-                actor_id=actor_id,
-                run_id=run_id,
-                allow_observe=False,
+            self.lease.require_legacy_run(
+                allocation=execution.allocation,
             )
 
     def _write_execution(
@@ -217,7 +260,10 @@ class WorkflowRunner:
         execution: _LegacyExecution | _ManualExecution,
     ) -> None:
         self._require_execution(run, execution)
-        self._write_unchecked(group_id, run)
+        if isinstance(execution, _LegacyExecution):
+            self.run_namespace.write_legacy_run(execution.allocation, run)
+        else:
+            self._write_unchecked(group_id, run)
 
     def _write_manual_operation(
         self,
@@ -352,7 +398,8 @@ class WorkflowRunner:
                 execution.authorities.mark_cancelled(execution.termination)
         self._write_unchecked(group_id, run)
         if str(run.get("status") or "") != "awaiting_verification":
-            self._manual_executions.pop(str(run["run_id"]), None)
+            key = self._run_key(group_id, str(run["actor_id"]), str(run["run_id"]))
+            self._remove_current(self._manual_executions, key, execution)
 
     async def _heartbeat_loop(
         self,
@@ -376,7 +423,7 @@ class WorkflowRunner:
                     )
                 else:
                     self._require_execution(run, execution)
-                    self.lease.heartbeat(group_id=group_id, actor_id=actor_id, run_id=run_id)
+                    self.lease.heartbeat_legacy_run(allocation=execution.allocation)
                 run["lease"] = {"last_heartbeat_at": time.time(), "status": "owned"}
             except asyncio.CancelledError:
                 raise
@@ -387,16 +434,6 @@ class WorkflowRunner:
                     lost.set()
                     return
                 current = self.lease.status().get("lease")
-                if not isinstance(current, dict) or str(current.get("run_id") or "") == run_id:
-                    try:
-                        self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=run_id)
-                        metrics = run.setdefault("metrics", {})
-                        metrics["lease_recoveries"] = int(metrics.get("lease_recoveries") or 0) + 1
-                        run["lease"] = {"last_recovered_at": time.time(), "status": "recovered"}
-                        self._emit("lease.recovered", group_id=group_id, run_id=run_id)
-                        continue
-                    except LeaseConflict:
-                        current = self.lease.status().get("lease")
                 run["lease"] = {"status": "lost", "owner": current or {}}
                 run["status"] = "external_blocked"
                 run["external_blocked"] = {"reason": "computer_control_busy", "lease": current or {}, "at": time.time()}
@@ -859,7 +896,13 @@ class WorkflowRunner:
         return future.result()
 
     def _run_path(self, group_id: str, run_id: str) -> Path:
-        return self.store.state_root(group_id) / "runs" / f"{run_id}.json"
+        resource = self._require_run_path_segment(run_id)
+        state_root = self.store.state_root(group_id).resolve()
+        runs_root = (state_root / "runs").resolve()
+        path = (runs_root / f"{resource}.json").resolve()
+        if runs_root.parent != state_root or path.parent != runs_root:
+            raise PermissionError("computer control run path is invalid")
+        return path
 
     def _approval_path(self, group_id: str, run_id: str, node_id: str) -> Path:
         return self.store.state_root(group_id) / "approvals" / run_id / f"{node_id}.json"
@@ -871,11 +914,6 @@ class WorkflowRunner:
         path = self._run_path(group_id, str(run["run_id"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(path, json.dumps(run, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
-
-    def _write(self, group_id: str, run: Dict[str, Any]) -> None:
-        if str(run.get("origin") or "legacy_internal") == "manual_actor":
-            raise PermissionError("manual actor run requires execution authority")
-        self._write_unchecked(group_id, run)
 
     @staticmethod
     def _emit(kind: str, **data: Any) -> None:
@@ -986,12 +1024,44 @@ class WorkflowRunner:
 
     def decide_approval(self, group_id: str, run_id: str, node_id: str, *, approved: bool) -> Dict[str, Any]:
         run = self.get(group_id, run_id)
-        if str(run.get("status") or "") != "waiting_approval" or str(run.get("current_node_id") or "") != node_id:
-            raise ValueError("run is not waiting for approval on this node")
-        path = self._approval_path(group_id, run_id, node_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(path, json.dumps({"approved": bool(approved), "decided_at": time.time()}, ensure_ascii=False) + "\n")
-        return {"run_id": run_id, "node_id": node_id, "approved": bool(approved)}
+        key = self._run_key(group_id, str(run.get("actor_id") or ""), run_id)
+        execution = self._legacy_executions.get(key)
+        if not isinstance(execution, _LegacyExecution):
+            raise PermissionError("legacy run execution allocation is unavailable")
+
+        def validate(current: Dict[str, Any]) -> None:
+            if (
+                self._legacy_executions.get(key) is not execution
+                or key in self._cancelled
+            ):
+                raise PermissionError("legacy run execution allocation is unavailable")
+            if (
+                str(current.get("status") or "") != "waiting_approval"
+                or str(current.get("current_node_id") or "") != node_id
+            ):
+                raise ValueError("run is not waiting for approval on this node")
+
+        def decide(_current: Dict[str, Any]) -> Dict[str, Any]:
+            path = self._approval_path(group_id, run_id, node_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(
+                path,
+                json.dumps(
+                    {"approved": bool(approved), "decided_at": time.time()},
+                    ensure_ascii=False,
+                )
+                + "\n",
+            )
+            return {"run_id": run_id, "node_id": node_id, "approved": bool(approved)}
+
+        return self.run_namespace.perform_legacy_operation_with_callback(
+            execution.allocation,
+            validate_current=validate,
+            require_lease=lambda allocation: self.lease.require_legacy_run(
+                allocation=allocation
+            ),
+            callback=decide,
+        )
 
     def decide_approval_manual(
         self,
@@ -1063,39 +1133,91 @@ class WorkflowRunner:
         idempotency_key: str = "",
     ) -> Dict[str, Any]:
         run = self.get(group_id, run_id)
-        recovery = run.get("recovery") if isinstance(run.get("recovery"), dict) else {}
-        if str(run.get("status") or "") != "recovering":
-            raise ValueError("run is not waiting for this recovery")
-        if str(run.get("actor_id") or "") != actor_id:
-            raise PermissionError("recovery belongs to another actor")
-        expected_recovery_id = str(recovery.get("recovery_id") or "")
-        if recovery_id and expected_recovery_id != recovery_id:
-            raise ValueError("recovery context has changed; refresh and retry")
-        recovery_id = expected_recovery_id
+        run_key = self._run_key(group_id, actor_id, run_id)
+        execution = self._legacy_executions.get(run_key)
+        if not isinstance(execution, _LegacyExecution):
+            raise PermissionError("legacy run execution allocation is unavailable")
         resolution = str(resolution or "retry").strip().lower()
         if resolution not in {"reobserve", "retry", "repair_step", "replace_target", "skip", "cancel"}:
             raise ValueError("unsupported recovery resolution")
-        key = str(idempotency_key or "").strip()
-        if key and str(recovery.get("resolved_idempotency_key") or "") == key:
-            return {"run_id": run_id, "recovery_id": recovery_id, "accepted": True, "idempotent": True}
-        path = self._recovery_path(group_id, run_id, recovery_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        original_arguments = recovery.get("arguments") if isinstance(recovery.get("arguments"), dict) else {}
-        value = {
-            "tool": str(tool or recovery.get("tool") or "").strip(),
-            "arguments": arguments if isinstance(arguments, dict) else dict(original_arguments),
-            "target": target if isinstance(target, dict) else recovery.get("target"),
-            "resolution": resolution,
-            "node_id": node_id or recovery.get("node_id"),
-            "actor_id": actor_id,
-            "idempotency_key": key,
-            "submitted_at": time.time(),
-        }
-        atomic_write_text(path, json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
-        if key:
-            recovery["resolved_idempotency_key"] = key
-            self._write(group_id, run)
-        return {"run_id": run_id, "recovery_id": recovery_id, "accepted": True}
+        presented_recovery_id = str(recovery_id or "")
+        idempotency = str(idempotency_key or "").strip()
+
+        def validate(current: Dict[str, Any]) -> None:
+            current_recovery = (
+                current.get("recovery")
+                if isinstance(current.get("recovery"), dict)
+                else {}
+            )
+            expected_recovery_id = str(current_recovery.get("recovery_id") or "")
+            if (
+                self._legacy_executions.get(run_key) is not execution
+                or run_key in self._cancelled
+            ):
+                raise PermissionError("legacy run execution allocation is unavailable")
+            if str(current.get("status") or "") != "recovering":
+                raise ValueError("run is not waiting for this recovery")
+            if str(current.get("actor_id") or "") != actor_id:
+                raise PermissionError("recovery belongs to another actor")
+            if presented_recovery_id and expected_recovery_id != presented_recovery_id:
+                raise ValueError("recovery context has changed; refresh and retry")
+
+        def submit(current: Dict[str, Any]) -> Dict[str, Any]:
+            current_recovery = current["recovery"]
+            expected_recovery_id = str(current_recovery.get("recovery_id") or "")
+            if (
+                idempotency
+                and str(current_recovery.get("resolved_idempotency_key") or "")
+                == idempotency
+            ):
+                return {
+                    "run_id": run_id,
+                    "recovery_id": expected_recovery_id,
+                    "accepted": True,
+                    "idempotent": True,
+                }
+            path = self._recovery_path(group_id, run_id, expected_recovery_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            original_arguments = (
+                current_recovery.get("arguments")
+                if isinstance(current_recovery.get("arguments"), dict)
+                else {}
+            )
+            value = {
+                "tool": str(tool or current_recovery.get("tool") or "").strip(),
+                "arguments": (
+                    arguments if isinstance(arguments, dict) else dict(original_arguments)
+                ),
+                "target": (
+                    target if isinstance(target, dict) else current_recovery.get("target")
+                ),
+                "resolution": resolution,
+                "node_id": node_id or current_recovery.get("node_id"),
+                "actor_id": actor_id,
+                "idempotency_key": idempotency,
+                "submitted_at": time.time(),
+            }
+            atomic_write_text(
+                path,
+                json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            )
+            if idempotency:
+                current_recovery["resolved_idempotency_key"] = idempotency
+            return {
+                "run_id": run_id,
+                "recovery_id": expected_recovery_id,
+                "accepted": True,
+            }
+
+        return self.run_namespace.perform_legacy_operation_with_callback(
+            execution.allocation,
+            validate_current=validate,
+            require_lease=lambda allocation: self.lease.require_legacy_run(
+                allocation=allocation
+            ),
+            callback=submit,
+            write_run=bool(idempotency),
+        )
 
     def submit_recovery_manual(
         self,
@@ -1237,6 +1359,7 @@ class WorkflowRunner:
         arguments: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         group_id, run_id = str(run["group_id"]), str(run["run_id"])
+        key = self._run_key(group_id, str(run["actor_id"]), run_id)
         recovery_id = "recovery_" + uuid.uuid4().hex[:12]
         observation: Any = None
         try:
@@ -1324,7 +1447,7 @@ class WorkflowRunner:
             raise RuntimeError("AI 自适应恢复通知无法投递：执行智能体未运行或当前不可接收消息")
         path = self._recovery_path(group_id, run_id, recovery_id)
         while True:
-            if run_id in self._cancelled:
+            if key in self._cancelled:
                 raise asyncio.CancelledError()
             if path.exists():
                 try:
@@ -1349,13 +1472,14 @@ class WorkflowRunner:
         timeout: Optional[float] = None,
     ) -> None:
         group_id, run_id = str(run["group_id"]), str(run["run_id"])
+        key = self._run_key(group_id, str(run["actor_id"]), run_id)
         path = self._approval_path(group_id, run_id, node_id)
         run["status"] = "waiting_approval"
         self._transition_manual(run, execution, "waiting_approval")
         self._write_execution(group_id, run, execution)
         self._emit("run.approval_required", group_id=group_id, run_id=run_id, node_id=node_id)
         while True:
-            if run_id in self._cancelled:
+            if key in self._cancelled:
                 raise asyncio.CancelledError()
             if path.exists():
                 try:
@@ -1383,12 +1507,10 @@ class WorkflowRunner:
     ) -> Dict[str, Any]:
         selected = self.store.get(group_id, workflow_id, version=version)
         definition = WorkflowDefinition.model_validate({k: v for k, v in selected["definition"].items() if k != "change_note"})
-        start_catalog = await self._catalog()
-        if start_catalog:
-            validate_workflow_tools(definition, start_catalog)
+        self._validate_node_path_ids(definition)
         effective_inputs = self._effective_inputs(definition, inputs)
-        run_id = "run_" + uuid.uuid4().hex[:16]
-        self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=run_id)
+        run_id = self._require_run_path_segment("run_" + uuid.uuid4().hex[:16])
+        key = self._run_key(group_id, actor_id, run_id)
         now = time.time()
         trigger = {
             key: trigger_context.get(key)
@@ -1412,7 +1534,7 @@ class WorkflowRunner:
             "workflow_id": workflow_id,
             "version": selected["version"],
             "actor_id": actor_id,
-            "status": "running",
+            "status": "initializing",
             "current_node_id": None,
             "started_at": now,
             "updated_at": now,
@@ -1436,22 +1558,94 @@ class WorkflowRunner:
                 )
             } if isinstance(authorization, dict) else {},
         }
-        self._write(group_id, run)
-        self._emit(
-            "run.started",
+        allocation, run = self.run_namespace.allocate_legacy_run(
             group_id=group_id,
-            run_id=run_id,
-            workflow_id=workflow_id,
             actor_id=actor_id,
-            version=selected["version"],
-            trigger=trigger or None,
+            resource_id=run_id,
+            initial_run=run,
+            reserve_lease=lambda claim: self.lease.reserve_legacy_run(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=run_id,
+                allocation=claim,
+            ),
+            cancel_reservation=lambda claim: self.lease.cancel_legacy_run_reservation(
+                allocation=claim,
+            ),
         )
-        task = asyncio.create_task(
-            self._execute(run, definition, effective_inputs, _LegacyExecution())
-        )
-        self._tasks[run_id] = task
-        task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
-        return run
+        execution = _LegacyExecution(allocation)
+        active_lease = False
+        try:
+            self._require_execution(run, execution)
+            self.lease.activate_legacy_run_reservation(allocation=allocation)
+            active_lease = True
+            self._require_provider_call(run, execution)
+            start_catalog = await self._catalog()
+            if start_catalog:
+                validate_workflow_tools(definition, start_catalog)
+            self._require_provider_call(run, execution)
+            run["status"] = "running"
+            run["updated_at"] = time.time()
+            self._write_execution(group_id, run, execution)
+            task = asyncio.create_task(
+                self._execute(run, definition, effective_inputs, execution)
+            )
+            self._legacy_executions[key] = execution
+            self._tasks[key] = task
+            task.add_done_callback(
+                lambda completed, run_key=key: self._remove_current(
+                    self._tasks,
+                    run_key,
+                    completed,
+                )
+            )
+            self._emit(
+                "run.started",
+                group_id=group_id,
+                run_id=run_id,
+                workflow_id=workflow_id,
+                actor_id=actor_id,
+                version=selected["version"],
+                trigger=trigger or None,
+            )
+            return run
+        except BaseException as start_error:
+            try:
+                self._require_execution(run, execution)
+                released = (
+                    self.lease.release_legacy_run(allocation=allocation)
+                    if active_lease
+                    else self.lease.cancel_legacy_run_reservation(allocation=allocation)
+                )
+                if not released:
+                    raise PermissionError("legacy run allocation cleanup lost ownership")
+            except BaseException as cleanup_error:
+                try:
+                    start_error.add_note(
+                        "legacy run allocation cleanup failed: "
+                        f"{type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+                except Exception:
+                    pass
+            else:
+                run.update(
+                    {
+                        "status": "start_failed",
+                        "finished_at": time.time(),
+                        "updated_at": time.time(),
+                    }
+                )
+                try:
+                    self.run_namespace.write_legacy_run(allocation, run)
+                except BaseException as projection_error:
+                    try:
+                        start_error.add_note(
+                            "legacy run start-failed projection failed: "
+                            f"{type(projection_error).__name__}: {projection_error}"
+                        )
+                    except Exception:
+                        pass
+            raise
 
     def start_manual_sync(
         self,
@@ -1511,17 +1705,9 @@ class WorkflowRunner:
         definition = WorkflowDefinition.model_validate(
             {key: value for key, value in selected["definition"].items() if key != "change_note"}
         )
-        for node in definition.nodes:
-            node_id = str(node.id)
-            if (
-                node_id in {".", ".."}
-                or "/" in node_id
-                or "\\" in node_id
-                or "\x00" in node_id
-                or Path(node_id).is_absolute()
-            ):
-                raise PermissionError("manual workflow node id must be a single path segment")
-        run_id = "run_" + uuid.uuid4().hex[:16]
+        self._validate_node_path_ids(definition)
+        run_id = self._require_run_path_segment("run_" + uuid.uuid4().hex[:16])
+        key = self._run_key(group_id, actor_id, run_id)
         issue = self.run_authorities.begin_run(
             group_id=group_id,
             actor_id=actor_id,
@@ -1583,7 +1769,7 @@ class WorkflowRunner:
             )
             active_lease = True
             execution = _ManualExecution(self.run_authorities, accepted.execution_claim)
-            self._manual_executions[run_id] = execution
+            self._manual_executions[key] = execution
             self._require_execution(run, execution)
             self._require_provider_call(run, execution)
             start_catalog = await self._catalog()
@@ -1596,8 +1782,14 @@ class WorkflowRunner:
             self._write_execution(group_id, run, execution)
             effective_inputs = self._effective_inputs(definition, normalized_inputs)
             task = asyncio.create_task(self._execute(run, definition, effective_inputs, execution))
-            self._tasks[run_id] = task
-            task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
+            self._tasks[key] = task
+            task.add_done_callback(
+                lambda completed, run_key=key: self._remove_current(
+                    self._tasks,
+                    run_key,
+                    completed,
+                )
+            )
             self._emit(
                 "run.started",
                 group_id=group_id,
@@ -1608,7 +1800,8 @@ class WorkflowRunner:
             )
             return {**run, "run_authority_receipt": issue.receipt}
         except Exception as start_error:
-            self._manual_executions.pop(run_id, None)
+            if execution is not None:
+                self._remove_current(self._manual_executions, key, execution)
             rollback_errors: List[str] = []
 
             def attempt_rollback(label: str, callback: Any) -> bool:
@@ -1678,6 +1871,19 @@ class WorkflowRunner:
                 except Exception:
                     pass
             raise
+
+    @staticmethod
+    def _validate_node_path_ids(definition: WorkflowDefinition) -> None:
+        for node in definition.nodes:
+            node_id = str(node.id)
+            if (
+                node_id in {".", ".."}
+                or "/" in node_id
+                or "\\" in node_id
+                or "\x00" in node_id
+                or Path(node_id).is_absolute()
+            ):
+                raise PermissionError("workflow node id must be a single path segment")
 
     @staticmethod
     def _effective_inputs(definition: WorkflowDefinition, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1790,6 +1996,7 @@ class WorkflowRunner:
         execution: _LegacyExecution | _ManualExecution,
     ) -> None:
         group_id, run_id, actor_id = run["group_id"], run["run_id"], run["actor_id"]
+        key = self._run_key(str(group_id), str(actor_id), str(run_id))
         nodes = {node.id: node for node in definition.nodes}
         outgoing: Dict[str, List[Any]] = {node_id: [] for node_id in nodes}
         for edge in definition.edges:
@@ -1806,7 +2013,7 @@ class WorkflowRunner:
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(run, lease_lost, execution))
         try:
             while True:
-                if run_id in self._cancelled:
+                if key in self._cancelled:
                     raise asyncio.CancelledError()
                 if deadline is not None and time.monotonic() > deadline:
                     raise TimeoutError("workflow run exceeded its configured safety limit")
@@ -2181,7 +2388,23 @@ class WorkflowRunner:
             if isinstance(execution, _ManualExecution):
                 self._finalize_manual_execution(group_id, run, execution)
             else:
-                self._write_execution(group_id, run, execution)
+                self._require_execution(run, execution)
+                released = self.lease.release_legacy_run(
+                    allocation=execution.allocation
+                )
+                if not released and str(run.get("status") or "") != "external_blocked":
+                    run.update(
+                        {
+                            "status": "external_blocked",
+                            "error": {
+                                "code": "computer_control_busy",
+                                "message": "legacy run lease ownership was lost before finalization",
+                            },
+                            "finished_at": time.time(),
+                            "updated_at": time.time(),
+                        }
+                    )
+                self.run_namespace.write_legacy_run(execution.allocation, run)
             try:
                 from ..kernel.events import publish_event
 
@@ -2191,12 +2414,18 @@ class WorkflowRunner:
                 )
             except Exception:
                 pass
-            self._cancelled.discard(run_id)
-            if isinstance(execution, _LegacyExecution):
-                try:
-                    self.lease.release(run_id=run_id)
-                except PermissionError:
-                    pass
+            self._cancelled.discard(key)
+            if isinstance(execution, _LegacyExecution) and str(
+                run.get("status") or ""
+            ) not in {
+                "initializing",
+                "running",
+                "recovering",
+                "waiting_approval",
+                "awaiting_verification",
+                "external_blocked",
+            }:
+                self._remove_current(self._legacy_executions, key, execution)
 
     @staticmethod
     def _redact_result(value: Any) -> Any:
@@ -2233,14 +2462,53 @@ class WorkflowRunner:
 
     async def cancel(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
         run = self.get(group_id, run_id)
-        self._cancelled.add(run_id)
-        task = self._tasks.get(run_id)
+        actor_id = str(run.get("actor_id") or "")
+        key = self._run_key(group_id, actor_id, run_id)
+        execution = self._legacy_executions.get(key)
+        if not isinstance(execution, _LegacyExecution):
+            raise PermissionError("legacy run execution allocation is unavailable")
+
+        def validate(current: Dict[str, Any]) -> None:
+            if self._legacy_executions.get(key) is not execution:
+                raise PermissionError("legacy run execution allocation is unavailable")
+            if str(current.get("status") or "") not in {
+                "running",
+                "recovering",
+                "waiting_approval",
+                "awaiting_verification",
+                "external_blocked",
+            }:
+                raise PermissionError("legacy run execution allocation is unavailable")
+
+        self.run_namespace.perform_legacy_operation_with_callback(
+            execution.allocation,
+            validate_current=validate,
+            require_lease=None,
+            callback=lambda _current: self._cancelled.add(key),
+        )
+        task = self._tasks.get(key)
         if task is not None:
             task.cancel()
-        self.lease.release(run_id=run_id, force=emergency)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        else:
+            self._require_execution(run, execution)
+            self.lease.release_legacy_run(allocation=execution.allocation)
+            run.update(
+                {
+                    "status": "cancelled",
+                    "finished_at": time.time(),
+                    "updated_at": time.time(),
+                }
+            )
+            self.run_namespace.write_legacy_run(execution.allocation, run)
+            self._remove_current(self._legacy_executions, key, execution)
+            self._cancelled.discard(key)
         if emergency:
             await self.session.stop()
-        return run
+        return self._get_unchecked(group_id, run_id)
 
     def cancel_sync(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
         loop = self._ensure_sync_loop()
@@ -2259,7 +2527,8 @@ class WorkflowRunner:
             raise PermissionError("validated run stop-owner claim is required")
         if stop_claim.group_id != group_id or stop_claim.resource_id != run_id:
             raise PermissionError("run stop-owner claim does not match the expected resource")
-        execution = self._manual_executions.get(run_id)
+        key = self._run_key(group_id, stop_claim.actor_id, run_id)
+        execution = self._manual_executions.get(key)
         if not isinstance(execution, _ManualExecution):
             raise PermissionError("manual actor run execution is unavailable")
         holder: Dict[str, Dict[str, Any]] = {}
@@ -2267,7 +2536,7 @@ class WorkflowRunner:
         def validate_live(expected_anchor: Dict[str, Any]) -> None:
             run = self._get_unchecked(group_id, run_id)
             if (
-                self._manual_executions.get(run_id) is not execution
+                self._manual_executions.get(key) is not execution
                 or str(run.get("origin") or "") != "manual_actor"
                 or str(run.get("group_id") or "") != group_id
                 or str(run.get("actor_id") or "") != stop_claim.actor_id
@@ -2279,7 +2548,7 @@ class WorkflowRunner:
 
         def on_started(claim: RunTerminationClaim) -> None:
             execution.termination = claim
-            self._cancelled.add(run_id)
+            self._cancelled.add(key)
 
         self.run_authorities.begin_cancel_for_execution(
             stop_claim,
@@ -2288,7 +2557,7 @@ class WorkflowRunner:
             on_started=on_started,
         )
         run = holder["run"]
-        task = self._tasks.get(run_id)
+        task = self._tasks.get(key)
         if task is not None:
             task.cancel()
             try:
@@ -2336,67 +2605,143 @@ class WorkflowRunner:
         run = self.get(group_id, run_id)
         if str(run.get("actor_id") or "") != actor_id:
             raise PermissionError("run belongs to another actor")
-        status = str(run.get("status") or "")
-        lease_recovery = status == "external_blocked" and bool((run.get("metrics") or {}).get("replay_success")) and bool(run.get("evidence"))
-        if status != "awaiting_verification" and not lease_recovery:
-            raise ValueError("run is not awaiting verification")
-        temporary_lease = False
-        if lease_recovery:
-            # Re-acquire only when no other owner controls the desktop. This
-            # turns the common end-of-run heartbeat race into a recoverable,
-            # read-only verification state.
-            self.lease.acquire(group_id=group_id, actor_id=actor_id, run_id=run_id)
-            temporary_lease = True
-        failure_markers = [
-            item for item in (run.get("events") if isinstance(run.get("events"), list) else [])
-            if isinstance(item, dict) and (
-                str(item.get("status") or "") in {"failed", "recovering"}
-                or self._contains_failure_marker(item.get("result"))
-                or self._contains_failure_marker(item.get("error"))
+        key = self._run_key(group_id, actor_id, run_id)
+        execution = self._legacy_executions.get(key)
+        if not isinstance(execution, _LegacyExecution):
+            raise PermissionError("legacy run execution allocation is unavailable")
+        finalization_error: list[BaseException] = []
+
+        def validate(current: Dict[str, Any]) -> None:
+            if (
+                self._legacy_executions.get(key) is not execution
+                or key in self._cancelled
+            ):
+                raise PermissionError("legacy run execution allocation is unavailable")
+            status = str(current.get("status") or "")
+            metrics = current.get("metrics") if isinstance(current.get("metrics"), dict) else {}
+            lease_recovery = (
+                status == "external_blocked"
+                and bool(metrics.get("replay_success"))
+                and bool(current.get("evidence"))
             )
-        ]
-        if passed and (failure_markers or (run.get("error") and not lease_recovery) or not bool((run.get("metrics") or {}).get("replay_success"))):
-            if temporary_lease:
-                self.lease.release(run_id=run_id)
-            raise ValueError("该运行包含失败步骤，不能验证为成功")
-        run["verification"] = {
-            "passed": bool(passed),
-            "summary": str(summary or "")[:2000],
-            "evidence_ids": [str(item)[:200] for item in evidence_ids[:100]],
-            "verified_by": actor_id,
-            "verified_at": time.time(),
-        }
-        if not passed:
-            run["status"] = "verification_failed"
-        else:
-            authorization = run.get("authorization") if isinstance(run.get("authorization"), dict) else {}
-            workflow_id, version = str(run["workflow_id"]), int(run["version"])
-            finalized: Dict[str, Any] = {}
-            has_request_authorization = bool(str(authorization.get("request_id") or "").strip())
-            if has_request_authorization and authorization.get("allow_publish") is not False:
-                finalized["published"] = self.store.publish(group_id, workflow_id, version)
-            if has_request_authorization and authorization.get("allow_trust") is not False:
-                if not fingerprint:
-                    raise ValueError("Windows-MCP fingerprint is unavailable")
-                finalized["trusted"] = self.store.trust(
-                    group_id,
-                    workflow_id,
-                    version,
-                    fingerprint=fingerprint,
-                    permissions=["all_windows_mcp_tools"],
+            if status != "awaiting_verification" and not lease_recovery:
+                raise ValueError("run is not awaiting verification")
+            failure_markers = [
+                item
+                for item in (
+                    current.get("events")
+                    if isinstance(current.get("events"), list)
+                    else []
                 )
-            run["finalization"] = {
-                "published": "published" in finalized,
-                "trusted": "trusted" in finalized,
-                "unattended_triggers_authorized": has_request_authorization and authorization.get("allow_unattended_triggers") is not False,
+                if isinstance(item, dict)
+                and (
+                    str(item.get("status") or "") in {"failed", "recovering"}
+                    or self._contains_failure_marker(item.get("result"))
+                    or self._contains_failure_marker(item.get("error"))
+                )
+            ]
+            if passed and (
+                failure_markers
+                or (current.get("error") and not lease_recovery)
+                or not bool(metrics.get("replay_success"))
+            ):
+                raise ValueError("该运行包含失败步骤，不能验证为成功")
+            authorization = (
+                current.get("authorization")
+                if isinstance(current.get("authorization"), dict)
+                else {}
+            )
+            if (
+                passed
+                and str(authorization.get("request_id") or "").strip()
+                and authorization.get("allow_trust") is not False
+                and not fingerprint
+            ):
+                raise ValueError("Windows-MCP fingerprint is unavailable")
+
+        def prepare_lease(allocation: LegacyRunAllocationClaim) -> Dict[str, Any]:
+            self.lease.reserve_legacy_run(
+                group_id=group_id,
+                actor_id=actor_id,
+                run_id=run_id,
+                allocation=allocation,
+            )
+            self.lease.activate_legacy_run_reservation(allocation=allocation)
+            return self.lease.require_legacy_run(allocation=allocation)
+
+        def finalize(current: Dict[str, Any]) -> Dict[str, Any]:
+            authorization = (
+                current.get("authorization")
+                if isinstance(current.get("authorization"), dict)
+                else {}
+            )
+            has_request_authorization = bool(
+                str(authorization.get("request_id") or "").strip()
+            )
+            current["verification"] = {
+                "passed": bool(passed),
+                "summary": str(summary or "")[:2000],
+                "evidence_ids": [str(item)[:200] for item in evidence_ids[:100]],
+                "verified_by": actor_id,
+                "verified_at": time.time(),
             }
-            run["status"] = "published" if finalized else "verified"
-        run["updated_at"] = time.time()
-        self._write(group_id, run)
-        self._emit("run.verified", group_id=group_id, run_id=run_id, workflow_id=run.get("workflow_id"), passed=bool(passed), status=run["status"])
-        if temporary_lease:
-            self.lease.release(run_id=run_id)
-        return run
+            finalized: Dict[str, Any] = {}
+            try:
+                if not passed:
+                    current["status"] = "verification_failed"
+                    return current
+                workflow_id, version = str(current["workflow_id"]), int(current["version"])
+                finalized: Dict[str, Any] = {}
+                if has_request_authorization and authorization.get("allow_publish") is not False:
+                    finalized["published"] = self.store.publish(group_id, workflow_id, version)
+                if has_request_authorization and authorization.get("allow_trust") is not False:
+                    finalized["trusted"] = self.store.trust(
+                        group_id,
+                        workflow_id,
+                        version,
+                        fingerprint=fingerprint,
+                        permissions=["all_windows_mcp_tools"],
+                    )
+                current["status"] = "published" if finalized else "verified"
+            except BaseException as exc:
+                finalization_error.append(exc)
+                current["status"] = "verification_failed"
+                current["error"] = {
+                    "code": "verification_finalization_failed",
+                    "message": str(exc)[:2000],
+                }
+            finally:
+                current["finalization"] = {
+                    "published": "published" in finalized,
+                    "trusted": "trusted" in finalized,
+                    "unattended_triggers_authorized": has_request_authorization and authorization.get("allow_unattended_triggers") is not False,
+                }
+                current["updated_at"] = time.time()
+                if not self.lease.release_legacy_run(allocation=execution.allocation):
+                    raise PermissionError(
+                        "legacy run lease ownership was lost before verification"
+                    )
+            return current
+
+        result = self.run_namespace.perform_legacy_operation_with_callback(
+            execution.allocation,
+            validate_current=validate,
+            require_lease=prepare_lease,
+            callback=finalize,
+            write_run=True,
+        )
+        self._remove_current(self._legacy_executions, key, execution)
+        self._emit(
+            "run.verified",
+            group_id=group_id,
+            run_id=run_id,
+            workflow_id=result.get("workflow_id"),
+            passed=bool(passed),
+            status=result["status"],
+        )
+        if finalization_error:
+            raise finalization_error[0]
+        return result
 
     def verify_manual(
         self,
@@ -2416,7 +2761,8 @@ class WorkflowRunner:
             actor_id=actor_id,
             operation_claim=operation_claim,
         )
-        execution = self._manual_executions.get(run_id)
+        key = self._run_key(group_id, actor_id, run_id)
+        execution = self._manual_executions.get(key)
         if (
             not isinstance(execution, _ManualExecution)
             or execution.authorities is not self.run_authorities
@@ -2513,5 +2859,5 @@ class WorkflowRunner:
         )
         run["updated_at"] = time.time()
         self._write_unchecked(group_id, run)
-        self._manual_executions.pop(run_id, None)
+        self._remove_current(self._manual_executions, key, execution)
         return run
