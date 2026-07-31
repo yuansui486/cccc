@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Deque, Dict, Iterable, Iterator, List
 
 from ..util.fs import atomic_write_json
+from ..util.file_lock import acquire_lockfile, release_lockfile
 
 
 _MANIFEST_SCHEMA = 1
@@ -37,6 +38,10 @@ def active_ledger_path(group_path: Path) -> Path:
     return group_path / "ledger.jsonl"
 
 
+def _ledger_lock_path(group_path: Path) -> Path:
+    return ledger_state_dir(group_path) / "ledger.lock"
+
+
 def _segment_entry_from_path(group_path: Path, path: Path) -> Dict[str, Any] | None:
     match = _SEGMENT_FILE_RE.match(path.name)
     if match is None:
@@ -48,13 +53,6 @@ def _segment_entry_from_path(group_path: Path, path: Path) -> Dict[str, Any] | N
         size_bytes = max(0, int(path.stat().st_size))
     except Exception:
         size_bytes = 0
-    line_count = 0
-    try:
-        with open_ledger_source_text(path) as handle:
-            for _ in handle:
-                line_count += 1
-    except Exception:
-        line_count = 0
     stamp = str(match.group("stamp") or "")
     return {
         "id": f"{seq:06d}",
@@ -65,7 +63,7 @@ def _segment_entry_from_path(group_path: Path, path: Path) -> Dict[str, Any] | N
         "sealed_at": stamp,
         "reason": "recovered",
         "size_bytes": size_bytes,
-        "line_count": line_count,
+        "line_count": 0,
     }
 
 
@@ -115,7 +113,10 @@ def _normalize_manifest_segments(group_path: Path, segments: List[Dict[str, Any]
                 normalized["compressed"] = bool(discovered_entry.get("compressed"))
                 changed = True
             normalized["size_bytes"] = int(discovered_entry.get("size_bytes") or 0)
-            normalized["line_count"] = int(discovered_entry.get("line_count") or 0)
+            line_count = normalized.get("line_count")
+            if type(line_count) is not int or line_count < 0:
+                normalized["line_count"] = 0
+                changed = True
             if not str(normalized.get("created_at") or "").strip():
                 normalized["created_at"] = str(discovered_entry.get("created_at") or "")
                 changed = True
@@ -247,7 +248,18 @@ def list_ledger_sources(group_path: Path, *, include_active: bool = True) -> Lis
     return sources
 
 
-def rotate_active_ledger(group_path: Path, *, reason: str = "auto") -> Dict[str, Any]:
+def rotate_active_ledger(
+    group_path: Path,
+    *,
+    reason: str = "auto",
+    _lock_held: bool = False,
+) -> Dict[str, Any]:
+    if not _lock_held:
+        lock = acquire_lockfile(_ledger_lock_path(group_path), blocking=True)
+        try:
+            return rotate_active_ledger(group_path, reason=reason, _lock_held=True)
+        finally:
+            release_lockfile(lock)
     ensure_ledger_layout(group_path)
     active = active_ledger_path(group_path)
     if not active.exists():
@@ -296,7 +308,19 @@ def compress_sealed_segments(
     *,
     keep_recent: int = 1,
     force: bool = False,
+    _lock_held: bool = False,
 ) -> Dict[str, Any]:
+    if not _lock_held:
+        lock = acquire_lockfile(_ledger_lock_path(group_path), blocking=True)
+        try:
+            return compress_sealed_segments(
+                group_path,
+                keep_recent=keep_recent,
+                force=force,
+                _lock_held=True,
+            )
+        finally:
+            release_lockfile(lock)
     ensure_ledger_layout(group_path)
     manifest = load_ledger_manifest(group_path)
     segments = [dict(item) for item in manifest.get("segments", []) if isinstance(item, dict)]
