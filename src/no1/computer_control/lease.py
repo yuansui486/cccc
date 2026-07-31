@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterator, Optional
 from ..util.file_lock import acquire_lockfile, release_lockfile
 from ..util.fs import atomic_write_text
 from .derived_authority import DerivedAuthorityClaim
+from .run_authority import RunExecutionClaim, RunExecutionSeedClaim
 
 
 class LeaseConflict(RuntimeError):
@@ -55,7 +56,7 @@ class ComputerControlLease:
             return {}
 
     def _retire_authority_unlocked(self, lease: Dict[str, Any]) -> None:
-        identity = self._authority_identity(lease)
+        identity = self._lease_authority_identity(lease)
         if not identity:
             return
         lineages = self._read_lineages_unlocked()
@@ -75,7 +76,16 @@ class ComputerControlLease:
         previous = lineages.get(str(identity.get("authority_id") or ""))
         if not isinstance(previous, dict):
             return True
-        immutable = ("issuer_epoch", "kind", "authority_id", "group_id", "actor_id", "resource_id", "generation")
+        immutable = (
+            "issuer_epoch",
+            "kind",
+            "authority_id",
+            "execution_id",
+            "group_id",
+            "actor_id",
+            "resource_id",
+            "generation",
+        )
         return bool(
             all(previous.get(key) == identity.get(key) for key in immutable)
             and int(identity.get("revision") or 0) > int(previous.get("revision") or 0)
@@ -135,6 +145,52 @@ class ComputerControlLease:
         return normalized
 
     @staticmethod
+    def _run_authority_identity(value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        identity = value.get("authority")
+        if not isinstance(identity, dict):
+            return {}
+        try:
+            generation = int(identity.get("generation") or 0)
+            revision = int(identity.get("revision") or 0)
+        except Exception:
+            return {}
+        normalized = {
+            "issuer_epoch": str(identity.get("issuer_epoch") or ""),
+            "kind": str(identity.get("kind") or ""),
+            "authority_id": str(identity.get("authority_id") or ""),
+            "execution_id": str(identity.get("execution_id") or ""),
+            "group_id": str(identity.get("group_id") or ""),
+            "actor_id": str(identity.get("actor_id") or ""),
+            "resource_id": str(identity.get("resource_id") or ""),
+            "generation": generation,
+            "revision": revision,
+            "state": str(identity.get("state") or ""),
+        }
+        if (
+            not normalized["issuer_epoch"]
+            or normalized["kind"] != "run"
+            or not normalized["authority_id"]
+            or not normalized["execution_id"]
+            or not normalized["group_id"]
+            or not normalized["actor_id"]
+            or not normalized["resource_id"]
+            or generation <= 0
+            or revision <= 0
+            or not normalized["state"]
+        ):
+            return {}
+        return normalized
+
+    @classmethod
+    def _lease_authority_identity(cls, value: Any) -> Dict[str, Any]:
+        recording = cls._authority_identity(value)
+        if recording:
+            return recording
+        return cls._run_authority_identity(value)
+
+    @staticmethod
     def _claim_identity(
         authority: Optional[DerivedAuthorityClaim],
         *,
@@ -157,6 +213,50 @@ class ComputerControlLease:
             raise PermissionError("computer_control_lease_authority_required")
         return authority.lease_identity()
 
+    @staticmethod
+    def _run_claim_identity(
+        authority: Any,
+        *,
+        pending: bool,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+    ) -> Dict[str, Any]:
+        identity = ComputerControlLease._run_claim_fields(
+            authority,
+            pending=pending,
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=run_id,
+        )
+        authority.require_current()
+        return identity
+
+    @staticmethod
+    def _run_claim_fields(
+        authority: Any,
+        *,
+        pending: bool,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+    ) -> Dict[str, Any]:
+        expected_type = RunExecutionSeedClaim if pending else RunExecutionClaim
+        expected_state = "prepared" if pending else "accepted"
+        if not isinstance(authority, expected_type):
+            raise PermissionError("validated run execution authority claim is required")
+        identity = authority.lease_identity()
+        if (
+            identity.get("kind") != "run"
+            or identity.get("state") != expected_state
+            or str(identity.get("group_id") or "") != group_id
+            or str(identity.get("actor_id") or "") != actor_id
+            or str(identity.get("resource_id") or "") != run_id
+            or not str(identity.get("execution_id") or "")
+        ):
+            raise PermissionError("computer_control_lease_authority_required")
+        return identity
+
     def acquire(
         self,
         *,
@@ -176,7 +276,7 @@ class ComputerControlLease:
         )
         with self._locked():
             current = self._read_unlocked()
-            current_authority = self._authority_identity(current)
+            current_authority = self._lease_authority_identity(current)
             if not self._active(current, now) and isinstance(current, dict):
                 self._retire_authority_unlocked(current)
                 self.path.unlink(missing_ok=True)
@@ -319,6 +419,216 @@ class ComputerControlLease:
             self.path.unlink(missing_ok=True)
             return True
 
+    def reserve_run(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+        authority: RunExecutionSeedClaim,
+    ) -> Dict[str, Any]:
+        identity = self._run_claim_identity(
+            authority,
+            pending=True,
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=run_id,
+        )
+        now = time.time()
+        with self._locked():
+            current = self._read_unlocked()
+            if not self._active(current, now) and isinstance(current, dict):
+                self._retire_authority_unlocked(current)
+                self.path.unlink(missing_ok=True)
+                current = None
+            if self._active(current, now):
+                raise LeaseConflict(current or {})
+            if not self._lineage_allows_unlocked(identity):
+                raise PermissionError("computer_control_lease_authority_required")
+            lease = {
+                "group_id": group_id,
+                "actor_id": actor_id,
+                "run_id": run_id,
+                "observe_only": False,
+                "owner_pid": os.getpid(),
+                "acquired_at": now,
+                "heartbeat_at": now,
+                "expires_at": now + self.TTL_SECONDS,
+                "authority": identity,
+                "reservation": True,
+            }
+            atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
+            return lease
+
+    def activate_run_reservation(
+        self,
+        *,
+        pending: RunExecutionSeedClaim,
+        active: RunExecutionClaim,
+    ) -> Dict[str, Any]:
+        pending_identity = self._run_claim_fields(
+            pending,
+            pending=True,
+            group_id=pending.group_id,
+            actor_id=pending.actor_id,
+            run_id=pending.resource_id,
+        )
+        active_identity = self._run_claim_identity(
+            active,
+            pending=False,
+            group_id=pending.group_id,
+            actor_id=pending.actor_id,
+            run_id=pending.resource_id,
+        )
+        immutable = (
+            "issuer_epoch",
+            "kind",
+            "authority_id",
+            "execution_id",
+            "group_id",
+            "actor_id",
+            "resource_id",
+            "generation",
+        )
+        if (
+            any(pending_identity[key] != active_identity[key] for key in immutable)
+            or int(active_identity["revision"]) != int(pending_identity["revision"]) + 1
+        ):
+            raise PermissionError("computer_control_lease_authority_transition_required")
+        with self._locked():
+            lease = self._read_unlocked()
+            if (
+                not self._active(lease)
+                or not isinstance(lease, dict)
+                or lease.get("reservation") is not True
+                or self._run_authority_identity(lease) != pending_identity
+            ):
+                raise PermissionError("computer_control_lease_authority_transition_required")
+            now = time.time()
+            lease["authority"] = active_identity
+            lease.pop("reservation", None)
+            lease["heartbeat_at"] = now
+            lease["expires_at"] = now + self.TTL_SECONDS
+            atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
+            return lease
+
+    def cancel_run_reservation(self, *, authority: RunExecutionSeedClaim) -> bool:
+        identity = self._run_claim_identity(
+            authority,
+            pending=True,
+            group_id=authority.group_id,
+            actor_id=authority.actor_id,
+            run_id=authority.resource_id,
+        )
+        with self._locked():
+            lease = self._read_unlocked()
+            if not lease:
+                return False
+            if (
+                not isinstance(lease, dict)
+                or lease.get("reservation") is not True
+                or self._run_authority_identity(lease) != identity
+            ):
+                raise PermissionError("computer_control_lease_authority_required")
+            self._retire_authority_unlocked(lease)
+            self.path.unlink(missing_ok=True)
+            return True
+
+    def require_run(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+        authority: RunExecutionClaim,
+    ) -> Dict[str, Any]:
+        identity = self._run_claim_identity(
+            authority,
+            pending=False,
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=run_id,
+        )
+        with self._locked():
+            lease = self._read_unlocked()
+            if (
+                not self._active(lease)
+                or not isinstance(lease, dict)
+                or lease.get("reservation") is True
+                or any(
+                    str(lease.get(key) or "") != expected
+                    for key, expected in (
+                        ("group_id", group_id),
+                        ("actor_id", actor_id),
+                        ("run_id", run_id),
+                    )
+                )
+            ):
+                raise PermissionError("computer_control_lease_required")
+            if self._run_authority_identity(lease) != identity:
+                raise PermissionError("computer_control_lease_authority_required")
+            return lease
+
+    def heartbeat_run(
+        self,
+        *,
+        group_id: str,
+        actor_id: str,
+        run_id: str,
+        authority: RunExecutionClaim,
+    ) -> Dict[str, Any]:
+        identity = self._run_claim_identity(
+            authority,
+            pending=False,
+            group_id=group_id,
+            actor_id=actor_id,
+            run_id=run_id,
+        )
+        now = time.time()
+        with self._locked():
+            lease = self._read_unlocked()
+            if (
+                not self._active(lease, now)
+                or not isinstance(lease, dict)
+                or self._run_authority_identity(lease) != identity
+                or any(
+                    str(lease.get(key) or "") != expected
+                    for key, expected in (
+                        ("group_id", group_id),
+                        ("actor_id", actor_id),
+                        ("run_id", run_id),
+                    )
+                )
+            ):
+                raise PermissionError("computer_control_lease_authority_required")
+            lease["heartbeat_at"] = now
+            lease["expires_at"] = now + self.TTL_SECONDS
+            atomic_write_text(self.path, json.dumps(lease, ensure_ascii=False, indent=2) + "\n")
+            return lease
+
+    def release_run(self, *, run_id: str, authority: RunExecutionClaim) -> bool:
+        # Persist the exact lease release while execution is still accepted;
+        # only then may the authority state machine persist a terminal state.
+        identity = self._run_claim_identity(
+            authority,
+            pending=False,
+            group_id=authority.group_id,
+            actor_id=authority.actor_id,
+            run_id=run_id,
+        )
+        with self._locked():
+            lease = self._read_unlocked()
+            if not lease:
+                return False
+            if (
+                str(lease.get("run_id") or "") != run_id
+                or self._run_authority_identity(lease) != identity
+            ):
+                raise PermissionError("computer_control_lease_authority_required")
+            self._retire_authority_unlocked(lease)
+            self.path.unlink(missing_ok=True)
+            return True
+
     def require(
         self,
         *,
@@ -335,7 +645,7 @@ class ComputerControlLease:
             for key, expected in (("group_id", group_id), ("actor_id", actor_id), ("run_id", run_id))
         ):
             raise PermissionError("computer_control_lease_required")
-        if self._authority_identity(lease) != self._claim_identity(
+        if self._lease_authority_identity(lease) != self._claim_identity(
             authority,
             allowed_states=frozenset({"active"}),
             group_id=group_id,
@@ -369,7 +679,7 @@ class ComputerControlLease:
                 raise PermissionError("computer_control_lease_required")
             if any(str(lease.get(k) or "") != v for k, v in (("group_id", group_id), ("actor_id", actor_id), ("run_id", run_id))):
                 raise PermissionError("computer_control_lease_required")
-            if self._authority_identity(lease) != authority_identity:
+            if self._lease_authority_identity(lease) != authority_identity:
                 raise PermissionError("computer_control_lease_authority_required")
             lease["heartbeat_at"] = now
             lease["expires_at"] = now + self.TTL_SECONDS
@@ -389,7 +699,7 @@ class ComputerControlLease:
                 return False
             if not force and str(lease.get("run_id") or "") != run_id:
                 raise PermissionError("computer_control_lease_owner_required")
-            lease_authority = self._authority_identity(lease)
+            lease_authority = self._lease_authority_identity(lease)
             if not force and lease_authority != self._claim_identity(
                 authority,
                 allowed_states=frozenset({"active", "terminating"}),

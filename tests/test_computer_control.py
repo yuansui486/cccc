@@ -992,6 +992,112 @@ class TestComputerControl(unittest.TestCase):
             fake.runner.start_sync.assert_called_once()
             fake.requests.require_authorized.assert_not_called()
 
+    def test_untrusted_mcp_run_start_preserves_legacy_run_id_writeback(self):
+        from no1.contracts.v1 import ChatMessageData
+        from no1.daemon.messaging.turn_provenance import (
+            begin_turn_delivery_attempt,
+            build_send_turn_provenance,
+            finalize_turn_delivery_attempt,
+            turn_delivery_grant_receipt,
+        )
+        from no1.kernel.actors import add_actor
+        from no1.kernel.ledger import append_event
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"CCCC_HOME": td}, clear=False):
+            home = Path(td)
+            group = create_group(load_registry(), title="untrusted-run-writeback", topic="")
+            add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
+            group.save()
+            store = WorkflowStore(home)
+            requests = ComputerRequestStore(store)
+            provenance = build_send_turn_provenance({"__turn_ingress": "web_user", "by": "user"})
+            request = {
+                "request_id": "req-untrusted-run",
+                "actor_id": "peer",
+                "mode": "create_and_run",
+                "workflow_id": "wf-untrusted",
+                "allow_high_risk": True,
+            }
+            event = append_event(
+                group.ledger_path,
+                kind="chat.message",
+                group_id=group.group_id,
+                scope_key="",
+                by="user",
+                data=ChatMessageData(
+                    text="run untrusted workflow",
+                    to=["peer"],
+                    computer_control_request=request,
+                    turn_provenance=provenance,
+                ).model_dump(),
+            )
+            requests.append(
+                group.group_id,
+                {
+                    **request,
+                    "event_id": str(event["id"]),
+                    "local_request_id": str(provenance.local_request_id),
+                    "status": "accepted",
+                    "created_ts": time.time(),
+                },
+            )
+            attempt = begin_turn_delivery_attempt(
+                group,
+                actor_id="peer",
+                event_ids=[str(event["id"])],
+                binding={"transport": "codex_app"},
+            )
+            receipt = turn_delivery_grant_receipt(attempt)
+            finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+
+            fake = Mock()
+            fake.requests = requests
+            fake.setup.status.return_value = {"fingerprint": "fp-current"}
+            fake.store.get.side_effect = lambda _group_id, _workflow_id, version=None: {
+                "manifest": {"published_version": 1, "trusted": {}},
+                "version": int(version or 1),
+                "definition": self._message_workflow(),
+            }
+            fake.runner.start_sync.return_value = {"run_id": "run-untrusted", "status": "running"}
+
+            def call_computer_control_daemon(message, *, timeout_s=None):
+                self.assertIsNone(timeout_s)
+                response, _ = try_handle_computer_control_op(
+                    message.get("op"),
+                    message.get("args") or {},
+                )
+                self.assertTrue(response.ok, getattr(response, "error", None))
+                return response.result or {}
+
+            with patch(
+                "no1.ports.mcp.server._runtime_context",
+                return_value=Mock(group_id=group.group_id, actor_id="peer", source="local_mcp"),
+            ), patch(
+                "no1.ports.mcp.server._call_daemon_or_raise",
+                side_effect=call_computer_control_daemon,
+            ), patch(
+                "no1.daemon.computer_control_ops.get_services",
+                return_value=fake,
+            ):
+                result = handle_tool_call(
+                    "onecolleague_computer_run",
+                    {
+                        "action": "start",
+                        "workflow_id": "wf-untrusted",
+                        "version": 1,
+                        "request_id": "req-untrusted-run",
+                        "inputs": {},
+                        "turn_grant_receipt": receipt,
+                    },
+                )
+
+            self.assertTrue(result.get("ok"))
+            self.assertEqual((result.get("result") or {}).get("run_id"), "run-untrusted")
+            fake.runner.start_sync.assert_called_once()
+            persisted = requests.get(group.group_id, "req-untrusted-run") or {}
+            self.assertEqual(persisted.get("status"), "running")
+            self.assertEqual(persisted.get("run_id"), "run-untrusted")
+
     def test_request_activation_binds_local_event_to_exact_grant_without_secret(self):
         from no1.contracts.v1 import ChatMessageData
         from no1.daemon.messaging.turn_provenance import (

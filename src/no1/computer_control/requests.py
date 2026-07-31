@@ -10,12 +10,15 @@ from ..util.file_lock import acquire_lockfile, release_lockfile
 from .models import computer_control_permissions
 from .authorization import (
     RecordingStartClaim,
+    RunStartClaim,
     _recording_start_authorization,
+    _run_start_authorization,
     load_initial_request_record,
     request_turn_authorization,
     validate_request_event_binding,
+    workflow_definition_digest,
 )
-from .storage import WorkflowStore
+from .storage import WorkflowNotFound, WorkflowStore
 
 
 _REQUEST_PROCESS_LOCKS_GUARD = threading.Lock()
@@ -102,6 +105,13 @@ class ComputerRequestStore:
                     raise PermissionError("activated computer control request facts are immutable")
                 for field in self.IMMUTABLE_ACTIVATED_FIELDS:
                     if field in request and str(request.get(field) or "") != str(current.get(field) or ""):
+                        raise PermissionError("activated computer control request facts are immutable")
+                if "inputs" in request:
+                    from .authorization import normalized_run_inputs
+
+                    if normalized_run_inputs(request.get("inputs")) != normalized_run_inputs(
+                        current.get("inputs")
+                    ):
                         raise PermissionError("activated computer control request facts are immutable")
             return self._append_record_unlocked(group_id, request)
 
@@ -334,5 +344,77 @@ class ComputerRequestStore:
 
         start_claim = root_claim.consume_current(activate)
         if not isinstance(start_claim, RecordingStartClaim):
+            raise PermissionError("computer control turn grant is no longer current")
+        return start_claim
+
+    def activate_run_start_for_turn_claim(
+        self,
+        group_id: str,
+        request_id: str,
+        actor_id: str,
+        *,
+        claim: Any,
+        workflow_id: str,
+        version: int,
+        inputs: Dict[str, Any],
+    ) -> RunStartClaim:
+        from ..daemon.messaging.turn_provenance import (
+            load_event_turn_provenance,
+            require_validated_turn_grant_claim,
+        )
+        from ..kernel.group import load_group
+        from ..kernel.ledger_index import lookup_event_by_id
+
+        root_claim = require_validated_turn_grant_claim(claim)
+
+        def activate(_current_claim: Any) -> RunStartClaim:
+            with self._locked(group_id):
+                request = self._require_authorized_unlocked(group_id, request_id, actor_id)
+                if str(request.get("run_id") or "").strip():
+                    raise PermissionError("computer control request already has a run")
+                initial_request = load_initial_request_record(self._path(group_id), request_id)
+                event_id = str(request.get("event_id") or "").strip()
+                group = load_group(group_id)
+                if group is None or not event_id:
+                    raise PermissionError("computer control request event was not found")
+                ledger_event = lookup_event_by_id(group.ledger_path, event_id)
+                provenance = load_event_turn_provenance(group, event_id)
+                try:
+                    resolved_version = int(version)
+                except (TypeError, ValueError) as exc:
+                    raise PermissionError("computer control run scope is incomplete") from exc
+                if resolved_version <= 0:
+                    raise PermissionError("computer control run scope is incomplete")
+                try:
+                    workflow = self.workflows.get(
+                        group_id,
+                        str(workflow_id or "").strip(),
+                        version=resolved_version,
+                    )
+                except (ValueError, WorkflowNotFound) as exc:
+                    raise PermissionError("computer control workflow version was not found") from exc
+                if int(workflow.get("version") or 0) != resolved_version:
+                    raise PermissionError("computer control workflow version does not match")
+                activation, start_claim = _run_start_authorization(
+                    request,
+                    initial_request,
+                    ledger_event,
+                    provenance,
+                    _current_claim,
+                    workflow_id=workflow_id,
+                    version=resolved_version,
+                    definition_digest=workflow_definition_digest(workflow.get("definition")),
+                    inputs=inputs,
+                )
+                if request.get("turn_authorization") != activation:
+                    self._append_turn_activation_unlocked(
+                        group_id,
+                        request_id,
+                        activation=activation,
+                    )
+                return start_claim
+
+        start_claim = root_claim.consume_current(activate)
+        if not isinstance(start_claim, RunStartClaim):
             raise PermissionError("computer control turn grant is no longer current")
         return start_claim

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,52 @@ _STATUS_ONLY_ACTIONS = {
     ("setup", "status"),
 }
 _START_CLAIM_SEAL = object()
+_RUN_START_CLAIM_SEAL = object()
+
+
+def normalized_run_inputs(value: Any) -> Dict[str, Any]:
+    if value is None:
+        value = {}
+    if not isinstance(value, dict):
+        raise PermissionError("computer control run inputs must be an object")
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        normalized = json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise PermissionError("computer control run inputs are not JSON serializable") from exc
+    if not isinstance(normalized, dict):
+        raise PermissionError("computer control run inputs must be an object")
+    return normalized
+
+
+def _canonical_digest(value: Any) -> str:
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise PermissionError("computer control scope is not JSON serializable") from exc
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def run_inputs_digest(value: Any) -> str:
+    return _canonical_digest(normalized_run_inputs(value))
+
+
+def workflow_definition_digest(value: Any) -> str:
+    if not isinstance(value, dict):
+        raise PermissionError("computer control workflow definition is invalid")
+    return _canonical_digest(value)
 
 
 @dataclass(frozen=True, init=False)
@@ -73,6 +120,115 @@ class RecordingStartClaim:
         if self._seal is not _START_CLAIM_SEAL:
             raise PermissionError("recording start claim is invalid")
         self._root_claim.require_fresh_current()
+
+
+@dataclass(frozen=True, init=False)
+class RunStartClaim:
+    issuer_epoch: str
+    root_authority_id: str
+    root_attempt_id: str
+    generation: int
+    group_id: str
+    actor_id: str
+    request_id: str
+    workflow_id: str
+    version: int
+    definition_digest: str
+    inputs_digest: str
+    permission_snapshot: Mapping[str, bool]
+    _seal: object
+    _root_claim: ValidatedTurnGrantClaim
+
+    def __init__(
+        self,
+        *,
+        _seal: object,
+        request: Dict[str, Any],
+        claim: ValidatedTurnGrantClaim,
+        workflow_id: str,
+        version: int,
+        definition_digest: str,
+        inputs: Dict[str, Any],
+    ):
+        if _seal is not _RUN_START_CLAIM_SEAL:
+            raise TypeError("run start claims can only be created by authorization")
+        root_claim = require_validated_turn_grant_claim(claim)
+        binding = claim.get("authorization_binding")
+        object.__setattr__(self, "issuer_epoch", str(claim.get("issuer_epoch") or ""))
+        object.__setattr__(
+            self,
+            "root_authority_id",
+            str(binding.get("authority_id") or "") if isinstance(binding, dict) else "",
+        )
+        object.__setattr__(self, "root_attempt_id", str(claim.get("attempt_id") or ""))
+        object.__setattr__(self, "generation", int(claim.get("generation") or 0))
+        object.__setattr__(self, "group_id", str(request.get("group_id") or ""))
+        object.__setattr__(self, "actor_id", str(request.get("actor_id") or ""))
+        object.__setattr__(self, "request_id", str(request.get("request_id") or ""))
+        object.__setattr__(self, "workflow_id", str(workflow_id or "").strip())
+        object.__setattr__(self, "version", int(version))
+        object.__setattr__(self, "definition_digest", str(definition_digest or "").strip())
+        object.__setattr__(self, "inputs_digest", run_inputs_digest(inputs))
+        object.__setattr__(
+            self,
+            "permission_snapshot",
+            MappingProxyType(computer_control_permissions(request)),
+        )
+        object.__setattr__(self, "_seal", _seal)
+        object.__setattr__(self, "_root_claim", root_claim)
+
+    def consume_current(self, consumer):
+        if self._seal is not _RUN_START_CLAIM_SEAL:
+            return None
+        return self._root_claim.consume_current(lambda _claim: consumer(self))
+
+    def require_fresh_current(self) -> None:
+        if self._seal is not _RUN_START_CLAIM_SEAL:
+            raise PermissionError("run start claim is invalid")
+        self._root_claim.require_fresh_current()
+
+
+def _run_start_authorization(
+    request: Dict[str, Any],
+    initial_request: Dict[str, Any],
+    ledger_event: Any,
+    provenance: Any,
+    claim: ValidatedTurnGrantClaim,
+    *,
+    workflow_id: str,
+    version: int,
+    definition_digest: str,
+    inputs: Dict[str, Any],
+) -> Tuple[Dict[str, Any], RunStartClaim]:
+    root_claim = require_validated_turn_grant_claim(claim)
+    validate_request_event_binding(request, initial_request, ledger_event)
+    resolved_workflow = str(workflow_id or "").strip()
+    resolved_definition = str(definition_digest or "").strip()
+    resolved_version = int(version)
+    if not resolved_workflow or resolved_version <= 0 or not resolved_definition:
+        raise PermissionError("computer control run scope is incomplete")
+    if normalized_run_inputs(request.get("inputs")) != normalized_run_inputs(inputs):
+        raise PermissionError("computer control run inputs do not match the local user request")
+    mode = str(request.get("mode") or "").strip()
+    if mode == "run_existing":
+        expected_workflow = str(request.get("workflow_id") or "").strip()
+    elif mode == "create_and_run":
+        expected_workflow = str(request.get("created_workflow_id") or "").strip()
+    else:
+        expected_workflow = ""
+    if not expected_workflow or expected_workflow != resolved_workflow:
+        raise PermissionError("computer control request does not authorize this workflow")
+    activation = request_turn_authorization(request, root_claim, provenance)
+    activated = {**request, "turn_authorization": activation}
+    return activation, RunStartClaim(
+        _seal=_RUN_START_CLAIM_SEAL,
+        request=activated,
+        claim=root_claim,
+        workflow_id=resolved_workflow,
+        version=resolved_version,
+        definition_digest=resolved_definition,
+        inputs=inputs,
+    )
 
 
 def _recording_start_authorization(
@@ -142,6 +298,7 @@ def _request_authorization_facts(value: Any) -> Dict[str, Any]:
         "actor_id": str(value.get("actor_id") or "").strip(),
         "mode": str(value.get("mode") or "").strip(),
         "workflow_id": str(value.get("workflow_id") or "").strip(),
+        "inputs": normalized_run_inputs(value.get("inputs")),
         **computer_control_permissions(value),
     }
 
