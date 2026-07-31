@@ -584,9 +584,6 @@ def _event_once_rebuild_journal_locked(
             # below is authoritative and will replace it.
             prior_journal = None
     scan = _scan_event_once_sources(ledger_path)
-    if scan.duplicate_ids:
-        duplicate_id = sorted(scan.duplicate_ids)[0]
-        raise LedgerEventConflictError(f"ledger contains duplicate event id: {duplicate_id}")
     found = scan.events
     counts = scan.counts
     fact_conflict_ids: set[str] = set()
@@ -604,9 +601,10 @@ def _event_once_rebuild_journal_locked(
             source_facts = {key: value for key, value in source_event.items() if key != "ts"}
             journal_facts = {key: value for key, value in journal_event.items() if key != "ts"}
             if not _json_values_equal(source_facts, journal_facts):
-                raise LedgerEventConflictError(
-                    f"ledger event id conflicts with journal facts: {event_id}"
-                )
+                # A corrupted identity must remain permanently rejected, but it
+                # must not prevent unrelated event-once identities from making
+                # progress while the ledger is being repaired or inspected.
+                fact_conflict_ids.add(event_id)
     temporary = journal_path.with_name(f"{journal_path.name}.rebuild.{os.getpid()}.{time.time_ns()}")
     state = {"seq": 0, "head": "", "offset": 0, "entries": {}}
     try:
