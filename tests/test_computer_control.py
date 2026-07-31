@@ -26,7 +26,11 @@ from no1.computer_control.requests import ComputerRequestStore
 from no1.computer_control.recording import RecordingStore
 from no1.computer_control.risk import annotate_catalog, workflow_risk
 from no1.computer_control.runtime import WorkflowRunner
-from no1.computer_control.services import ComputerControlServices
+from no1.computer_control.services import (
+    ComputerControlServices,
+    issue_daemon_computer_control_owner,
+    start_daemon_services,
+)
 from no1.computer_control.storage import RevisionConflict, WorkflowStore
 from no1.computer_control.triggers import should_confirm_element, validate_trigger
 from no1.daemon.messaging.actor_turn_rendering import build_actor_delivery_text
@@ -43,6 +47,7 @@ from no1.ports.mcp.server import (
 from no1.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS
 from no1.ports.mcp import main as mcp_main
 from no1.daemon.computer_control_ops import try_handle_computer_control_op
+from no1.util.file_lock import acquire_lockfile, release_lockfile
 from no1.ports.web.routes.computer_control import _require_local_computer_control_admin
 
 
@@ -142,6 +147,15 @@ class TestComputerControlRunSurfaceDispatch(unittest.TestCase):
 
 
 class TestComputerControl(unittest.TestCase):
+    @staticmethod
+    def _recover_recordings(home: Path, recordings: RecordingStore) -> None:
+        lock = acquire_lockfile(home / "daemon" / "onecolleagued.lock", blocking=False)
+        try:
+            owner = issue_daemon_computer_control_owner(home, lock_handle=lock)
+            recordings._recover_after_restart(owner)
+        finally:
+            release_lockfile(lock)
+
     @staticmethod
     def _recording_security(
         home: Path,
@@ -421,6 +435,12 @@ class TestComputerControl(unittest.TestCase):
             assert group is not None
             add_actor(group, actor_id="peer", title="Peer", runtime="codex", runner="headless")
             group.save()
+            daemon_lock = acquire_lockfile(
+                Path(td) / "daemon" / "onecolleagued.lock",
+                blocking=False,
+            )
+            self.addCleanup(release_lockfile, daemon_lock)
+            start_daemon_services(Path(td), lock_handle=daemon_lock)
 
             with patch(
                 "no1.ports.mcp.server._call_daemon_or_raise",
@@ -740,6 +760,12 @@ class TestComputerControl(unittest.TestCase):
             )
             root_receipt = turn_delivery_grant_receipt(attempt)
             finalize_turn_delivery_attempt(group, actor_id="peer", attempt=attempt)
+            daemon_lock = acquire_lockfile(
+                Path(td) / "daemon" / "onecolleagued.lock",
+                blocking=False,
+            )
+            self.addCleanup(release_lockfile, daemon_lock)
+            start_daemon_services(Path(td), lock_handle=daemon_lock)
 
             started, _ = try_handle_computer_control_op(
                 "computer_control",
@@ -2205,6 +2231,8 @@ class TestComputerControl(unittest.TestCase):
             self.assertTrue(lease.status()["active"])
 
             restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            self.assertEqual(first._read(group.group_id, recording_id)["status"], "exploring")
+            self._recover_recordings(home, restarted)
             suspended = restarted._read(group.group_id, recording_id, actor_id="foreman")
             self.assertEqual(suspended["status"], "suspended")
             self.assertEqual(suspended["suspend_reason"], "service_restart")
@@ -2267,6 +2295,8 @@ class TestComputerControl(unittest.TestCase):
             self.assertTrue(lease.status()["active"])
 
             restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            self.assertEqual(first._read(group.group_id, recording_id)["status"], "exploring")
+            self._recover_recordings(home, restarted)
 
             recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
             self.assertEqual(recovered["status"], "suspended")
@@ -2324,6 +2354,8 @@ class TestComputerControl(unittest.TestCase):
             self.assertTrue(lease.status()["active"])
 
             restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            self.assertEqual(first._read(group.group_id, recording_id)["status"], "exploring")
+            self._recover_recordings(home, restarted)
 
             recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
             self.assertEqual(recovered["status"], "aborted")
@@ -2391,6 +2423,7 @@ class TestComputerControl(unittest.TestCase):
                         lease.activate_reservation(pending=issue.claim, active=active)
 
                 restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+                self._recover_recordings(home, restarted)
 
                 self.assertEqual(
                     authorities.persisted_record(group.group_id, recording_id)["state"],
@@ -2475,6 +2508,8 @@ class TestComputerControl(unittest.TestCase):
             )
 
             restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            self.assertEqual(first._read(group.group_id, recording_id)["status"], "exploring")
+            self._recover_recordings(home, restarted)
 
             self.assertEqual(
                 restarted._read(group.group_id, recording_id, actor_id="foreman")["status"],
@@ -2536,6 +2571,7 @@ class TestComputerControl(unittest.TestCase):
             authorities.revoke(terminating)
 
             restarted = RecordingStore(home, store, requests, authorities, lease, Mock())
+            self._recover_recordings(home, restarted)
 
             recovered = restarted._read(group.group_id, recording_id, actor_id="foreman")
             self.assertEqual(recovered["status"], "aborted")
@@ -2590,7 +2626,8 @@ class TestComputerControl(unittest.TestCase):
             requests = ComputerRequestStore(workflows)
             self.assertFalse(outside_root.exists())
 
-            RecordingStore(home, workflows, requests, authorities, lease, Mock())
+            restarted = RecordingStore(home, workflows, requests, authorities, lease, Mock())
+            self._recover_recordings(home, restarted)
 
             authorities.begin_stop.assert_not_called()
             authorities.suspend_after_restart.assert_not_called()

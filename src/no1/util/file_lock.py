@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import IO
 
 _LOG = logging.getLogger("no1.util.file_lock")
+_HELD_HANDLES_LOCK = threading.Lock()
+_HELD_HANDLES: dict[int, tuple[int, IO[bytes]]] = {}
 
 
 class LockUnavailableError(RuntimeError):
@@ -86,13 +89,27 @@ def acquire_lockfile(path: Path, *, blocking: bool = True) -> IO[bytes]:
         except Exception:
             pass
         raise
+    with _HELD_HANDLES_LOCK:
+        _HELD_HANDLES[id(f)] = (os.getpid(), f)
     return f
+
+
+def is_lockfile_handle(f: object) -> bool:
+    """Return whether ``f`` was acquired and is still held by this process."""
+
+    if f is None or bool(getattr(f, "closed", True)):
+        return False
+    with _HELD_HANDLES_LOCK:
+        record = _HELD_HANDLES.get(id(f))
+        return record is not None and record[0] == os.getpid() and record[1] is f
 
 
 def release_lockfile(f: IO[bytes]) -> None:
     """Release a lockfile acquired via acquire_lockfile (best-effort)."""
     # On Windows, msvcrt.locking() locks/unlocks from the current file position.
     # Seek to 0 so we reliably unlock the 1-byte region we lock in acquire_lockfile().
+    with _HELD_HANDLES_LOCK:
+        _HELD_HANDLES.pop(id(f), None)
     try:
         f.seek(0)
     except Exception:

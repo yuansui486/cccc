@@ -147,8 +147,6 @@ class WorkflowRunner:
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self._sync_thread: threading.Thread | None = None
         self._sync_lock = threading.Lock()
-        if self.run_authorities is not None:
-            self._recover_manual_runs_after_restart()
 
     class _ExternalLeaseLost(RuntimeError):
         def __init__(self, lease: Optional[Dict[str, Any]] = None):
@@ -185,7 +183,10 @@ class WorkflowRunner:
         values.pop(key, None)
         return True
 
-    def _recover_manual_runs_after_restart(self) -> None:
+    def _recover_manual_runs_after_restart(self, owner: Any) -> None:
+        from .services import _daemon_owner_state
+
+        _daemon_owner_state(owner, home=self.home)
         assert self.run_authorities is not None
         for candidate in self.run_authorities.restart_candidates():
             expected = {
@@ -203,7 +204,7 @@ class WorkflowRunner:
                     claim = self.run_authorities.prepare_restart_recovery(**expected)
                     self.lease.release_run_after_restart(authority=claim)
                     self.run_authorities.finish_restart_recovery(claim)
-            except (PermissionError, OSError):
+            except PermissionError:
                 continue
 
     def _require_execution(

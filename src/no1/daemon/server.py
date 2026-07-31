@@ -109,6 +109,7 @@ from .ops.socket_accept_ops import handle_incoming_connection
 from .actors.actor_runtime_ops import start_actor_process as runtime_start_actor_process
 from .actors.runner_ops import stop_actor as runner_stop_actor
 from .request_dispatch_ops import RequestDispatchDeps, dispatch_request
+from .computer_control_ops import start_daemon_computer_control
 from .serve_ops import (
     start_automation_thread,
     start_request_execution_thread,
@@ -481,6 +482,15 @@ class DaemonPaths:
 
 def default_paths() -> DaemonPaths:
     return DaemonPaths(home=ensure_home())
+
+
+def _start_daemon_computer_control_after_lock(home: Path, lock_handle: Any) -> bool:
+    try:
+        start_daemon_computer_control(home, lock_handle=lock_handle)
+    except Exception:
+        logger.exception("Computer-control daemon service recovery is not ready")
+        return False
+    return True
 
 
 def _desired_daemon_transport() -> str:
@@ -963,6 +973,8 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         )
     except Exception:
         pass
+
+    _start_daemon_computer_control_after_lock(p.home, lock_handle)
 
     try:
         p.sock_path.unlink(missing_ok=True)

@@ -55,9 +55,30 @@ class RecordingStore:
         self._inflight: set[str] = set()
         self._terminating: Dict[str, tuple[DerivedAuthorityClaim, DerivedAuthorityClaim, str]] = {}
         self._suspend_pending: Dict[str, tuple[str, str, DerivedAuthorityClaim, str]] = {}
+        self._watchdog: Optional[threading.Thread] = None
+
+    def _recover_after_restart(self, owner: Any) -> None:
+        from .services import _daemon_owner_state
+
+        _daemon_owner_state(owner, home=self.home)
         self._suspend_recovered_recordings()
-        self._watchdog = threading.Thread(target=self._watch, name="onecolleague-recording-watchdog", daemon=True)
-        self._watchdog.start()
+
+    def _start_watchdog(self, owner: Any) -> None:
+        from .services import _daemon_owner_state
+
+        _daemon_owner_state(owner, home=self.home)
+        with self._lock:
+            if self._watchdog is not None:
+                if self._watchdog.is_alive():
+                    return
+                raise RuntimeError("computer-control recording watchdog terminated")
+            watchdog = threading.Thread(
+                target=self._watch,
+                name="onecolleague-recording-watchdog",
+                daemon=True,
+            )
+            watchdog.start()
+            self._watchdog = watchdog
 
     def _enhance_snapshot(self, snapshot: Dict[str, Any], locator: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         method = getattr(self.observation_provider, "enhance_sync", None)

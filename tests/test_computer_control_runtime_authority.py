@@ -19,6 +19,7 @@ from no1.computer_control.models import WorkflowDefinition
 from no1.computer_control.requests import ComputerRequestStore
 from no1.computer_control.run_authority import RunAuthorityStore
 from no1.computer_control.runtime import WorkflowRunner
+from no1.computer_control.services import issue_daemon_computer_control_owner
 from no1.computer_control.storage import WorkflowStore
 from no1.contracts.v1 import ChatMessageData
 from no1.daemon.messaging.turn_provenance import (
@@ -34,6 +35,7 @@ from no1.daemon.computer_control_ops import try_handle_computer_control_op
 from no1.kernel.actors import add_actor
 from no1.kernel.group import Group
 from no1.kernel.ledger import append_event
+from no1.util.file_lock import acquire_lockfile, release_lockfile
 
 
 class _Session:
@@ -56,6 +58,17 @@ class _Session:
 
 
 class TestManualRunAuthorityRuntime(unittest.TestCase):
+    def _recover_runner(self, runner: WorkflowRunner) -> None:
+        lock = acquire_lockfile(
+            self.home / "daemon" / "onecolleagued.lock",
+            blocking=False,
+        )
+        try:
+            owner = issue_daemon_computer_control_owner(self.home, lock_handle=lock)
+            runner._recover_manual_runs_after_restart(owner)
+        finally:
+            release_lockfile(lock)
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name)
@@ -274,6 +287,9 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
             requests=self.requests,
         )
         self.assertEqual(runner._get_unchecked("g", started["run_id"])["status"], "completed")
+        with self.assertRaisesRegex(PermissionError, "terminal record is invalid"):
+            restarted_authorities.validate_terminal_record("g", started["run_id"])
+        self._recover_runner(restarted_runner)
         self.assertEqual(
             restarted_authorities.validate_terminal_record("g", started["run_id"])[
                 "execution_state"
@@ -419,7 +435,9 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
         self.issuer = "daemon-restarted-active-rollback"
         authority = self.authorities.restart_candidates()[0]
         self.assertEqual(authority["resource_id"], run_id)
-        self._runner()
+        restarted_runner = self._runner()
+        self.assertEqual(runner._get_unchecked("g", run_id)["status"], "initializing")
+        self._recover_runner(restarted_runner)
         self.assertEqual(
             runner._get_unchecked("g", run_id)["status"],
             "start_failed",
@@ -464,7 +482,9 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
         self.issuer = "daemon-restarted-pending-rollback"
         authority = self.authorities.restart_candidates()[0]
         self.assertEqual(authority["resource_id"], run_id)
-        self._runner()
+        restarted_runner = self._runner()
+        self.assertEqual(runner._get_unchecked("g", run_id)["status"], "initializing")
+        self._recover_runner(restarted_runner)
         self.assertEqual(
             runner._get_unchecked("g", run_id)["status"],
             "start_failed",

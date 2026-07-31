@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from ..computer_control.mcp import MCPUnavailable
@@ -29,7 +30,7 @@ from ..computer_control.run_authority import (
     RunStopOwnerClaim,
 )
 from ..computer_control.requests import ComputerRequestStore
-from ..computer_control.services import get_services
+from ..computer_control.services import get_services, start_daemon_services
 from ..computer_control.storage import WorkflowStore
 from ..contracts.v1 import DaemonError, DaemonResponse
 from ..kernel.actors import find_actor
@@ -51,6 +52,12 @@ def _error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None)
 
 def _ok(value: Any) -> Tuple[DaemonResponse, bool]:
     return DaemonResponse(ok=True, result={"ok": True, "result": value}), False
+
+
+def start_daemon_computer_control(home: Path, *, lock_handle: Any) -> Any:
+    """Start daemon-owned recovery after the daemon lifecycle lock is held."""
+
+    return start_daemon_services(home, lock_handle=lock_handle)
 
 
 def _observation_status(service: Any) -> Dict[str, Any]:
@@ -729,7 +736,14 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             return _error("permission_denied", str(exc), details={"retryable": False})
         except Exception as exc:
             return _error("permission_denied", str(exc), details={"retryable": False})
-    service = get_services(ensure_home())
+    try:
+        service = get_services(ensure_home(), role="daemon")
+    except Exception:
+        return _error(
+            "computer_control_not_ready",
+            "computer-control daemon service is not ready",
+            details={"retryable": True},
+        )
     try:
         if command == "catalog":
             tools = annotate_catalog(service.session.catalog_sync())
