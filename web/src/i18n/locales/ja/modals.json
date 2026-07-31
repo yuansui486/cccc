@@ -75,6 +75,11 @@
     "relay": "リレー"
   },
   "context": {
+    "projectOverview": "チームの目標、タスク実行、協働を編集します。",
+    "teamGoal": "チーム目標",
+    "taskExecution": "タスク実行",
+    "collaboration": "協働",
+    "insertNotesSection": "Notes セクションを挿入: {{section}}",
     "title": "プロジェクトのコンテキスト",
     "closeAria": "コンテキストモーダルを閉じる",
     "tabsAria": "コンテキストセクション",

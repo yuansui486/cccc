@@ -75,6 +75,11 @@
     "relay": "转发"
   },
   "context": {
+    "projectOverview": "编辑团队目标、任务执行和分工协作。",
+    "teamGoal": "团队目标",
+    "taskExecution": "任务执行",
+    "collaboration": "分工协作",
+    "insertNotesSection": "插入 Notes 段落：{{section}}",
     "title": "项目上下文",
     "closeAria": "关闭上下文面板",
     "tabsAria": "上下文分区",

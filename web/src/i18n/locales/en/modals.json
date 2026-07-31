@@ -75,6 +75,11 @@
     "relay": "Relay"
   },
   "context": {
+    "projectOverview": "Edit team goals, task execution, and collaboration.",
+    "teamGoal": "Team goal",
+    "taskExecution": "Task execution",
+    "collaboration": "Collaboration",
+    "insertNotesSection": "Insert Notes section: {{section}}",
     "title": "Project Context",
     "closeAria": "Close context modal",
     "tabsAria": "Context sections",
