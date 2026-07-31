@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
@@ -126,6 +127,36 @@ def canonical_payload_bytes(payload: Dict[str, Any]) -> bytes:
     except (TypeError, ValueError) as exc:
         raise ValueError("Group Bridge signed payload must be JSON serializable") from exc
     return encoded.encode("utf-8")
+
+
+def verify_group_bridge_signature(
+    payload: bytes,
+    signature_b64: str,
+    *,
+    public_key_b64: str,
+    peer_id: str,
+) -> bool:
+    """Verify a signature without consulting the local identity store."""
+    if not isinstance(payload, bytes):
+        raise TypeError("Group Bridge verification payload must be bytes")
+    if not all(isinstance(value, str) and value for value in (signature_b64, public_key_b64, peer_id)):
+        return False
+    try:
+        public_raw = base64.b64decode(public_key_b64.encode("ascii"), validate=True)
+        signature = base64.b64decode(signature_b64.encode("ascii"), validate=True)
+        if len(public_raw) != 32 or len(signature) != 64:
+            return False
+        if (
+            base64.b64encode(public_raw).decode("ascii") != public_key_b64
+            or base64.b64encode(signature).decode("ascii") != signature_b64
+        ):
+            return False
+        if peer_id_from_public_key_b64(public_key_b64) != peer_id:
+            return False
+        Ed25519PublicKey.from_public_bytes(public_raw).verify(signature, payload)
+        return True
+    except (InvalidSignature, ValueError, TypeError):
+        return False
 
 
 def _identity_from_doc(raw: Any) -> _IdentityMaterial:

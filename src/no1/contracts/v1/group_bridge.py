@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 GroupBridgeAccessLevel = Literal["messages", "read", "full"]
 GROUP_BRIDGE_ACCESS_LEVELS = ("messages", "read", "full")
@@ -63,6 +63,69 @@ class RemoteSendReceipt(BaseModel):
     error: Optional[RemoteSendError] = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class GroupBridgeSessionMessage(BaseModel):
+    text: str = Field(min_length=1, max_length=100_000)
+    format: Literal["plain", "markdown"] = "plain"
+    priority: Literal["normal", "attention"] = "normal"
+    reply_required: bool = False
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class GroupBridgeSignedMessageEnvelope(BaseModel):
+    version: Literal[1] = 1
+    kind: Literal["message"] = "message"
+    transport: Literal["group_bridge_session"] = "group_bridge_session"
+    nonce: str = Field(min_length=43, max_length=43, pattern=r"[A-Za-z0-9_-]{43}")
+    issued_at: str = Field(min_length=1, max_length=40)
+    source_group_id: str = Field(min_length=1, max_length=256)
+    source_peer_id: str = Field(min_length=1, max_length=256)
+    source_public_key: str = Field(min_length=44, max_length=44, pattern=r"[A-Za-z0-9+/]{43}=")
+    source_endpoint: str = Field(min_length=1, max_length=2048)
+    target_group_id: str = Field(min_length=1, max_length=256)
+    target_peer_id: str = Field(min_length=1, max_length=256)
+    target_endpoint: str = Field(min_length=1, max_length=2048)
+    payload: GroupBridgeSessionMessage
+    signature: str = Field(min_length=88, max_length=88, pattern=r"[A-Za-z0-9+/]{86}==")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _closed_version(cls, value: object) -> object:
+        if type(value) is not int or value != 1:
+            raise ValueError("version must be the integer 1")
+        return value
+
+
+class GroupBridgeSignedReceiptEnvelope(BaseModel):
+    version: Literal[1] = 1
+    kind: Literal["receipt"] = "receipt"
+    transport: Literal["group_bridge_session"] = "group_bridge_session"
+    request_nonce_hash: str = Field(min_length=64, max_length=64, pattern=r"[0-9a-f]{64}")
+    request_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"[0-9a-f]{64}")
+    issued_at: str = Field(min_length=1, max_length=40)
+    source_group_id: str = Field(min_length=1, max_length=256)
+    source_peer_id: str = Field(min_length=1, max_length=256)
+    source_public_key: str = Field(min_length=44, max_length=44, pattern=r"[A-Za-z0-9+/]{43}=")
+    source_endpoint: str = Field(min_length=1, max_length=2048)
+    target_group_id: str = Field(min_length=1, max_length=256)
+    target_peer_id: str = Field(min_length=1, max_length=256)
+    target_endpoint: str = Field(min_length=1, max_length=2048)
+    status: Literal["accepted"] = "accepted"
+    remote_event_id: str = Field(min_length=1, max_length=512)
+    signature: str = Field(min_length=88, max_length=88, pattern=r"[A-Za-z0-9+/]{86}==")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _closed_version(cls, value: object) -> object:
+        if type(value) is not int or value != 1:
+            raise ValueError("version must be the integer 1")
+        return value
 
 
 class RegistrationRecord(BaseModel):
