@@ -27,6 +27,7 @@ _PERSISTED_FIELDS = frozenset({"user_id", "allowed_groups", "is_admin", "created
 _PUBLIC_FIELDS = frozenset({"token", "kind", *_PERSISTED_FIELDS})
 _STORE_SCHEMA_ID = "access-token-store-v1"
 _CLAIM_SEAL = object()
+_ANY_HOME = object()
 _ClaimResult = TypeVar("_ClaimResult")
 
 
@@ -40,6 +41,10 @@ class AccessTokenClaimError(PermissionError):
 
 class AccessTokenClaimStaleError(AccessTokenClaimError):
     """Raised when a claim no longer describes the current token entry."""
+
+
+class AccessTokenClaimHomeMismatchError(AccessTokenClaimError):
+    """Raised when a claim is consumed for a different access-token home."""
 
 
 class AccessTokenLockOrderError(RuntimeError):
@@ -131,6 +136,32 @@ class AccessTokenPrincipalClaim:
         self,
         callback: Callable[[AccessTokenPrincipal], _ClaimResult],
     ) -> _ClaimResult:
+        return AccessTokenPrincipalClaim._consume_current(
+            self,
+            callback,
+            expected_home=_ANY_HOME,
+            pass_canonical_home=False,
+        )
+
+    def consume_current_for_home(
+        self,
+        home: Optional[Path],
+        callback: Callable[[AccessTokenPrincipal, Path], _ClaimResult],
+    ) -> _ClaimResult:
+        return AccessTokenPrincipalClaim._consume_current(
+            self,
+            callback,
+            expected_home=home,
+            pass_canonical_home=True,
+        )
+
+    def _consume_current(
+        self,
+        callback: Callable[..., _ClaimResult],
+        *,
+        expected_home: Any,
+        pass_canonical_home: bool,
+    ) -> _ClaimResult:
         _guard_token_api()
         if not isinstance(self, AccessTokenPrincipalClaim):
             raise AccessTokenClaimError("Access token principal claim is invalid")
@@ -147,6 +178,18 @@ class AccessTokenPrincipalClaim:
                 raise AccessTokenClaimStaleError("Access token principal claim is no longer current")
             state = _ClaimState(**{**state.__dict__, "spent": True})
             _CLAIM_STATES[self] = state
+
+        if expected_home is not _ANY_HOME:
+            try:
+                resolved_expected_home = _resolved_home(expected_home)
+            except Exception:
+                raise AccessTokenClaimHomeMismatchError(
+                    "Access token principal claim does not authorize this home"
+                ) from None
+            if resolved_expected_home != state.home:
+                raise AccessTokenClaimHomeMismatchError(
+                    "Access token principal claim does not authorize this home"
+                )
 
         lock = acquire_lockfile(_access_tokens_lock_path(state.home), blocking=True)
         try:
@@ -165,7 +208,10 @@ class AccessTokenPrincipalClaim:
             previous = bool(getattr(_CONSUME_LOCAL, "active", False))
             _CONSUME_LOCAL.active = True
             try:
-                result = callback(state.principal)
+                if pass_canonical_home:
+                    result = callback(state.principal, state.home)
+                else:
+                    result = callback(state.principal)
                 if inspect.isawaitable(result):
                     close = getattr(result, "close", None)
                     if callable(close):

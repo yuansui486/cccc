@@ -4,6 +4,7 @@ import multiprocessing
 import os
 import pickle
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -490,11 +491,19 @@ class TestAccessTokens(unittest.TestCase):
                 json.dumps(claim)
             with self.assertRaises(AccessTokenClaimError):
                 AccessTokenPrincipalClaim.consume_current({"token": token}, lambda principal: principal)
+            with self.assertRaises(AccessTokenClaimError):
+                AccessTokenPrincipalClaim.consume_current_for_home(
+                    {"token": token},
+                    home,
+                    lambda principal, canonical_home: principal,
+                )
             forged = object.__new__(AccessTokenPrincipalClaim)
             with self.assertRaises(AccessTokenClaimError):
                 _ = forged.principal
             with self.assertRaises(AccessTokenClaimError):
                 forged.consume_current(lambda principal: principal)
+            with self.assertRaises(AccessTokenClaimError):
+                forged.consume_current_for_home(home, lambda principal, canonical_home: principal)
         finally:
             cleanup()
 
@@ -558,6 +567,181 @@ class TestAccessTokens(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_home_bound_consume_rejects_cross_home_without_leaking_and_spends_claim(self) -> None:
+        from no1.kernel.access_tokens import (
+            AccessTokenClaimHomeMismatchError,
+            AccessTokenClaimStaleError,
+            create_access_token,
+            issue_access_token_principal_claim,
+        )
+
+        with tempfile.TemporaryDirectory() as first_td, tempfile.TemporaryDirectory() as second_td:
+            first_home = Path(first_td)
+            second_home = Path(second_td)
+            token = create_access_token("member-a", allowed_groups=["g1"], home=first_home)["token"]
+            create_access_token("member-b", allowed_groups=["g1"], home=second_home)
+            claim = issue_access_token_principal_claim(token, group_id="g1", home=first_home)
+            first_path = first_home / "access_tokens.yaml"
+            second_path = second_home / "access_tokens.yaml"
+            before = (first_path.read_bytes(), second_path.read_bytes())
+            called = []
+
+            with self.assertRaisesRegex(
+                AccessTokenClaimHomeMismatchError,
+                "^Access token principal claim does not authorize this home$",
+            ) as ctx:
+                claim.consume_current_for_home(second_home, lambda principal, canonical_home: called.append((principal, canonical_home)))
+
+            self.assertEqual(called, [])
+            self.assertNotIn(str(first_home), str(ctx.exception))
+            self.assertNotIn(str(second_home), str(ctx.exception))
+            self.assertNotIn(token, str(ctx.exception))
+            self.assertEqual((first_path.read_bytes(), second_path.read_bytes()), before)
+            with self.assertRaises(AccessTokenClaimStaleError):
+                claim.consume_current(lambda principal: principal)
+
+    def test_home_bound_consume_accepts_relative_resolved_and_symlink_aliases(self) -> None:
+        from no1.kernel.access_tokens import create_access_token, issue_access_token_principal_claim
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "home"
+            home.mkdir()
+            token = create_access_token("member", allowed_groups=["g1"], home=home)["token"]
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                relative_claim = issue_access_token_principal_claim(token, group_id="g1", home=Path("home"))
+                principal = relative_claim.consume_current_for_home(home.resolve(), lambda current, canonical_home: current)
+            finally:
+                os.chdir(old_cwd)
+            self.assertEqual((principal.user_id, principal.group_id), ("member", "g1"))
+
+            if os.name != "nt":
+                alias = root / "home-alias"
+                alias.symlink_to(home, target_is_directory=True)
+                alias_claim = issue_access_token_principal_claim(token, group_id="g1", home=home)
+                aliased = alias_claim.consume_current_for_home(alias, lambda current, canonical_home: current)
+                self.assertEqual(aliased.user_id, "member")
+
+    @unittest.skipIf(os.name == "nt", "symlink retargeting is POSIX-specific")
+    def test_home_bound_consume_rejects_retargeted_symlink(self) -> None:
+        from no1.kernel.access_tokens import (
+            AccessTokenClaimHomeMismatchError,
+            AccessTokenClaimStaleError,
+            create_access_token,
+            issue_access_token_principal_claim,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first_home = root / "first"
+            second_home = root / "second"
+            first_home.mkdir()
+            second_home.mkdir()
+            alias = root / "active-home"
+            alias.symlink_to(first_home, target_is_directory=True)
+            token = create_access_token("member", allowed_groups=["g1"], home=first_home)["token"]
+            claim = issue_access_token_principal_claim(token, group_id="g1", home=alias)
+            alias.unlink()
+            alias.symlink_to(second_home, target_is_directory=True)
+            called = []
+
+            with self.assertRaisesRegex(
+                AccessTokenClaimHomeMismatchError,
+                "^Access token principal claim does not authorize this home$",
+            ):
+                claim.consume_current_for_home(alias, lambda principal, canonical_home: called.append((principal, canonical_home)))
+            self.assertEqual(called, [])
+            with self.assertRaises(AccessTokenClaimStaleError):
+                claim.consume_current(lambda principal: principal)
+
+    def test_home_bound_callback_failure_preserves_bytes_and_nested_guard_applies(self) -> None:
+        from no1.kernel.access_tokens import (
+            AccessTokenClaimStaleError,
+            AccessTokenLockOrderError,
+            create_access_token,
+            issue_access_token_principal_claim,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            token = create_access_token("member", allowed_groups=["g1"], home=home)["token"]
+            path = home / "access_tokens.yaml"
+            before = path.read_bytes()
+            failing = issue_access_token_principal_claim(token, group_id="g1", home=home)
+            with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                failing.consume_current_for_home(
+                    home,
+                    lambda _principal, _canonical_home: (_ for _ in ()).throw(RuntimeError("callback failed")),
+                )
+            self.assertEqual(path.read_bytes(), before)
+            with self.assertRaises(AccessTokenClaimStaleError):
+                failing.consume_current_for_home(home, lambda principal, canonical_home: principal)
+
+            outer = issue_access_token_principal_claim(token, group_id="g1", home=home)
+            inner = issue_access_token_principal_claim(token, group_id="g1", home=home)
+            with self.assertRaisesRegex(
+                AccessTokenLockOrderError,
+                "^Access token APIs are unavailable during claim consumption$",
+            ):
+                outer.consume_current_for_home(
+                    home,
+                    lambda _principal, _canonical_home: inner.consume_current_for_home(
+                        home,
+                        lambda principal, canonical_home: principal,
+                    ),
+                )
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(
+                inner.consume_current_for_home(home, lambda principal, canonical_home: principal).user_id,
+                "member",
+            )
+
+    @unittest.skipIf(os.name == "nt", "symlink retargeting is POSIX-specific")
+    def test_home_bound_consume_passes_claim_home_across_symlink_retarget(self) -> None:
+        from no1.kernel.access_tokens import create_access_token, issue_access_token_principal_claim
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first_home = root / "first"
+            second_home = root / "second"
+            first_home.mkdir()
+            second_home.mkdir()
+            alias = root / "active-home"
+            alias.symlink_to(first_home, target_is_directory=True)
+            token = create_access_token("member", allowed_groups=["g1"], home=first_home)["token"]
+            claim = issue_access_token_principal_claim(token, group_id="g1", home=alias)
+            first_bytes = (first_home / "access_tokens.yaml").read_bytes()
+            ready = threading.Event()
+            changed = threading.Event()
+
+            def retarget() -> None:
+                self.assertTrue(ready.wait(timeout=5))
+                alias.unlink()
+                alias.symlink_to(second_home, target_is_directory=True)
+                changed.set()
+
+            worker = threading.Thread(target=retarget)
+            worker.start()
+
+            def write_marker(_principal, canonical_home: Path) -> Path:
+                ready.set()
+                self.assertTrue(changed.wait(timeout=5))
+                marker = canonical_home / "claim-home-marker"
+                marker.write_text("authorized", encoding="utf-8")
+                return canonical_home
+
+            consumed_home = claim.consume_current_for_home(alias, write_marker)
+            worker.join(timeout=10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(consumed_home, first_home.resolve())
+            self.assertEqual((first_home / "claim-home-marker").read_text(encoding="utf-8"), "authorized")
+            self.assertFalse((second_home / "claim-home-marker").exists())
+            self.assertEqual((first_home / "access_tokens.yaml").read_bytes(), first_bytes)
+            self.assertFalse((second_home / "access_tokens.yaml").exists())
+
     def test_callback_guard_rejects_every_public_token_entrypoint(self) -> None:
         from no1.kernel.access_tokens import (
             AccessTokenLockOrderError,
@@ -586,6 +770,10 @@ class TestAccessTokens(unittest.TestCase):
                 "issue": lambda claim: issue_access_token_principal_claim(token, group_id="g1", home=home),
                 "principal": lambda claim: claim.principal,
                 "consume": lambda claim: claim.consume_current(lambda principal: principal),
+                "consume_home": lambda claim: claim.consume_current_for_home(
+                    home,
+                    lambda principal, canonical_home: principal,
+                ),
             }
             path = home / "access_tokens.yaml"
             before = path.read_bytes()
