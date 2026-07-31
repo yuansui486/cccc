@@ -292,6 +292,8 @@ export default function App() {
   }, [selectedGroupId]);
 
   useEffect(() => {
+    // This effect synchronizes the capability projection after the group changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshEnabledSkillCount();
   }, [refreshEnabledSkillCount]);
 
