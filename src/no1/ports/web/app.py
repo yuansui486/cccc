@@ -249,11 +249,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
-        from ...computer_control.services import get_services as get_computer_control_services
-
         _configure_web_logging()
-        computer_control_services = get_computer_control_services(home)
-        await computer_control_services.scheduler.start()
         restart_supported = str(os.environ.get("CCCC_WEB_SUPERVISED") or "").strip().lower() in ("1", "true", "yes", "on")
         runtime_host_raw = str(os.environ.get("CCCC_WEB_EFFECTIVE_HOST") or "").strip()
         runtime_port_raw = str(os.environ.get("CCCC_WEB_EFFECTIVE_PORT") or "").strip()
@@ -322,7 +318,6 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
-            await computer_control_services.scheduler.stop()
             supervisor_watchdog_stop.set()
             if supervisor_watchdog_thread is not None:
                 try:

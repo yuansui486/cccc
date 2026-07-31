@@ -3,12 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
 from no1.computer_control.models import WorkflowDefinition
 from no1.computer_control.storage import WorkflowStore
+from no1.computer_control.storage import RevisionConflict
+from no1.daemon.computer_control_ops import try_handle_computer_control_op
 from no1.ports.web.routes.computer_control import create_routers
 from no1.ports.web.schemas import RouteContext
 
@@ -88,6 +90,65 @@ def _endpoint(routers, method: str, suffix: str):
 
 
 class TestComputerControlTriggerApi(unittest.TestCase):
+    def test_daemon_trigger_update_fails_closed_before_write_when_setup_is_unready(self):
+        store = Mock()
+        service = SimpleNamespace(
+            store=store,
+            setup=SimpleNamespace(
+                status=lambda: {"phase": "failed", "fingerprint": ""}
+            ),
+        )
+        definition = _definition(enabled=True).model_dump(mode="json")
+        with patch(
+            "no1.daemon.computer_control_ops.get_services", return_value=service
+        ):
+            response, _ = try_handle_computer_control_op(
+                "computer_control",
+                {
+                    "command": "admin_trigger",
+                    "action": "update",
+                    "group_id": "g-test",
+                    "workflow_id": "wf-test",
+                    "caller_surface": "local_web",
+                    "definition": definition,
+                    "expected_revision": 1,
+                    "allow_unready_disable": False,
+                },
+            )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(response.error.code, "windows_mcp_not_ready")
+        store.update_triggers.assert_not_called()
+
+    def test_daemon_trigger_update_preserves_revision_conflict(self):
+        store = Mock()
+        store.update_triggers.side_effect = RevisionConflict(7)
+        service = SimpleNamespace(
+            store=store,
+            setup=SimpleNamespace(
+                status=lambda: {"phase": "ready", "fingerprint": "fp-current"}
+            ),
+        )
+        with patch(
+            "no1.daemon.computer_control_ops.get_services", return_value=service
+        ):
+            response, _ = try_handle_computer_control_op(
+                "computer_control",
+                {
+                    "command": "admin_trigger",
+                    "action": "update",
+                    "group_id": "g-test",
+                    "workflow_id": "wf-test",
+                    "caller_surface": "local_web",
+                    "definition": _definition(enabled=True).model_dump(mode="json"),
+                    "expected_revision": 1,
+                },
+            )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(response.error.code, "revision_conflict")
+        self.assertEqual(response.error.details["current_revision"], 7)
+
     def test_trigger_lifecycle_has_status_read_only_test_and_fail_closed_disable(self):
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
@@ -98,11 +159,66 @@ class TestComputerControlTriggerApi(unittest.TestCase):
             setup = _Setup()
             scheduler = _Scheduler()
             service = SimpleNamespace(store=store, setup=setup, scheduler=scheduler)
+            daemon_calls = []
+
+            def fake_call_daemon(request, **kwargs):
+                del kwargs
+                daemon_calls.append(request)
+                args = request["args"]
+                if args.get("command") not in {"scheduler", "admin_trigger"}:
+                    return {"ok": False, "error": {"code": "unexpected_command"}}
+                if args.get("command") == "scheduler" and args.get("action") == "status":
+                    result = {"available": True, "running": True, "triggers": {}}
+                elif args.get("command") == "admin_trigger":
+                    definition = WorkflowDefinition.model_validate(args["definition"])
+                    value = service.store.update_triggers(
+                        args["group_id"],
+                        args["workflow_id"],
+                        definition,
+                        expected_revision=int(args["expected_revision"]),
+                    )
+                    setup_status = setup.status()
+                    ready = setup_status["phase"] == "ready" and bool(setup_status["fingerprint"])
+                    if ready:
+                        service.store.publish(args["group_id"], args["workflow_id"], value["version"])
+                        service.store.trust(
+                            args["group_id"],
+                            args["workflow_id"],
+                            value["version"],
+                            fingerprint=setup_status["fingerprint"],
+                            permissions=["all_windows_mcp_tools"],
+                        )
+                        for trigger in definition.triggers:
+                            service.store.set_trigger_activation(
+                                args["group_id"],
+                                args["workflow_id"],
+                                trigger.id,
+                                enabled=bool(trigger.enabled),
+                                version=value["version"],
+                                fingerprint=setup_status["fingerprint"] if trigger.enabled else "",
+                                reason="active" if trigger.enabled else "disabled",
+                            )
+                        value = service.store.get(args["group_id"], args["workflow_id"], version=value["version"])
+                    result = {
+                        "value": value,
+                        "finalization": {
+                            "auto_published": ready,
+                            "auto_trusted": ready,
+                            "runtime_activation_opened": ready and any(item.enabled for item in definition.triggers),
+                            "setup_ready": ready,
+                        },
+                    }
+                else:
+                    result = {"available": True, "preview": {"source": "scheduler"}}
+                return {"ok": True, "result": {"result": result}}
 
             with patch("no1.computer_control.storage.load_group", return_value=group), patch(
                 "no1.ports.web.routes.computer_control._service", return_value=service
             ), patch("no1.ports.web.routes.computer_control.audit"), patch(
                 "no1.ports.web.routes.computer_control._emit"
+            ), patch(
+                "no1.ports.web.routes.computer_control.call_daemon",
+                side_effect=fake_call_daemon,
             ):
                 created = store.create("g-test", _definition())
                 workflow_id = created["manifest"]["workflow_id"]
@@ -220,7 +336,14 @@ class TestComputerControlTriggerApi(unittest.TestCase):
                     )
                 self.assertEqual(raised.exception.status_code, 409)
                 self.assertEqual(store.get("g-test", workflow_id)["version"], current_version)
-                self.assertTrue(scheduler.calls)
+                self.assertFalse(scheduler.calls)
+                self.assertTrue(daemon_calls)
+                self.assertTrue(
+                    all(
+                        call["args"].get("command") in {"scheduler", "admin_trigger"}
+                        for call in daemon_calls
+                    )
+                )
 
     def test_store_refuses_to_open_activation_gate_without_current_trust(self):
         with tempfile.TemporaryDirectory() as td:

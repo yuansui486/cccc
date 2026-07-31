@@ -484,13 +484,12 @@ def default_paths() -> DaemonPaths:
     return DaemonPaths(home=ensure_home())
 
 
-def _start_daemon_computer_control_after_lock(home: Path, lock_handle: Any) -> bool:
+def _start_daemon_computer_control_after_lock(home: Path, lock_handle: Any) -> Any:
     try:
-        start_daemon_computer_control(home, lock_handle=lock_handle)
+        return start_daemon_computer_control(home, lock_handle=lock_handle)
     except Exception:
         logger.exception("Computer-control daemon service recovery is not ready")
-        return False
-    return True
+        return None
 
 
 def _desired_daemon_transport() -> str:
@@ -974,7 +973,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
     except Exception:
         pass
 
-    _start_daemon_computer_control_after_lock(p.home, lock_handle)
+    computer_control_service = _start_daemon_computer_control_after_lock(p.home, lock_handle)
 
     try:
         p.sock_path.unlink(missing_ok=True)
@@ -1229,6 +1228,11 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             if should_exit:
                 stop_event.set()
 
+    try:
+        if computer_control_service is not None:
+            computer_control_service.stop_daemon()
+    except Exception:
+        logger.exception("Computer-control daemon scheduler did not stop cleanly")
     try:
         close_all_browser_surface_sessions()
     except Exception:

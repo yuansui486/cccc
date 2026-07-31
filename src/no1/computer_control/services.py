@@ -184,6 +184,10 @@ class ComputerControlServices:
                     or self._daemon_start_lock_handle_id != lock_handle_id
                 ):
                     raise PermissionError("computer-control service belongs to another daemon owner")
+                # A worker crash must not leave a READY service with unattended
+                # execution silently disabled.  start_daemon is idempotent for
+                # a live worker and recreates it when the prior thread exited.
+                self.scheduler.start_daemon(owner)
                 return self
             self._daemon_start_state = "starting"
             self._daemon_start_epoch = epoch
@@ -192,6 +196,7 @@ class ComputerControlServices:
             self.recordings._recover_after_restart(owner)
             self.runner._recover_manual_runs_after_restart(owner)
             self.recordings._start_watchdog(owner)
+            self.scheduler.start_daemon(owner)
         except Exception:
             with self._daemon_start:
                 self._daemon_start_state = "new"
@@ -202,6 +207,9 @@ class ComputerControlServices:
             self._daemon_start_state = "ready"
             self._daemon_start.notify_all()
         return self
+
+    def stop_daemon(self) -> None:
+        self.scheduler.stop_daemon()
 
     def require_daemon_ready(self, owner: DaemonComputerControlOwner) -> "ComputerControlServices":
         state = _daemon_owner_state(owner, home=self.home)

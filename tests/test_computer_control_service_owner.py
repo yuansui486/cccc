@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -258,6 +259,71 @@ else:
                     self.assertEqual(run_recovery.call_count, 2)
                     start_watchdog.assert_called_once_with(owner)
             finally:
+                release_lockfile(lock)
+
+    def test_daemon_scheduler_is_singleton_and_stops_when_owner_lock_is_released(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            lock = self._lock(home)
+            owner = issue_daemon_computer_control_owner(home, lock_handle=lock)
+            service = ComputerControlServices(home, role="daemon")
+            scheduler = service.scheduler
+            scheduler.LOOP_SECONDS = 0.01
+            ticked = threading.Event()
+
+            async def tick() -> None:
+                ticked.set()
+
+            try:
+                with patch.object(scheduler, "_tick", side_effect=tick):
+                    scheduler.start_daemon(owner)
+                    self.assertTrue(ticked.wait(2))
+                    first_thread = scheduler._daemon_thread
+                    self.assertIsNotNone(first_thread)
+                    scheduler.start_daemon(owner)
+                    self.assertIs(scheduler._daemon_thread, first_thread)
+
+                    release_lockfile(lock)
+                    deadline = time.monotonic() + 2
+                    while scheduler._daemon_thread is not None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertIsNone(scheduler._daemon_thread)
+                    self.assertFalse(first_thread.is_alive())
+            finally:
+                if not getattr(lock, "closed", True):
+                    release_lockfile(lock)
+
+    def test_ready_daemon_restarts_scheduler_after_worker_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            lock = self._lock(home)
+            owner = issue_daemon_computer_control_owner(home, lock_handle=lock)
+            service = ComputerControlServices(home, role="daemon")
+            try:
+                with patch.object(
+                    service.recordings, "_recover_after_restart"
+                ), patch.object(
+                    service.runner, "_recover_manual_runs_after_restart"
+                ), patch.object(
+                    service.recordings, "_start_watchdog"
+                ), patch.object(
+                    service.scheduler, "_run_daemon_thread", return_value=None
+                ) as worker:
+                    service.start_daemon(owner)
+                    deadline = time.monotonic() + 2
+                    while (
+                        service.scheduler._daemon_thread is not None
+                        and service.scheduler._daemon_thread.is_alive()
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    self.assertFalse(service.scheduler._daemon_thread.is_alive())
+
+                    service.start_daemon(owner)
+                    self.assertEqual(worker.call_count, 2)
+                    self.assertEqual(service._daemon_start_state, "ready")
+            finally:
+                service.stop_daemon()
                 release_lockfile(lock)
 
     def test_concurrent_start_runs_recovery_once(self) -> None:

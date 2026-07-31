@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -9,6 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 from ..computer_control.mcp import MCPUnavailable
 from ..computer_control.risk import annotate_catalog, workflow_risk
 from ..computer_control.mcp import validate_workflow_tools
+from ..computer_control.compiler import compile_or_raise
 from ..computer_control.lease import LeaseConflict
 from ..computer_control.elements import normalize_snapshot
 from ..computer_control.models import WorkflowDefinition
@@ -31,7 +33,7 @@ from ..computer_control.run_authority import (
 )
 from ..computer_control.requests import ComputerRequestStore
 from ..computer_control.services import get_services, start_daemon_services
-from ..computer_control.storage import WorkflowStore
+from ..computer_control.storage import RevisionConflict, WorkflowNotFound, WorkflowStore
 from ..contracts.v1 import DaemonError, DaemonResponse
 from ..kernel.actors import find_actor
 from ..kernel.group import load_group
@@ -530,6 +532,202 @@ def _workflow(service: Any, args: Dict[str, Any], group_id: str, actor_id: str) 
     raise ValueError(f"unsupported workflow action: {action}")
 
 
+def _admin_trigger(service: Any, args: Dict[str, Any], group_id: str) -> Any:
+    """Apply Web-admin trigger changes inside the daemon owner process."""
+    action = str(args.get("action") or "update").strip().lower()
+    workflow_id = str(args.get("workflow_id") or "").strip()
+    if not workflow_id:
+        raise ValueError("workflow_id is required")
+    definition = WorkflowDefinition.model_validate(args.get("definition") or {})
+    compile_or_raise(definition)
+    enabled = any(trigger.enabled for trigger in definition.triggers)
+    setup = service.setup.status()
+    phase = str(setup.get("phase") or setup.get("setup_phase") or "")
+    fingerprint = str(setup.get("fingerprint") or "")
+    ready = phase == "ready" and bool(fingerprint)
+    allow_unready_disable = bool(args.get("allow_unready_disable"))
+    if enabled and not ready and not allow_unready_disable:
+        raise RuntimeError("Windows-MCP 尚未完成验证，不能启用触发器")
+    if action == "update":
+        value = service.store.update_triggers(
+            group_id,
+            workflow_id,
+            definition,
+            expected_revision=int(args.get("expected_revision") or 0),
+        )
+    else:
+        raise ValueError(f"unsupported admin trigger action: {action}")
+
+    if not ready and allow_unready_disable:
+        current = service.store.get(group_id, workflow_id, version=int(value["version"]))
+        finalization = {
+            "auto_published": False,
+            "auto_trusted": False,
+            "runtime_activation_opened": False,
+            "setup_ready": False,
+            "draft_reason": "setup_not_ready_runtime_gate_closed",
+        }
+        return {"value": current, "finalization": finalization}
+
+    service.store.publish(group_id, workflow_id, int(value["version"]))
+    trusted = False
+    if ready:
+        service.store.trust(
+            group_id,
+            workflow_id,
+            int(value["version"]),
+            fingerprint=fingerprint,
+            permissions=["all_windows_mcp_tools"],
+        )
+        trusted = True
+    for trigger in definition.triggers:
+        service.store.set_trigger_activation(
+            group_id,
+            workflow_id,
+            trigger.id,
+            enabled=bool(trigger.enabled and trusted),
+            version=int(value["version"]),
+            fingerprint=fingerprint if trigger.enabled and trusted else "",
+            reason="active" if trigger.enabled and trusted else "setup_not_ready" if trigger.enabled else "disabled",
+        )
+    current = service.store.get(group_id, workflow_id, version=int(value["version"]))
+    return {
+        "value": current,
+        "finalization": {
+            "auto_published": True,
+            "auto_trusted": trusted,
+            "runtime_activation_opened": bool(enabled and trusted),
+            "setup_ready": ready,
+        },
+    }
+
+
+def _admin_workflow(service: Any, args: Dict[str, Any], group_id: str) -> Any:
+    """Apply local Web workflow administration inside the daemon owner."""
+    action = str(args.get("action") or "").strip().lower()
+    workflow_id = str(args.get("workflow_id") or "").strip()
+    fingerprint = str(service.setup.status().get("fingerprint") or "")
+
+    def finalize(value: Dict[str, Any]) -> Dict[str, Any]:
+        definition = WorkflowDefinition.model_validate(
+            {
+                key: child
+                for key, child in value["definition"].items()
+                if key != "change_note"
+            }
+        )
+        validate_workflow_tools(definition, service.session.catalog_sync())
+        return service.store.auto_finalize(
+            group_id,
+            str(value["manifest"]["workflow_id"]),
+            int(value["version"]),
+            fingerprint=fingerprint,
+        )
+
+    if action == "settings_get":
+        return service.store.settings(group_id, current_fingerprint=fingerprint)
+    if action == "settings_update":
+        return service.store.update_settings(
+            group_id,
+            auto_publish_and_trust=args.get("auto_publish_and_trust") is not False,
+            current_fingerprint=fingerprint,
+            authorize_current_fingerprint=bool(args.get("authorize_current_fingerprint")),
+        )
+
+    if action == "create":
+        definition = WorkflowDefinition.model_validate(args.get("definition") or {})
+        validate_workflow_tools(definition, service.session.catalog_sync())
+        value = service.store.create(group_id, definition)
+        return finalize(value)
+
+    if not workflow_id:
+        raise ValueError("workflow_id is required")
+    if action == "update":
+        definition = WorkflowDefinition.model_validate(args.get("definition") or {})
+        validate_workflow_tools(definition, service.session.catalog_sync())
+        value = service.store.update(
+            group_id,
+            workflow_id,
+            definition,
+            expected_revision=int(args.get("expected_revision") or 0),
+            change_note=str(args.get("change_note") or ""),
+        )
+        return finalize(value)
+    if action in {"publish", "rollback"}:
+        version = int(args.get("version") or 0)
+        value = (
+            service.store.publish(group_id, workflow_id, version)
+            if action == "publish"
+            else service.store.rollback(group_id, workflow_id, version)
+        )
+        return finalize(value)
+    if action == "trust":
+        if not fingerprint:
+            raise RuntimeError("Windows-MCP 尚未完成验证")
+        return service.store.trust(
+            group_id,
+            workflow_id,
+            int(args.get("version") or 0),
+            fingerprint=fingerprint,
+            permissions=args.get("permissions") if isinstance(args.get("permissions"), list) else [],
+        )
+    if action == "archive":
+        return service.store.archive(group_id, workflow_id, bool(args.get("archived")))
+    if action == "duplicate":
+        value = service.store.duplicate(group_id, workflow_id)
+        return finalize(value)
+    if action == "delete":
+        service.store.delete(group_id, workflow_id)
+        return {"deleted": True}
+    if action in {"accept_proposal", "reject_proposal"}:
+        proposal_id = str(args.get("proposal_id") or "").strip()
+        value = service.store.decide_proposal(
+            group_id,
+            workflow_id,
+            proposal_id,
+            accept=action == "accept_proposal",
+        )
+        if action == "accept_proposal" and value.get("accepted_version"):
+            accepted = service.store.get(
+                group_id,
+                workflow_id,
+                version=int(value["accepted_version"]),
+            )
+            finalize(accepted)
+        return value
+    raise ValueError(f"unsupported admin workflow action: {action}")
+
+
+def _admin_request(service: Any, args: Dict[str, Any], group_id: str) -> Any:
+    action = str(args.get("action") or "").strip().lower()
+    request_id = str(args.get("request_id") or "").strip()
+    if action == "append":
+        request = args.get("request") if isinstance(args.get("request"), dict) else {}
+        service.requests.append(group_id, request)
+        return {"request": request}
+    if not request_id:
+        raise ValueError("request_id is required")
+    if action == "approve":
+        value = service.requests.update(
+            group_id,
+            request_id,
+            status="approved",
+            approved_at=args.get("approved_at"),
+            approved_by="user",
+        )
+    elif action == "reject":
+        value = service.requests.update(
+            group_id,
+            request_id,
+            status="rejected",
+            rejected_at=args.get("rejected_at"),
+            rejected_by="user",
+        )
+    else:
+        raise ValueError(f"unsupported admin request action: {action}")
+    return {"request": value}
+
+
 def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tuple[DaemonResponse, bool]]:
     if op != "computer_control":
         return None
@@ -861,6 +1059,53 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
             )
         if command == "workflow":
             return _ok(_workflow(service, args, group_id, actor_id))
+        if command == "admin_trigger":
+            try:
+                return _ok(_admin_trigger(service, args, group_id))
+            except RevisionConflict as exc:
+                return _error(
+                    "revision_conflict",
+                    str(exc),
+                    details={"current_revision": exc.current_revision},
+                )
+            except WorkflowNotFound as exc:
+                return _error("workflow_not_found", str(exc))
+            except ValueError as exc:
+                return _error("workflow_invalid", str(exc))
+            except RuntimeError as exc:
+                return _error("windows_mcp_not_ready", str(exc))
+        if command in {"admin_workflow", "admin_request"}:
+            try:
+                value = (
+                    _admin_workflow(service, args, group_id)
+                    if command == "admin_workflow"
+                    else _admin_request(service, args, group_id)
+                )
+                return _ok(value)
+            except RevisionConflict as exc:
+                return _error("revision_conflict", str(exc), details={"current_revision": exc.current_revision})
+            except WorkflowNotFound as exc:
+                error_code = (
+                    "proposal_not_found"
+                    if str(args.get("action") or "").endswith("_proposal")
+                    else "workflow_not_found"
+                )
+                return _error(error_code, str(exc))
+            except KeyError as exc:
+                return _error("request_not_found", str(exc))
+            except ValueError as exc:
+                action = str(args.get("action") or "")
+                if action.startswith("settings_"):
+                    error_code = "settings_invalid"
+                elif action.endswith("_proposal"):
+                    error_code = "proposal_conflict"
+                elif command == "admin_request":
+                    error_code = "invalid_request"
+                else:
+                    error_code = "workflow_invalid"
+                return _error(error_code, str(exc))
+            except RuntimeError as exc:
+                return _error("windows_mcp_not_ready", str(exc))
         if command == "run":
             return _ok(
                 _run(
@@ -874,6 +1119,17 @@ def try_handle_computer_control_op(op: str, args: Dict[str, Any]) -> Optional[Tu
                     stop_claim=run_stop_owner,
                 )
             )
+        if command == "scheduler":
+            action = str(args.get("action") or "status").strip().lower()
+            workflow_id = str(args.get("workflow_id") or "").strip()
+            if not workflow_id:
+                raise ValueError("workflow_id is required")
+            if action == "status":
+                return _ok(asyncio.run(service.scheduler.status(group_id, workflow_id)))
+            if action == "test":
+                trigger = args.get("trigger") if isinstance(args.get("trigger"), dict) else {}
+                return _ok(asyncio.run(service.scheduler.test_trigger(group_id, workflow_id, trigger)))
+            return _error("invalid_request", f"unsupported scheduler action: {action}")
         if command == "picker":
             return _ok(_picker(service, args, group_id, actor_id))
         if command == "element_snapshot":
