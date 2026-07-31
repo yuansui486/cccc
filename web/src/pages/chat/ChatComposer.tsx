@@ -12,6 +12,18 @@ import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem,
 import { getRecipientDisplayLabel } from "../../utils/displayText";
 import { Laptop } from "lucide-react";
 import { computerControlApi, type WorkflowManifest } from "../../services/api/computerControl";
+import {
+  canStartComposerHistory,
+  moveComposerHistory,
+  startComposerHistory,
+  type ComposerHistorySession,
+} from "./chatComposerHistory";
+import {
+  filterComposerMentionSuggestions,
+  type ComposerMentionKind,
+  type ComposerMentionSuggestion,
+} from "./chatMentionSuggestions";
+import { consumeSuggestedUserMessage, type SuggestedUserMessage } from "../../utils/suggestedUserMessage";
 
 const SLASH_COMMAND_PAGE_SIZE = 8;
 
@@ -66,7 +78,9 @@ export interface ChatComposerProps {
   // Mention menu
   showMentionMenu: boolean;
   setShowMentionMenu: Dispatch<SetStateAction<boolean>>;
-  mentionSuggestions: string[];
+  mentionSuggestions: ComposerMentionSuggestion[];
+  composerHistoryEntries: string[];
+  suggestedUserMessage: SuggestedUserMessage | null;
   mentionSelectedIndex: number;
   setMentionSelectedIndex: Dispatch<SetStateAction<number>>;
   setMentionFilter: Dispatch<SetStateAction<string>>;
@@ -120,6 +134,8 @@ export function ChatComposer({
   showMentionMenu,
   setShowMentionMenu,
   mentionSuggestions,
+  composerHistoryEntries,
+  suggestedUserMessage,
   mentionSelectedIndex,
   setMentionSelectedIndex,
   setMentionFilter,
@@ -134,11 +150,18 @@ export function ChatComposer({
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillSearchQuery, setSkillSearchQuery] = useState("");
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [mentionKind, setMentionKind] = useState<ComposerMentionKind>("actor");
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [slashVisibleCount, setSlashVisibleCount] = useState(SLASH_COMMAND_PAGE_SIZE);
+  const [acceptedSuggestedMessage, setAcceptedSuggestedMessage] = useState({ groupId: selectedGroupId, eventId: "" });
+  const composerHistoryRef = useRef<ComposerHistorySession | null>(null);
   const [computerWorkflows, setComputerWorkflows] = useState<WorkflowManifest[]>([]);
   const skillMenuRef = useRef<HTMLDivElement | null>(null);
   const { t } = useTranslation('chat');
+
+  useEffect(() => {
+    composerHistoryRef.current = null;
+  }, [selectedGroupId]);
 
   useEffect(() => {
     if (!computerControlEnabled || !selectedGroupId) return;
@@ -302,6 +325,42 @@ export function ChatComposer({
     [slashSuggestions, slashVisibleCount],
   );
   const hasMoreSlashSuggestions = visibleSlashSuggestions.length < slashSuggestions.length;
+  const mentionFilter = useMemo(() => {
+    const trigger = mentionKind === "group" ? "#" : "@";
+    const index = composerText.lastIndexOf(trigger);
+    if (index < 0) return "";
+    return composerText.slice(index + 1).trim();
+  }, [composerText, mentionKind]);
+  const visibleMentionSuggestions = useMemo(
+    () => filterComposerMentionSuggestions(mentionSuggestions, mentionKind, mentionFilter),
+    [mentionFilter, mentionKind, mentionSuggestions],
+  );
+  const activeSuggestedUserMessage = suggestedUserMessage && (
+    acceptedSuggestedMessage.groupId !== selectedGroupId ||
+    suggestedUserMessage.eventId !== acceptedSuggestedMessage.eventId
+  )
+    ? suggestedUserMessage
+    : null;
+  const showSuggestedUserMessage = Boolean(
+    activeSuggestedUserMessage &&
+    !composerText.trim() &&
+    composerFiles.length === 0 &&
+    !replyTarget &&
+    !quotedPresentationRef &&
+    composerGroupSettled,
+  );
+
+  const acceptSuggestedUserMessage = useCallback(() => {
+    if (!activeSuggestedUserMessage) return;
+    setComposerText(activeSuggestedUserMessage.text);
+    consumeSuggestedUserMessage(activeSuggestedUserMessage.eventId);
+    setAcceptedSuggestedMessage({ groupId: selectedGroupId, eventId: activeSuggestedUserMessage.eventId });
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [activeSuggestedUserMessage, composerRef, selectedGroupId, setComposerText]);
+
+  const exitComposerHistory = useCallback(() => {
+    composerHistoryRef.current = null;
+  }, []);
 
   // Handle pasted files (clipboard items).
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -348,6 +407,7 @@ export function ChatComposer({
   // Handle text changes.
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    exitComposerHistory();
     isUserInputRef.current = true;
     setComposerText(val);
     const target = e.target;
@@ -368,16 +428,20 @@ export function ChatComposer({
     setShowSlashMenu(false);
     setSlashVisibleCount(SLASH_COMMAND_PAGE_SIZE);
 
-    // Detect @ mentions for the recipient helper menu.
+    // Detect @ actor and # group mentions for the structured helper menu.
     const lastAt = val.lastIndexOf("@");
-    if (lastAt >= 0) {
-      const afterAt = val.slice(lastAt + 1);
+    const lastHash = val.lastIndexOf("#");
+    const triggerIndex = Math.max(lastAt, lastHash);
+    const trigger = triggerIndex === lastHash ? "#" : "@";
+    if (triggerIndex >= 0) {
+      const afterTrigger = val.slice(triggerIndex + 1);
       if (
-        (lastAt === 0 || val[lastAt - 1] === " " || val[lastAt - 1] === "\n") &&
-        !afterAt.includes(" ") &&
-        !afterAt.includes("\n")
+        (triggerIndex === 0 || val[triggerIndex - 1] === " " || val[triggerIndex - 1] === "\n") &&
+        !afterTrigger.includes(" ") &&
+        !afterTrigger.includes("\n")
       ) {
-        setMentionFilter(afterAt);
+        setMentionKind(trigger === "#" ? "group" : "actor");
+        setMentionFilter(afterTrigger);
         setShowMentionMenu(true);
         setMentionSelectedIndex(0);
       } else {
@@ -431,8 +495,8 @@ export function ChatComposer({
         return;
       }
     }
-    if (showMentionMenu && mentionSuggestions.length > 0) {
-      const maxIndex = Math.min(mentionSuggestions.length, 8) - 1;
+    if (showMentionMenu && visibleMentionSuggestions.length > 0) {
+      const maxIndex = Math.min(visibleMentionSuggestions.length, 8) - 1;
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setMentionSelectedIndex((prev) => (prev >= maxIndex ? 0 : prev + 1));
@@ -445,13 +509,34 @@ export function ChatComposer({
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        selectMention(mentionSuggestions[mentionSelectedIndex]);
+        selectMention(visibleMentionSuggestions[mentionSelectedIndex]);
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
         setShowMentionMenu(false);
         setMentionSelectedIndex(0);
+        return;
+      }
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      const history = composerHistoryRef.current;
+      const canStart = canStartComposerHistory({
+        composerText,
+        groupSettled: composerGroupSettled,
+        groupId: selectedGroupId,
+        busy,
+        menuOpen: showMentionMenu || showSlashMenu,
+        isComposing: e.nativeEvent.isComposing,
+        hasModifier: e.metaKey || e.ctrlKey || e.altKey,
+      });
+      if (history || canStart) {
+        e.preventDefault();
+        const nextHistory = history || startComposerHistory(composerHistoryEntries, selectedGroupId, composerText);
+        if (!nextHistory) return;
+        const move = moveComposerHistory(nextHistory, e.key === "ArrowUp" ? "older" : "newer");
+        composerHistoryRef.current = move.session;
+        setComposerText(move.text);
         return;
       }
     }
@@ -470,16 +555,21 @@ export function ChatComposer({
   };
 
   // Select a mention from the menu.
-  const selectMention = (selected: string | undefined) => {
+  const selectMention = (selected: ComposerMentionSuggestion | undefined) => {
     if (!selected) return;
-    const lastAt = composerText.lastIndexOf("@");
-    if (lastAt >= 0) {
-      const before = composerText.slice(0, lastAt);
-      setComposerText(before + selected + " ");
+    const trigger = selected.kind === "group" ? "#" : "@";
+    const triggerIndex = composerText.lastIndexOf(trigger);
+    if (triggerIndex >= 0) {
+      const before = composerText.slice(0, triggerIndex);
+      const inserted = selected.kind === "actor" && selected.token.startsWith("@")
+        ? selected.token
+        : `${trigger}${selected.token}`;
+      setComposerText(before + inserted + " ");
     }
-    if (!toTokens.includes(selected)) {
-      onAppendRecipientToken(selected);
+    if (selected.kind === "actor" && !toTokens.includes(selected.token)) {
+      onAppendRecipientToken(selected.token);
     }
+    exitComposerHistory();
     setShowMentionMenu(false);
     setMentionSelectedIndex(0);
   };
@@ -1061,32 +1151,51 @@ export function ChatComposer({
                   fontSize: `${composerFontSize}px`,
                   lineHeight: `${composerLineHeight}px`,
                 }}
-                placeholder={isSmallScreen ? t('messagePlaceholder') : t('messagePlaceholderDesktop')}
+                placeholder={showSuggestedUserMessage ? "" : isSmallScreen ? t('messagePlaceholder') : t('messagePlaceholderDesktop')}
                 rows={1}
                 value={composerText}
                 onPaste={handlePaste}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
+                onPointerDown={exitComposerHistory}
                 onBlur={() => setTimeout(() => setShowMentionMenu(false), 150)}
                 aria-label={t('messageInput')}
               />
 
+              {showSuggestedUserMessage && activeSuggestedUserMessage ? (
+                <button
+                  type="button"
+                  className={classNames(
+                    "absolute inset-x-3 top-2.5 truncate rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                    isDark
+                      ? "border-amber-300/20 bg-amber-300/10 text-amber-100 hover:bg-amber-300/15"
+                      : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+                  )}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={acceptSuggestedUserMessage}
+                  title={t("useSuggestedMessage", { defaultValue: "Use suggested message" })}
+                >
+                  <span className="mr-1 font-semibold">{t("suggestedMessage", { defaultValue: "Suggested" })}:</span>
+                  {activeSuggestedUserMessage.text}
+                </button>
+              ) : null}
+
               {/* Mention menu */}
-              {showMentionMenu && mentionSuggestions.length > 0 && (
+              {showMentionMenu && visibleMentionSuggestions.length > 0 && (
                 <div
                   className={classNames(
                     "glass-panel absolute bottom-full left-2 mb-3 w-64 max-h-60 overflow-auto scrollbar-subtle rounded-2xl border shadow-2xl z-30 animate-in fade-in zoom-in-95 duration-200",
                   )}
                   role="listbox"
                 >
-                  {mentionSuggestions.slice(0, 8).map((s, idx) => (
+                  {visibleMentionSuggestions.slice(0, 8).map((s, idx) => (
                     (() => {
-                      const option = recipientLabelMap.get(s);
-                      const primaryLabel = option?.label || s;
-                      const secondaryLabel = option?.secondary;
+                      const option = s.kind === "actor" ? recipientLabelMap.get(s.token) : undefined;
+                      const primaryLabel = option?.label || s.label;
+                      const secondaryLabel = option?.secondary || s.secondary;
                       return (
                         <button
-                          key={s}
+                          key={`${s.kind}:${s.token}`}
                           className={classNames(
                             "w-full text-left px-4 py-3 text-sm transition-colors",
                             isDark ? "text-slate-200 border-b border-white/5" : "text-gray-700 border-b border-black/5",
@@ -1102,12 +1211,12 @@ export function ChatComposer({
                           onMouseEnter={() => setMentionSelectedIndex(idx)}
                         >
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className="opacity-60 flex-shrink-0">@</span>
+                            <span className="opacity-60 flex-shrink-0">{s.kind === "group" ? "#" : "@"}</span>
                             <div className="min-w-0">
                               <div className="truncate">{primaryLabel}</div>
                               {secondaryLabel ? (
                                 <div className={classNames("truncate text-[11px]", isDark ? "text-slate-400" : "text-gray-500")}>
-                                  @{secondaryLabel}
+                                  {s.kind === "group" ? "#" : "@"}{secondaryLabel}
                                 </div>
                               ) : null}
                             </div>

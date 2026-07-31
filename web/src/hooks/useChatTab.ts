@@ -43,6 +43,9 @@ import {
   type SlashSkillScope,
 } from "../utils/slashCommands";
 import { useSlashSkillDispatch } from "./useSlashSkillDispatch";
+import { buildComposerHistoryEntries } from "../pages/chat/chatComposerHistory";
+import { buildComposerMentionSuggestions, type ComposerMentionSuggestion } from "../pages/chat/chatMentionSuggestions";
+import { latestSuggestedUserMessage } from "../utils/suggestedUserMessage";
 
 export const CHAT_SCROLL_SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -642,6 +645,7 @@ interface UseChatTabOptions {
   selectedGroupRunning: boolean;
   actors: Actor[];
   recipientActors: Actor[];
+  groupLabelById: Record<string, string>;
   /** Callback for when message is sent */
   onMessageSent?: () => void;
   /** Refs for composer interactions */
@@ -702,6 +706,11 @@ export function restoreFailedSendComposerState(
   const currentSelectedGroupId = String(useGroupStore.getState().selectedGroupId || "").trim();
   const currentActiveGroupId = String(composerState.activeGroupId || "").trim();
   const stillOnOriginGroup = currentSelectedGroupId === originGroupId && currentActiveGroupId === originGroupId;
+  const computerControlPermissions = snapshot.computerControlPermissions || {
+    publish: true,
+    trust: true,
+    unattendedTriggers: true,
+  };
 
   if (stillOnOriginGroup) {
     restoreActions.setComposerText(snapshot.composerText);
@@ -715,7 +724,7 @@ export function restoreFailedSendComposerState(
     restoreActions.setComputerControlEnabled(snapshot.computerControlEnabled);
     restoreActions.setComputerControlWorkflowId(snapshot.computerControlWorkflowId);
     restoreActions.setComputerControlActorId(snapshot.computerControlActorId);
-    for (const [permission, value] of Object.entries(snapshot.computerControlPermissions)) {
+    for (const [permission, value] of Object.entries(computerControlPermissions)) {
       restoreActions.setComputerControlPermission(permission as "publish" | "trust" | "unattendedTriggers", value);
     }
     restoreActions.setToText(snapshot.toText);
@@ -735,7 +744,7 @@ export function restoreFailedSendComposerState(
     computerControlEnabled: snapshot.computerControlEnabled,
     computerControlWorkflowId: snapshot.computerControlWorkflowId,
     computerControlActorId: snapshot.computerControlActorId,
-    computerControlPermissions: snapshot.computerControlPermissions,
+    computerControlPermissions,
   }));
 }
 
@@ -789,6 +798,7 @@ export function useChatTab({
   selectedGroupRunning,
   actors,
   recipientActors,
+  groupLabelById,
   onMessageSent,
   composerRef,
   fileInputRef,
@@ -941,11 +951,10 @@ export function useChatTab({
   }, [toText, validRecipientSet]);
 
   // Mention suggestions
-  const mentionSuggestions = useMemo(() => {
-    const base = ["@all"];
-    const actorIds = recipientActors.map((a) => String(a.id || "")).filter((id) => id);
-    return [...base, ...actorIds];
-  }, [recipientActors]);
+  const mentionSuggestions = useMemo<ComposerMentionSuggestion[]>(
+    () => buildComposerMentionSuggestions(recipientActors, groupLabelById),
+    [groupLabelById, recipientActors],
+  );
 
   // Send group ID (respects cross-group destination)
   const sendGroupId = useMemo(() => {
@@ -1107,6 +1116,15 @@ export function useChatTab({
     if (inChatWindow && chatWindow) return (chatWindow.events || []).filter(isFormalChatMessageEvent);
     return liveChatMessages;
   }, [chatWindow, inChatWindow, liveChatMessages]);
+
+  const composerHistoryEntries = useMemo(
+    () => buildComposerHistoryEntries(events),
+    [events],
+  );
+  const suggestedUserMessage = useMemo(
+    () => latestSuggestedUserMessage(events),
+    [events],
+  );
 
   const hasAnyChatMessages = useMemo(
     () => events.some(isFormalChatMessageEvent) || outboxEntries.length > 0,
@@ -1849,6 +1867,8 @@ export function useChatTab({
     setDestGroupId,
     composerGroupSettled,
     mentionSuggestions,
+    composerHistoryEntries,
+    suggestedUserMessage,
     slashSkillScope,
     setSlashSkillScope,
 

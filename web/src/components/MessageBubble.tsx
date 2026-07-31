@@ -29,6 +29,7 @@ import {
 } from "./messageBubble/helpers";
 import { LazyMarkdownRenderer } from "./LazyMarkdownRenderer";
 import { Laptop } from "lucide-react";
+import { getMessageInsight } from "../utils/messagePerspective";
 
 const ANIMATED_MESSAGE_BUBBLE_KEYS = new Set<string>();
 const NEW_MESSAGE_ANIMATION_WINDOW_MS = 12000;
@@ -168,6 +169,9 @@ function MessageBubbleBody({
     dstTo,
     relayChipClass,
     quoteText,
+    insight,
+    remoteEventId,
+    dstEventId,
     replyToEventId,
     presentationRefs,
     taskRefs,
@@ -195,6 +199,9 @@ function MessageBubbleBody({
     dstTo: string[];
     relayChipClass: string;
     quoteText?: string;
+    insight?: string;
+    remoteEventId?: string;
+    dstEventId?: string;
     replyToEventId?: string;
     presentationRefs: PresentationMessageRef[];
     taskRefs: TaskMessageRef[];
@@ -238,7 +245,7 @@ function MessageBubbleBody({
 
     return (
         <>
-            {(normalizedToLabel || hasSource || hasDestination) ? (
+            {(normalizedToLabel || hasSource || hasDestination || remoteEventId || dstEventId) ? (
                 <div className="mb-3 flex flex-wrap items-center gap-1.5">
                     {normalizedToLabel ? (
                         <span className={metaChipClass} title={normalizedToLabel}>
@@ -279,6 +286,18 @@ function MessageBubbleBody({
                             </div>
                         );
                     })() : null}
+                    {remoteEventId || dstEventId ? (
+                        <span
+                            className={classNames(metaChipClass, relayChipClass)}
+                            title={t("receiptProjection", { defaultValue: "Projected delivery receipt" })}
+                        >
+                            <span className="opacity-65">✓</span>
+                            <span className="truncate">
+                                {t("receiptProjection", { defaultValue: "Projected delivery receipt" })}
+                                {remoteEventId ? ` · ${remoteEventId.slice(0, 8)}` : dstEventId ? ` · ${dstEventId.slice(0, 8)}` : ""}
+                            </span>
+                        </span>
+                    ) : null}
                 </div>
             ) : null}
 
@@ -310,6 +329,15 @@ function MessageBubbleBody({
                         <span className="block">"{quoteText}"</span>
                     </div>
                 )
+            ) : null}
+
+            {insight ? (
+                <div className={classNames(quoteClassName, "mb-3 border-sky-300/50 bg-sky-50/60 dark:border-sky-400/20 dark:bg-sky-500/[0.08]")}>
+                    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] opacity-60">
+                        {t("peerInsight", { defaultValue: "Peer insight" })}
+                    </span>
+                    <span className="block whitespace-pre-wrap">{insight}</span>
+                </div>
             ) : null}
 
             {presentationRefs.length > 0 ? (
@@ -633,6 +661,9 @@ export const MessageBubble = memo(function MessageBubble({
         return raw.map((t) => String(t || "").trim()).filter((t) => t);
     }, [msgData?.dst_to]);
     const hasDestination = !!dstGroupId;
+    const dstEventId = typeof msgData?.dst_event_id === "string" ? String(msgData.dst_event_id || "").trim() : "";
+    const remoteEventId = typeof msgData?.remote_event_id === "string" ? String(msgData.remote_event_id || "").trim() : "";
+    const insight = getMessageInsight(msgData);
     const rawAttachments: MessageAttachment[] = Array.isArray(msgData?.attachments) ? msgData.attachments : [];
     const sourcePlatform = typeof msgData?.source_platform === "string" ? String(msgData.source_platform || "").trim() : "";
     const blobAttachments = rawAttachments
@@ -934,6 +965,9 @@ export const MessageBubble = memo(function MessageBubble({
                         dstTo={dstTo}
                         relayChipClass={relayChipClass}
                         quoteText={quoteText}
+                        insight={insight}
+                        remoteEventId={remoteEventId}
+                        dstEventId={dstEventId}
                         replyToEventId={replyToEventId}
                         presentationRefs={presentationRefs}
                         taskRefs={taskRefs}

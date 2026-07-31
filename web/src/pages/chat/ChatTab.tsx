@@ -164,6 +164,8 @@ export function ChatTab({
     destGroupId,
     composerGroupSettled,
     mentionSuggestions,
+    composerHistoryEntries,
+    suggestedUserMessage,
     slashSkillScope,
     setSlashSkillScope,
 
@@ -191,6 +193,7 @@ export function ChatTab({
     selectedGroupRunning,
     actors,
     recipientActors,
+    groupLabelById,
     composerRef,
     fileInputRef,
     chatAtBottomRef,
@@ -875,6 +878,8 @@ export function ChatTab({
             showMentionMenu={showMentionMenu}
             setShowMentionMenu={setShowMentionMenu}
             mentionSuggestions={mentionSuggestions}
+            composerHistoryEntries={composerHistoryEntries}
+            suggestedUserMessage={suggestedUserMessage}
             mentionSelectedIndex={mentionSelectedIndex}
             setMentionSelectedIndex={setMentionSelectedIndex}
             setMentionFilter={setMentionFilter}
