@@ -126,6 +126,13 @@ def handle_actor_start(
     env = actor.get("env") if isinstance(actor.get("env"), dict) else {}
     runner_kind = str(actor.get("runner") or "pty").strip()
     runtime = str(actor.get("runtime") or "codex").strip()
+    # A new start attempt invalidates execution state left by the prior
+    # session before runtime initialization can fail or raise.
+    try:
+        ContextStorage(group).clear_agent_status_if_present(actor_id)
+    except Exception:
+        pass
+
     try:
         start_result = start_actor_process(
             group,
@@ -141,6 +148,7 @@ def handle_actor_start(
     except Exception as e:
         _restore_previous_enabled()
         return _error("actor_start_failed", str(e))
+
     if not start_result["success"]:
         _restore_previous_enabled()
         return _error("actor_start_failed", start_result.get("error") or "unknown error")
@@ -292,6 +300,9 @@ def handle_actor_restart(
             remove_headless_state=remove_headless_state,
             remove_pty_state_if_pid=remove_pty_state_if_pid,
         )
+        # A restart begins a new execution lifecycle. Clear old status before
+        # launch so a failed runtime handshake cannot resurrect it.
+        ContextStorage(group).clear_agent_status_if_present(actor_id)
         clear_preamble_sent(group, actor_id)
         throttle_reset_actor(group.group_id, actor_id, keep_pending=True)
     except Exception as e:

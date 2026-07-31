@@ -142,6 +142,12 @@ class TestActorLifecycleOps(unittest.TestCase):
             )
             self.assertTrue(add.ok, getattr(add, "error", None))
 
+            from no1.kernel.group import load_group
+            from no1.kernel.context import ContextStorage
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            ContextStorage(group).update_agent_state("peer1", "stale focus", active_task_id="T999")  # type: ignore[arg-type]
+
             disable, _ = self._call(
                 "actor_update",
                 {"group_id": group_id, "actor_id": "peer1", "by": "user", "patch": {"enabled": False}},
@@ -164,6 +170,15 @@ class TestActorLifecycleOps(unittest.TestCase):
             actors = group_doc.get("actors") if isinstance(group_doc.get("actors"), list) else []
             actor = next((item for item in actors if isinstance(item, dict) and item.get("id") == "peer1"), {})
             self.assertFalse(bool(actor.get("enabled", True)))
+
+            refreshed = load_group(group_id)
+            self.assertIsNotNone(refreshed)
+            refreshed_agents = ContextStorage(refreshed).load_agents().agents  # type: ignore[arg-type]
+            refreshed_actor = next((item for item in refreshed_agents if getattr(item, "id", "") == "peer1"), None)
+            self.assertIsNotNone(refreshed_actor)
+            hot = refreshed_actor.hot if refreshed_actor is not None else None
+            self.assertEqual(str(getattr(hot, "active_task_id", "") or ""), "")
+            self.assertEqual(str(getattr(hot, "focus", "") or ""), "")
         finally:
             cleanup()
 
