@@ -287,6 +287,45 @@ MCP_TOOLS = [
         ),
     },
     {
+        "name": "onecolleague_group_bridge_remote_send",
+        "description": "Queue a Messages-only Group Bridge remote delivery through the daemon owner.",
+        "annotations": {"readOnlyHint": False},
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "registration_id": {"type": "string", "minLength": 1},
+                "idempotency_key": {"type": "string", "pattern": "^gbs_[0-9a-f]{32}$"},
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1},
+                        "format": {"type": "string", "enum": ["plain", "markdown"], "default": "plain"},
+                        "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
+                        "reply_required": {"type": "boolean", "default": False},
+                    },
+                    "required": ["text"],
+                },
+            },
+            required=["registration_id", "idempotency_key", "payload"],
+        ),
+    },
+    {
+        "name": "onecolleague_group_bridge_remote_delivery_status",
+        "description": "Read the public receipt for a daemon-owned Group Bridge remote delivery.",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": _obj(
+            {
+                **_COMMON_GROUP,
+                **_COMMON_ACTOR,
+                "registration_id": {"type": "string", "minLength": 1},
+                "idempotency_key": {"type": "string", "pattern": "^gbs_[0-9a-f]{32}$"},
+            },
+            required=["registration_id", "idempotency_key"],
+        ),
+    },
+    {
         "name": "onecolleague_message_send",
         "description": "Send a visible chat message. Choose `to` deliberately; use @all only when the whole group needs it.",
         "inputSchema": _obj(

@@ -88,7 +88,12 @@ from .handlers.onecolleague_messaging import (  # noqa: F401
     message_send,
     tracked_send,
 )
-from .group_bridge import group_bridge_session_send  # noqa: F401
+from .group_bridge import (
+    group_bridge_session_send,
+    remote_delivery_status,
+    remote_send,
+    require_local_runtime_binding,
+)  # noqa: F401
 from .handlers.onecolleague_repo import (  # noqa: F401
     apply_codex_patch_tool,
     exec_command_tool,
@@ -948,6 +953,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
         }
         if set(arguments) - allowed_fields:
             raise MCPError(code="invalid_request", message="Group Bridge session arguments are invalid")
+        require_local_runtime_binding()
         gid = _resolve_group_id(arguments)
         _resolve_self_actor_id(arguments)
         return group_bridge_session_send(
@@ -958,6 +964,33 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             remote_endpoint=str(arguments.get("remote_endpoint") or ""),
             client_nonce=str(arguments.get("client_nonce") or ""),
             payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+        )
+
+    if name == "onecolleague_group_bridge_remote_send":
+        allowed_fields = {"group_id", "actor_id", "registration_id", "idempotency_key", "payload"}
+        if set(arguments) - allowed_fields:
+            raise MCPError(code="invalid_request", message="Group Bridge remote arguments are invalid")
+        require_local_runtime_binding()
+        gid = _resolve_group_id(arguments)
+        _resolve_self_actor_id(arguments)
+        return remote_send(
+            group_id=gid,
+            registration_id=str(arguments.get("registration_id") or ""),
+            idempotency_key=str(arguments.get("idempotency_key") or ""),
+            payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+        )
+
+    if name == "onecolleague_group_bridge_remote_delivery_status":
+        allowed_fields = {"group_id", "actor_id", "registration_id", "idempotency_key"}
+        if set(arguments) - allowed_fields:
+            raise MCPError(code="invalid_request", message="Group Bridge remote status arguments are invalid")
+        require_local_runtime_binding()
+        gid = _resolve_group_id(arguments)
+        _resolve_self_actor_id(arguments)
+        return remote_delivery_status(
+            group_id=gid,
+            registration_id=str(arguments.get("registration_id") or ""),
+            idempotency_key=str(arguments.get("idempotency_key") or ""),
         )
 
     if name == "onecolleague_message_send":
@@ -2020,6 +2053,8 @@ def list_tools_for_caller() -> List[Dict[str, Any]]:
     # surfaces while being discoverable to the authenticated local caller.
     if str(runtime_ctx.source or "").strip().lower() == "local_mcp":
         visible.add("onecolleague_group_bridge_session_send")
+        visible.add("onecolleague_group_bridge_remote_send")
+        visible.add("onecolleague_group_bridge_remote_delivery_status")
 
     if local_computer_control_allowed:
         visible.update(_LOCAL_COMPUTER_CONTROL_TOOLS)
