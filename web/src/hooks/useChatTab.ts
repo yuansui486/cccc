@@ -1,7 +1,7 @@
 // useChatTab - Encapsulates ChatTab business logic and state.
 // Reduces prop drilling by providing state from stores and computed values directly.
 
-import { useMemo, useCallback, useEffect, useRef, useState } from "react";
+import { useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useGroupStore,
@@ -53,12 +53,18 @@ import {
   type GroupBridgeRemoteReceipt,
   type GroupBridgeRemoteTarget,
 } from "../services/api/groupBridge";
+import {
+  GroupBridgeRemoteLifecycle,
+  captureGroupBridgeRemoteComposerIntent,
+  decideGroupBridgeRemoteSend,
+  isGroupBridgeRemoteViewCurrent,
+  isGroupBridgeRemoteComposerIntentCurrent,
+  normalizeGroupBridgeRemoteGroupId,
+  pollGroupBridgeRemoteReceipt,
+  type GroupBridgeRemoteOperationToken,
+} from "./groupBridgeRemoteOrchestration";
 
 export const CHAT_SCROLL_SNAPSHOT_MAX_AGE_MS = 30 * 60 * 1000;
-
-const REMOTE_POLL_LIMIT = 20;
-const REMOTE_POLL_DELAY_MS = 1000;
-const REMOTE_TERMINAL_STATUSES = new Set(["sent", "failed"]);
 
 export function shouldRestoreDetachedScrollSnapshot(
   snapshot: { mode?: unknown; anchorId?: unknown; updatedAt?: unknown } | null | undefined,
@@ -901,114 +907,161 @@ export function useChatTab({
   const enqueueOutbox = useChatOutboxStore((s) => s.enqueue);
   const removeOutbox = useChatOutboxStore((s) => s.remove);
   const sendInFlightRef = useRef(false);
+  const remoteSendOwnerRef = useRef<GroupBridgeRemoteOperationToken | null>(null);
+  const remoteLifecycleRef = useRef<GroupBridgeRemoteLifecycle | null>(null);
+  if (!remoteLifecycleRef.current) remoteLifecycleRef.current = new GroupBridgeRemoteLifecycle();
+  const remoteLifecycle = remoteLifecycleRef.current;
   const [slashSkillScope, setSlashSkillScope] = useState<SlashSkillScope>("team");
+  const [remoteViewGroupId, setRemoteViewGroupId] = useState(() => (
+    normalizeGroupBridgeRemoteGroupId(selectedGroupId)
+  ));
   const [remoteTargets, setRemoteTargets] = useState<GroupBridgeRemoteTarget[]>([]);
   const [remoteTargetsBusy, setRemoteTargetsBusy] = useState(false);
   const [remoteTargetId, setRemoteTargetIdState] = useState("");
   const [remoteReceipt, setRemoteReceipt] = useState<GroupBridgeRemoteReceipt | null>(null);
   const [remoteStatusUnavailable, setRemoteStatusUnavailable] = useState(false);
   const [remoteRequest, setRemoteRequest] = useState<{
+    groupId: string;
     registrationId: string;
+    messageGeneration: number;
     idempotencyKey: string;
     receipt: GroupBridgeRemoteReceipt;
   } | null>(null);
 
-  useEffect(() => {
-    const groupId = String(selectedGroupId || "").trim();
+  useLayoutEffect(() => {
+    const groupId = normalizeGroupBridgeRemoteGroupId(selectedGroupId);
+    remoteLifecycle.selectGroup(groupId);
+    setRemoteViewGroupId(groupId);
     setRemoteTargets([]);
     setRemoteTargetIdState("");
     setRemoteReceipt(null);
     setRemoteRequest(null);
     setRemoteStatusUnavailable(false);
-    if (!groupId) return;
+    setRemoteTargetsBusy(Boolean(groupId));
+    if (!groupId) return undefined;
 
-    let cancelled = false;
-    setRemoteTargetsBusy(true);
-    void Promise.all([groupBridgeApi.registrations(groupId), groupBridgeApi.trusts(groupId)])
-      .then(([registrationsResponse, trustsResponse]) => {
-        if (cancelled) return;
-        if (!registrationsResponse.ok || !trustsResponse.ok) {
+    const token = remoteLifecycle.begin("load", groupId);
+    if (!token) return undefined;
+    void (async () => {
+      try {
+        const [registrationsResponse, trustsResponse] = await Promise.all([
+          groupBridgeApi.registrations(groupId, { signal: token.signal }),
+          groupBridgeApi.trusts(groupId, { signal: token.signal }),
+        ]);
+        remoteLifecycle.commit(token, () => {
+          if (!registrationsResponse.ok || !trustsResponse.ok) {
+            remoteLifecycle.selectRoute(groupId, "");
+            setRemoteTargets([]);
+            setRemoteTargetIdState("");
+            setRemoteReceipt(null);
+            setRemoteRequest(null);
+            setRemoteStatusUnavailable(false);
+            return;
+          }
+          const targets = buildActiveGroupBridgeRemoteTargets(
+            registrationsResponse.result.registrations || [],
+            trustsResponse.result.trusts || [],
+            groupId,
+          );
+          const currentRoute = remoteLifecycle.currentRoute(groupId);
+          const nextRoute = targets.some((target) => target.registration_id === currentRoute)
+            ? currentRoute
+            : "";
+          if (nextRoute !== currentRoute) {
+            remoteLifecycle.selectRoute(groupId, nextRoute);
+            setRemoteReceipt(null);
+            setRemoteRequest(null);
+            setRemoteStatusUnavailable(false);
+          }
+          setRemoteTargets(targets);
+          setRemoteTargetIdState(nextRoute);
+        });
+      } catch {
+        remoteLifecycle.commit(token, () => {
+          remoteLifecycle.selectRoute(groupId, "");
           setRemoteTargets([]);
-          return;
-        }
-        const targets = buildActiveGroupBridgeRemoteTargets(
-          registrationsResponse.result.registrations || [],
-          trustsResponse.result.trusts || [],
-          groupId,
-        );
-        setRemoteTargets(targets);
-        setRemoteTargetIdState((current) => (
-          targets.some((target) => target.registration_id === current) ? current : ""
-        ));
-      })
-      .finally(() => {
-        if (!cancelled) setRemoteTargetsBusy(false);
-      });
+          setRemoteTargetIdState("");
+          setRemoteReceipt(null);
+          setRemoteRequest(null);
+          setRemoteStatusUnavailable(false);
+        });
+      } finally {
+        if (remoteLifecycle.finish(token)) setRemoteTargetsBusy(false);
+      }
+    })();
 
     return () => {
-      cancelled = true;
+      remoteLifecycle.selectGroup("");
     };
-  }, [selectedGroupId]);
+  }, [remoteLifecycle, selectedGroupId]);
+
+  const remoteViewCurrent = isGroupBridgeRemoteViewCurrent(selectedGroupId, remoteViewGroupId);
+  const visibleRemoteTargets = useMemo(
+    () => remoteViewCurrent ? remoteTargets : [],
+    [remoteTargets, remoteViewCurrent],
+  );
+  const visibleRemoteTargetId = remoteViewCurrent ? remoteTargetId : "";
+  const visibleRemoteReceipt = remoteViewCurrent ? remoteReceipt : null;
+  const visibleRemoteStatusUnavailable = remoteViewCurrent ? remoteStatusUnavailable : false;
+  const visibleRemoteTargetsBusy = remoteViewCurrent ? remoteTargetsBusy : false;
 
   const selectedRemoteTarget = useMemo(
-    () => remoteTargets.find((target) => target.registration_id === remoteTargetId) || null,
-    [remoteTargetId, remoteTargets],
+    () => visibleRemoteTargets.find((target) => target.registration_id === visibleRemoteTargetId) || null,
+    [visibleRemoteTargetId, visibleRemoteTargets],
   );
 
   const setRemoteTargetId = useCallback((registrationId: string) => {
+    if (!remoteViewCurrent) return;
     const next = String(registrationId || "").trim();
+    if (!remoteLifecycle.selectRoute(selectedGroupId, next)) return;
     setRemoteTargetIdState(next);
     setDestGroupId(selectedGroupId);
     setRemoteReceipt(null);
     setRemoteRequest(null);
     setRemoteStatusUnavailable(false);
-  }, [selectedGroupId, setDestGroupId]);
+  }, [remoteLifecycle, remoteViewCurrent, selectedGroupId, setDestGroupId]);
 
   useEffect(() => {
     const request = remoteRequest;
-    if (!request || !selectedGroupId) return;
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const poll = async () => {
-      let lastReceipt = request.receipt;
-      for (let attempt = 0; attempt < REMOTE_POLL_LIMIT && !cancelled; attempt += 1) {
-        if (REMOTE_TERMINAL_STATUSES.has(String(lastReceipt.status || "").trim())) return;
-        await new Promise<void>((resolve) => {
-          const timer = window.setTimeout(resolve, REMOTE_POLL_DELAY_MS);
-          controller.signal.addEventListener("abort", () => {
-            window.clearTimeout(timer);
-            resolve();
-          }, { once: true });
-        });
-        if (cancelled || controller.signal.aborted) return;
-
+    if (!request || !remoteViewCurrent || request.groupId !== remoteViewGroupId) return undefined;
+    const token = remoteLifecycle.begin(
+      "poll",
+      request.groupId,
+      request.registrationId,
+      request.messageGeneration,
+    );
+    if (!token) return undefined;
+    void pollGroupBridgeRemoteReceipt({
+      initialReceipt: request.receipt,
+      signal: token.signal,
+      getStatus: async (signal) => {
         const response = await groupBridgeApi.remoteStatus(
-          selectedGroupId,
+          request.groupId,
           request.registrationId,
           request.idempotencyKey,
-          { signal: controller.signal },
+          { signal },
         );
-        if (cancelled) return;
-        if (!response.ok) {
-          setRemoteStatusUnavailable(true);
-          return;
-        }
-        const nextReceipt = response.result.receipt;
-        if (!nextReceipt) continue;
-        lastReceipt = nextReceipt;
-        setRemoteReceipt(nextReceipt);
+        return response.ok
+          ? { ok: true as const, receipt: response.result.receipt }
+          : { ok: false as const };
+      },
+      onReceipt: (receipt) => {
+        remoteLifecycle.commit(token, () => {
+          setRemoteReceipt(receipt);
+          setRemoteStatusUnavailable(false);
+        });
+      },
+    }).then((result) => {
+      if (result.kind === "unavailable") {
+        remoteLifecycle.commit(token, () => setRemoteStatusUnavailable(true));
       }
-    };
-
-    void poll().catch(() => {
-      if (!cancelled) setRemoteStatusUnavailable(true);
+    }).finally(() => {
+      remoteLifecycle.finish(token);
     });
     return () => {
-      cancelled = true;
-      controller.abort();
+      remoteLifecycle.abort(token);
     };
-  }, [remoteRequest, selectedGroupId]);
+  }, [remoteLifecycle, remoteRequest, remoteViewCurrent, remoteViewGroupId]);
 
   // ============ Computed Values ============
 
@@ -1422,31 +1475,43 @@ export function useChatTab({
 
     const dstGroup = routingSnapshot.destGroupId;
     const isCrossGroup = routingSnapshot.isCrossGroup;
-    const remoteTargetSnapshot = selectedRemoteTarget;
-    if (remoteTargetId && !remoteTargetSnapshot) {
-      showError("The selected Group Bridge target is no longer active.");
+    const remoteDecision = decideGroupBridgeRemoteSend({
+      groupId: selectedGroupId,
+      remoteTargetId: visibleRemoteTargetId,
+      remoteTarget: selectedRemoteTarget,
+      attachmentCount: composerFilesSnapshot.length,
+      hasReply: Boolean(composerStateSnapshot.replyTarget),
+      hasQuote: Boolean(composerStateSnapshot.quotedPresentationRef),
+      collaborationRequired: composerStateSnapshot.collaborationRequired,
+      computerControlEnabled: composerStateSnapshot.computerControlEnabled,
+      selectedSkillCommand: selectedSkillCommandSnapshot,
+      text: txt,
+    });
+    if (remoteDecision.kind === "reject") {
+      if (remoteDecision.reason === "target_unavailable") {
+        showError("The selected Group Bridge target is no longer active.");
+      } else {
+        showError("Group Bridge remote messages do not support replies, quotes, attachments, skills, or computer control.");
+      }
       return;
     }
-    if (remoteTargetSnapshot) {
-      if (
-        composerFilesSnapshot.length > 0 ||
-        composerStateSnapshot.replyTarget ||
-        composerStateSnapshot.quotedPresentationRef ||
-        composerStateSnapshot.collaborationRequired ||
-        composerStateSnapshot.computerControlEnabled ||
-        selectedSkillCommandSnapshot ||
-        txt.startsWith("/")
-      ) {
-        showError("Group Bridge remote messages do not support replies, quotes, attachments, skills, or computer control.");
-        return;
-      }
+    if (remoteDecision.kind === "remote") {
+      const composerIntent = captureGroupBridgeRemoteComposerIntent(selectedGroupId, composerStateSnapshot);
+      const token = remoteLifecycle.begin("send", selectedGroupId, remoteDecision.target.registration_id);
+      if (!token) return;
+      if (!remoteLifecycle.commit(token, () => {
+        setRemoteReceipt(null);
+        setRemoteRequest(null);
+        setRemoteStatusUnavailable(false);
+      })) return;
 
       sendInFlightRef.current = true;
+      remoteSendOwnerRef.current = token;
       try {
         const idempotencyKey = createGroupBridgeIdempotencyKey();
         const response = await groupBridgeApi.remoteSend(
           selectedGroupId,
-          remoteTargetSnapshot.registration_id,
+          remoteDecision.target.registration_id,
           idempotencyKey,
           {
             text: txt,
@@ -1454,7 +1519,9 @@ export function useChatTab({
             priority: composerStateSnapshot.replyRequired ? "attention" : composerStateSnapshot.priority,
             reply_required: composerStateSnapshot.replyRequired,
           },
+          { signal: token.signal },
         );
+        if (!remoteLifecycle.isCurrent(token)) return;
         if (!response.ok) {
           showError(formatSendMessageError({
             code: response.error.code,
@@ -1465,22 +1532,38 @@ export function useChatTab({
           return;
         }
         const receipt = response.result.receipt;
-        setRemoteReceipt(receipt);
-        setRemoteRequest({
-          registrationId: remoteTargetSnapshot.registration_id,
-          idempotencyKey,
-          receipt,
+        remoteLifecycle.commit(token, () => {
+          const consumeComposerIntent = isGroupBridgeRemoteComposerIntentCurrent(
+            composerIntent,
+            useComposerStore.getState(),
+          );
+          setRemoteReceipt(receipt);
+          setRemoteRequest({
+            groupId: selectedGroupId,
+            registrationId: remoteDecision.target.registration_id,
+            messageGeneration: token.messageGeneration,
+            idempotencyKey,
+            receipt,
+          });
+          setRemoteStatusUnavailable(false);
+          if (consumeComposerIntent) {
+            clearComposer();
+            clearDraft(selectedGroupId);
+            if (fileInputRef?.current) fileInputRef.current.value = "";
+            setDestGroupId(selectedGroupId);
+          }
+          onMessageSent?.();
         });
-        setRemoteStatusUnavailable(false);
-        clearComposer();
-        clearDraft(selectedGroupId);
-        setDestGroupId(selectedGroupId);
-        if (fileInputRef?.current) fileInputRef.current.value = "";
-        onMessageSent?.();
       } catch (error) {
-        showError(error instanceof Error ? error.message : "Group Bridge remote send failed");
+        remoteLifecycle.commit(token, () => {
+          showError(error instanceof Error ? error.message : "Group Bridge remote send failed");
+        });
       } finally {
-        sendInFlightRef.current = false;
+        remoteLifecycle.finish(token);
+        if (remoteSendOwnerRef.current === token) {
+          remoteSendOwnerRef.current = null;
+          sendInFlightRef.current = false;
+        }
       }
       return;
     }
@@ -1832,8 +1915,9 @@ export function useChatTab({
     resolveAssistantTargets,
     upsertStreamingEvent,
     actors,
-    remoteTargetId,
+    visibleRemoteTargetId,
     selectedRemoteTarget,
+    remoteLifecycle,
     t,
   ]);
 
@@ -2048,12 +2132,12 @@ export function useChatTab({
     destGroupId: sendGroupId,
     setDestGroupId,
     composerGroupSettled,
-    remoteTargets,
-    remoteTargetsBusy,
-    remoteTargetId,
+    remoteTargets: visibleRemoteTargets,
+    remoteTargetsBusy: visibleRemoteTargetsBusy,
+    remoteTargetId: visibleRemoteTargetId,
     setRemoteTargetId,
-    remoteReceipt,
-    remoteStatusUnavailable,
+    remoteReceipt: visibleRemoteReceipt,
+    remoteStatusUnavailable: visibleRemoteStatusUnavailable,
     mentionSuggestions,
     composerHistoryEntries,
     suggestedUserMessage,

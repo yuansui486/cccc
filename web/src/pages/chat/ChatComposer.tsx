@@ -13,6 +13,7 @@ import { getRecipientDisplayLabel } from "../../utils/displayText";
 import { Laptop } from "lucide-react";
 import { computerControlApi, type WorkflowManifest } from "../../services/api/computerControl";
 import type { GroupBridgeRemoteReceipt, GroupBridgeRemoteTarget } from "../../services/api/groupBridge";
+import { projectGroupBridgeRemoteReceipt } from "../../hooks/groupBridgeRemoteOrchestration";
 import {
   canStartComposerHistory,
   moveComposerHistory,
@@ -660,21 +661,10 @@ export function ChatComposer({
     shortcut: sendShortcutLabel,
     defaultValue: "Send message ({{shortcut}})",
   });
-  const remoteReceiptStatus = String(remoteReceipt?.status || "").trim();
-  const remoteReceiptEventId = String(remoteReceipt?.remote_event_id || "").trim();
-  const remoteReceiptLabel = remoteReceiptStatus === "sent" && remoteReceiptEventId
-    ? "Remote accepted / signed receipt verified"
-    : remoteReceiptStatus === "sent"
-      ? "Remote receipt pending"
-      : remoteReceiptStatus === "failed"
-        ? "Remote delivery failed"
-        : remoteReceiptStatus === "sending"
-          ? "Remote sending"
-          : remoteReceiptStatus === "retrying"
-            ? "Remote retrying"
-            : remoteReceiptStatus === "queued"
-              ? "Remote queued"
-              : "";
+  const remoteReceiptProjection = projectGroupBridgeRemoteReceipt(remoteReceipt, remoteStatusUnavailable);
+  const remoteReceiptStatus = remoteReceiptProjection.status;
+  const remoteReceiptEventId = remoteReceiptProjection.eventId;
+  const remoteReceiptLabel = remoteReceiptProjection.label;
 
   return (
     <footer
@@ -1155,20 +1145,20 @@ export function ChatComposer({
               )}
             </div>
 
-            {remoteReceiptLabel || remoteStatusUnavailable ? (
+            {remoteReceiptLabel ? (
               <div
                 className={classNames(
                   "flex flex-wrap items-center gap-2 border-b px-2.5 py-1.5 text-[11px]",
                   isDark ? "border-white/[0.05] bg-cyan-400/[0.04] text-cyan-100/80" : "border-black/[0.05] bg-cyan-50/70 text-cyan-800",
                 )}
               >
-                <span className="font-medium">{remoteStatusUnavailable ? "Remote status unavailable" : remoteReceiptLabel}</span>
+                <span className="font-medium">{remoteReceiptLabel}</span>
                 {remoteReceiptStatus === "sent" && remoteReceiptEventId ? (
                   <span className="min-w-0 truncate opacity-75" title={remoteReceiptEventId}>
                     {remoteReceiptEventId}
                   </span>
                 ) : null}
-                {remoteStatusUnavailable ? <span className="opacity-70">Last known receipt retained</span> : null}
+                {remoteReceiptProjection.statusUnavailable ? <span className="opacity-70">Last known receipt retained</span> : null}
               </div>
             ) : null}
 

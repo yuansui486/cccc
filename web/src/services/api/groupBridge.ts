@@ -164,8 +164,14 @@ const groupBridgePath = (suffix: string, groupId: string) =>
 
 export const groupBridgeApi = {
   identity: (groupId: string) => apiJson<{ identity: GroupBridgeIdentity }>(groupBridgePath("identity", groupId)),
-  registrations: (groupId: string) => apiJson<{ registrations: GroupBridgeRegistration[] }>(groupBridgePath("registrations", groupId)),
-  trusts: (groupId: string) => apiJson<{ trusts: GroupBridgeTrust[] }>(groupBridgePath("trusts", groupId)),
+  registrations: (groupId: string, options?: { signal?: AbortSignal }) => apiJson<{ registrations: GroupBridgeRegistration[] }>(
+    groupBridgePath("registrations", groupId),
+    { signal: options?.signal },
+  ),
+  trusts: (groupId: string, options?: { signal?: AbortSignal }) => apiJson<{ trusts: GroupBridgeTrust[] }>(
+    groupBridgePath("trusts", groupId),
+    { signal: options?.signal },
+  ),
   pairingRequests: (groupId: string) => apiJson<{ requests: GroupBridgePairingRequest[] }>(groupBridgePath("pairing/requests", groupId)),
   invite: (args: {
     groupId: string;
@@ -204,10 +210,12 @@ export const groupBridgeApi = {
     registrationId: string,
     idempotencyKey: string,
     payload: GroupBridgeSessionMessage,
+    options?: { signal?: AbortSignal },
   ) => apiJson<{ queued: boolean; replayed: boolean; receipt: GroupBridgeRemoteReceipt }>(
     "/api/group-bridge/remote/send",
     {
       method: "POST",
+      signal: options?.signal,
       body: JSON.stringify({
         group_id: groupId,
         registration_id: registrationId,

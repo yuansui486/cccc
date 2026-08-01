@@ -137,6 +137,37 @@ describe("groupBridgeApi", () => {
     );
   });
 
+  it("forwards optional cancellation signals across remote orchestration requests", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, result: { registrations: [], trusts: [], receipt: null } }),
+    });
+    const controller = new AbortController();
+    const options = { signal: controller.signal };
+    const { groupBridgeApi } = await import("./groupBridge");
+
+    await groupBridgeApi.registrations("group-1", options);
+    await groupBridgeApi.trusts("group-1", options);
+    await groupBridgeApi.remoteSend(
+      "group-1",
+      "registration-1",
+      "gbs_0123456789abcdef0123456789abcdef",
+      { text: "hello" },
+      options,
+    );
+    await groupBridgeApi.remoteStatus(
+      "group-1",
+      "registration-1",
+      "gbs_0123456789abcdef0123456789abcdef",
+      options,
+    );
+
+    for (const call of fetchMock.mock.calls) {
+      expect(call[1]).toEqual(expect.objectContaining({ signal: controller.signal }));
+    }
+  });
+
   it("generates strict Web Crypto idempotency keys", async () => {
     vi.stubGlobal("crypto", { getRandomValues: (bytes: Uint8Array) => {
       bytes.fill(0xab);
