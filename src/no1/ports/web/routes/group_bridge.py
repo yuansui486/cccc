@@ -7,12 +7,13 @@ the daemon operation boundary.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ....contracts.v1.group_bridge import GroupBridgeSessionMessage
+from ..middleware import get_access_token_cookie
 from ..schemas import RouteContext, check_group, require_user
 
 
@@ -53,6 +54,36 @@ class GroupBridgeRemoteStatusRequest(BaseModel):
     idempotency_key: str = Field(pattern=r"gbs_[0-9a-f]{32}")
 
 
+class GroupBridgeManagementGroupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    group_id: str = Field(min_length=1, max_length=256)
+
+
+class GroupBridgePairingInviteRequest(GroupBridgeManagementGroupRequest):
+    expected_remote_group_id: str = Field(default="", max_length=256)
+    expected_remote_peer_id: str = Field(default="", max_length=256)
+    multiaddrs: list[str] = Field(default_factory=list, max_length=32)
+    ttl_seconds: int = Field(default=600, ge=60, le=3600)
+
+
+class GroupBridgePairingRequestAction(GroupBridgeManagementGroupRequest):
+    pass
+
+
+class GroupBridgePairingRejectRequest(GroupBridgePairingRequestAction):
+    reason: str = Field(default="", max_length=1024)
+
+
+class GroupBridgeTrustAccessRequest(GroupBridgeManagementGroupRequest):
+    access_level: Literal["messages", "read", "full"]
+    expected_revision: int = Field(ge=0)
+
+
+class GroupBridgeTrustRevokeRequest(GroupBridgeManagementGroupRequest):
+    expected_revision: int = Field(ge=0)
+
+
 def _daemon_error(resp: Dict[str, Any]) -> HTTPException:
     error = resp.get("error") if isinstance(resp, dict) else None
     error = error if isinstance(error, dict) else {}
@@ -68,6 +99,22 @@ def _unwrap_daemon(resp: Dict[str, Any]) -> Dict[str, Any]:
         raise _daemon_error(resp)
     result = resp.get("result")
     return result if isinstance(result, dict) else {}
+
+
+def _request_access_token(request: Request) -> str:
+    authorization = str(request.headers.get("authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        return str(authorization[7:] or "").strip()
+    cookie = get_access_token_cookie(request)
+    if cookie:
+        return cookie
+    return str(request.query_params.get("token") or "").strip()
+
+
+def _management_args(request: Request, values: Dict[str, Any]) -> Dict[str, Any]:
+    args = dict(values)
+    args["access_token"] = _request_access_token(request)
+    return args
 
 
 def create_routers(ctx: RouteContext) -> list[APIRouter]:
@@ -121,6 +168,150 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
         return {"ok": True, "result": _unwrap_daemon(response)}
 
+    @management_router.get("/identity")
+    async def group_bridge_management_identity(
+        request: Request,
+        group_id: str = Query(..., min_length=1, max_length=256),
+    ) -> Dict[str, Any]:
+        check_group(request, group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_identity",
+                "args": _management_args(request, {"group_id": group_id}),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.get("/registrations")
+    async def group_bridge_management_registrations(
+        request: Request,
+        group_id: str = Query(..., min_length=1, max_length=256),
+    ) -> Dict[str, Any]:
+        check_group(request, group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_registrations",
+                "args": _management_args(request, {"group_id": group_id}),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.get("/trusts")
+    async def group_bridge_management_trusts(
+        request: Request,
+        group_id: str = Query(..., min_length=1, max_length=256),
+    ) -> Dict[str, Any]:
+        check_group(request, group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_trusts",
+                "args": _management_args(request, {"group_id": group_id}),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.get("/pairing/requests")
+    async def group_bridge_management_pairing_requests(
+        request: Request,
+        group_id: str = Query(..., min_length=1, max_length=256),
+    ) -> Dict[str, Any]:
+        check_group(request, group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_requests",
+                "args": _management_args(request, {"group_id": group_id}),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/pairing/invites")
+    async def group_bridge_management_pairing_invite(
+        request: Request,
+        req: GroupBridgePairingInviteRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_invite",
+                "args": _management_args(request, req.model_dump()),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/pairing/requests/{request_id}/approve")
+    async def group_bridge_management_pairing_approve(
+        request: Request,
+        request_id: str,
+        req: GroupBridgePairingRequestAction,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_approve",
+                "args": _management_args(request, {"group_id": req.group_id, "request_id": request_id}),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/pairing/requests/{request_id}/reject")
+    async def group_bridge_management_pairing_reject(
+        request: Request,
+        request_id: str,
+        req: GroupBridgePairingRejectRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_reject",
+                "args": _management_args(
+                    request,
+                    {"group_id": req.group_id, "request_id": request_id, "reason": req.reason},
+                ),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/trusts/{trust_id}/access")
+    async def group_bridge_management_trust_access(
+        request: Request,
+        trust_id: str,
+        req: GroupBridgeTrustAccessRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_trust_access",
+                "args": _management_args(
+                    request,
+                    {
+                        "group_id": req.group_id,
+                        "trust_id": trust_id,
+                        "access_level": req.access_level,
+                        "expected_revision": req.expected_revision,
+                    },
+                ),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/trusts/{trust_id}/revoke")
+    async def group_bridge_management_trust_revoke(
+        request: Request,
+        trust_id: str,
+        req: GroupBridgeTrustRevokeRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_trust_revoke",
+                "args": _management_args(
+                    request,
+                    {"group_id": req.group_id, "trust_id": trust_id, "expected_revision": req.expected_revision},
+                ),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
     @public_router.post("/session/receive")
     async def group_bridge_session_receive(
         req: GroupBridgeSessionReceiveRequest,
@@ -143,5 +334,11 @@ __all__ = [
     "GroupBridgeSessionSendRequest",
     "GroupBridgeRemoteSendRequest",
     "GroupBridgeRemoteStatusRequest",
+    "GroupBridgeManagementGroupRequest",
+    "GroupBridgePairingInviteRequest",
+    "GroupBridgePairingRequestAction",
+    "GroupBridgePairingRejectRequest",
+    "GroupBridgeTrustAccessRequest",
+    "GroupBridgeTrustRevokeRequest",
     "create_routers",
 ]

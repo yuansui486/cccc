@@ -7,6 +7,20 @@ from typing import Any, Callable, Dict, Optional
 
 from ...contracts.v1 import DaemonError, DaemonResponse
 from ...contracts.v1.group_bridge import GroupBridgeSignedMessageEnvelope
+from ...kernel.access_tokens import AccessTokenClaimError, issue_access_token_principal_claim
+from ...kernel.group_bridge.pairing import (
+    ACCESS_LEVELS,
+    approve_pairing_request,
+    create_pairing_invite,
+    get_local_identity,
+    list_pairing_requests,
+    list_trusts,
+    reject_pairing_request,
+    revoke_trust,
+    update_trust_access_level,
+)
+from ...kernel.group_bridge.registration import list_registrations
+from .identity import get_group_bridge_identity
 from ..messaging.chat_ops import (
     _GROUP_BRIDGE_DELIVERY_CLAIM_ARG,
     _issue_group_bridge_delivery_claim,
@@ -37,6 +51,37 @@ _REMOTE_SEND_OP = "remote_send"
 _REMOTE_STATUS_OP = "remote_delivery_status"
 _REMOTE_SEND_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key", "payload"})
 _REMOTE_STATUS_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key"})
+_MGMT_IDENTITY_OP = "group_bridge_management_identity"
+_MGMT_REGISTRATIONS_OP = "group_bridge_management_registrations"
+_MGMT_TRUSTS_OP = "group_bridge_management_trusts"
+_MGMT_REQUESTS_OP = "group_bridge_management_pairing_requests"
+_MGMT_INVITE_OP = "group_bridge_management_pairing_invite"
+_MGMT_APPROVE_OP = "group_bridge_management_pairing_approve"
+_MGMT_REJECT_OP = "group_bridge_management_pairing_reject"
+_MGMT_ACCESS_OP = "group_bridge_management_trust_access"
+_MGMT_REVOKE_OP = "group_bridge_management_trust_revoke"
+_MGMT_ALIASES = {
+    "group_bridge_identity": _MGMT_IDENTITY_OP,
+    "group_bridge_registrations": _MGMT_REGISTRATIONS_OP,
+    "group_bridge_trusts": _MGMT_TRUSTS_OP,
+    "group_bridge_pairing_requests": _MGMT_REQUESTS_OP,
+    "group_bridge_pairing_invite_create": _MGMT_INVITE_OP,
+    "group_bridge_pairing_request_approve": _MGMT_APPROVE_OP,
+    "group_bridge_pairing_request_reject": _MGMT_REJECT_OP,
+    "group_bridge_trust_access_update": _MGMT_ACCESS_OP,
+    "group_bridge_trust_revoke": _MGMT_REVOKE_OP,
+}
+_MGMT_IDENTITY_FIELDS = frozenset({"group_id", "access_token"})
+_MGMT_REGISTRATIONS_FIELDS = frozenset({"group_id", "access_token"})
+_MGMT_TRUSTS_FIELDS = frozenset({"group_id", "access_token"})
+_MGMT_REQUESTS_FIELDS = frozenset({"group_id", "access_token"})
+_MGMT_INVITE_FIELDS = frozenset(
+    {"group_id", "expected_remote_group_id", "expected_remote_peer_id", "multiaddrs", "ttl_seconds", "access_token"}
+)
+_MGMT_APPROVE_FIELDS = frozenset({"group_id", "request_id", "access_token"})
+_MGMT_REJECT_FIELDS = frozenset({"group_id", "request_id", "reason", "access_token"})
+_MGMT_ACCESS_FIELDS = frozenset({"group_id", "trust_id", "access_level", "expected_revision", "access_token"})
+_MGMT_REVOKE_FIELDS = frozenset({"group_id", "trust_id", "expected_revision", "access_token"})
 
 
 def _error(code: str, message: str, *, retriable: bool = False) -> DaemonResponse:
@@ -184,6 +229,143 @@ def _remote_error(error: RemoteDispatchError) -> DaemonResponse:
     return _error(error.code, str(error), retriable=error.retriable)
 
 
+def _management_error(code: str, message: str = "Group Bridge management request failed") -> DaemonResponse:
+    return _error(code, message)
+
+
+def _management_claim(args: Dict[str, Any], group_id: str):
+    token = args.get("access_token")
+    if type(token) is not str or not token:
+        raise AccessTokenClaimError("authenticated user is required")
+    if type(group_id) is not str or not group_id or group_id != group_id.strip():
+        raise ValueError("group_id is invalid")
+    return issue_access_token_principal_claim(token, group_id=group_id)
+
+
+def _public_registration(record: Dict[str, Any]) -> Dict[str, Any]:
+    fields = (
+        "registration_id",
+        "registration_fingerprint",
+        "group_id",
+        "url",
+        "transport",
+        "remote_group_id",
+        "remote_peer_id",
+        "multiaddrs",
+        "status",
+        "created_at",
+        "updated_at",
+        "last_sync_at",
+    )
+    return {field: copy.deepcopy(record[field]) for field in fields if field in record}
+
+
+def _management_read_principal(args: Dict[str, Any], group_id: str) -> None:
+    _management_claim(args, group_id)
+
+
+def _handle_management(args: Dict[str, Any], *, op: str) -> DaemonResponse:
+    field_sets = {
+        _MGMT_IDENTITY_OP: _MGMT_IDENTITY_FIELDS,
+        _MGMT_REGISTRATIONS_OP: _MGMT_REGISTRATIONS_FIELDS,
+        _MGMT_TRUSTS_OP: _MGMT_TRUSTS_FIELDS,
+        _MGMT_REQUESTS_OP: _MGMT_REQUESTS_FIELDS,
+        _MGMT_INVITE_OP: _MGMT_INVITE_FIELDS,
+        _MGMT_APPROVE_OP: _MGMT_APPROVE_FIELDS,
+        _MGMT_REJECT_OP: _MGMT_REJECT_FIELDS,
+        _MGMT_ACCESS_OP: _MGMT_ACCESS_FIELDS,
+        _MGMT_REVOKE_OP: _MGMT_REVOKE_FIELDS,
+    }
+    invalid = _closed_args(args, field_sets[op])
+    if invalid is not None:
+        return invalid
+    group_id = args.get("group_id")
+    if type(group_id) is not str or not group_id or group_id != group_id.strip():
+        return _management_error("invalid_request", "Group Bridge management group is invalid")
+    try:
+        if op == _MGMT_IDENTITY_OP:
+            _management_read_principal(args, group_id)
+            identity = get_group_bridge_identity().public_dict()
+            identity.update(get_local_identity())
+            return DaemonResponse(ok=True, result={"identity": identity})
+        if op == _MGMT_REGISTRATIONS_OP:
+            _management_read_principal(args, group_id)
+            registrations = [
+                _public_registration(item)
+                for item in list_registrations()
+                if item.get("group_id") == group_id and item.get("status") == "active"
+            ]
+            return DaemonResponse(ok=True, result={"registrations": registrations})
+        if op == _MGMT_TRUSTS_OP:
+            _management_read_principal(args, group_id)
+            trusts = [trust for trust in list_trusts(group_id=group_id) if trust.get("status") == "active"]
+            return DaemonResponse(ok=True, result={"trusts": trusts})
+        if op == _MGMT_REQUESTS_OP:
+            _management_read_principal(args, group_id)
+            return DaemonResponse(ok=True, result={"requests": list_pairing_requests(group_id=group_id)})
+        claim = _management_claim(args, group_id)
+        if op == _MGMT_INVITE_OP:
+            if type(args["expected_remote_group_id"]) is not str or type(args["expected_remote_peer_id"]) is not str:
+                raise ValueError("pairing invite identities are invalid")
+            if type(args["multiaddrs"]) is not list or not all(type(item) is str for item in args["multiaddrs"]):
+                raise ValueError("pairing invite addresses are invalid")
+            if type(args["ttl_seconds"]) is not int or isinstance(args["ttl_seconds"], bool):
+                raise ValueError("pairing invite ttl is invalid")
+            invite = create_pairing_invite(
+                group_id=group_id,
+                remote_group_id=args["expected_remote_group_id"],
+                remote_peer_id=args["expected_remote_peer_id"],
+                multiaddrs=args["multiaddrs"],
+                ttl_seconds=args["ttl_seconds"],
+            )
+            return DaemonResponse(ok=True, result={"invite": invite})
+        if op == _MGMT_APPROVE_OP:
+            if type(args["request_id"]) is not str or not args["request_id"]:
+                raise ValueError("request_id is invalid")
+            result = approve_pairing_request(args["request_id"], claim=claim)
+            return DaemonResponse(ok=True, result={"request": result.get("request"), "trust": result.get("trust")})
+        if op == _MGMT_REJECT_OP:
+            if type(args["request_id"]) is not str or not args["request_id"] or type(args["reason"]) is not str:
+                raise ValueError("pairing request action is invalid")
+            result = reject_pairing_request(args["request_id"], claim=claim, reason=args["reason"])
+            return DaemonResponse(ok=True, result={"request": result})
+        if op == _MGMT_ACCESS_OP:
+            if type(args["access_level"]) is not str or args["access_level"] not in ACCESS_LEVELS:
+                raise ValueError("access_level must be one of: messages, read, full")
+            if type(args["trust_id"]) is not str or not args["trust_id"]:
+                raise ValueError("trust_id is invalid")
+            if type(args["expected_revision"]) is not int or isinstance(args["expected_revision"], bool):
+                raise ValueError("expected_revision is invalid")
+            result = update_trust_access_level(
+                args["trust_id"],
+                args["access_level"],
+                expected_revision=args["expected_revision"],
+                claim=claim,
+            )
+            return DaemonResponse(ok=True, result={"trust": result})
+        if type(args["trust_id"]) is not str or not args["trust_id"]:
+            raise ValueError("trust_id is invalid")
+        if type(args["expected_revision"]) is not int or isinstance(args["expected_revision"], bool):
+            raise ValueError("expected_revision is invalid")
+        result = revoke_trust(
+            args["trust_id"],
+            expected_revision=args["expected_revision"],
+            claim=claim,
+        )
+        return DaemonResponse(ok=True, result={"trust": result})
+    except AccessTokenClaimError:
+        return _management_error("permission_denied", "authenticated user is required")
+    except PermissionError:
+        return _management_error("permission_denied", "Group Bridge management permission denied")
+    except ValueError as exc:
+        message = str(exc)
+        if "access_level" in message:
+            return _management_error("invalid_access_level", "access level is invalid")
+        return _management_error("invalid_request", "Group Bridge management request is invalid")
+    except Exception:
+        return _management_error("management_failed")
+
+
 def _handle_remote_send(args: Dict[str, Any]) -> DaemonResponse:
     invalid = _closed_args(args, _REMOTE_SEND_FIELDS)
     if invalid is not None:
@@ -233,6 +415,19 @@ def try_handle_group_bridge_op(
         return _handle_remote_send(args)
     if op == _REMOTE_STATUS_OP:
         return _handle_remote_status(args)
+    canonical_management_op = _MGMT_ALIASES.get(op, op)
+    if canonical_management_op in {
+        _MGMT_IDENTITY_OP,
+        _MGMT_REGISTRATIONS_OP,
+        _MGMT_TRUSTS_OP,
+        _MGMT_REQUESTS_OP,
+        _MGMT_INVITE_OP,
+        _MGMT_APPROVE_OP,
+        _MGMT_REJECT_OP,
+        _MGMT_ACCESS_OP,
+        _MGMT_REVOKE_OP,
+    }:
+        return _handle_management(args, op=canonical_management_op)
     return None
 
 
