@@ -166,24 +166,26 @@ class TestMcpToolspecSchemaGuard(unittest.TestCase):
         self.assertEqual((props.get("include_external") or {}).get("default"), False)
 
     def test_web_model_local_power_tools_are_not_generic_core_tools(self) -> None:
-        from no1.kernel.capabilities import CORE_BASIC_TOOLS, WEB_MODEL_CORE_TOOLS, resolve_core_tool_names
+        from no1.kernel.capabilities import (
+            CORE_BASIC_TOOLS,
+            WEB_MODEL_CORE_TOOLS,
+            WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS,
+            resolve_core_tool_names,
+        )
 
         web_model_only_tools = {
             "onecolleague_runtime_wait_next_turn",
             "onecolleague_runtime_complete_turn",
-            "onecolleague_code_exec",
-            "onecolleague_code_wait",
             "onecolleague_repo_edit",
             "onecolleague_apply_patch",
-            "onecolleague_shell",
-            "onecolleague_exec_command",
-            "onecolleague_write_stdin",
-            "onecolleague_git",
         }
+        denied_local_execution_tools = set(WEB_MODEL_DENIED_LOCAL_EXECUTION_TOOLS)
         self.assertFalse(web_model_only_tools & set(CORE_BASIC_TOOLS))
         self.assertTrue(web_model_only_tools <= set(WEB_MODEL_CORE_TOOLS))
         self.assertFalse(web_model_only_tools & resolve_core_tool_names(actor_role="peer"))
         self.assertTrue(web_model_only_tools <= resolve_core_tool_names(actor_role="peer", is_web_model=True))
+        self.assertTrue(denied_local_execution_tools.isdisjoint(set(WEB_MODEL_CORE_TOOLS)))
+        self.assertTrue(denied_local_execution_tools.isdisjoint(resolve_core_tool_names(actor_role="peer", is_web_model=True)))
 
     def test_web_model_turn_tools_describe_transport_boundary(self) -> None:
         wait = next((item for item in MCP_TOOLS if str(item.get("name") or "") == "onecolleague_runtime_wait_next_turn"), None)
