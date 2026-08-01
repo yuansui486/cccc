@@ -7,6 +7,9 @@ import hashlib
 import hmac
 import json
 import math
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -16,6 +19,7 @@ from ...contracts.v1.group_bridge import RemoteSendError, RemoteSendQueuedReques
 from ...paths import ensure_home
 from ...util.file_lock import acquire_lockfile, release_lockfile
 from ...util.fs import atomic_write_text
+from ...util.time import parse_utc_iso, utc_now_iso
 
 _KEY_SEP = "::"
 _IMMUTABLE_RECEIPT_FIELDS = frozenset({"registration_id", "idempotency_key", "request_fingerprint"})
@@ -37,6 +41,9 @@ _STATUS_TRANSITIONS = {
     "failed": frozenset({"failed"}),
 }
 _QUEUED_REQUEST_FIELD = "_queued_request"
+_CLAIM_TOKEN_FIELD = "_claim_token"
+_PRIVATE_FIELDS = frozenset({_QUEUED_REQUEST_FIELD, _CLAIM_TOKEN_FIELD})
+_CLAIM_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -125,7 +132,7 @@ def get_receipt(registration_id: str, idempotency_key: str, home: Optional[Path]
 
 
 def _public_receipt(entry: Dict[str, Any]) -> Dict[str, Any]:
-    return {key: copy.deepcopy(value) for key, value in entry.items() if key != _QUEUED_REQUEST_FIELD}
+    return {key: copy.deepcopy(value) for key, value in entry.items() if key not in _PRIVATE_FIELDS}
 
 
 def get_receipt_strict(
@@ -226,6 +233,9 @@ def _validate_stored_receipts(receipts: Dict[str, Dict[str, Any]]) -> None:
         for key, entry in receipts.items():
             if not isinstance(entry, dict):
                 raise ReceiptStoreError("Group Bridge receipt store is malformed")
+            private_keys = set(entry) - set(_public_receipt(entry))
+            if not private_keys.issubset(_PRIVATE_FIELDS):
+                raise ReceiptStoreError("Group Bridge receipt store is malformed")
             public_entry = _public_receipt(entry)
             normalized = RemoteSendReceipt.model_validate(public_entry).model_dump()
             if _canonical_json_bytes(normalized) != _canonical_json_bytes(public_entry) or _compose_key(
@@ -238,6 +248,10 @@ def _validate_stored_receipts(receipts: Dict[str, Dict[str, Any]]) -> None:
                     raise ReceiptStoreError("Group Bridge receipt store is malformed")
             elif normalized["status"] == "queued" and normalized["transport"] == "group_bridge_session":
                 raise ReceiptStoreError("Group Bridge receipt store is malformed")
+            if _CLAIM_TOKEN_FIELD in entry:
+                claim_token = entry[_CLAIM_TOKEN_FIELD]
+                if not isinstance(claim_token, str) or _CLAIM_TOKEN_PATTERN.fullmatch(claim_token) is None:
+                    raise ReceiptStoreError("Group Bridge receipt store is malformed")
             fingerprint = normalized["request_fingerprint"]
             if len(fingerprint) != 64 or any(char not in "0123456789abcdef" for char in fingerprint):
                 raise ReceiptStoreError("Group Bridge receipt store is malformed")
@@ -325,6 +339,9 @@ def update_receipt(
     registration_id: str,
     idempotency_key: str,
     home: Optional[Path] = None,
+    *,
+    expected_attempt: Optional[int] = None,
+    claim_token: Optional[str] = None,
     **fields: Any,
 ) -> Optional[Dict[str, Any]]:
     rid = str(registration_id or "").strip()
@@ -336,6 +353,14 @@ def update_receipt(
         existing = receipts.get(key)
         if not isinstance(existing, dict):
             return None
+        if expected_attempt is not None:
+            if (
+                isinstance(expected_attempt, bool)
+                or int(existing.get("attempt") or 0) != expected_attempt
+                or not isinstance(claim_token, str)
+                or not secrets.compare_digest(str(existing.get(_CLAIM_TOKEN_FIELD) or ""), claim_token)
+            ):
+                return None
         unknown = set(fields) - set(RemoteSendReceipt.model_fields)
         immutable = set(fields) & _IMMUTABLE_RECEIPT_FIELDS
         if unknown or immutable:
@@ -347,14 +372,99 @@ def update_receipt(
             raise ValueError("receipt status transition is not allowed")
         if patch.get("error") is not None:
             patch["error"] = safe_error_projection(patch["error"] if isinstance(patch["error"], dict) else {})
-        candidate = {_key: copy.deepcopy(value) for _key, value in existing.items() if _key != _QUEUED_REQUEST_FIELD}
+        candidate = {_key: copy.deepcopy(value) for _key, value in existing.items() if _key not in _PRIVATE_FIELDS}
         candidate.update(patch)
         normalized = RemoteSendReceipt.model_validate(candidate).model_dump()
+        for private_field in _PRIVATE_FIELDS:
+            if private_field in existing:
+                normalized[private_field] = copy.deepcopy(existing[private_field])
+        receipts[key] = normalized
+        _validate_stored_receipts(receipts)
+        _save_unlocked(receipts, home)
+        return _public_receipt(normalized)
+    finally:
+        release_lockfile(lock)
+
+
+def claim_receipt_attempt(
+    registration_id: str,
+    idempotency_key: str,
+    home: Optional[Path] = None,
+    *,
+    now: Optional[datetime] = None,
+    stale_after_seconds: int = 120,
+) -> Optional[Dict[str, Any]]:
+    """Atomically claim one due receipt attempt for the daemon outbox owner."""
+    rid = str(registration_id or "").strip()
+    ik = str(idempotency_key or "").strip()
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now_iso = current_time.isoformat().replace("+00:00", "Z")
+    lock = acquire_lockfile(_lock_path(home), blocking=True)
+    try:
+        receipts = _load_unlocked(home, for_write=True)
+        key = _compose_key(rid, ik)
+        existing = receipts.get(key)
+        if not isinstance(existing, dict):
+            return None
+        status = str(existing.get("status") or "")
+        if status in {"sent", "failed"}:
+            return None
+        if status == "sending":
+            last = parse_utc_iso(str(existing.get("last_attempt_at") or ""))
+            if last is not None and current_time - last < timedelta(seconds=max(0, int(stale_after_seconds))):
+                return None
+        elif status == "retrying":
+            next_attempt = parse_utc_iso(str(existing.get("next_attempt_at") or ""))
+            if next_attempt is not None and next_attempt > current_time:
+                return None
+        elif status != "queued":
+            return None
+        attempt = int(existing.get("attempt") or 0)
+        max_attempts = max(1, int(existing.get("max_attempts") or 1))
+        if attempt >= max_attempts:
+            if status == "sending":
+                candidate = {
+                    field: copy.deepcopy(value) for field, value in existing.items() if field not in _PRIVATE_FIELDS
+                }
+                candidate.update(
+                    status="failed",
+                    next_attempt_at="",
+                    error={
+                        "code": "remote_delivery_failed",
+                        "message": "Remote delivery failed.",
+                        "retriable": False,
+                        "transport": "group_bridge_session",
+                    },
+                )
+                normalized = RemoteSendReceipt.model_validate(candidate).model_dump()
+                for private_field in _PRIVATE_FIELDS:
+                    if private_field in existing:
+                        normalized[private_field] = copy.deepcopy(existing[private_field])
+                receipts[key] = normalized
+                _validate_stored_receipts(receipts)
+                _save_unlocked(receipts, home)
+                return _public_receipt(normalized)
+            return None
+        candidate = {
+            field: copy.deepcopy(value) for field, value in existing.items() if field not in _PRIVATE_FIELDS
+        }
+        candidate.update(
+            status="sending",
+            attempt=attempt + 1,
+            last_attempt_at=now_iso,
+            next_attempt_at="",
+            error=None,
+        )
+        claim_token = secrets.token_urlsafe(32)
+        normalized = RemoteSendReceipt.model_validate(candidate).model_dump()
+        normalized[_CLAIM_TOKEN_FIELD] = claim_token
         if _QUEUED_REQUEST_FIELD in existing:
             normalized[_QUEUED_REQUEST_FIELD] = copy.deepcopy(existing[_QUEUED_REQUEST_FIELD])
         receipts[key] = normalized
         _validate_stored_receipts(receipts)
         _save_unlocked(receipts, home)
-        return _public_receipt(normalized)
+        claimed = _public_receipt(normalized)
+        claimed[_CLAIM_TOKEN_FIELD] = claim_token
+        return claimed
     finally:
         release_lockfile(lock)

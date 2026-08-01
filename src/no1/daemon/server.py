@@ -48,6 +48,7 @@ from .pty_app_server_exit import stop_codex_app_server_for_pty_actor_if_needed
 from .im.bootstrap_im_ops import autostart_enabled_im_bridges
 from .group.bootstrap_actor_ops import autostart_running_groups
 from .assistants.voice_idle_review_scheduler import recover_pending_voice_idle_reviews
+from .group_bridge.remote_outbox_worker import RemoteOutboxWorker
 from .mcp_install import (
     is_mcp_installed as runtime_is_mcp_installed,
     ensure_mcp_installed as runtime_ensure_mcp_installed,
@@ -985,6 +986,7 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
         pass
 
     stop_event = threading.Event()
+    remote_outbox_worker: Optional[RemoteOutboxWorker] = None
 
     try:
         pty_runner.SUPERVISOR.set_exit_hook(
@@ -1130,6 +1132,11 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             now_iso=utc_now_iso(),
         )
 
+        # Remote delivery is daemon-owned. Web lifespan and request handlers
+        # only enqueue receipts; this worker owns network attempts and retries.
+        remote_outbox_worker = RemoteOutboxWorker(home=p.home)
+        remote_outbox_worker.start()
+
         # Bootstrap background work only after the daemon socket is ready, but
         # don't block the accept loop (clients should see the daemon as responsive).
         recover_pending_voice_idle_reviews()
@@ -1228,6 +1235,9 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             if should_exit:
                 stop_event.set()
 
+    if remote_outbox_worker is not None and not remote_outbox_worker.stop(timeout=2.0):
+        logger.error("Group Bridge remote outbox worker is still active; retaining daemon ownership")
+        return 1
     try:
         if computer_control_service is not None:
             computer_control_service.stop_daemon()
