@@ -9,4 +9,5 @@ export * from "./im";
 export * from "./webAccess";
 export * from "./webModel";
 export * from "./groupSpace";
+export * from "./groupBridge";
 export * from "./diagnostics";

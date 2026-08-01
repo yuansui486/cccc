@@ -22,6 +22,7 @@ const GuidanceTab = lazy(() => import("./modals/settings/GuidanceTab").then((mod
 const CapabilitiesTab = lazy(() => import("./modals/settings/CapabilitiesTab").then((module) => ({ default: module.CapabilitiesTab })));
 const ActorProfilesTab = lazy(() => import("./modals/settings/ActorProfilesTab").then((module) => ({ default: module.ActorProfilesTab })));
 const DeveloperTab = lazy(() => import("./modals/settings/DeveloperTab").then((module) => ({ default: module.DeveloperTab })));
+const GroupBridgeTab = lazy(() => import("./modals/settings/GroupBridgeTab").then((module) => ({ default: module.GroupBridgeTab })));
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -65,7 +66,7 @@ export function SettingsModal({
   const { t } = useTranslation("settings");
   const { modalRef } = useModalA11y(isOpen, onClose);
   const [scope, setScope] = useState<SettingsScope>("global");
-  const [groupTab, setGroupTab] = useState<GroupTabId>("blueprint");
+  const [groupTab, setGroupTab] = useState<GroupTabId>("groupBridge");
   const [globalTab, setGlobalTab] = useState<GlobalTabId>(groupId ? "blueprint" : "capabilities");
   const [hiddenMenuUnlocked, setHiddenMenuUnlocked] = useState(false);
   const [canAccessGlobalSettings, setCanAccessGlobalSettings] = useState<boolean | null>(null);
@@ -77,13 +78,19 @@ export function SettingsModal({
     if (!isOpen || !initialTarget) return;
     if (initialTarget.scope === "global") {
       setScope("global");
-      if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
+      if (initialTarget.tab === "groupBridge" && groupId) {
+        setScope("group");
+        setGroupTab("groupBridge");
+      } else if (initialTarget.tab === "blueprint" || initialTarget.tab === "guidance" || initialTarget.tab === "capabilities" || initialTarget.tab === "selfEvolvingSkills" || initialTarget.tab === "actorProfiles" || initialTarget.tab === "myProfiles" || initialTarget.tab === "branding" || initialTarget.tab === "webAccess" || initialTarget.tab === "webModels" || initialTarget.tab === "developer") {
         setGlobalTab(initialTarget.tab);
       }
       return;
     }
     if (initialTarget.scope === "group") {
-      if (initialTarget.tab === "blueprint") {
+      if (initialTarget.tab === "groupBridge") {
+        setScope("group");
+        setGroupTab("groupBridge");
+      } else if (initialTarget.tab === "blueprint") {
         setScope("global");
         setGlobalTab("blueprint");
       }
@@ -524,6 +531,7 @@ export function SettingsModal({
 
   const globalTabs = useMemo<{ id: GlobalTabId; label: string }[]>(() => [
     ...(groupId ? [{ id: "blueprint" as const, label: t("tabs.currentTeam", { defaultValue: "当前团队" }) }] : []),
+    ...(groupId ? [{ id: "groupBridge" as const, label: t("tabs.groupBridge") }] : []),
     ...(globalSettingsEnabled ? [
       { id: "capabilities" as const, label: t("tabs.capabilities") },
       { id: "selfEvolvingSkills" as const, label: t("tabs.selfEvolvingSkills") },
@@ -548,12 +556,9 @@ export function SettingsModal({
     }
   }, [globalTab, globalTabs, hiddenTabs, scope]);
 
-  const groupTabs: { id: GroupTabId; label: string }[] = [];
-
-  useEffect(() => {
-    if (scope !== "group") return;
-    setScope("global");
-  }, [groupTab, groupTabs, scope]);
+  const groupTabs: { id: GroupTabId; label: string }[] = useMemo(() => [
+    { id: "groupBridge", label: t("tabs.groupBridge") },
+  ], [t]);
 
   const tabs = scope === "group" ? groupTabs : (globalScopeEnabled ? globalTabs : []);
   const visibleHiddenTabs = scope === "group" ? [] : (globalScopeEnabled ? hiddenTabs : []);
@@ -594,6 +599,11 @@ export function SettingsModal({
       } else {
         developerClickWindowRef.current = { count: 0, firstClickAt: 0 };
       }
+    }
+    if (scope === "global" && tab === "groupBridge" && groupId) {
+      setScope("group");
+      setGroupTab("groupBridge");
+      return;
     }
     if (scope === "group") setGroupTab(tab as GroupTabId);
     else setGlobalTab(tab as GlobalTabId);
@@ -686,6 +696,8 @@ export function SettingsModal({
             ) : !availableTabs.some((tab) => tab.id === activeTab) ? null : (
               <Suspense fallback={<SettingsTabFallback isDark={isDark} />}>
               {activeTab === "blueprint" && <BlueprintTab isDark={isDark} groupId={groupId} groupTitle={groupDoc?.title || ""} />}
+
+              {activeTab === "groupBridge" && <GroupBridgeTab isDark={isDark} groupId={groupId} />}
 
               {activeTab === "guidance" && <GuidanceTab isDark={isDark} groupId={groupId} />}
 

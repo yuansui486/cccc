@@ -12,6 +12,7 @@ const groupTabIds = new Set<GroupTabId>([
   "im",
   "transcript",
   "copyGroups",
+  "groupBridge",
 ]);
 
 const globalTabIds = new Set<GlobalTabId>([
