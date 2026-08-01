@@ -1677,43 +1677,45 @@ class TestComputerControl(unittest.TestCase):
 
     def test_request_store_rejects_public_authority_writes_without_disk_changes(self):
         with tempfile.TemporaryDirectory() as td:
-            group = create_group(load_registry(), title="reserved-request-authority", topic="")
-            requests = ComputerRequestStore(WorkflowStore(Path(td)))
-            path = requests._path(group.group_id)
-            for field in sorted(ComputerRequestStore.RESERVED_AUTHORITY_FIELDS):
-                with self.subTest(operation="append", field=field):
-                    before = path.read_bytes() if path.exists() else None
-                    with self.assertRaisesRegex(PermissionError, "authority fields are reserved"):
-                        requests.append(
-                            group.group_id,
-                            {
-                                "request_id": "req-forged",
-                                "actor_id": "peer",
-                                field: {"authority_id": "forged"},
-                            },
-                        )
-                    after = path.read_bytes() if path.exists() else None
-                    self.assertEqual(after, before)
+            home = str(Path(td) / "onecolleague-home")
+            with patch.dict(os.environ, {"ONECOLLEAGUE_HOME": home}, clear=False):
+                group = create_group(load_registry(), title="reserved-request-authority", topic="")
+                requests = ComputerRequestStore(WorkflowStore(Path(td)))
+                path = requests._path(group.group_id)
+                for field in sorted(ComputerRequestStore.RESERVED_AUTHORITY_FIELDS):
+                    with self.subTest(operation="append", field=field):
+                        before = path.read_bytes() if path.exists() else None
+                        with self.assertRaisesRegex(PermissionError, "authority fields are reserved"):
+                            requests.append(
+                                group.group_id,
+                                {
+                                    "request_id": "req-forged",
+                                    "actor_id": "peer",
+                                    field: {"authority_id": "forged"},
+                                },
+                            )
+                        after = path.read_bytes() if path.exists() else None
+                        self.assertEqual(after, before)
 
-            requests.append(
-                group.group_id,
-                {
-                    "request_id": "req-existing",
-                    "actor_id": "peer",
-                    "status": "accepted",
-                    "created_ts": time.time(),
-                },
-            )
-            for field in sorted(ComputerRequestStore.RESERVED_AUTHORITY_FIELDS):
-                with self.subTest(operation="update", field=field):
-                    before = path.read_bytes()
-                    with self.assertRaisesRegex(PermissionError, "authority fields are reserved"):
-                        requests.update(
-                            group.group_id,
-                            "req-existing",
-                            **{field: {"authority_id": "forged"}},
-                        )
-                    self.assertEqual(path.read_bytes(), before)
+                requests.append(
+                    group.group_id,
+                    {
+                        "request_id": "req-existing",
+                        "actor_id": "peer",
+                        "status": "accepted",
+                        "created_ts": time.time(),
+                    },
+                )
+                for field in sorted(ComputerRequestStore.RESERVED_AUTHORITY_FIELDS):
+                    with self.subTest(operation="update", field=field):
+                        before = path.read_bytes()
+                        with self.assertRaisesRegex(PermissionError, "authority fields are reserved"):
+                            requests.update(
+                                group.group_id,
+                                "req-existing",
+                                **{field: {"authority_id": "forged"}},
+                            )
+                        self.assertEqual(path.read_bytes(), before)
 
     def test_web_computer_control_rejects_viewer_and_remote_clients(self):
         local_request = Mock(client=Mock(host="127.0.0.1"))
@@ -1728,30 +1730,32 @@ class TestComputerControl(unittest.TestCase):
 
     def test_active_recording_authorization_does_not_expire(self):
         with tempfile.TemporaryDirectory() as td:
-            store = WorkflowStore(Path(td))
-            group = create_group(load_registry(), title="long recording auth")
-            requests = ComputerRequestStore(store)
-            requests.append(group.group_id, {
-                "request_id": "req-long",
-                "actor_id": "foreman",
-                "status": "accepted",
-                "created_ts": time.time() - 7200,
-            })
-            requests.mark_recording_started(
-                group.group_id,
-                "req-long",
-                recording_id="rec_long",
-            )
-            authorized = requests.require_authorized(group.group_id, "req-long", "foreman")
-            self.assertEqual(authorized["recording_id"], "rec_long")
-            for key in (
-                "allow_high_risk",
-                "allow_publish",
-                "allow_trust",
-                "allow_unattended_triggers",
-                "allow_workflow_edit",
-            ):
-                self.assertFalse(authorized[key], key)
+            home = str(Path(td) / "onecolleague-home")
+            with patch.dict(os.environ, {"ONECOLLEAGUE_HOME": home}, clear=False):
+                group = create_group(load_registry(), title="long recording auth")
+                store = WorkflowStore(Path(td))
+                requests = ComputerRequestStore(store)
+                requests.append(group.group_id, {
+                    "request_id": "req-long",
+                    "actor_id": "foreman",
+                    "status": "accepted",
+                    "created_ts": time.time() - 7200,
+                })
+                requests.mark_recording_started(
+                    group.group_id,
+                    "req-long",
+                    recording_id="rec_long",
+                )
+                authorized = requests.require_authorized(group.group_id, "req-long", "foreman")
+                self.assertEqual(authorized["recording_id"], "rec_long")
+                for key in (
+                    "allow_high_risk",
+                    "allow_publish",
+                    "allow_trust",
+                    "allow_unattended_triggers",
+                    "allow_workflow_edit",
+                ):
+                    self.assertFalse(authorized[key], key)
 
     def test_workflow_graph_and_secret_constraints(self):
         with self.assertRaises(ValueError):
