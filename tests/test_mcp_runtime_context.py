@@ -180,7 +180,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
 
         with patch(
             "no1.ports.mcp.common._runtime_context",
-            return_value=_RuntimeContext(home=str(fake_home), group_id="g1", actor_id="a1"),
+            return_value=_RuntimeContext(home=str(fake_home), group_id="g1", actor_id="a1", source="local_mcp"),
         ), patch(
             "no1.ports.mcp.common.call_daemon",
             side_effect=_fake_call_daemon,
@@ -205,7 +205,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
 
         with patch.dict(os.environ, {"ONECOLLEAGUE_GROUP_ID": "", "ONECOLLEAGUE_ACTOR_ID": ""}, clear=False), patch(
             "no1.ports.mcp.common._runtime_context",
-            return_value=_RuntimeContext(home="/tmp/onecolleague", group_id="g_runtime", actor_id="管理员"),
+            return_value=_RuntimeContext(home="/tmp/onecolleague", group_id="g_runtime", actor_id="管理员", source="local_mcp"),
         ), patch.object(
             mcp_common,
             "call_daemon",
@@ -237,7 +237,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
 
         with patch.dict(os.environ, {"ONECOLLEAGUE_GROUP_ID": "", "ONECOLLEAGUE_ACTOR_ID": ""}, clear=False), patch(
             "no1.ports.mcp.server._runtime_context",
-            return_value=_RuntimeContext(home="/tmp/onecolleague", group_id="g_help", actor_id="管理员"),
+            return_value=_RuntimeContext(home="/tmp/onecolleague", group_id="g_help", actor_id="管理员", source="local_mcp"),
         ), patch(
             "no1.ports.mcp.server.load_group",
             return_value=object(),
