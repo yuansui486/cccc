@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from tests.mcp_router_harness import route_tool_call
+
 
 class TestMcpActorCallerTargetResolution(unittest.TestCase):
     def test_actor_add_uses_env_actor_as_caller(self) -> None:
@@ -16,7 +18,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
-                out = mcp_server.handle_tool_call(
+                out = route_tool_call(
                     "onecolleague_actor",
                     {
                         "action": "add",
@@ -46,7 +48,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
-                out = mcp_server.handle_tool_call(
+                out = route_tool_call(
                     "onecolleague_actor",
                     {
                         "action": "start",
@@ -68,7 +70,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}, clear=False):
             with self.assertRaises(MCPError) as raised:
-                mcp_server.handle_tool_call(
+                route_tool_call(
                     "onecolleague_actor",
                     {
                         "action": "add",
@@ -92,7 +94,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
-                out = mcp_server.handle_tool_call(
+                out = route_tool_call(
                     "onecolleague_actor",
                     {
                         "action": "add",
@@ -126,7 +128,7 @@ class TestMcpActorCallerTargetResolution(unittest.TestCase):
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g_test", "CCCC_ACTOR_ID": "foreman"}, clear=False):
             with patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
-                out = mcp_server.handle_tool_call("onecolleague_actor", {"action": "profile_list"})
+                out = route_tool_call("onecolleague_actor", {"action": "profile_list"})
 
         self.assertIn("profiles", out)
         self.assertEqual([req.get("op") for req in captured], ["actor_profile_list", "actor_list"])

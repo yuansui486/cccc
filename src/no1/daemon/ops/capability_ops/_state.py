@@ -48,7 +48,7 @@ from ._runtime import (
     _record_runtime_recent_success,
     _append_audit_event,
 )
-from ._removed import _set_removed_capability
+from ._removed import _collect_removed_capabilities, _set_removed_capability
 from ._policy import (
     _policy_level_visible,
     _allowlist_policy,
@@ -190,11 +190,12 @@ def _set_enabled_capability(
     capability_id: str,
     enabled: bool,
     ttl_seconds: int,
+    clear_group_removal: bool = False,
 ) -> None:
     gid = str(group_id or "").strip()
     aid = str(actor_id or "").strip()
     cap_id = _canonical_capability_id(capability_id)
-    if enabled:
+    if enabled and clear_group_removal:
         _set_removed_capability(state_doc, group_id=gid, capability_id=cap_id, removed=False)
     if scope == "group":
         group_enabled = state_doc.setdefault("group_enabled", {})
@@ -634,30 +635,63 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
             # Audit write failures should not block capability state mutation path.
             pass
 
-    def _check_enable_quota(*, scope: str, group_id: str, actor_id: str, capability_id: str) -> str:
-        with _STATE_LOCK:
-            _, state_doc = _load_state_doc()
-            if scope in {"actor", "session"} and not capability_id.startswith("skill:"):
-                enabled_caps, _ = _collect_enabled_capabilities(
-                    state_doc,
+    def _check_enable_quota(
+        *,
+        scope: str,
+        group_id: str,
+        actor_id: str,
+        capability_id: str,
+        current_state_doc: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        if current_state_doc is None:
+            with _STATE_LOCK:
+                _, loaded_state_doc = _load_state_doc()
+                return _check_enable_quota(
+                    scope=scope,
                     group_id=group_id,
-                    actor_id=actor_id or "user",
+                    actor_id=actor_id,
+                    capability_id=capability_id,
+                    current_state_doc=loaded_state_doc,
                 )
-                quota_exempt = _quota_exempt_capabilities(actor_role=actor_role)
-                counted_caps = [cap_id for cap_id in enabled_caps if cap_id not in quota_exempt]
-                if capability_id not in set(counted_caps) and len(counted_caps) >= max_enabled_per_actor:
-                    return f"quota_enabled_actor_exceeded:{max_enabled_per_actor}"
 
-            if scope == "group":
-                group_enabled = (
-                    state_doc.get("group_enabled")
-                    if isinstance(state_doc.get("group_enabled"), dict)
-                    else {}
-                )
-                current = set(group_enabled.get(group_id) or [])
-                if capability_id not in current and len(current) >= max_enabled_per_group:
-                    return f"quota_enabled_group_exceeded:{max_enabled_per_group}"
+        if scope in {"actor", "session"} and not capability_id.startswith("skill:"):
+            enabled_caps, _ = _collect_enabled_capabilities(
+                current_state_doc,
+                group_id=group_id,
+                actor_id=actor_id or "user",
+            )
+            quota_exempt = _quota_exempt_capabilities(actor_role=actor_role)
+            counted_caps = [cap_id for cap_id in enabled_caps if cap_id not in quota_exempt]
+            if capability_id not in set(counted_caps) and len(counted_caps) >= max_enabled_per_actor:
+                return f"quota_enabled_actor_exceeded:{max_enabled_per_actor}"
+
+        if scope == "group":
+            group_enabled = (
+                current_state_doc.get("group_enabled")
+                if isinstance(current_state_doc.get("group_enabled"), dict)
+                else {}
+            )
+            current = set(group_enabled.get(group_id) or [])
+            if capability_id not in current and len(current) >= max_enabled_per_group:
+                return f"quota_enabled_group_exceeded:{max_enabled_per_group}"
         return ""
+
+    def _quota_blocked_response(quota_reason: str) -> DaemonResponse:
+        _audit("failed", state="failed", error_code=quota_reason)
+        return DaemonResponse(
+            ok=True,
+            result={
+                "action_id": action_id,
+                "group_id": group_id,
+                "actor_id": actor_id,
+                "capability_id": capability_id,
+                "scope": scope_for_audit,
+                "enabled": False,
+                "state": "blocked",
+                "refresh_required": False,
+                "reason": quota_reason,
+            },
+        )
 
     try:
         group = _ensure_group(group_id)
@@ -692,12 +726,33 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     details={"action_id": action_id},
                 )
 
+        can_restore_group_removal = by == "user" or _is_foreman(group, by)
         blocked_entry: Dict[str, str] = {}
         with _STATE_LOCK:
             state_path, state_doc = _load_state_doc()
             blocked_caps, blocked_mutated = _collect_blocked_capabilities(state_doc, group_id=group_id)
+            removed_caps = set(_collect_removed_capabilities(state_doc, group_id=group_id))
             if blocked_mutated:
                 _save_state_doc(state_path, state_doc)
+        if enabled and capability_id in removed_caps and not can_restore_group_removal:
+            reason_code = "removed_by_group_policy"
+            _audit("failed", state="failed", error_code=reason_code, details={"removed_scope": "group"})
+            return DaemonResponse(
+                ok=True,
+                result={
+                    "action_id": action_id,
+                    "group_id": group_id,
+                    "actor_id": actor_id,
+                    "capability_id": capability_id,
+                    "scope": scope,
+                    "enabled": False,
+                    "state": "blocked",
+                    "refresh_required": False,
+                    "reason": reason_code,
+                    "policy_level": "removed",
+                    "removed_scope": "group",
+                },
+            )
         maybe_block = blocked_caps.get(capability_id) if isinstance(blocked_caps.get(capability_id), dict) else None
         if isinstance(maybe_block, dict):
             blocked_entry = dict(maybe_block)
@@ -734,21 +789,7 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                 capability_id=capability_id,
             )
             if quota_reason:
-                _audit("failed", state="failed", error_code=quota_reason)
-                return DaemonResponse(
-                    ok=True,
-                    result={
-                        "action_id": action_id,
-                        "group_id": group_id,
-                        "actor_id": actor_id,
-                        "capability_id": capability_id,
-                        "scope": scope,
-                        "enabled": False,
-                        "state": "blocked",
-                        "refresh_required": False,
-                        "reason": quota_reason,
-                    },
-                )
+                return _quota_blocked_response(quota_reason)
 
         # Built-in packs are directly enable-able.
         if capability_id.startswith("pack:"):
@@ -784,18 +825,31 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                         "policy_level": policy_level,
                     },
                 )
+            final_quota_reason = ""
             with _STATE_LOCK:
                 state_path, state_doc = _load_state_doc()
-                _set_enabled_capability(
-                    state_doc,
-                    group_id=group_id,
-                    actor_id=actor_id,
-                    scope=scope,
-                    capability_id=capability_id,
-                    enabled=enabled,
-                    ttl_seconds=ttl_seconds,
-                )
-                _save_state_doc(state_path, state_doc)
+                if enabled:
+                    final_quota_reason = _check_enable_quota(
+                        scope=scope,
+                        group_id=group_id,
+                        actor_id=actor_id,
+                        capability_id=capability_id,
+                        current_state_doc=state_doc,
+                    )
+                if not final_quota_reason:
+                    _set_enabled_capability(
+                        state_doc,
+                        group_id=group_id,
+                        actor_id=actor_id,
+                        scope=scope,
+                        capability_id=capability_id,
+                        enabled=enabled,
+                        ttl_seconds=ttl_seconds,
+                        clear_group_removal=can_restore_group_removal,
+                    )
+                    _save_state_doc(state_path, state_doc)
+            if final_quota_reason:
+                return _quota_blocked_response(final_quota_reason)
             if enabled:
                 with _RUNTIME_LOCK:
                     runtime_path, runtime_doc = _load_runtime_doc()
@@ -1158,43 +1212,100 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                             ],
                         },
                     )
+            final_quota_reason = ""
             with _STATE_LOCK:
                 state_path, state_doc = _load_state_doc()
-                _set_enabled_capability(
-                    state_doc,
+                final_quota_reason = _check_enable_quota(
+                    scope=scope,
                     group_id=group_id,
                     actor_id=actor_id,
-                    scope=scope,
                     capability_id=capability_id,
-                    enabled=True,
-                    ttl_seconds=ttl_seconds,
+                    current_state_doc=state_doc,
                 )
-                for dep_cap_id in requires:
-                    if dep_cap_id not in BUILTIN_CAPABILITY_PACKS:
-                        skipped_dependencies.append(
-                            {"capability_id": dep_cap_id, "reason": "unsupported_skill_dependency"}
-                        )
-                        continue
-                    dep_quota_reason = _check_enable_quota(
-                        scope=scope,
-                        group_id=group_id,
-                        actor_id=actor_id,
-                        capability_id=dep_cap_id,
+                if not final_quota_reason:
+                    removed_dependencies = set(
+                        _collect_removed_capabilities(state_doc, group_id=group_id)
                     )
-                    if dep_quota_reason:
-                        skipped_dependencies.append({"capability_id": dep_cap_id, "reason": dep_quota_reason})
-                        continue
+                    blocked_dependencies, _ = _collect_blocked_capabilities(
+                        state_doc,
+                        group_id=group_id,
+                    )
                     _set_enabled_capability(
                         state_doc,
                         group_id=group_id,
                         actor_id=actor_id,
                         scope=scope,
-                        capability_id=dep_cap_id,
+                        capability_id=capability_id,
                         enabled=True,
                         ttl_seconds=ttl_seconds,
+                        clear_group_removal=can_restore_group_removal,
                     )
-                    applied_dependencies.append(dep_cap_id)
-                _save_state_doc(state_path, state_doc)
+                    for dep_cap_id in requires:
+                        if dep_cap_id not in BUILTIN_CAPABILITY_PACKS:
+                            skipped_dependencies.append(
+                                {"capability_id": dep_cap_id, "reason": "unsupported_skill_dependency"}
+                            )
+                            continue
+                        if dep_cap_id in removed_dependencies:
+                            skipped_dependencies.append(
+                                {"capability_id": dep_cap_id, "reason": "removed_by_group_policy"}
+                            )
+                            continue
+                        blocked_dependency = blocked_dependencies.get(dep_cap_id)
+                        if isinstance(blocked_dependency, dict):
+                            blocked_scope = str(blocked_dependency.get("scope") or "group")
+                            skipped_dependencies.append(
+                                {
+                                    "capability_id": dep_cap_id,
+                                    "reason": (
+                                        "blocked_by_global_policy"
+                                        if blocked_scope == "global"
+                                        else "blocked_by_group_policy"
+                                    ),
+                                }
+                            )
+                            continue
+                        dependency_policy_level = _pkg()._effective_policy_level(
+                            policy,
+                            capability_id=dep_cap_id,
+                            kind="mcp_toolpack",
+                            source_id=BUILTIN_SOURCE_ID,
+                            actor_role=actor_role,
+                        )
+                        if not _policy_level_visible(dependency_policy_level):
+                            skipped_dependencies.append(
+                                {
+                                    "capability_id": dep_cap_id,
+                                    "reason": "policy_level_indexed",
+                                    "policy_level": dependency_policy_level,
+                                }
+                            )
+                            continue
+                        dep_quota_reason = _check_enable_quota(
+                            scope=scope,
+                            group_id=group_id,
+                            actor_id=actor_id,
+                            capability_id=dep_cap_id,
+                            current_state_doc=state_doc,
+                        )
+                        if dep_quota_reason:
+                            skipped_dependencies.append(
+                                {"capability_id": dep_cap_id, "reason": dep_quota_reason}
+                            )
+                            continue
+                        _set_enabled_capability(
+                            state_doc,
+                            group_id=group_id,
+                            actor_id=actor_id,
+                            scope=scope,
+                            capability_id=dep_cap_id,
+                            enabled=True,
+                            ttl_seconds=ttl_seconds,
+                        )
+                        applied_dependencies.append(dep_cap_id)
+                    _save_state_doc(state_path, state_doc)
+            if final_quota_reason:
+                return _quota_blocked_response(final_quota_reason)
 
             refresh_required = bool(applied_dependencies)
             result_state = "activation_pending" if refresh_required else "runnable"
@@ -1443,15 +1554,6 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     capability_id=capability_id,
                     artifact_entry=artifact,
                 )
-                _set_runtime_actor_binding(
-                    runtime_doc,
-                    group_id=group_id,
-                    actor_id=actor_id,
-                    capability_id=capability_id,
-                    artifact_id=artifact_id,
-                    state="activation_pending",
-                    last_error="",
-                )
                 _save_runtime_doc(runtime_path, runtime_doc)
                 install = artifact
         else:
@@ -1462,31 +1564,97 @@ def handle_capability_enable(args: Dict[str, Any]) -> DaemonResponse:
                     capability_id=capability_id,
                     artifact_id=artifact_id,
                 )
-                _set_runtime_actor_binding(
-                    runtime_doc,
+                _save_runtime_doc(runtime_path, runtime_doc)
+
+        prior_runtime_binding: Optional[Dict[str, Any]] = None
+        expected_runtime_binding: Dict[str, Any] = {}
+        with _RUNTIME_LOCK:
+            runtime_path, runtime_doc = _load_runtime_doc()
+            actor_instances = runtime_doc.get("actor_instances")
+            per_group = actor_instances.get(group_id) if isinstance(actor_instances, dict) else None
+            per_actor = per_group.get(actor_id) if isinstance(per_group, dict) else None
+            current_binding = per_actor.get(capability_id) if isinstance(per_actor, dict) else None
+            if isinstance(current_binding, dict):
+                prior_runtime_binding = dict(current_binding)
+            _set_runtime_actor_binding(
+                runtime_doc,
+                group_id=group_id,
+                actor_id=actor_id,
+                capability_id=capability_id,
+                artifact_id=artifact_id,
+                state="activation_pending",
+                last_error="",
+            )
+            actor_instances = runtime_doc.get("actor_instances")
+            per_group = actor_instances.get(group_id) if isinstance(actor_instances, dict) else None
+            per_actor = per_group.get(actor_id) if isinstance(per_group, dict) else None
+            current_binding = per_actor.get(capability_id) if isinstance(per_actor, dict) else None
+            if isinstance(current_binding, dict):
+                current_binding["mutation_id"] = action_id
+                expected_runtime_binding = dict(current_binding)
+            _save_runtime_doc(runtime_path, runtime_doc)
+
+        def _restore_runtime_binding_if_owned() -> None:
+            with _RUNTIME_LOCK:
+                restore_path, restore_doc = _load_runtime_doc()
+                actor_instances = restore_doc.get("actor_instances")
+                per_group = actor_instances.get(group_id) if isinstance(actor_instances, dict) else None
+                per_actor = per_group.get(actor_id) if isinstance(per_group, dict) else None
+                current_binding = per_actor.get(capability_id) if isinstance(per_actor, dict) else None
+                if (
+                    not isinstance(current_binding, dict)
+                    or str(current_binding.get("mutation_id") or "") != action_id
+                    or current_binding != expected_runtime_binding
+                ):
+                    return
+                if prior_runtime_binding is None:
+                    _remove_runtime_actor_binding(
+                        restore_doc,
+                        group_id=group_id,
+                        actor_id=actor_id,
+                        capability_id=capability_id,
+                    )
+                else:
+                    per_actor[capability_id] = dict(prior_runtime_binding)
+                _save_runtime_doc(restore_path, restore_doc)
+
+        final_quota_reason = ""
+        try:
+            with _STATE_LOCK:
+                state_path, state_doc = _load_state_doc()
+                final_quota_reason = _check_enable_quota(
+                    scope=scope,
                     group_id=group_id,
                     actor_id=actor_id,
                     capability_id=capability_id,
-                    artifact_id=artifact_id,
-                    state="activation_pending",
-                    last_error="",
+                    current_state_doc=state_doc,
                 )
-                _save_runtime_doc(runtime_path, runtime_doc)
-
-        with _STATE_LOCK:
-            state_path, state_doc = _load_state_doc()
-            _set_enabled_capability(
-                state_doc,
-                group_id=group_id,
-                actor_id=actor_id,
-                scope=scope,
-                capability_id=capability_id,
-                enabled=True,
-                ttl_seconds=ttl_seconds,
-            )
-            _save_state_doc(state_path, state_doc)
+                if not final_quota_reason:
+                    _set_enabled_capability(
+                        state_doc,
+                        group_id=group_id,
+                        actor_id=actor_id,
+                        scope=scope,
+                        capability_id=capability_id,
+                        enabled=True,
+                        ttl_seconds=ttl_seconds,
+                        clear_group_removal=can_restore_group_removal,
+                    )
+                    _save_state_doc(state_path, state_doc)
+        except Exception:
+            _restore_runtime_binding_if_owned()
+            raise
+        if final_quota_reason:
+            _restore_runtime_binding_if_owned()
+            return _quota_blocked_response(final_quota_reason)
         with _RUNTIME_LOCK:
             runtime_path, runtime_doc = _load_runtime_doc()
+            actor_instances = runtime_doc.get("actor_instances")
+            per_group = actor_instances.get(group_id) if isinstance(actor_instances, dict) else None
+            per_actor = per_group.get(actor_id) if isinstance(per_group, dict) else None
+            current_binding = per_actor.get(capability_id) if isinstance(per_actor, dict) else None
+            if isinstance(current_binding, dict) and str(current_binding.get("mutation_id") or "") == action_id:
+                current_binding.pop("mutation_id", None)
             _record_runtime_recent_success(
                 runtime_doc,
                 capability_id=capability_id,

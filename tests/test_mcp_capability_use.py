@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -662,6 +663,153 @@ class TestMcpCapabilityUse(unittest.TestCase):
         kwargs = use_mock.call_args.kwargs if use_mock.call_args else {}
         self.assertEqual(str(kwargs.get("by") or ""), "peer-1")
         self.assertEqual(str(kwargs.get("actor_id") or ""), "peer-1")
+
+    def test_capability_use_passes_exact_capability_to_nested_scope(self) -> None:
+        from no1.ports.mcp.server import capability_use
+
+        with patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
+            return_value={"enabled_capabilities": []},
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            return_value={"state": "runnable", "enabled": True, "refresh_required": False},
+        ), patch(
+            "no1.ports.mcp.server.capability_use_nested_builtin_call_scope",
+        ) as nested_scope, patch(
+            "no1.ports.mcp.server.handle_tool_call",
+            return_value={"ok": True},
+        ):
+            result = capability_use(
+                group_id="g1",
+                by="peer-1",
+                actor_id="peer-1",
+                capability_id="pack:space",
+                tool_name="onecolleague_space",
+                tool_arguments={"action": "status"},
+            )
+
+        self.assertTrue(bool(result.get("tool_called")))
+        nested_scope.assert_called_once_with("pack:space")
+
+    def test_capability_use_unrelated_builtin_pack_cannot_dispatch_tool(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        runtime = SimpleNamespace(group_id="g1", actor_id="peer-1", source="remote")
+        with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
+            return_value={"enabled_capabilities": []},
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            return_value={"state": "runnable", "enabled": True, "refresh_required": False},
+        ), patch.object(
+            mcp_server,
+            "_runtime_context",
+            return_value=runtime,
+        ), patch.object(mcp_server, "load_group", return_value=None), patch.object(
+            mcp_server,
+            "_call_daemon_or_raise",
+            return_value={
+                "admission_fingerprint": "rev-1",
+                "builtin_tool_grants": {"onecolleague_space": ["pack:space"]},
+            },
+        ):
+            with self.assertRaises(mcp_server.MCPError) as caught:
+                mcp_server.capability_use(
+                    group_id="g1",
+                    by="peer-1",
+                    actor_id="peer-1",
+                    capability_id="pack:automation",
+                    tool_name="onecolleague_space",
+                    tool_arguments={"action": "status"},
+                )
+        self.assertEqual(caught.exception.code, "capability_tool_not_found")
+
+    def test_capability_use_core_cannot_dispatch_non_core_tools(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        runtime = SimpleNamespace(group_id="g1", actor_id="peer-1", source="remote")
+        with patch.object(mcp_server, "_runtime_context", return_value=runtime), patch.object(
+            mcp_server,
+            "load_group",
+            return_value=None,
+        ):
+            for tool_name in (
+                "onecolleague_space",
+                "onecolleague_shell",
+                "onecolleague_exec_command",
+            ):
+                with self.subTest(tool_name=tool_name), self.assertRaises(
+                    mcp_server.MCPError
+                ) as caught:
+                    mcp_server.capability_use(
+                        group_id="g1",
+                        by="peer-1",
+                        actor_id="peer-1",
+                        capability_id="core",
+                        tool_name=tool_name,
+                        tool_arguments={"action": "status"},
+                    )
+                self.assertEqual(caught.exception.code, "capability_tool_not_found")
+
+    def test_capability_use_rejects_product_and_disabled_targets_before_state_or_enable(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+
+        cases = {
+            "onecolleague_group_bridge_session_send": "pack:group_bridge",
+            "onecolleague_computer_run": "pack:computer-control-local",
+            "onecolleague_repo_edit": "core",
+            "onecolleague_runtime_complete_turn": "core",
+            "onecolleague_voice_secretary_request": "core",
+            "onecolleague_shell": "pack:diagnostics",
+        }
+        with patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
+            side_effect=AssertionError("non-capability target must not read capability state"),
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            side_effect=AssertionError("non-capability target must not enable a capability"),
+        ), patch.object(mcp_server, "handle_tool_call") as handle_tool_call:
+            for tool_name, capability_id in cases.items():
+                with self.subTest(tool=tool_name), self.assertRaises(mcp_server.MCPError) as caught:
+                    mcp_server.capability_use(
+                        group_id="g1",
+                        by="peer-1",
+                        actor_id="peer-1",
+                        capability_id=capability_id,
+                        tool_name=tool_name,
+                        tool_arguments={},
+                    )
+                self.assertEqual(caught.exception.code, "capability_tool_not_found")
+        handle_tool_call.assert_not_called()
+
+    def test_capability_use_dispatch_rejects_product_before_target_caller_policy(self) -> None:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
+
+        with runtime_context_override(group_id="g1", actor_id="peer-1", source="remote"), patch.object(
+            mcp_server,
+            "_authorize_web_model_builtin_tool_call",
+        ) as caller_policy, patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_state",
+            side_effect=AssertionError("product target must not read capability state"),
+        ), patch(
+            "no1.ports.mcp.handlers.onecolleague_capability.capability_enable",
+            side_effect=AssertionError("product target must not enable a capability"),
+        ):
+            with self.assertRaises(mcp_server.MCPError) as caught:
+                mcp_server.handle_tool_call(
+                    "onecolleague_capability_use",
+                    {
+                        "group_id": "g1",
+                        "actor_id": "peer-1",
+                        "capability_id": "pack:group_bridge",
+                        "tool_name": "onecolleague_group_bridge_session_send",
+                        "tool_arguments": {},
+                    },
+                )
+
+        self.assertEqual(caught.exception.code, "capability_tool_not_found")
+        caller_policy.assert_called_once_with("onecolleague_capability_use")
 
 
 if __name__ == "__main__":

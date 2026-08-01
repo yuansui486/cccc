@@ -6,11 +6,10 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-from ....kernel.capabilities import BUILTIN_CAPABILITY_PACKS, CORE_TOOL_NAMES, SPECIALIZED_CORE_TOOL_NAMES
 from ..common import MCPError, _call_daemon_or_raise
+from ..ownership import is_canonical_mcp_tool, resolve_mcp_tool_owner
 from ..toolspecs import canonical_mcp_tool_name
 
-_CORE_TOOL_NAME_SET = set(CORE_TOOL_NAMES) | set(SPECIALIZED_CORE_TOOL_NAMES)
 _EXT_TOOL_NAME_RE = re.compile(r"^onecolleague_ext_[a-f0-9]{8}_(.+)$")
 
 
@@ -377,22 +376,27 @@ def capability_use(
     cap_id = str(capability_id or "").strip()
     call_tool = canonical_mcp_tool_name(str(tool_name or "").strip())
     tool_args = dict(tool_arguments) if isinstance(tool_arguments, dict) else {}
+    primary_owner = resolve_mcp_tool_owner(call_tool) if call_tool else None
+
+    if primary_owner is not None and primary_owner.kind in {"product", "disabled"}:
+        raise MCPError(
+            code="capability_tool_not_found",
+            message=f"tool is not a capability target: {call_tool}",
+            details={"tool_name": call_tool, "owner_kind": primary_owner.kind},
+        )
+    if primary_owner is None and call_tool and is_canonical_mcp_tool(call_tool):
+        raise MCPError(
+            code="capability_tool_not_found",
+            message=f"canonical tool has no primary owner: {call_tool}",
+            details={"tool_name": call_tool},
+        )
 
     if not cap_id and call_tool:
-        candidates = [
-            pack_id
-            for pack_id, pack in BUILTIN_CAPABILITY_PACKS.items()
-            if isinstance(pack, dict) and call_tool in set(pack.get("tool_names") or ())
-        ]
-        if len(candidates) == 1:
-            cap_id = str(candidates[0])
-        elif len(candidates) > 1:
-            raise MCPError(
-                code="capability_use_ambiguous_tool",
-                message=f"tool maps to multiple capabilities: {call_tool}",
-                details={"candidates": candidates},
-            )
-        else:
+        if primary_owner is not None and primary_owner.kind == "pack":
+            cap_id = primary_owner.owner_id
+        elif primary_owner is not None and primary_owner.kind == "core":
+            cap_id = "core"
+        elif primary_owner is None:
             try:
                 state = capability_state(group_id=group_id, actor_id=target_actor)
             except Exception:
@@ -420,8 +424,6 @@ def capability_use(
                     message=f"tool maps to multiple capabilities: {call_tool}",
                     details={"candidates": sorted(matched_cap_ids)},
                 )
-            elif call_tool in _CORE_TOOL_NAME_SET:
-                cap_id = "core"
 
     if not cap_id:
         raise MCPError(
@@ -611,7 +613,7 @@ def capability_use(
     else:
         from ..server import capability_use_nested_builtin_call_scope, handle_tool_call
 
-        with capability_use_nested_builtin_call_scope():
+        with capability_use_nested_builtin_call_scope(cap_id):
             tool_result = handle_tool_call(call_tool, tool_args)
     out = {
         "group_id": group_id,

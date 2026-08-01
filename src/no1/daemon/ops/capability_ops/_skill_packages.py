@@ -19,7 +19,7 @@ from ....util.fs import atomic_write_bytes, atomic_write_json, read_json
 from ....util.time import utc_now_iso
 
 from ._common import _capability_root, _env_int
-from ._documents import _load_catalog_doc
+from ._admission import resolve_current_admission
 
 _PACKAGE_MODE = "codex_skill_package"
 _MAX_PACKAGE_BYTES = 50 * 1024 * 1024
@@ -458,38 +458,67 @@ def _normalize_capability_id_list(raw: Any) -> List[str]:
     return out
 
 
-def _effective_package_autoload_for_actor(group: Any, actor: Dict[str, Any]) -> List[str]:
-    group_autoload: List[str] = []
-    try:
-        from ....kernel.group import normalize_group_capability_defaults
+def _effective_package_autoload_for_actor(
+    group: Any,
+    actor: Dict[str, Any],
+    *,
+    admission: Dict[str, Any] | None = None,
+) -> List[str]:
+    group_id = str(getattr(group, "group_id", "") or "").strip()
+    actor_id = str(actor.get("id") or "").strip()
+    if not group_id or not actor_id:
+        return []
+    current = admission if isinstance(admission, dict) else resolve_current_admission(
+        group_id=group_id,
+        actor_id=actor_id,
+    )
+    return list(current.get("admitted_capabilities") or [])
 
-        defaults = normalize_group_capability_defaults(getattr(group, "doc", {}).get("capability_defaults"))
-        group_autoload = _normalize_capability_id_list(defaults.get("autoload_capabilities"))
-    except Exception:
-        group_autoload = []
 
-    actor_autoload = _normalize_capability_id_list(actor.get("capability_autoload"))
-    return _normalize_capability_id_list([*group_autoload, *actor_autoload])
+def _reconcile_managed_overlay_skills(overlay: Path, wanted: set[str]) -> None:
+    skills_dir = overlay / "skills"
+    if not skills_dir.is_dir():
+        return
+    keep = {".system", *{str(item or "").strip() for item in wanted if str(item or "").strip()}}
+    for child in list(skills_dir.iterdir()):
+        if child.name in keep:
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
 
 
 def prepare_codex_skill_package_overlay_for_actor(group: Any, actor_id: str, env: Dict[str, Any]) -> Dict[str, Any]:
+    overlay = ensure_home() / "runtime" / "codex_homes" / _safe_token(
+        getattr(group, "group_id", ""), default="group"
+    ) / _safe_token(actor_id, default="actor")
     actor = find_actor(group, actor_id)
     if not isinstance(actor, dict):
+        _reconcile_managed_overlay_skills(overlay, set())
         return {}
-    autoload = _effective_package_autoload_for_actor(group, actor)
+    admission = resolve_current_admission(
+        group_id=str(getattr(group, "group_id", "") or ""),
+        actor_id=actor_id,
+    )
+    autoload = _effective_package_autoload_for_actor(group, actor, admission=admission)
     if not autoload:
+        _reconcile_managed_overlay_skills(overlay, set())
         return {}
-    _, catalog = _load_catalog_doc()
-    records = catalog.get("records") if isinstance(catalog.get("records"), dict) else {}
+    records = admission.get("admitted_records") if isinstance(admission.get("admitted_records"), dict) else {}
     selected: List[Dict[str, Any]] = []
     for cap_id in autoload:
         rec = records.get(cap_id) if isinstance(records.get(cap_id), dict) else None
-        if isinstance(rec, dict) and is_codex_skill_package_record(rec):
+        if (
+            isinstance(rec, dict)
+            and is_codex_skill_package_record(rec)
+            and str(rec.get("qualification_status") or "").strip().lower() == "qualified"
+        ):
             selected.append(dict(rec))
     if not selected:
+        _reconcile_managed_overlay_skills(overlay, set())
         return {}
 
-    overlay = ensure_home() / "runtime" / "codex_homes" / _safe_token(getattr(group, "group_id", ""), default="group") / _safe_token(actor_id, default="actor")
     _prepare_overlay_base(overlay, env)
     skills_dir = overlay / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
@@ -502,6 +531,7 @@ def prepare_codex_skill_package_overlay_for_actor(group: Any, actor_id: str, env
         row = packages.get(cap_id) if isinstance(packages.get(cap_id), dict) else {}
         extracted_path = Path(str(row.get("extracted_path") or ""))
         if not extracted_path.is_dir() or not (extracted_path / "SKILL.md").is_file():
+            _reconcile_managed_overlay_skills(overlay, set())
             raise ValueError(f"skill package is not installed: {cap_id}")
         skill_slug = _safe_token(row.get("skill_slug") or (rec.get("install_spec") or {}).get("skill_slug") or rec.get("name") or cap_id)
         target = skills_dir / skill_slug
@@ -513,12 +543,7 @@ def prepare_codex_skill_package_overlay_for_actor(group: Any, actor_id: str, env
         _copy_or_link(extracted_path, target)
         wanted.add(skill_slug)
         materialized.append({"capability_id": cap_id, "skill_slug": skill_slug, "path": str(target)})
-    for child in list(skills_dir.iterdir()):
-        if child.name not in wanted:
-            if child.is_symlink() or child.is_file():
-                child.unlink()
-            elif child.is_dir():
-                shutil.rmtree(child)
+    _reconcile_managed_overlay_skills(overlay, wanted)
     return {
         "CODEX_HOME": str(overlay),
         "CCCC_CODEX_SKILLS_OVERLAY": "1",

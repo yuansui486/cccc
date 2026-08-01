@@ -121,6 +121,16 @@ SPECIALIZED_CORE_TOOL_NAMES: Tuple[str, ...] = tuple(
 
 
 BUILTIN_CAPABILITY_PACKS: Dict[str, Dict[str, object]] = {
+    "pack:group_bridge": {
+        "title": "Group Bridge Transport",
+        "description": "Trusted Group Bridge session send, remote enqueue, and receipt status operations.",
+        "tool_names": (
+            "onecolleague_group_bridge_session_send",
+            "onecolleague_group_bridge_remote_send",
+            "onecolleague_group_bridge_remote_delivery_status",
+        ),
+        "tags": ("group-bridge", "remote", "transport"),
+    },
     "pack:group-runtime": {
         "title": "Group + Runtime Operations",
         "description": "Group state operations and actor/runtime lifecycle controls.",

@@ -24,6 +24,18 @@ _SOURCE_ID_ALIASES = {
 _SOURCE_IDS = (
     BUILTIN_SOURCE_ID,
     "onecolleague_skill_library",
+    "manual_import",
+    "agent_self_proposed",
+    "github_import",
+    "url_import",
+    "local_import",
+    "mcp_registry_official",
+    "anthropic_skills",
+    "github_skills_curated",
+    "skillsmp_remote",
+    "clawhub_remote",
+    "openclaw_skills_remote",
+    "clawskills_remote",
 )
 
 

@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.mcp_router_harness import route_tool_call
+
 
 class TestMcpCodeMode(unittest.TestCase):
     def setUp(self) -> None:
@@ -32,6 +34,19 @@ class TestMcpCodeMode(unittest.TestCase):
         for authorization_patch in self._engine_authorization_patches:
             authorization_patch.start()
             self.addCleanup(authorization_patch.stop)
+
+    def _route_engine(self, name: str, arguments: dict) -> dict:
+        from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.toolspecs import CANONICAL_MCP_TOOLS
+
+        engine_names = set(mcp_server._WEB_MODEL_PEER_ADVERTISED_TOOL_NAMES)
+        engine_tools = [spec for spec in CANONICAL_MCP_TOOLS if str(spec.get("name") or "") in engine_names]
+        with patch.object(mcp_server, "handle_tool_call", side_effect=route_tool_call), patch.object(
+            mcp_server,
+            "list_tools_for_caller",
+            return_value=engine_tools,
+        ):
+            return route_tool_call(name, arguments)
 
     def _with_home_and_group(self):
         from no1.kernel.actors import add_actor
@@ -123,7 +138,7 @@ text(JSON.stringify({
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"), patch.object(
                 onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_daemon
             ):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
 
             self.assertEqual(out.get("status"), "completed")
             self.assertFalse(out.get("running"))
@@ -150,8 +165,8 @@ text(JSON.stringify({
                 "write_stdin_tool",
                 return_value={"running": True, "session_id": "exec-1"},
             ) as stdin_tool:
-                mcp_server.handle_tool_call("onecolleague_exec_command", {"command": "sleep 1", "yield_time_ms": 0})
-                mcp_server.handle_tool_call("onecolleague_write_stdin", {"session_id": "exec-1", "yield_time_ms": 0})
+                self._route_engine("onecolleague_exec_command", {"command": "sleep 1", "yield_time_ms": 0})
+                self._route_engine("onecolleague_write_stdin", {"session_id": "exec-1", "yield_time_ms": 0})
 
             self.assertEqual(exec_tool.call_args.kwargs.get("yield_time_ms"), 0)
             self.assertEqual(stdin_tool.call_args.kwargs.get("yield_time_ms"), 0)
@@ -171,11 +186,11 @@ await new Promise((resolve) => setTimeout(resolve, 100));
 text("phase-2");
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                first = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                first = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
                 self.assertEqual(first.get("status"), "running")
                 cell_id = str(first.get("cell_id") or "")
                 self.assertTrue(cell_id)
-                second = mcp_server.handle_tool_call(
+                second = self._route_engine(
                     "onecolleague_code_wait",
                     {"cell_id": cell_id, "yield_time_ms": 1000},
                 )
@@ -196,12 +211,12 @@ text("before-wait");
 await new Promise(() => {});
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                first = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 50})
+                first = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 50})
                 self.assertEqual(first.get("status"), "running")
                 cell_id = str(first.get("cell_id") or "")
                 self.assertTrue(cell_id)
-                terminated = mcp_server.handle_tool_call("onecolleague_code_wait", {"cell_id": cell_id, "terminate": True})
-                missing = mcp_server.handle_tool_call("onecolleague_code_wait", {"cell_id": cell_id, "yield_time_ms": 1})
+                terminated = self._route_engine("onecolleague_code_wait", {"cell_id": cell_id, "terminate": True})
+                missing = self._route_engine("onecolleague_code_wait", {"cell_id": cell_id, "yield_time_ms": 1})
 
             self.assertEqual(terminated.get("status"), "terminated")
             self.assertEqual(missing.get("status"), "missing")
@@ -222,21 +237,21 @@ text("peer1-secret-output");
 await new Promise(() => {});
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                first = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 50})
+                first = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 50})
                 self.assertEqual(first.get("status"), "running")
                 cell_id = str(first.get("cell_id") or "")
                 self.assertTrue(cell_id)
 
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer2"):
-                blocked_wait = mcp_server.handle_tool_call("onecolleague_code_wait", {"cell_id": cell_id, "yield_time_ms": 1})
-                blocked_terminate = mcp_server.handle_tool_call(
+                blocked_wait = self._route_engine("onecolleague_code_wait", {"cell_id": cell_id, "yield_time_ms": 1})
+                blocked_terminate = self._route_engine(
                     "onecolleague_code_wait",
                     {"cell_id": cell_id, "terminate": True},
                 )
 
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                still_running = mcp_server.handle_tool_call("onecolleague_code_wait", {"cell_id": cell_id, "yield_time_ms": 1})
-                terminated = mcp_server.handle_tool_call("onecolleague_code_wait", {"cell_id": cell_id, "terminate": True})
+                still_running = self._route_engine("onecolleague_code_wait", {"cell_id": cell_id, "yield_time_ms": 1})
+                terminated = self._route_engine("onecolleague_code_wait", {"cell_id": cell_id, "terminate": True})
 
             self.assertEqual(load_group(group.group_id).group_id, group.group_id)
             self.assertEqual(blocked_wait.get("status"), "missing")
@@ -254,11 +269,11 @@ await new Promise(() => {});
         home, _workspace, group, cleanup = self._with_home_and_group()
         try:
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                first = mcp_server.handle_tool_call(
+                first = self._route_engine(
                     "onecolleague_code_exec",
                     {"source": 'store("answer", { value: 42 }); text("stored");', "yield_time_ms": 5000},
                 )
-                second = mcp_server.handle_tool_call(
+                second = self._route_engine(
                     "onecolleague_code_exec",
                     {"source": 'text(JSON.stringify(load("answer")));', "yield_time_ms": 5000},
                 )
@@ -268,29 +283,26 @@ await new Promise(() => {});
         finally:
             cleanup()
 
-    def test_code_mode_engine_fixture_keeps_execution_fallbacks_visible(self) -> None:
+    def test_web_model_listing_keeps_local_execution_disabled(self) -> None:
         from no1.ports.mcp import server as mcp_server
         from no1.ports.mcp.common import runtime_context_override
+        from no1.ports.mcp.ownership import disabled_tool_names
 
         home, _workspace, group, cleanup = self._with_home_and_group()
         try:
-            expected = {
-                "onecolleague_code_exec",
-                "onecolleague_code_wait",
+            available = {
                 "onecolleague_repo",
                 "onecolleague_apply_patch",
-                "onecolleague_exec_command",
-                "onecolleague_write_stdin",
-                "onecolleague_git",
                 "onecolleague_message_send",
             }
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
                 names = {str(spec.get("name") or "") for spec in mcp_server.list_tools_for_caller()}
-            self.assertTrue(expected.issubset(names), expected - names)
+            self.assertTrue(available.issubset(names), available - names)
+            self.assertTrue(set(disabled_tool_names()).isdisjoint(names))
         finally:
             cleanup()
 
-    def test_code_mode_env_kill_switch_hides_and_blocks_code_tools(self) -> None:
+    def test_disabled_code_tools_ignore_legacy_kill_switch_and_reject_before_runtime_probe(self) -> None:
         from no1.ports.mcp import server as mcp_server
         from no1.ports.mcp.common import runtime_context_override
 
@@ -303,9 +315,14 @@ await new Promise(() => {});
                 self.assertNotIn("onecolleague_code_exec", names)
                 self.assertNotIn("onecolleague_code_wait", names)
                 self.assertIn("onecolleague_repo", names)
-                with self.assertRaises(mcp_server.MCPError) as cm:
-                    mcp_server.handle_tool_call("onecolleague_code_exec", {"source": "text('blocked')"})
-            self.assertEqual(cm.exception.code, "code_mode_disabled")
+                with patch.object(
+                    mcp_server,
+                    "load_group",
+                    side_effect=AssertionError("disabled tool must reject before runtime probing"),
+                ):
+                    with self.assertRaises(mcp_server.MCPError) as cm:
+                        mcp_server.handle_tool_call("onecolleague_code_exec", {"source": "text('blocked')"})
+            self.assertEqual(cm.exception.code, "permission_denied")
         finally:
             cleanup()
 
@@ -322,7 +339,7 @@ text(JSON.stringify({
 }));
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
             self.assertEqual(out.get("status"), "completed")
             self.assertEqual(json.loads(str(out.get("output") or "{}")), {"has_actor": False, "has_shell": True})
         finally:
@@ -336,7 +353,7 @@ text(JSON.stringify({
         try:
             source = 'text(String(ALL_TOOLS.some((tool) => tool.raw_name === "onecolleague_code_exec")));'
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
             self.assertEqual(out.get("status"), "completed")
             self.assertEqual(str(out.get("output") or "").strip(), "false")
         finally:
@@ -377,7 +394,7 @@ text(JSON.stringify({
 }));
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
             self.assertEqual(out.get("status"), "completed")
             payload = str(out.get("output") or "")
             self.assertIn('"hasRepo":true', payload)
@@ -413,7 +430,7 @@ try {
 }
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
             self.assertEqual(out.get("status"), "completed")
             output = str(out.get("output") or "")
             self.assertIn("old_text_not_found", output)
@@ -430,7 +447,7 @@ try {
         try:
             source = "text([typeof console, typeof require, typeof process, typeof fetch, typeof WebSocket].join(','));"
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
             self.assertEqual(out.get("status"), "completed")
             self.assertEqual(str(out.get("output") or "").strip(), "undefined,undefined,undefined,undefined,undefined")
         finally:
@@ -467,7 +484,7 @@ try {
 text(results.join(","));
 '''
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
-                out = mcp_server.handle_tool_call("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
+                out = self._route_engine("onecolleague_code_exec", {"source": source, "yield_time_ms": 5000})
             self.assertEqual(out.get("status"), "completed")
             self.assertEqual(
                 str(out.get("output") or "").strip(),
@@ -484,10 +501,10 @@ text(results.join(","));
         try:
             with runtime_context_override(home=str(home), group_id=group.group_id, actor_id="peer1"):
                 with self.assertRaises(mcp_server.MCPError) as require_cm:
-                    mcp_server.handle_tool_call("onecolleague_code_exec", {"source": "const fs = require('node:fs');"})
+                    self._route_engine("onecolleague_code_exec", {"source": "const fs = require('node:fs');"})
                 with self.assertRaises(mcp_server.MCPError) as import_cm:
-                    mcp_server.handle_tool_call("onecolleague_code_exec", {"source": "import('node:fs')"})
-                ok = mcp_server.handle_tool_call(
+                    self._route_engine("onecolleague_code_exec", {"source": "import('node:fs')"})
+                ok = self._route_engine(
                     "onecolleague_code_exec",
                     {"source": "const important = 1; text(String(important));", "yield_time_ms": 5000},
                 )
@@ -497,20 +514,17 @@ text(results.join(","));
         finally:
             cleanup()
 
-    def test_code_exec_requires_web_model_actor(self) -> None:
+    def test_code_exec_is_disabled_before_actor_runtime_probe(self) -> None:
         from no1.ports.mcp import server as mcp_server
 
-        class _FakeGroup:
-            pass
-
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "_resolve_self_actor_id", return_value="peer1"
-        ), patch.object(mcp_server, "load_group", return_value=_FakeGroup()), patch.object(
-            mcp_server, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
+        with patch.object(
+            mcp_server,
+            "load_group",
+            side_effect=AssertionError("disabled tool must reject before actor runtime probing"),
         ):
             with self.assertRaises(mcp_server.MCPError) as cm:
                 mcp_server.handle_tool_call("onecolleague_code_exec", {"source": "text('blocked')"})
-        self.assertEqual(cm.exception.code, "invalid_actor_runtime")
+        self.assertEqual(cm.exception.code, "permission_denied")
 
 
 class TestWebModelLocalExecutionDenied(unittest.TestCase):
@@ -629,7 +643,7 @@ class TestWebModelLocalExecutionDenied(unittest.TestCase):
                     with self.subTest(path="nested_scope", tool=tool_name), mcp_server.capability_use_nested_builtin_call_scope():
                         with self.assertRaises(mcp_server.MCPError) as nested_caught:
                             mcp_server.handle_tool_call(tool_name, {})
-                    self.assertEqual(nested_caught.exception.code, "permission_denied")
+                    self.assertEqual(nested_caught.exception.code, "capability_tool_not_found")
 
                     with self.subTest(path="external_capability", tool=tool_name), patch.object(
                         mcp_server,

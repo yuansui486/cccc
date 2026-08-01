@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from no1.ports.mcp.common import MCPError
+from tests.mcp_router_harness import route_tool_call
 
 
 class TestMcpContextPermissionEnforcement(unittest.TestCase):
@@ -147,19 +148,19 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "peer-impl"},
                 clear=False,
             ):
-                own = mcp_server.handle_tool_call(
+                own = route_tool_call(
                     "onecolleague_role_notes",
                     {"action": "get", "target_actor_id": "peer-impl"},
                 )
                 self.assertEqual(str(own.get("content") or ""), "self notes")
                 with self.assertRaises(MCPError) as other_err:
-                    mcp_server.handle_tool_call(
+                    route_tool_call(
                         "onecolleague_role_notes",
                         {"action": "get", "target_actor_id": "peer-2"},
                     )
                 self.assertEqual(other_err.exception.code, "permission_denied")
                 with self.assertRaises(MCPError) as list_err:
-                    mcp_server.handle_tool_call("onecolleague_role_notes", {"action": "get"})
+                    route_tool_call("onecolleague_role_notes", {"action": "get"})
                 self.assertEqual(list_err.exception.code, "permission_denied")
 
             with patch.object(mcp_common, "call_daemon", side_effect=self._fake_call_daemon), patch.dict(
@@ -167,7 +168,7 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 {"CCCC_GROUP_ID": group_id, "CCCC_ACTOR_ID": "foreman-impl"},
                 clear=False,
             ):
-                all_notes = mcp_server.handle_tool_call("onecolleague_role_notes", {"action": "get"})
+                all_notes = route_tool_call("onecolleague_role_notes", {"action": "get"})
                 role_notes = all_notes.get("role_notes") if isinstance(all_notes.get("role_notes"), list) else []
                 self.assertEqual(
                     sorted((str(item.get("actor_id") or ""), str(item.get("content") or "")) for item in role_notes if isinstance(item, dict)),
@@ -312,7 +313,7 @@ class TestMcpContextPermissionEnforcement(unittest.TestCase):
                 clear=False,
             ):
                 with self.assertRaises(MCPError) as err:
-                    mcp_server.handle_tool_call(
+                    route_tool_call(
                         "onecolleague_role_notes",
                         {"action": "set", "target_actor_id": "peer-impl", "content": "I should not self-author this"},
                     )

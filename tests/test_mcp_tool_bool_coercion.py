@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.mcp_router_harness import route_tool_call
+
 
 class TestMcpToolBoolCoercion(unittest.TestCase):
     def test_headless_codex_message_send_is_allowed(self) -> None:
@@ -383,7 +385,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_self_actor_id", return_value="peer1"
         ), patch.object(mcp_server, "notify_send", return_value={"ok": True}) as mock_notify_send:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_notify",
                 {
                     "action": "send",
@@ -405,7 +407,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_self_actor_id", return_value="peer1"
         ), patch.object(mcp_server, "terminal_tail", return_value={"ok": True}) as mock_terminal_tail:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_terminal",
                 {
                     "action": "tail",
@@ -426,7 +428,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_space",
                 {
                     "action": "artifact",
@@ -466,7 +468,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
                 }
                 if raw_fresh is not None:
                     arguments["fresh"] = raw_fresh
-                mcp_server.handle_tool_call("onecolleague_space", arguments)
+                route_tool_call("onecolleague_space", arguments)
 
                 called = mock_sources if action == "sources" else mock_artifact
                 self.assertEqual(called.call_args.kwargs.get("fresh"), expected)
@@ -506,7 +508,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_space",
                 {
                     "action": "artifact",
@@ -527,7 +529,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_space",
                 {
                     "action": "artifact",
@@ -551,7 +553,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
                 mcp_server, "_resolve_caller_from_by", return_value="peer1"
             ), patch.object(mcp_server, "space_artifact", return_value={"ok": True}) as mock_space_artifact:
-                mcp_server.handle_tool_call(
+                route_tool_call(
                     "onecolleague_space",
                     {
                         "action": "artifact",
@@ -570,7 +572,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_resolve_caller_from_by", return_value="peer1"
         ), patch.object(mcp_server, "space_ingest", return_value={"ok": True}) as mock_space_ingest:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_space",
                 {
                     "action": "ingest",
@@ -593,7 +595,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "space_query", return_value={"ok": True}
         ) as mock_space_query:
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_space",
                 {
                     "action": "query",
@@ -611,7 +613,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"):
             with self.assertRaises(mcp_server.MCPError) as cm:
-                mcp_server.handle_tool_call(
+                route_tool_call(
                     "onecolleague_space",
                     {
                         "action": "query",
@@ -628,7 +630,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
 
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"):
             with self.assertRaises(mcp_server.MCPError) as cm:
-                mcp_server.handle_tool_call(
+                route_tool_call(
                     "onecolleague_space",
                     {
                         "action": "query",
@@ -731,7 +733,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
-            mcp_server.handle_tool_call("onecolleague_memory_admin", {"action": "index_sync", "mode": "rebuild"})
+            route_tool_call("onecolleague_memory_admin", {"action": "index_sync", "mode": "rebuild"})
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
         self.assertEqual(req.get("op"), "memory_reme_index_sync")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
@@ -750,7 +752,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_memory_admin",
                 {
                     "action": "context_check",
@@ -777,7 +779,7 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
             mcp_server, "_call_daemon_or_raise", side_effect=_fake_call
         ):
-            mcp_server.handle_tool_call(
+            route_tool_call(
                 "onecolleague_memory_admin",
                 {"action": "daily_flush", "messages": [{"role": "user", "content": "h"}], "return_prompt": "false"},
             )

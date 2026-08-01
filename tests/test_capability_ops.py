@@ -4,12 +4,13 @@ import json
 import hashlib
 import os
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 class TestCapabilityOps(unittest.TestCase):
@@ -97,6 +98,25 @@ class TestCapabilityOps(unittest.TestCase):
         last_error: str = "",
         tools: Any = None,
     ) -> str:
+        self._write_allowlist_override(mcp_registry_level="mounted")
+        catalog_path, catalog_doc = ops._load_catalog_doc()
+        catalog_doc["records"].setdefault(
+            capability_id,
+            {
+                "capability_id": capability_id,
+                "kind": "mcp_toolpack",
+                "name": capability_id.rsplit(":", 1)[-1],
+                "description_short": "Deterministic external MCP test fixture",
+                "source_id": "mcp_registry_official",
+                "source_tier": "official",
+                "trust_tier": "official",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "install_mode": "remote_only",
+                "install_spec": {"transport": "http", "url": url},
+            },
+        )
+        ops._save_catalog_doc(catalog_path, catalog_doc)
         rec = {
             "install_mode": "remote_only",
             "install_spec": {"transport": "http", "url": url},
@@ -421,6 +441,7 @@ class TestCapabilityOps(unittest.TestCase):
         old_codex_home = os.environ.get("CODEX_HOME")
         try:
             gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
             workspace = Path(home) / "workspace"
             workspace.mkdir()
             attach_resp, _ = self._call("attach", {"group_id": gid, "path": str(workspace), "by": "user"})
@@ -511,6 +532,32 @@ class TestCapabilityOps(unittest.TestCase):
                 self.assertEqual(str((rec or {}).get("install_mode") or ""), "codex_skill_package")
                 self.assertEqual(str(((rec or {}).get("install_spec") or {}).get("package_sha256") or ""), package_sha)
 
+                requested_group = SimpleNamespace(
+                    group_id=gid,
+                    doc={
+                        "capability_defaults": {
+                            "autoload_capabilities": ["skill:onecolleague:demo-skill"]
+                        },
+                        "actors": [
+                            {
+                                "id": "peer-1",
+                                "runtime": "codex",
+                                "runner": "headless",
+                                "capability_autoload": ["skill:onecolleague:demo-skill"],
+                            }
+                        ],
+                    },
+                )
+                ops._state_path().unlink(missing_ok=True)
+                self.assertEqual(
+                    ops.prepare_codex_skill_package_overlay_for_actor(
+                        requested_group,
+                        "peer-1",
+                        {},
+                    ),
+                    {},
+                )
+
                 enable_resp, _ = self._call(
                     "capability_enable",
                     {
@@ -553,7 +600,6 @@ class TestCapabilityOps(unittest.TestCase):
                                 "id": "peer-1",
                                 "runtime": "codex",
                                 "runner": "headless",
-                                "capability_autoload": ["skill:onecolleague:demo-skill"],
                             }
                         ]
                     },
@@ -564,6 +610,98 @@ class TestCapabilityOps(unittest.TestCase):
                 for rel_path in arbitrary_files:
                     self.assertTrue((overlay / "skills" / "demo-skill" / rel_path).is_file(), rel_path)
                 self.assertFalse((source_codex / "skills" / "demo-skill").exists())
+                system_skill = overlay / "skills" / ".system" / "managed.md"
+                system_skill.parent.mkdir(parents=True, exist_ok=True)
+                system_skill.write_text("preserve system skill\n", encoding="utf-8")
+                sibling_skill = (
+                    overlay.parent / "peer-2" / "skills" / "sibling-skill" / "SKILL.md"
+                )
+                sibling_skill.parent.mkdir(parents=True, exist_ok=True)
+                sibling_skill.write_text("preserve sibling actor\n", encoding="utf-8")
+
+                state_path, state_doc = ops._load_state_doc()
+                ops._set_blocked_capability(
+                    state_doc,
+                    scope="group",
+                    group_id=gid,
+                    capability_id="skill:onecolleague:demo-skill",
+                    by="user",
+                    reason="test",
+                    ttl_seconds=0,
+                )
+                ops._save_state_doc(state_path, state_doc)
+                self.assertEqual(
+                    ops.prepare_codex_skill_package_overlay_for_actor(
+                        requested_group,
+                        "peer-1",
+                        {},
+                    ),
+                    {},
+                )
+                self.assertFalse((overlay / "skills" / "demo-skill").exists())
+                self.assertTrue(system_skill.is_file())
+                self.assertTrue(sibling_skill.is_file())
+
+                state_path, state_doc = ops._load_state_doc()
+                ops._unset_blocked_capability(
+                    state_doc,
+                    scope="group",
+                    group_id=gid,
+                    capability_id="skill:onecolleague:demo-skill",
+                )
+                ops._set_removed_capability(
+                    state_doc,
+                    group_id=gid,
+                    capability_id="skill:onecolleague:demo-skill",
+                    removed=True,
+                )
+                ops._save_state_doc(state_path, state_doc)
+                self.assertEqual(
+                    ops.prepare_codex_skill_package_overlay_for_actor(
+                        requested_group,
+                        "peer-1",
+                        {},
+                    ),
+                    {},
+                )
+
+                state_path, state_doc = ops._load_state_doc()
+                ops._set_removed_capability(
+                    state_doc,
+                    group_id=gid,
+                    capability_id="skill:onecolleague:demo-skill",
+                    removed=False,
+                )
+                ops._save_state_doc(state_path, state_doc)
+                disable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": "skill:onecolleague:demo-skill",
+                        "scope": "actor",
+                        "enabled": False,
+                    },
+                )
+                self.assertTrue(disable_resp.ok, getattr(disable_resp, "error", None))
+                self.assertEqual(
+                    ops.prepare_codex_skill_package_overlay_for_actor(
+                        requested_group,
+                        "peer-1",
+                        {},
+                    ),
+                    {},
+                )
+                ops._state_path().write_text("{invalid", encoding="utf-8")
+                self.assertEqual(
+                    ops.prepare_codex_skill_package_overlay_for_actor(
+                        requested_group,
+                        "peer-1",
+                        {},
+                    ),
+                    {},
+                )
 
             self.assertFalse((Path(home) / ".codex" / "skills" / "demo-skill").exists())
         finally:
@@ -916,84 +1054,19 @@ class TestCapabilityOps(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_group_scope_enable_updates_group_capability_defaults(self) -> None:
+    def test_group_settings_update_persists_capability_defaults(self) -> None:
         from no1.daemon.ops import capability_ops as ops
         from no1.kernel.group import load_group
 
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
-            self._add_actor(gid, "peer-1", by="user")
-            cap_id = "skill:onecolleague:group-default"
-            catalog_path, catalog_doc = ops._load_catalog_doc()
-            catalog_doc["records"][cap_id] = {
-                "capability_id": cap_id,
-                "kind": "skill",
-                "name": "group-default",
-                "description_short": "Group default skill",
-                "source_id": "onecolleague_skill_library",
-                "source_tier": "tier1",
-                "trust_tier": "tier1",
-                "qualification_status": "qualified",
-                "enable_supported": True,
-                "capsule_text": "Use this skill from group defaults.",
-            }
-            ops._save_catalog_doc(catalog_path, catalog_doc)
-
-            enable_resp, _ = self._call(
-                "capability_enable",
-                {
-                    "group_id": gid,
-                    "by": "user",
-                    "actor_id": "user",
-                    "capability_id": cap_id,
-                    "scope": "group",
-                    "enabled": True,
-                },
-            )
-            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
-            group = load_group(gid)
-            self.assertIsNotNone(group)
-            defaults = (group.doc.get("capability_defaults") if group is not None else {}) or {}
-            self.assertIn(cap_id, defaults.get("autoload_capabilities") or [])
-
-            state_resp, _ = self._call("capability_state", {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"})
-            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
-            state = state_resp.result if isinstance(state_resp.result, dict) else {}
-            self.assertIn(cap_id, state.get("enabled_capabilities") or [])
-            self.assertIn(cap_id, state.get("group_autoload_capabilities") or [])
-            self.assertIn(cap_id, state.get("autoload_capabilities") or [])
-
-            disable_resp, _ = self._call(
-                "capability_enable",
-                {
-                    "group_id": gid,
-                    "by": "user",
-                    "actor_id": "user",
-                    "capability_id": cap_id,
-                    "scope": "group",
-                    "enabled": False,
-                },
-            )
-            self.assertTrue(disable_resp.ok, getattr(disable_resp, "error", None))
-            group = load_group(gid)
-            self.assertIsNotNone(group)
-            defaults = (group.doc.get("capability_defaults") if group is not None else {}) or {}
-            self.assertNotIn(cap_id, defaults.get("autoload_capabilities") or [])
-        finally:
-            cleanup()
-
-    def test_group_settings_update_persists_capability_defaults(self) -> None:
-        from no1.kernel.group import load_group
-
-        _, cleanup = self._with_home()
-        try:
-            gid = self._create_group()
+            capability_id = "skill:anthropic:triage"
             patch = {
                 "group_id": gid,
                 "patch": {
                     "capability_defaults": {
-                        "autoload_capabilities": ["skill:onecolleague:group-default"],
+                        "autoload_capabilities": [capability_id],
                         "default_scope": "session",
                         "session_ttl_seconds": 7200,
                     },
@@ -1007,13 +1080,191 @@ class TestCapabilityOps(unittest.TestCase):
             defaults = settings.get("capability_defaults") if isinstance(settings.get("capability_defaults"), dict) else {}
             self.assertEqual(defaults.get("default_scope"), "session")
             self.assertEqual(defaults.get("session_ttl_seconds"), 7200)
-            self.assertIn("skill:onecolleague:group-default", defaults.get("autoload_capabilities") or [])
+            self.assertIn(capability_id, defaults.get("autoload_capabilities") or [])
 
             group = load_group(gid)
             self.assertIsNotNone(group)
             stored = (group.doc.get("capability_defaults") if group is not None else {}) or {}
             self.assertEqual(stored.get("default_scope"), "session")
-            self.assertIn("skill:onecolleague:group-default", stored.get("autoload_capabilities") or [])
+            self.assertIn(capability_id, stored.get("autoload_capabilities") or [])
+
+            def load_state() -> dict[str, Any]:
+                state_resp, _ = self._call(
+                    "capability_state",
+                    {"group_id": gid, "actor_id": "user", "by": "user"},
+                )
+                self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+                return state_resp.result if isinstance(state_resp.result, dict) else {}
+
+            def assert_requested_but_not_effective(state: dict[str, Any]) -> None:
+                self.assertIn(
+                    capability_id,
+                    state.get("group_requested_autoload_capabilities") or [],
+                )
+                self.assertNotIn(
+                    capability_id,
+                    state.get("group_autoload_capabilities") or [],
+                )
+                self.assertNotIn(capability_id, state.get("autoload_capabilities") or [])
+                autoload_skills = (
+                    state.get("autoload_skills")
+                    if isinstance(state.get("autoload_skills"), list)
+                    else []
+                )
+                autoload_ids = {
+                    str(item.get("capability_id") or "")
+                    for item in autoload_skills
+                    if isinstance(item, dict)
+                }
+                self.assertNotIn(capability_id, autoload_ids)
+
+            assert_requested_but_not_effective(load_state())
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][capability_id] = {
+                "capability_id": capability_id,
+                "kind": "skill",
+                "name": "triage",
+                "description_short": "Issue triage checklist",
+                "source_id": "anthropic_skills",
+                "source_tier": "tier1",
+                "trust_tier": "tier1",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "capability_id": capability_id,
+                    "scope": "group",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enabled_state = load_state()
+            self.assertIn(capability_id, enabled_state.get("group_autoload_capabilities") or [])
+            self.assertIn(capability_id, enabled_state.get("autoload_capabilities") or [])
+            enabled_autoload_skills = (
+                enabled_state.get("autoload_skills")
+                if isinstance(enabled_state.get("autoload_skills"), list)
+                else []
+            )
+            self.assertIn(
+                capability_id,
+                {
+                    str(item.get("capability_id") or "")
+                    for item in enabled_autoload_skills
+                    if isinstance(item, dict)
+                },
+            )
+
+            state_path, state_doc = ops._load_state_doc()
+            ops._set_blocked_capability(
+                state_doc,
+                scope="group",
+                group_id=gid,
+                capability_id=capability_id,
+                by="user",
+                reason="test",
+                ttl_seconds=0,
+            )
+            ops._save_state_doc(state_path, state_doc)
+            assert_requested_but_not_effective(load_state())
+
+            state_path, state_doc = ops._load_state_doc()
+            ops._unset_blocked_capability(
+                state_doc,
+                scope="group",
+                group_id=gid,
+                capability_id=capability_id,
+            )
+            ops._set_removed_capability(
+                state_doc,
+                group_id=gid,
+                capability_id=capability_id,
+                removed=True,
+            )
+            ops._save_state_doc(state_path, state_doc)
+            assert_requested_but_not_effective(load_state())
+
+            state_path, state_doc = ops._load_state_doc()
+            ops._set_removed_capability(
+                state_doc,
+                group_id=gid,
+                capability_id=capability_id,
+                removed=False,
+            )
+            ops._save_state_doc(state_path, state_doc)
+            disable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "user",
+                    "capability_id": capability_id,
+                    "scope": "group",
+                    "enabled": False,
+                },
+            )
+            self.assertTrue(disable_resp.ok, getattr(disable_resp, "error", None))
+            assert_requested_but_not_effective(load_state())
+        finally:
+            cleanup()
+
+    def test_mcp_tool_listing_never_recovers_capability_tools_from_yaml(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+        from no1.ports.mcp import server as mcp_server
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            group = ops._ensure_group(gid)
+            actor = next(
+                item
+                for item in group.doc.get("actors") or []
+                if isinstance(item, dict) and str(item.get("id") or "") == "peer-1"
+            )
+            actor["capability_autoload"] = ["pack:space"]
+            group.save()
+
+            runtime_context = Mock(
+                group_id=gid,
+                actor_id="peer-1",
+                source="remote",
+            )
+            cases = (
+                ("daemon_failure", RuntimeError("daemon unavailable"), None),
+                ("state_missing", None, {}),
+                ("empty_visible_tools", None, {"visible_tools": [], "dynamic_tools": []}),
+            )
+            for label, error, result in cases:
+                with self.subTest(case=label), patch.dict(
+                    os.environ,
+                    {"CCCC_MCP_TOOL_PROFILE": ""},
+                    clear=False,
+                ), patch.object(
+                    mcp_server,
+                    "_runtime_context",
+                    return_value=runtime_context,
+                ), patch.object(
+                    mcp_server,
+                    "_call_daemon_or_raise",
+                    side_effect=error,
+                    return_value=result,
+                ):
+                    names = {
+                        str(item.get("name") or "")
+                        for item in mcp_server.list_tools_for_caller()
+                        if isinstance(item, dict)
+                    }
+                self.assertIn("onecolleague_help", names)
+                self.assertNotIn("onecolleague_space", names)
         finally:
             cleanup()
 
@@ -1045,6 +1296,18 @@ class TestCapabilityOps(unittest.TestCase):
             visible = result.get("visible_tools") if isinstance(result.get("visible_tools"), list) else []
             self.assertIn("onecolleague_space", visible)
             self.assertIn("pack:space", result.get("enabled_capabilities") or [])
+            enabled_rows = result.get("enabled") if isinstance(result.get("enabled"), list) else []
+            enabled_row = next(
+                (
+                    item
+                    for item in enabled_rows
+                    if isinstance(item, dict) and str(item.get("capability_id") or "") == "pack:space"
+                ),
+                {},
+            )
+            self.assertEqual(str(enabled_row.get("scope") or ""), "session")
+            self.assertEqual(str(enabled_row.get("actor_id") or ""), "peer-1")
+            self.assertGreater(int(enabled_row.get("ttl_seconds") or 0), 0)
         finally:
             cleanup()
 
@@ -1296,6 +1559,11 @@ class TestCapabilityOps(unittest.TestCase):
             source_level = defaults.get("source_level") if isinstance(defaults.get("source_level"), dict) else {}
             self.assertEqual(str(source_level.get("mcp_registry_official") or ""), "indexed")
 
+            get_after, _ = self._call("capability_allowlist_get", {"by": "user"})
+            self.assertTrue(get_after.ok, getattr(get_after, "error", None))
+            fresh_revision = str((get_after.result or {}).get("revision") or "")
+            self.assertEqual(revision_after, fresh_revision)
+
             reset, _ = self._call("capability_allowlist_reset", {"by": "user"})
             self.assertTrue(reset.ok, getattr(reset, "error", None))
             reset_result = reset.result if isinstance(reset.result, dict) else {}
@@ -1331,6 +1599,217 @@ class TestCapabilityOps(unittest.TestCase):
             )
             self.assertFalse(second.ok)
             self.assertEqual(getattr(second.error, "code", ""), "allowlist_revision_mismatch")
+        finally:
+            cleanup()
+
+    def test_current_admission_invalidates_policy_errors_and_recovers(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+        from no1.daemon.ops.capability_ops import _policy
+        from no1.daemon.ops.capability_ops._admission import resolve_current_admission
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            enabled, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "scope": "actor",
+                    "capability_id": "pack:space",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enabled.ok, getattr(enabled, "error", None))
+            baseline = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertIn("pack:space", baseline.get("admitted_capabilities") or [])
+            baseline_revision = str(baseline.get("policy_revision") or "")
+
+            overlay = _policy._allowlist_user_overlay_path()
+            overlay.parent.mkdir(parents=True, exist_ok=True)
+            overlay.write_text("defaults: [\n", encoding="utf-8")
+            _policy._clear_policy_cache()
+            broken = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertTrue(bool(broken.get("stable")))
+            self.assertFalse(bool(broken.get("valid")))
+            self.assertNotEqual(str(broken.get("policy_revision") or ""), baseline_revision)
+            self.assertIn("invalid_overlay_yaml", str(broken.get("policy_error") or ""))
+            self.assertEqual(broken.get("admitted_capabilities"), [])
+
+            self._write_allowlist_override(mcp_registry_level="mounted")
+            _policy._clear_policy_cache()
+            repaired = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertTrue(bool(repaired.get("valid")))
+            self.assertIn("pack:space", repaired.get("admitted_capabilities") or [])
+
+            default_doc, default_text, _ = _policy._load_allowlist_default_doc_with_error()
+            repaired_snapshot = _policy._allowlist_effective_snapshot()
+            with patch.object(
+                _policy,
+                "_load_allowlist_default_doc_with_error",
+                return_value=({}, default_text, "failed_to_read_default:test"),
+            ):
+                failed_snapshot = _policy._allowlist_effective_snapshot()
+                _policy._clear_policy_cache()
+                failed_policy = _policy._allowlist_policy()
+            self.assertNotEqual(failed_snapshot.get("revision"), repaired_snapshot.get("revision"))
+            self.assertEqual(failed_snapshot.get("default_error"), "failed_to_read_default:test")
+            self.assertTrue(default_doc)
+            self.assertTrue(all(value is False for value in failed_policy.get("source_enabled", {}).values()))
+            _policy._clear_policy_cache()
+        finally:
+            cleanup()
+
+    def test_current_admission_revalidates_sources_catalog_and_external_runtime(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+        from no1.daemon.ops.capability_ops._admission import resolve_current_admission
+
+        _, cleanup = self._with_home()
+        try:
+            self._write_allowlist_override(mcp_registry_level="mounted")
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            skill_id = "skill:anthropic:current-admission"
+            external_id = "mcp:current-admission"
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][skill_id] = {
+                "capability_id": skill_id,
+                "kind": "skill",
+                "name": "current-admission",
+                "source_id": "anthropic_skills",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+            }
+            catalog_doc["records"][external_id] = {
+                "capability_id": external_id,
+                "kind": "mcp_toolpack",
+                "name": "current-admission",
+                "source_id": "mcp_registry_official",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "install_mode": "remote_only",
+                "install_spec": {"transport": "http", "url": "http://127.0.0.1:9919/mcp"},
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+            state_path, state_doc = ops._load_state_doc()
+            for capability_id in (skill_id, external_id):
+                ops._set_enabled_capability(
+                    state_doc,
+                    group_id=gid,
+                    actor_id="peer-1",
+                    scope="actor",
+                    capability_id=capability_id,
+                    enabled=True,
+                    ttl_seconds=3600,
+                )
+            ops._save_state_doc(state_path, state_doc)
+
+            initial = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertIn(skill_id, initial.get("authorized_capabilities") or [])
+            self.assertIn(skill_id, initial.get("admitted_capabilities") or [])
+            self.assertIn(external_id, initial.get("authorized_capabilities") or [])
+            self.assertNotIn(external_id, initial.get("admitted_capabilities") or [])
+            self.assertEqual(
+                (initial.get("denied_capabilities") or {}).get(external_id),
+                "runtime_not_executable",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"CCCC_CAPABILITY_SOURCE_ANTHROPIC_SKILLS_ENABLED": "0"},
+                clear=False,
+            ):
+                source_disabled = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertIn(skill_id, source_disabled.get("raw_bindings") or [])
+            self.assertNotIn(skill_id, source_disabled.get("authorized_capabilities") or [])
+            self.assertEqual(
+                (source_disabled.get("denied_capabilities") or {}).get(skill_id),
+                "source_disabled_by_runtime_config",
+            )
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][skill_id]["qualification_status"] = "blocked"
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+            downgraded = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertNotIn(skill_id, downgraded.get("admitted_capabilities") or [])
+            self.assertEqual(
+                (downgraded.get("denied_capabilities") or {}).get(skill_id),
+                "qualification_not_qualified",
+            )
+
+            runtime_path, runtime_doc = ops._load_runtime_doc()
+            artifact_id = self._seed_runtime_external_install(
+                ops,
+                runtime_doc,
+                capability_id=external_id,
+                synthetic_tool_name="onecolleague_ext_current_echo",
+                real_tool_name="echo",
+            )
+            ops._set_runtime_actor_binding(
+                runtime_doc,
+                group_id=gid,
+                actor_id="peer-1",
+                capability_id=external_id,
+                artifact_id=artifact_id,
+                state="runnable",
+            )
+            ops._save_runtime_doc(runtime_path, runtime_doc)
+            executable = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertIn(external_id, executable.get("admitted_capabilities") or [])
+            self.assertEqual(len(executable.get("external_tool_grants") or []), 1)
+
+            runtime_path, runtime_doc = ops._load_runtime_doc()
+            runtime_doc["artifacts"][artifact_id]["tools"] = []
+            ops._save_runtime_doc(runtime_path, runtime_doc)
+            empty_manifest = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertIn(external_id, empty_manifest.get("authorized_capabilities") or [])
+            self.assertNotIn(external_id, empty_manifest.get("admitted_capabilities") or [])
+            with patch(
+                "no1.daemon.ops.capability_ops._invoke_installed_external_tool_with_aliases",
+            ) as invoke:
+                call_resp, _ = self._call(
+                    "capability_tool_call",
+                    {
+                        "group_id": gid,
+                        "actor_id": "peer-1",
+                        "by": "peer-1",
+                        "capability_id": external_id,
+                        "tool_name": "echo",
+                        "arguments": {},
+                    },
+                )
+            self.assertFalse(call_resp.ok)
+            self.assertEqual(getattr(call_resp.error, "code", ""), "capability_tool_not_found")
+            invoke.assert_not_called()
+        finally:
+            cleanup()
+
+    def test_builtin_capsule_skill_admission_does_not_require_catalog_record(self) -> None:
+        from no1.daemon.ops.capability_ops._admission import resolve_current_admission
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            enabled, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "scope": "actor",
+                    "capability_id": "skill:onecolleague:install",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enabled.ok, getattr(enabled, "error", None))
+            admission = resolve_current_admission(group_id=gid, actor_id="peer-1")
+            self.assertIn("skill:onecolleague:install", admission.get("admitted_capabilities") or [])
+            record = (admission.get("admitted_records") or {}).get("skill:onecolleague:install") or {}
+            self.assertEqual(record.get("source_id"), "onecolleague_builtin")
+            self.assertEqual(record.get("qualification_status"), "qualified")
         finally:
             cleanup()
 
@@ -1492,15 +1971,20 @@ class TestCapabilityOps(unittest.TestCase):
         try:
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
-            catalog = ops._new_catalog_doc()
+            catalog_path, catalog = ops._load_catalog_doc()
             catalog["records"]["mcp:test-server"] = {
                 "capability_id": "mcp:test-server",
                 "kind": "mcp_toolpack",
                 "name": "test-server",
+                "source_id": "manual_import",
+                "source_tier": "local",
+                "trust_tier": "local",
                 "qualification_status": "qualified",
+                "enable_supported": True,
                 "install_mode": "remote_only",
                 "install_spec": {"transport": "http", "url": "http://127.0.0.1:9900/mcp"},
             }
+            ops._save_catalog_doc(catalog_path, catalog)
             installed = {
                 "state": "installed",
                 "installer": "remote_http",
@@ -1510,7 +1994,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "last_error": "",
                 "updated_at": "2026-02-25T00:00:00Z",
             }
-            with patch("no1.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
+            with patch(
                 "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=installed,
             ):
@@ -1539,15 +2023,20 @@ class TestCapabilityOps(unittest.TestCase):
         try:
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
-            catalog = ops._new_catalog_doc()
+            catalog_path, catalog = ops._load_catalog_doc()
             catalog["records"]["mcp:test-server"] = {
                 "capability_id": "mcp:test-server",
                 "kind": "mcp_toolpack",
                 "name": "test-server",
+                "source_id": "manual_import",
+                "source_tier": "local",
+                "trust_tier": "local",
                 "qualification_status": "qualified",
+                "enable_supported": True,
                 "install_mode": "remote_only",
                 "install_spec": {"transport": "http", "url": "http://127.0.0.1:9900/mcp"},
             }
+            ops._save_catalog_doc(catalog_path, catalog)
             installed = {
                 "state": "installed",
                 "installer": "remote_http",
@@ -1564,7 +2053,7 @@ class TestCapabilityOps(unittest.TestCase):
                 "last_error": "",
                 "updated_at": "2026-02-25T00:00:00Z",
             }
-            with patch("no1.daemon.ops.capability_ops._load_catalog_doc", return_value=(Path("/tmp/cat.json"), catalog)), patch(
+            with patch(
                 "no1.daemon.ops.capability_ops._install_external_capability",
                 return_value=installed,
             ):
@@ -3191,6 +3680,13 @@ class TestCapabilityOps(unittest.TestCase):
 
         _, cleanup = self._with_home()
         try:
+            self._write_allowlist_override(
+                extra=(
+                    "mcp_overrides:\n"
+                    "  - capability_id: mcp:io.github.upstash/context7\n"
+                    "    level: indexed"
+                )
+            )
             runtime_path, runtime_doc = ops._load_runtime_doc()
             ops._record_runtime_recent_success(
                 runtime_doc,
@@ -3225,6 +3721,8 @@ class TestCapabilityOps(unittest.TestCase):
             recent = target.get("recent_success") if isinstance(target.get("recent_success"), dict) else {}
             self.assertEqual(int(recent.get("success_count") or 0), 1)
             self.assertEqual(str(recent.get("last_action") or ""), "enable")
+            self.assertFalse(bool(target.get("autoload_candidate")))
+            self.assertEqual(str(target.get("current_admission_reason") or ""), "policy_level_indexed")
         finally:
             cleanup()
 
@@ -3313,7 +3811,11 @@ class TestCapabilityOps(unittest.TestCase):
             enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
             skill_payload = enable_result.get("skill") if isinstance(enable_result.get("skill"), dict) else {}
             self.assertEqual(str(skill_payload.get("capability_id") or ""), "skill:anthropic:write-pr")
-            applied = skill_payload.get("applied_dependencies") if isinstance(skill_payload.get("applied_dependencies"), list) else []
+            applied = (
+                skill_payload.get("applied_dependencies")
+                if isinstance(skill_payload.get("applied_dependencies"), list)
+                else []
+            )
             self.assertIn("pack:space", applied)
 
             state_resp, _ = self._call(
@@ -3325,8 +3827,16 @@ class TestCapabilityOps(unittest.TestCase):
             enabled = state.get("enabled_capabilities") if isinstance(state.get("enabled_capabilities"), list) else []
             self.assertIn("skill:anthropic:write-pr", enabled)
             self.assertIn("pack:space", enabled)
-            active_capsule_skills = state.get("active_capsule_skills") if isinstance(state.get("active_capsule_skills"), list) else []
-            active_ids = {str(item.get("capability_id") or "") for item in active_capsule_skills if isinstance(item, dict)}
+            active_capsule_skills = (
+                state.get("active_capsule_skills")
+                if isinstance(state.get("active_capsule_skills"), list)
+                else []
+            )
+            active_ids = {
+                str(item.get("capability_id") or "")
+                for item in active_capsule_skills
+                if isinstance(item, dict)
+            }
             self.assertIn("skill:anthropic:write-pr", active_ids)
             autoload_skills = state.get("autoload_skills") if isinstance(state.get("autoload_skills"), list) else []
             autoload_ids = {str(item.get("capability_id") or "") for item in autoload_skills if isinstance(item, dict)}
@@ -3336,6 +3846,677 @@ class TestCapabilityOps(unittest.TestCase):
             )
             skill_binding = binding_states.get("skill:anthropic:write-pr") if isinstance(binding_states, dict) else {}
             self.assertEqual(str((skill_binding or {}).get("mode") or ""), "skill")
+        finally:
+            cleanup()
+
+    def test_skill_enable_skips_group_removed_dependency(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "foreman-1", by="user")
+            self._add_actor(gid, "peer-1", by="user")
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"]["skill:anthropic:write-pr"] = {
+                "capability_id": "skill:anthropic:write-pr",
+                "kind": "skill",
+                "name": "write-pr",
+                "description_short": "Write concise PR summaries",
+                "source_id": "anthropic_skills",
+                "source_tier": "tier1",
+                "trust_tier": "tier1",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "capsule_text": "Use structured PR summary format.",
+                "requires_capabilities": ["pack:space"],
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            uninstall_resp, _ = self._call(
+                "capability_uninstall",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": "pack:space",
+                },
+            )
+            self.assertTrue(uninstall_resp.ok, getattr(uninstall_resp, "error", None))
+            uninstall_result = uninstall_resp.result if isinstance(uninstall_resp.result, dict) else {}
+            self.assertTrue(bool(uninstall_result.get("removed_group_marker")))
+
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": "skill:anthropic:write-pr",
+                    "scope": "session",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            skill_payload = enable_result.get("skill") if isinstance(enable_result.get("skill"), dict) else {}
+            self.assertNotIn("pack:space", skill_payload.get("applied_dependencies") or [])
+            self.assertIn(
+                {"capability_id": "pack:space", "reason": "removed_by_group_policy"},
+                skill_payload.get("skipped_dependencies") or [],
+            )
+
+            _, state_doc = ops._load_state_doc()
+            self.assertIn("pack:space", set(ops._collect_removed_capabilities(state_doc, group_id=gid)))
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            self.assertIn("skill:anthropic:write-pr", state.get("enabled_capabilities") or [])
+            self.assertNotIn("pack:space", state.get("enabled_capabilities") or [])
+            self.assertNotIn("onecolleague_space", state.get("visible_tools") or [])
+
+            restore_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "foreman-1",
+                    "actor_id": "foreman-1",
+                    "capability_id": "pack:space",
+                    "scope": "group",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(restore_resp.ok, getattr(restore_resp, "error", None))
+            _, restored_state = ops._load_state_doc()
+            self.assertNotIn(
+                "pack:space",
+                set(ops._collect_removed_capabilities(restored_state, group_id=gid)),
+            )
+
+            block_resp, _ = self._call(
+                "capability_block",
+                {
+                    "group_id": gid,
+                    "by": "foreman-1",
+                    "actor_id": "foreman-1",
+                    "scope": "group",
+                    "capability_id": "pack:space",
+                    "blocked": True,
+                },
+            )
+            self.assertTrue(block_resp.ok, getattr(block_resp, "error", None))
+            blocked_enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": "skill:anthropic:write-pr",
+                    "scope": "session",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(blocked_enable_resp.ok, getattr(blocked_enable_resp, "error", None))
+            blocked_enable_result = (
+                blocked_enable_resp.result if isinstance(blocked_enable_resp.result, dict) else {}
+            )
+            blocked_skill = (
+                blocked_enable_result.get("skill")
+                if isinstance(blocked_enable_result.get("skill"), dict)
+                else {}
+            )
+            self.assertIn(
+                {"capability_id": "pack:space", "reason": "blocked_by_group_policy"},
+                blocked_skill.get("skipped_dependencies") or [],
+            )
+            blocked_state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(blocked_state_resp.ok, getattr(blocked_state_resp, "error", None))
+            blocked_state = blocked_state_resp.result if isinstance(blocked_state_resp.result, dict) else {}
+            self.assertNotIn("pack:space", blocked_state.get("enabled_capabilities") or [])
+            self.assertNotIn("onecolleague_space", blocked_state.get("visible_tools") or [])
+
+            unblock_resp, _ = self._call(
+                "capability_block",
+                {
+                    "group_id": gid,
+                    "by": "foreman-1",
+                    "actor_id": "foreman-1",
+                    "scope": "group",
+                    "capability_id": "pack:space",
+                    "blocked": False,
+                },
+            )
+            self.assertTrue(unblock_resp.ok, getattr(unblock_resp, "error", None))
+            self._write_allowlist_override(
+                extra=(
+                    "mcp_overrides:\n"
+                    "  - capability_id: pack:space\n"
+                    "    level: indexed"
+                )
+            )
+            indexed_enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": "skill:anthropic:write-pr",
+                    "scope": "session",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(indexed_enable_resp.ok, getattr(indexed_enable_resp, "error", None))
+            indexed_enable_result = (
+                indexed_enable_resp.result if isinstance(indexed_enable_resp.result, dict) else {}
+            )
+            indexed_skill = (
+                indexed_enable_result.get("skill")
+                if isinstance(indexed_enable_result.get("skill"), dict)
+                else {}
+            )
+            self.assertIn(
+                {
+                    "capability_id": "pack:space",
+                    "reason": "policy_level_indexed",
+                    "policy_level": "indexed",
+                },
+                indexed_skill.get("skipped_dependencies") or [],
+            )
+        finally:
+            cleanup()
+
+    def test_skill_group_dependency_quota_uses_transaction_state(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            state_path, state_doc = ops._load_state_doc()
+            ops._set_enabled_capability(
+                state_doc,
+                group_id=gid,
+                actor_id="peer-1",
+                scope="group",
+                capability_id="pack:diagnostics",
+                enabled=True,
+                ttl_seconds=3600,
+            )
+            ops._save_state_doc(state_path, state_doc)
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"]["skill:anthropic:write-pr"] = {
+                "capability_id": "skill:anthropic:write-pr",
+                "kind": "skill",
+                "name": "write-pr",
+                "description_short": "Write concise PR summaries",
+                "source_id": "anthropic_skills",
+                "source_tier": "tier1",
+                "trust_tier": "tier1",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "capsule_text": "Use structured PR summary format.",
+                "requires_capabilities": ["pack:space"],
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            with patch.dict(
+                os.environ,
+                {"CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP": "2"},
+                clear=False,
+            ):
+                enable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": "skill:anthropic:write-pr",
+                        "scope": "group",
+                        "enabled": True,
+                    },
+                )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            skill_payload = enable_result.get("skill") if isinstance(enable_result.get("skill"), dict) else {}
+            self.assertNotIn("pack:space", skill_payload.get("applied_dependencies") or [])
+            self.assertIn(
+                {"capability_id": "pack:space", "reason": "quota_enabled_group_exceeded:2"},
+                skill_payload.get("skipped_dependencies") or [],
+            )
+
+            _, final_state_doc = ops._load_state_doc()
+            group_enabled = final_state_doc.get("group_enabled")
+            group_items = set(group_enabled.get(gid) or []) if isinstance(group_enabled, dict) else set()
+            self.assertEqual(
+                group_items,
+                {"pack:diagnostics", "skill:anthropic:write-pr"},
+            )
+            state_resp, _ = self._call(
+                "capability_state",
+                {"group_id": gid, "actor_id": "peer-1", "by": "peer-1"},
+            )
+            self.assertTrue(state_resp.ok, getattr(state_resp, "error", None))
+            state = state_resp.result if isinstance(state_resp.result, dict) else {}
+            self.assertNotIn("pack:space", state.get("enabled_capabilities") or [])
+            self.assertNotIn("onecolleague_space", state.get("visible_tools") or [])
+        finally:
+            cleanup()
+
+    def test_concurrent_group_enable_quota_is_linearized_at_commit(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+
+            state_path, state_doc = ops._load_state_doc()
+            ops._set_enabled_capability(
+                state_doc,
+                group_id=gid,
+                actor_id="peer-1",
+                scope="group",
+                capability_id="pack:diagnostics",
+                enabled=True,
+                ttl_seconds=3600,
+            )
+            ops._save_state_doc(state_path, state_doc)
+
+            capability_ids = ("skill:anthropic:race-a", "skill:anthropic:race-b")
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            for capability_id in capability_ids:
+                catalog_doc["records"][capability_id] = {
+                    "capability_id": capability_id,
+                    "kind": "skill",
+                    "name": capability_id.rsplit(":", 1)[-1],
+                    "description_short": "Concurrent quota test skill",
+                    "source_id": "anthropic_skills",
+                    "source_tier": "tier1",
+                    "trust_tier": "tier1",
+                    "qualification_status": "qualified",
+                    "enable_supported": True,
+                    "capsule_text": "Use the concurrent quota test procedure.",
+                    "requires_capabilities": [],
+                }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            barrier = threading.Barrier(2)
+            barrier_lock = threading.Lock()
+            aligned: set[str] = set()
+            original_supported = ops._record_enable_supported
+
+            def align_after_precheck(rec, *, capability_id=""):  # type: ignore[no-untyped-def]
+                supported = original_supported(rec, capability_id=capability_id)
+                should_wait = False
+                with barrier_lock:
+                    if capability_id in capability_ids and capability_id not in aligned:
+                        aligned.add(capability_id)
+                        should_wait = True
+                if should_wait:
+                    barrier.wait(timeout=5.0)
+                return supported
+
+            responses: dict[str, Any] = {}
+
+            def enable(capability_id: str) -> None:
+                response, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": capability_id,
+                        "scope": "group",
+                        "enabled": True,
+                    },
+                )
+                responses[capability_id] = response
+
+            with patch.dict(
+                os.environ,
+                {"CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP": "2"},
+                clear=False,
+            ), patch(
+                "no1.daemon.ops.capability_ops._record_enable_supported",
+                side_effect=align_after_precheck,
+            ):
+                threads = [threading.Thread(target=enable, args=(capability_id,)) for capability_id in capability_ids]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=10.0)
+
+            self.assertTrue(all(not thread.is_alive() for thread in threads))
+            self.assertEqual(set(responses), set(capability_ids))
+            results = []
+            for response in responses.values():
+                self.assertTrue(response.ok, getattr(response, "error", None))
+                results.append(response.result if isinstance(response.result, dict) else {})
+            self.assertEqual(sum(str(result.get("state") or "") == "runnable" for result in results), 1)
+            self.assertEqual(
+                sum(str(result.get("reason") or "") == "quota_enabled_group_exceeded:2" for result in results),
+                1,
+            )
+
+            _, final_state_doc = ops._load_state_doc()
+            group_enabled = final_state_doc.get("group_enabled")
+            group_items = set(group_enabled.get(gid) or []) if isinstance(group_enabled, dict) else set()
+            self.assertEqual(len(group_items), 2)
+            self.assertIn("pack:diagnostics", group_items)
+            self.assertEqual(len(group_items.intersection(capability_ids)), 1)
+        finally:
+            cleanup()
+
+    def test_external_group_quota_loser_preserves_existing_runtime_binding(self) -> None:
+        from no1.daemon.ops import capability_ops as ops
+
+        _, cleanup = self._with_home()
+        try:
+            gid = self._create_group()
+            self._add_actor(gid, "peer-1", by="user")
+            capability_id = "mcp:test-server"
+
+            state_path, state_doc = ops._load_state_doc()
+            ops._set_enabled_capability(
+                state_doc,
+                group_id=gid,
+                actor_id="peer-1",
+                scope="actor",
+                capability_id=capability_id,
+                enabled=True,
+                ttl_seconds=3600,
+            )
+            ops._set_enabled_capability(
+                state_doc,
+                group_id=gid,
+                actor_id="peer-1",
+                scope="group",
+                capability_id="pack:diagnostics",
+                enabled=True,
+                ttl_seconds=3600,
+            )
+            ops._save_state_doc(state_path, state_doc)
+
+            runtime_path, runtime_doc = ops._load_runtime_doc()
+            artifact_id = self._seed_runtime_external_install(
+                ops,
+                runtime_doc,
+                capability_id=capability_id,
+                tools=[],
+                state="installed",
+            )
+            ops._set_runtime_actor_binding(
+                runtime_doc,
+                group_id=gid,
+                actor_id="peer-1",
+                capability_id=capability_id,
+                artifact_id=artifact_id,
+                state="runnable",
+                last_error="",
+            )
+            ops._save_runtime_doc(runtime_path, runtime_doc)
+            prior_binding = dict(runtime_doc["actor_instances"][gid]["peer-1"][capability_id])
+
+            catalog_path, catalog_doc = ops._load_catalog_doc()
+            catalog_doc["records"][capability_id] = {
+                "capability_id": capability_id,
+                "kind": "mcp_toolpack",
+                "name": "test-server",
+                "description_short": "External quota ownership test",
+                "source_id": "manual_import",
+                "source_tier": "tier2",
+                "trust_tier": "tier2",
+                "qualification_status": "qualified",
+                "enable_supported": True,
+                "install_mode": "remote_only",
+                "install_spec": {"transport": "http", "url": "http://127.0.0.1:9900/mcp"},
+            }
+            ops._save_catalog_doc(catalog_path, catalog_doc)
+
+            original_supported = ops._record_enable_supported
+            injected = False
+
+            def fill_group_quota(rec, *, capability_id=""):  # type: ignore[no-untyped-def]
+                nonlocal injected
+                supported = original_supported(rec, capability_id=capability_id)
+                if capability_id == "mcp:test-server" and not injected:
+                    injected = True
+                    current_path, current_doc = ops._load_state_doc()
+                    ops._set_enabled_capability(
+                        current_doc,
+                        group_id=gid,
+                        actor_id="peer-1",
+                        scope="group",
+                        capability_id="pack:space",
+                        enabled=True,
+                        ttl_seconds=3600,
+                    )
+                    ops._save_state_doc(current_path, current_doc)
+                return supported
+
+            with patch.dict(
+                os.environ,
+                {"CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP": "2"},
+                clear=False,
+            ), patch(
+                "no1.daemon.ops.capability_ops._record_enable_supported",
+                side_effect=fill_group_quota,
+            ):
+                enable_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": capability_id,
+                        "scope": "group",
+                        "enabled": True,
+                    },
+                )
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
+            enable_result = enable_resp.result if isinstance(enable_resp.result, dict) else {}
+            self.assertEqual(str(enable_result.get("reason") or ""), "quota_enabled_group_exceeded:2")
+
+            _, final_state_doc = ops._load_state_doc()
+            actor_enabled = final_state_doc.get("actor_enabled")
+            actor_group = actor_enabled.get(gid) if isinstance(actor_enabled, dict) else {}
+            self.assertIn(capability_id, actor_group.get("peer-1") or [])
+            group_enabled = final_state_doc.get("group_enabled")
+            self.assertNotIn(capability_id, group_enabled.get(gid) or [])
+
+            _, final_runtime_doc = ops._load_runtime_doc()
+            final_binding = final_runtime_doc["actor_instances"][gid]["peer-1"][capability_id]
+            self.assertEqual(final_binding, prior_binding)
+
+            def reset_loser_state() -> None:
+                current_path, current_doc = ops._load_state_doc()
+                ops._set_enabled_capability(
+                    current_doc,
+                    group_id=gid,
+                    actor_id="peer-1",
+                    scope="actor",
+                    capability_id=capability_id,
+                    enabled=False,
+                    ttl_seconds=3600,
+                )
+                ops._set_enabled_capability(
+                    current_doc,
+                    group_id=gid,
+                    actor_id="peer-1",
+                    scope="group",
+                    capability_id="pack:space",
+                    enabled=False,
+                    ttl_seconds=3600,
+                )
+                ops._save_state_doc(current_path, current_doc)
+                current_runtime_path, current_runtime_doc = ops._load_runtime_doc()
+                ops._remove_runtime_actor_binding(
+                    current_runtime_doc,
+                    group_id=gid,
+                    actor_id="peer-1",
+                    capability_id=capability_id,
+                )
+                ops._save_runtime_doc(current_runtime_path, current_runtime_doc)
+
+            reset_loser_state()
+            injected = False
+            with patch.dict(
+                os.environ,
+                {"CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP": "2"},
+                clear=False,
+            ), patch(
+                "no1.daemon.ops.capability_ops._record_enable_supported",
+                side_effect=fill_group_quota,
+            ):
+                no_prior_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": capability_id,
+                        "scope": "group",
+                        "enabled": True,
+                    },
+                )
+            self.assertTrue(no_prior_resp.ok, getattr(no_prior_resp, "error", None))
+            _, no_prior_runtime = ops._load_runtime_doc()
+            actor_instances = no_prior_runtime.get("actor_instances")
+            per_group = actor_instances.get(gid) if isinstance(actor_instances, dict) else {}
+            per_actor = per_group.get("peer-1") if isinstance(per_group, dict) else {}
+            self.assertNotIn(capability_id, per_actor)
+
+            reset_loser_state()
+            injected = False
+            original_save_runtime = ops._save_runtime_doc
+            competing_binding: dict[str, Any] = {}
+            replaced_reservation = False
+
+            def replace_owned_reservation(path, doc):  # type: ignore[no-untyped-def]
+                nonlocal replaced_reservation, competing_binding
+                original_save_runtime(path, doc)
+                actor_instances = doc.get("actor_instances")
+                per_group = actor_instances.get(gid) if isinstance(actor_instances, dict) else None
+                per_actor = per_group.get("peer-1") if isinstance(per_group, dict) else None
+                binding = per_actor.get(capability_id) if isinstance(per_actor, dict) else None
+                if replaced_reservation or not isinstance(binding, dict) or not binding.get("mutation_id"):
+                    return
+                replaced_reservation = True
+                competing_path, competing_doc = ops._load_runtime_doc()
+                ops._set_runtime_actor_binding(
+                    competing_doc,
+                    group_id=gid,
+                    actor_id="peer-1",
+                    capability_id=capability_id,
+                    artifact_id=artifact_id,
+                    state="runnable",
+                    last_error="concurrent-writer",
+                )
+                original_save_runtime(competing_path, competing_doc)
+                competing_binding = dict(
+                    competing_doc["actor_instances"][gid]["peer-1"][capability_id]
+                )
+
+            with patch.dict(
+                os.environ,
+                {"CCCC_CAPABILITY_MAX_ENABLED_PER_GROUP": "2"},
+                clear=False,
+            ), patch(
+                "no1.daemon.ops.capability_ops._record_enable_supported",
+                side_effect=fill_group_quota,
+            ), patch(
+                "no1.daemon.ops.capability_ops._state._save_runtime_doc",
+                side_effect=replace_owned_reservation,
+            ):
+                stale_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": capability_id,
+                        "scope": "group",
+                        "enabled": True,
+                    },
+                )
+            self.assertTrue(stale_resp.ok, getattr(stale_resp, "error", None))
+            self.assertTrue(replaced_reservation)
+            _, stale_runtime = ops._load_runtime_doc()
+            self.assertEqual(
+                stale_runtime["actor_instances"][gid]["peer-1"][capability_id],
+                competing_binding,
+            )
+
+            reset_loser_state()
+            original_save_state = ops._save_state_doc
+
+            def fail_external_state_commit(path, doc):  # type: ignore[no-untyped-def]
+                group_enabled = doc.get("group_enabled")
+                enabled_ids = group_enabled.get(gid) if isinstance(group_enabled, dict) else []
+                if capability_id in set(enabled_ids or []):
+                    raise OSError("state commit failed")
+                original_save_state(path, doc)
+
+            with patch(
+                "no1.daemon.ops.capability_ops._state._save_state_doc",
+                side_effect=fail_external_state_commit,
+            ):
+                failed_commit_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "user",
+                        "actor_id": "peer-1",
+                        "capability_id": capability_id,
+                        "scope": "group",
+                        "enabled": True,
+                    },
+                )
+            self.assertFalse(failed_commit_resp.ok)
+            _, failed_state = ops._load_state_doc()
+            group_enabled = failed_state.get("group_enabled")
+            self.assertNotIn(capability_id, group_enabled.get(gid) or [])
+            _, failed_runtime = ops._load_runtime_doc()
+            actor_instances = failed_runtime.get("actor_instances")
+            per_group = actor_instances.get(gid) if isinstance(actor_instances, dict) else {}
+            per_actor = per_group.get("peer-1") if isinstance(per_group, dict) else {}
+            self.assertNotIn(capability_id, per_actor)
+            recent_success = failed_runtime.get("recent_success")
+            self.assertNotIn(capability_id, recent_success if isinstance(recent_success, dict) else {})
+            successful_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": capability_id,
+                    "scope": "group",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(successful_resp.ok, getattr(successful_resp, "error", None))
+
+            disabled_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "user",
+                    "actor_id": "peer-1",
+                    "capability_id": capability_id,
+                    "scope": "group",
+                    "enabled": False,
+                },
+            )
+            self.assertTrue(disabled_resp.ok, getattr(disabled_resp, "error", None))
         finally:
             cleanup()
 
@@ -3539,15 +4720,20 @@ class TestCapabilityOps(unittest.TestCase):
             self.assertIn("skill:anthropic:triage", actor_autoload)
             autoload_skills = state.get("autoload_skills") if isinstance(state.get("autoload_skills"), list) else []
             autoload_ids = {str(item.get("capability_id") or "") for item in autoload_skills if isinstance(item, dict)}
-            self.assertIn("skill:anthropic:triage", autoload_ids)
+            self.assertNotIn("skill:anthropic:triage", autoload_ids)
 
-            autoload_result = ops.apply_actor_capability_autoload(
-                group_id=gid,
-                actor_id="peer-1",
-                autoload_capabilities=["skill:anthropic:triage"],
+            enable_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "capability_id": "skill:anthropic:triage",
+                    "scope": "actor",
+                    "enabled": True,
+                },
             )
-            self.assertIn("skill:anthropic:triage", autoload_result.get("applied") or [])
-            self.assertFalse(autoload_result.get("skipped") or [])
+            self.assertTrue(enable_resp.ok, getattr(enable_resp, "error", None))
 
             active_state_resp, _ = self._call(
                 "capability_state",
@@ -3555,6 +4741,19 @@ class TestCapabilityOps(unittest.TestCase):
             )
             self.assertTrue(active_state_resp.ok, getattr(active_state_resp, "error", None))
             active_state = active_state_resp.result if isinstance(active_state_resp.result, dict) else {}
+            effective_autoload_skills = (
+                active_state.get("autoload_skills")
+                if isinstance(active_state.get("autoload_skills"), list)
+                else []
+            )
+            self.assertIn(
+                "skill:anthropic:triage",
+                {
+                    str(item.get("capability_id") or "")
+                    for item in effective_autoload_skills
+                    if isinstance(item, dict)
+                },
+            )
             active_capsule_skills = (
                 active_state.get("active_capsule_skills")
                 if isinstance(active_state.get("active_capsule_skills"), list)
@@ -3735,7 +4934,7 @@ class TestCapabilityOps(unittest.TestCase):
             with patch(
                 "no1.daemon.ops.capability_ops._http_get_json_obj",
                 return_value=registry_payload,
-            ), patch.dict(
+            ) as get_json, patch.dict(
                 os.environ,
                 {
                     "CCCC_CAPABILITY_SOURCE_SKILLSMP_REMOTE_ENABLED": "0",
@@ -3752,6 +4951,7 @@ class TestCapabilityOps(unittest.TestCase):
                         "actor_id": "peer-1",
                         "by": "peer-1",
                         "query": "test-server",
+                        "kind": "mcp",
                         "include_external": True,
                         "limit": 20,
                     },
@@ -3764,6 +4964,9 @@ class TestCapabilityOps(unittest.TestCase):
             diag = result.get("search_diagnostics") if isinstance(result.get("search_diagnostics"), dict) else {}
             self.assertTrue(bool(diag.get("remote_augmented")))
             self.assertEqual(int(diag.get("remote_added") or 0), 1)
+            get_json.assert_called_once()
+            applied_filters = result.get("applied_filters") if isinstance(result.get("applied_filters"), dict) else {}
+            self.assertEqual(str(applied_filters.get("kind") or ""), "mcp_toolpack")
 
             catalog_path, catalog_doc = ops._load_catalog_doc()
             self.assertTrue(catalog_path.exists())
@@ -4418,6 +5621,7 @@ class TestCapabilityOps(unittest.TestCase):
 
         _, cleanup = self._with_home()
         try:
+            self._write_allowlist_override(mcp_registry_level="mounted")
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
 
@@ -4589,6 +5793,7 @@ class TestCapabilityOps(unittest.TestCase):
         _, cleanup = self._with_home()
         try:
             gid = self._create_group()
+            self._add_actor(gid, "foreman-1", by="user")
             self._add_actor(gid, "peer-1", by="user")
 
             catalog_path, catalog_doc = ops._load_catalog_doc()
@@ -4649,6 +5854,108 @@ class TestCapabilityOps(unittest.TestCase):
             autoload_skills = state.get("autoload_skills") if isinstance(state.get("autoload_skills"), list) else []
             autoload_ids = {str(item.get("capability_id") or "") for item in autoload_skills if isinstance(item, dict)}
             self.assertNotIn("skill:anthropic:triage", autoload_ids)
+
+            search_resp, _ = self._call(
+                "capability_search",
+                {
+                    "group_id": gid,
+                    "actor_id": "peer-1",
+                    "by": "peer-1",
+                    "query": "triage",
+                    "kind": "skill",
+                    "include_external": False,
+                    "limit": 20,
+                },
+            )
+            self.assertTrue(search_resp.ok, getattr(search_resp, "error", None))
+            search_result = search_resp.result if isinstance(search_resp.result, dict) else {}
+            search_ids = {
+                str(item.get("capability_id") or "")
+                for item in (search_result.get("items") if isinstance(search_result.get("items"), list) else [])
+                if isinstance(item, dict)
+            }
+            self.assertNotIn("skill:anthropic:triage", search_ids)
+
+            overview_resp, _ = self._call(
+                "capability_overview",
+                {"group_id": gid, "query": "triage", "include_indexed": True, "limit": 20},
+            )
+            self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
+            overview_result = overview_resp.result if isinstance(overview_resp.result, dict) else {}
+            overview_ids = {
+                str(item.get("capability_id") or "")
+                for item in (
+                    overview_result.get("items") if isinstance(overview_result.get("items"), list) else []
+                )
+                if isinstance(item, dict)
+            }
+            self.assertNotIn("skill:anthropic:triage", overview_ids)
+
+            for scope in ("actor", "session"):
+                blocked_resp, _ = self._call(
+                    "capability_enable",
+                    {
+                        "group_id": gid,
+                        "by": "peer-1",
+                        "actor_id": "peer-1",
+                        "capability_id": "skill:anthropic:triage",
+                        "scope": scope,
+                        "enabled": True,
+                    },
+                )
+                self.assertTrue(blocked_resp.ok, getattr(blocked_resp, "error", None))
+                blocked_result = blocked_resp.result if isinstance(blocked_resp.result, dict) else {}
+                self.assertEqual(str(blocked_result.get("state") or ""), "blocked")
+                self.assertEqual(str(blocked_result.get("reason") or ""), "removed_by_group_policy")
+
+            _, state_doc = ops._load_state_doc()
+            self.assertIn(
+                "skill:anthropic:triage",
+                set(ops._collect_removed_capabilities(state_doc, group_id=gid)),
+            )
+
+            other_gid = self._create_group("capability-other-group")
+            self._add_actor(other_gid, "peer-2", by="user")
+            other_search_resp, _ = self._call(
+                "capability_search",
+                {
+                    "group_id": other_gid,
+                    "actor_id": "peer-2",
+                    "by": "peer-2",
+                    "query": "triage",
+                    "kind": "skill",
+                    "include_external": False,
+                    "limit": 20,
+                },
+            )
+            self.assertTrue(other_search_resp.ok, getattr(other_search_resp, "error", None))
+            other_result = other_search_resp.result if isinstance(other_search_resp.result, dict) else {}
+            other_ids = {
+                str(item.get("capability_id") or "")
+                for item in (other_result.get("items") if isinstance(other_result.get("items"), list) else [])
+                if isinstance(item, dict)
+            }
+            self.assertIn("skill:anthropic:triage", other_ids)
+
+            restore_resp, _ = self._call(
+                "capability_enable",
+                {
+                    "group_id": gid,
+                    "by": "foreman-1",
+                    "actor_id": "foreman-1",
+                    "capability_id": "skill:anthropic:triage",
+                    "scope": "group",
+                    "enabled": True,
+                },
+            )
+            self.assertTrue(restore_resp.ok, getattr(restore_resp, "error", None))
+            restore_result = restore_resp.result if isinstance(restore_resp.result, dict) else {}
+            self.assertEqual(str(restore_result.get("state") or ""), "runnable")
+            _, restored_state = ops._load_state_doc()
+            self.assertNotIn(
+                "skill:anthropic:triage",
+                set(ops._collect_removed_capabilities(restored_state, group_id=gid)),
+            )
         finally:
             cleanup()
 
@@ -6177,6 +7484,7 @@ class TestCapabilityOps(unittest.TestCase):
 
         _, cleanup = self._with_home()
         try:
+            self._write_allowlist_override(mcp_registry_level="mounted")
             gid = self._create_group()
             self._add_actor(gid, "peer-1", by="user")
             capability_id = "mcp:example/echo-server"
@@ -6354,17 +7662,37 @@ class TestCapabilityOps(unittest.TestCase):
             )
             self.assertTrue(import_resp.ok, getattr(import_resp, "error", None))
 
+            secondary_resp, _ = self._call(
+                "capability_import",
+                {
+                    "group_id": gid,
+                    "by": "peer-1",
+                    "actor_id": "peer-1",
+                    "record": {
+                        "capability_id": "skill:github:demo:minimal-checklist",
+                        "kind": "skill",
+                        "name": "Minimal Checklist",
+                        "description_short": "Minimal checklist",
+                        "source_id": "github_skills_curated",
+                        "capsule_text": "Use a short checklist",
+                    },
+                },
+            )
+            self.assertTrue(secondary_resp.ok, getattr(secondary_resp, "error", None))
+
             overview_resp, _ = self._call(
                 "capability_overview",
                 {
                     "query": "minimal repro note",
                     "limit": 50,
                     "include_indexed": True,
+                    "source_id": "github_skills_curated",
                 },
             )
             self.assertTrue(overview_resp.ok, getattr(overview_resp, "error", None))
             result = overview_resp.result if isinstance(overview_resp.result, dict) else {}
             items = result.get("items") if isinstance(result.get("items"), list) else []
+            self.assertEqual(str((items[0] if items else {}).get("capability_id") or ""), capability_id)
             row = next(
                 (
                     item

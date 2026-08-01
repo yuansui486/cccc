@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.mcp_router_harness import route_tool_call
+
 
 class TestMcpRuntimeContext(unittest.TestCase):
     def test_iter_ancestor_pids_uses_windows_parent_chain(self) -> None:
@@ -211,7 +213,7 @@ class TestMcpRuntimeContext(unittest.TestCase):
             "call_daemon",
             side_effect=_fake_call_daemon,
         ):
-            out = mcp_server.handle_tool_call(
+            out = route_tool_call(
                 "onecolleague_actor",
                 {
                     "action": "add",

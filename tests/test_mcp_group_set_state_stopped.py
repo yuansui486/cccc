@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from tests.mcp_router_harness import route_tool_call
+
 # Env vars that _resolve_group_id / _resolve_caller_actor_id read at runtime.
 # Tests must isolate from the host environment to avoid group_id_mismatch.
 _CLEAN_ENV = {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}
@@ -20,7 +22,7 @@ class TestMcpGroupSetStateStopped(unittest.TestCase):
 
         with patch.dict(os.environ, _CLEAN_ENV, clear=False), \
              patch.object(mcp_common, "call_daemon", side_effect=_fake_call_daemon):
-            out = mcp_server.handle_tool_call(
+            out = route_tool_call(
                 "onecolleague_group",
                 {
                     "action": "set_state",

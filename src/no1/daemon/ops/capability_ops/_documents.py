@@ -264,7 +264,7 @@ def _normalize_catalog_doc(raw: Any) -> Dict[str, Any]:
             cap_id = canonical_builtin_skill_id(str(candidate.get("capability_id") or raw_cap_id).strip())
             if not cap_id:
                 continue
-            source_id = _normalize_source_id(candidate.get("source_id"))
+            source_id = _normalize_source_id(candidate.get("source_id") or "manual_import")
             if source_id not in _SOURCE_IDS:
                 continue
             candidate["source_id"] = source_id
@@ -438,12 +438,16 @@ def _normalize_runtime_doc(raw: Any) -> Dict[str, Any]:
                     artifact_id = str(item.get("artifact_id") or capability_artifacts.get(cid) or "").strip()
                     if artifact_id and artifact_id not in artifacts:
                         artifact_id = ""
-                    clean_actor[cid] = {
+                    clean_binding = {
                         "artifact_id": artifact_id,
                         "state": str(item.get("state") or "").strip() or "unknown",
                         "last_error": str(item.get("last_error") or "").strip(),
                         "updated_at": str(item.get("updated_at") or "").strip() or now,
                     }
+                    mutation_id = str(item.get("mutation_id") or "").strip()
+                    if mutation_id:
+                        clean_binding["mutation_id"] = mutation_id
+                    clean_actor[cid] = clean_binding
                 if clean_actor:
                     clean_group[aid] = clean_actor
             if clean_group:

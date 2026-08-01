@@ -90,6 +90,7 @@ from ._search import (
     _display_name_from_capability_id,
     _render_source_states,
 )
+from ._admission import resolve_current_admission
 
 
 def _pkg():
@@ -2200,44 +2201,21 @@ def handle_capability_tool_call(args: Dict[str, Any]) -> DaemonResponse:
             if actor_id not in {str(a.get("id") or "") for a in actors if isinstance(a, dict)}:
                 return _error("actor_not_found", f"actor not found in group: {actor_id}")
 
-        with _STATE_LOCK:
-            state_path, state_doc = _load_state_doc()
-            enabled_caps, mutated = _collect_enabled_capabilities(state_doc, group_id=group_id, actor_id=actor_id)
-            blocked_caps, blocked_mutated = _collect_blocked_capabilities(state_doc, group_id=group_id)
-            if mutated or blocked_mutated:
-                _save_state_doc(state_path, state_doc)
-
-        enabled_external = [cid for cid in enabled_caps if cid not in BUILTIN_CAPABILITY_PACKS]
+        admission = resolve_current_admission(group_id=group_id, actor_id=actor_id)
+        enabled_external = [
+            cid
+            for cid in admission.get("admitted_capabilities") or []
+            if cid not in BUILTIN_CAPABILITY_PACKS
+        ]
         if capability_id_hint and capability_id_hint in BUILTIN_CAPABILITY_PACKS:
             return _error("capability_tool_not_found", f"capability is not external: {capability_id_hint}")
-        if capability_id_hint and isinstance(blocked_caps.get(capability_id_hint), dict):
-            block_entry = blocked_caps.get(capability_id_hint) if isinstance(blocked_caps.get(capability_id_hint), dict) else {}
-            scope_token = str(block_entry.get("scope") or "group").strip().lower()
-            reason_code = "blocked_by_global_policy" if scope_token == "global" else "blocked_by_group_policy"
-            details = {"capability_id": capability_id_hint, "tool_name": tool_name, "blocked_scope": scope_token}
-            reason_text = str(block_entry.get("reason") or "").strip()
-            if reason_text:
-                details["blocked_reason"] = reason_text
-            return _error(reason_code, f"capability blocked: {capability_id_hint}", details=details)
         if capability_id_hint and capability_id_hint not in set(enabled_external):
+            denial = str((admission.get("denied_capabilities") or {}).get(capability_id_hint) or "not_admitted")
             return _error(
                 "capability_tool_not_found",
-                f"capability not enabled for actor: {capability_id_hint}",
-                details={"capability_id": capability_id_hint, "tool_name": tool_name},
+                f"capability not currently admitted for actor: {capability_id_hint}",
+                details={"capability_id": capability_id_hint, "tool_name": tool_name, "reason": denial},
             )
-        candidate_caps = [
-            cid
-            for cid in ([capability_id_hint] if capability_id_hint else list(enabled_external))
-            if not isinstance(blocked_caps.get(cid), dict)
-        ]
-        if not candidate_caps:
-            blocked_ids = [cid for cid in enabled_external if isinstance(blocked_caps.get(cid), dict)]
-            if blocked_ids:
-                return _error(
-                    "blocked_by_group_policy",
-                    "all enabled external capabilities are blocked",
-                    details={"tool_name": tool_name, "blocked_capabilities": blocked_ids},
-                )
 
         target_capability_id = ""
         target_artifact_id = ""
@@ -2248,90 +2226,54 @@ def handle_capability_tool_call(args: Dict[str, Any]) -> DaemonResponse:
         if not tool_aliases:
             tool_aliases = {tool_name}
 
-        with _RUNTIME_LOCK:
-            _, runtime_doc = _load_runtime_doc()
-            artifacts = _runtime_artifacts(runtime_doc)
-            capability_artifacts = _runtime_capability_artifacts(runtime_doc)
-            actor_bindings = _runtime_actor_bindings(runtime_doc)
-            per_group_bindings = (
-                actor_bindings.get(group_id)
-                if isinstance(actor_bindings.get(group_id), dict)
-                else {}
+        matches: List[Tuple[str, str, Dict[str, Any], str, str]] = []
+        available_by_cap: Dict[str, set[str]] = {}
+        for grant in admission.get("external_tool_grants") or []:
+            if not isinstance(grant, dict):
+                continue
+            capability_id = str(grant.get("capability_id") or "").strip()
+            if capability_id_hint and capability_id != capability_id_hint:
+                continue
+            synthetic_name = str(grant.get("name") or "").strip()
+            real_name = str(grant.get("real_tool_name") or "").strip()
+            aliases = {str(item or "").strip() for item in grant.get("aliases") or [] if str(item or "").strip()}
+            available_by_cap.setdefault(capability_id, set()).update({synthetic_name, real_name})
+            if not tool_aliases.intersection(aliases):
+                continue
+            install = grant.get("install") if isinstance(grant.get("install"), dict) else {}
+            matches.append(
+                (
+                    capability_id,
+                    str(grant.get("artifact_id") or ""),
+                    install,
+                    real_name,
+                    synthetic_name,
+                )
             )
-            per_actor_bindings = (
-                per_group_bindings.get(actor_id)
-                if isinstance(per_group_bindings.get(actor_id), dict)
-                else {}
-            )
-            matches: List[Tuple[str, str, Dict[str, Any], str, str]] = []
-            available_by_cap: Dict[str, set[str]] = {}
-            direct_fallback: Optional[Tuple[str, str, Dict[str, Any]]] = None
-            for capability_id in candidate_caps:
-                binding = per_actor_bindings.get(capability_id) if isinstance(per_actor_bindings, dict) else None
-                binding_state = str((binding or {}).get("state") or "").strip() if isinstance(binding, dict) else ""
-                if not _binding_state_allows_external_tool(binding_state):
-                    continue
-                artifact_id = str((binding or {}).get("artifact_id") or "").strip() if isinstance(binding, dict) else ""
-                if not artifact_id:
-                    artifact_id = str(capability_artifacts.get(capability_id) or "").strip()
-                install = artifacts.get(artifact_id) if isinstance(artifacts, dict) else None
-                if not isinstance(install, dict):
-                    continue
-                if not _install_state_allows_external_tool(install.get("state")):
-                    continue
-                tools = install.get("tools") if isinstance(install.get("tools"), list) else []
-                if not tools:
-                    if capability_id_hint and capability_id == capability_id_hint:
-                        direct_fallback = (capability_id, artifact_id, install)
-                    continue
-                for tool in tools:
-                    if not isinstance(tool, dict):
-                        continue
-                    synthetic_name = str(tool.get("name") or "").strip()
-                    real_name = str(tool.get("real_tool_name") or "").strip()
-                    if not synthetic_name or not real_name:
-                        continue
-                    names = available_by_cap.setdefault(capability_id, set())
-                    names.add(synthetic_name)
-                    names.add(real_name)
-                    if (
-                        tool_name != synthetic_name
-                        and tool_name != real_name
-                        and synthetic_name not in tool_aliases
-                        and real_name not in tool_aliases
-                    ):
-                        continue
-                    matches.append((capability_id, artifact_id, install, real_name, synthetic_name))
 
-            if not matches:
-                if capability_id_hint and isinstance(direct_fallback, tuple):
-                    target_capability_id, target_artifact_id, target_install = direct_fallback
-                    real_tool_name = tool_name
-                    resolved_tool_name = tool_name
-                else:
-                    details: Dict[str, Any] = {}
-                    if capability_id_hint:
-                        available = sorted(available_by_cap.get(capability_id_hint) or [])
-                        if available:
-                            details["available_tools"] = available[:64]
-                        details["capability_id"] = capability_id_hint
-                    return _error("capability_tool_not_found", f"tool not found or not enabled: {tool_name}", details=details)
-            else:
-                if len(matches) > 1:
-                    candidates = [
-                        {
-                            "capability_id": cap_id,
-                            "tool_name": synthetic,
-                            "real_tool_name": real,
-                        }
-                        for cap_id, _, _, real, synthetic in matches
-                    ]
-                    return _error(
-                        "capability_tool_ambiguous",
-                        f"tool resolves to multiple enabled capabilities: {tool_name}",
-                        details={"tool_name": tool_name, "candidates": candidates},
-                    )
-                target_capability_id, target_artifact_id, target_install, real_tool_name, resolved_tool_name = matches[0]
+        if not matches:
+            details: Dict[str, Any] = {}
+            if capability_id_hint:
+                available = sorted(available_by_cap.get(capability_id_hint) or [])
+                if available:
+                    details["available_tools"] = available[:64]
+                details["capability_id"] = capability_id_hint
+            return _error("capability_tool_not_found", f"tool not found or not enabled: {tool_name}", details=details)
+        if len(matches) > 1:
+            candidates = [
+                {
+                    "capability_id": cap_id,
+                    "tool_name": synthetic,
+                    "real_tool_name": real,
+                }
+                for cap_id, _, _, real, synthetic in matches
+            ]
+            return _error(
+                "capability_tool_ambiguous",
+                f"tool resolves to multiple enabled capabilities: {tool_name}",
+                details={"tool_name": tool_name, "candidates": candidates},
+            )
+        target_capability_id, target_artifact_id, target_install, real_tool_name, resolved_tool_name = matches[0]
 
         try:
             result, resolved_real_tool_name = _pkg()._invoke_installed_external_tool_with_aliases(
