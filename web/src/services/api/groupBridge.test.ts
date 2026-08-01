@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { GroupBridgeRegistration, GroupBridgeTrust } from "./groupBridge";
 
 describe("groupBridgeApi", () => {
   const fetchMock = vi.fn();
@@ -77,5 +78,72 @@ describe("groupBridgeApi", () => {
     expect(settingsSource).toContain('id: "groupBridge"');
     expect(settingsSource).toContain('tab === "groupBridge" && groupId');
     expect(settingsSource).toContain('setScope("group")');
+  });
+
+  it("builds remote targets only from exact active registration and trust pairs", async () => {
+    const { buildActiveGroupBridgeRemoteTargets } = await import("./groupBridge");
+    const registrations: GroupBridgeRegistration[] = [
+      { registration_id: "reg-1", group_id: "local", remote_group_id: "remote", remote_peer_id: "peer", transport: "group_bridge_session", status: "active" },
+      { registration_id: "reg-2", group_id: "local", remote_group_id: "other", remote_peer_id: "peer", transport: "group_bridge_session", status: "revoked" },
+    ];
+    const trusts: GroupBridgeTrust[] = [
+      { trust_id: "trust-1", registration_id: "reg-1", group_id: "local", remote_group_id: "remote", remote_peer_id: "peer", remote_endpoint: "https://remote", transport: "group_bridge_session", access_level: "full", status: "active", revision: 1 },
+      { trust_id: "trust-2", registration_id: "reg-1", group_id: "local", remote_group_id: "other", remote_peer_id: "peer", remote_endpoint: "https://other", transport: "group_bridge_session", access_level: "messages", status: "active", revision: 1 },
+    ];
+
+    expect(buildActiveGroupBridgeRemoteTargets(registrations, trusts, "local")).toEqual([
+      {
+        registration_id: "reg-1",
+        group_id: "local",
+        remote_group_id: "remote",
+        remote_peer_id: "peer",
+      },
+    ]);
+  });
+
+  it("sends and polls remote delivery with one registration-scoped idempotency key", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, result: { queued: true, replayed: false, receipt: { status: "queued" } } }),
+    });
+
+    const { groupBridgeApi } = await import("./groupBridge");
+    await groupBridgeApi.remoteSend("group-1", "registration-1", "gbs_0123456789abcdef0123456789abcdef", {
+      text: "hello",
+      format: "plain",
+      priority: "normal",
+      reply_required: false,
+    });
+    await groupBridgeApi.remoteStatus("group-1", "registration-1", "gbs_0123456789abcdef0123456789abcdef");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/group-bridge/remote/send",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          group_id: "group-1",
+          registration_id: "registration-1",
+          idempotency_key: "gbs_0123456789abcdef0123456789abcdef",
+          payload: { text: "hello", format: "plain", priority: "normal", reply_required: false },
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/group-bridge/remote/status",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("generates strict Web Crypto idempotency keys", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: (bytes: Uint8Array) => {
+      bytes.fill(0xab);
+      return bytes;
+    } });
+    const { createGroupBridgeIdempotencyKey } = await import("./groupBridge");
+    const key = createGroupBridgeIdempotencyKey();
+    expect(key).toMatch(/^gbs_[0-9a-f]{32}$/);
   });
 });

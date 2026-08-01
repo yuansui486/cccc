@@ -12,6 +12,7 @@ import { filterSlashCommands, getVisibleSlashCommandPage, type SlashCommandItem,
 import { getRecipientDisplayLabel } from "../../utils/displayText";
 import { Laptop } from "lucide-react";
 import { computerControlApi, type WorkflowManifest } from "../../services/api/computerControl";
+import type { GroupBridgeRemoteReceipt, GroupBridgeRemoteTarget } from "../../services/api/groupBridge";
 import {
   canStartComposerHistory,
   moveComposerHistory,
@@ -35,6 +36,12 @@ export interface ChatComposerProps {
   recipientActors: Actor[];
   recipientActorsBusy?: boolean;
   destGroupId: string;
+  remoteTargets: GroupBridgeRemoteTarget[];
+  remoteTargetsBusy?: boolean;
+  remoteTargetId: string;
+  onRemoteTargetChange: (registrationId: string) => void;
+  remoteReceipt: GroupBridgeRemoteReceipt | null;
+  remoteStatusUnavailable?: boolean;
   composerGroupSettled: boolean;
   busy: string;
 
@@ -100,6 +107,12 @@ export function ChatComposer({
   recipientActors,
   recipientActorsBusy,
   destGroupId,
+  remoteTargets,
+  remoteTargetsBusy,
+  remoteTargetId,
+  onRemoteTargetChange,
+  remoteReceipt,
+  remoteStatusUnavailable,
   composerGroupSettled,
   busy,
   replyTarget,
@@ -585,6 +598,7 @@ export function ChatComposer({
   const canSend = composerGroupSettled && (composerText.trim() || composerFiles.length > 0);
   const isAttention = priority === "attention";
   const isCrossGroup = !!destGroupId && destGroupId !== selectedGroupId;
+  const isRemoteTarget = !!remoteTargetId;
 
   type MessageMode = "normal" | "attention" | "task" | "collaboration";
   const messageMode: MessageMode = replyRequired
@@ -631,7 +645,9 @@ export function ChatComposer({
   const fileDisabledReason = (() => {
     if (!selectedGroupId) return t('selectGroupFirst');
     if (busy === "send") return t('busy');
-    if (isCrossGroup) return t('crossGroupAttachment');
+    if (isCrossGroup || isRemoteTarget) return isRemoteTarget
+      ? "Group Bridge remote messages do not support attachments"
+      : t('crossGroupAttachment');
     return t('attachFile');
   })();
   const sendShortcutLabel = useMemo(() => {
@@ -644,6 +660,21 @@ export function ChatComposer({
     shortcut: sendShortcutLabel,
     defaultValue: "Send message ({{shortcut}})",
   });
+  const remoteReceiptStatus = String(remoteReceipt?.status || "").trim();
+  const remoteReceiptEventId = String(remoteReceipt?.remote_event_id || "").trim();
+  const remoteReceiptLabel = remoteReceiptStatus === "sent" && remoteReceiptEventId
+    ? "Remote accepted / signed receipt verified"
+    : remoteReceiptStatus === "sent"
+      ? "Remote receipt pending"
+      : remoteReceiptStatus === "failed"
+        ? "Remote delivery failed"
+        : remoteReceiptStatus === "sending"
+          ? "Remote sending"
+          : remoteReceiptStatus === "retrying"
+            ? "Remote retrying"
+            : remoteReceiptStatus === "queued"
+              ? "Remote queued"
+              : "";
 
   return (
     <footer
@@ -776,13 +807,66 @@ export function ChatComposer({
                 : "bg-white/55 focus-within:bg-white/80",
             )}
           >
+            {(remoteTargetsBusy || remoteTargets.length > 0) && (
+              <label
+                className={classNames(
+                  "flex min-w-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px] font-medium text-[var(--color-text-tertiary)] sm:hidden",
+                  isDark ? "border-white/[0.04]" : "border-black/[0.04]",
+                )}
+              >
+                <span className="shrink-0">Route</span>
+                <select
+                  className={classNames(
+                    "h-7 min-w-0 flex-1 rounded-lg border px-2 text-[11px] outline-none",
+                    isDark ? "border-white/[0.08] bg-white/[0.05] text-slate-200" : "border-black/[0.08] bg-white text-gray-700",
+                  )}
+                  value={remoteTargetId}
+                  onChange={(event) => onRemoteTargetChange(event.target.value)}
+                  disabled={busy === "send" || remoteTargetsBusy}
+                  aria-label="Message route"
+                >
+                  <option value="">Local chat</option>
+                  {remoteTargets.map((target) => (
+                    <option key={target.registration_id} value={target.registration_id}>
+                      {target.remote_group_title || target.remote_group_id} · {target.remote_peer_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             {/* Row 1 — Skill picker and recipients */}
             <div
               className={classNames(
-                "flex items-center gap-1.5 border-b px-2.5 py-1",
+                "flex items-center gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b px-2.5 py-1 scrollbar-subtle touch-pan-x sm:overflow-x-visible sm:overscroll-auto",
                 isDark ? "border-white/[0.04]" : "border-black/[0.04]",
               )}
+              role="toolbar"
+              aria-label="Composer controls"
+              tabIndex={0}
             >
+              {(remoteTargetsBusy || remoteTargets.length > 0) && (
+                <label className="hidden min-w-0 shrink-0 items-center gap-1.5 text-[10px] font-medium text-[var(--color-text-tertiary)] sm:flex">
+                  <span>Route</span>
+                  <select
+                    className={classNames(
+                      "h-6 max-w-[12rem] min-w-0 rounded-lg border px-1.5 text-[10px] outline-none",
+                      isDark ? "border-white/[0.08] bg-white/[0.05] text-slate-200" : "border-black/[0.08] bg-white text-gray-700",
+                    )}
+                    value={remoteTargetId}
+                    onChange={(event) => onRemoteTargetChange(event.target.value)}
+                    disabled={busy === "send" || remoteTargetsBusy}
+                    aria-label="Message route"
+                  >
+                    <option value="">Local chat</option>
+                    {remoteTargets.map((target) => (
+                      <option key={target.registration_id} value={target.registration_id}>
+                        {target.remote_group_title || target.remote_group_id} · {target.remote_peer_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div ref={skillMenuRef} className="relative flex-shrink-0">
                 <button
                   type="button"
@@ -792,7 +876,7 @@ export function ChatComposer({
                     selectedSkill ? skillPickerActiveClass : chipInactiveClass,
                   )}
                   onClick={() => setShowSkillMenu((value) => !value)}
-                  disabled={busy === "send"}
+                  disabled={busy === "send" || isRemoteTarget}
                   aria-expanded={showSkillMenu}
                   aria-label={t("skillPicker", { defaultValue: "技能选择" })}
                   title={t("skillPicker", { defaultValue: "技能选择" })}
@@ -929,7 +1013,7 @@ export function ChatComposer({
                     if (foreman?.id) setComputerControlActorId(foreman.id);
                   }
                 }}
-                disabled={busy === "send" || !selectedGroupId || isCrossGroup}
+                  disabled={busy === "send" || !selectedGroupId || isCrossGroup || isRemoteTarget}
                 aria-pressed={computerControlEnabled}
                 title="让智能体编排或运行电脑控制工作流"
               >
@@ -988,7 +1072,7 @@ export function ChatComposer({
                       : chipInactiveClass,
                   )}
                   onClick={toggleCollaborationRequiredMode}
-                  disabled={busy === "send" || !selectedGroupId}
+                  disabled={busy === "send" || !selectedGroupId || isRemoteTarget}
                   aria-pressed={messageMode === "collaboration"}
                   aria-label={t("modeNeedCollaboration", { defaultValue: "需协作" })}
                   title={t("modeNeedCollaborationDesc", { defaultValue: "要求负责人按协作流程拆分、验收并持续推进" })}
@@ -1002,8 +1086,8 @@ export function ChatComposer({
               </span>
 
               <ScrollFade
-                className="min-w-0 flex-1"
-                innerClassName="w-full max-w-full"
+                className="w-max flex-none sm:min-w-0 sm:flex-1"
+                innerClassName="w-max max-w-none sm:w-full sm:max-w-full"
                 fadeWidth={20}
               >
                 <div
@@ -1024,7 +1108,7 @@ export function ChatComposer({
                             : chipInactiveClass,
                         )}
                         onClick={() => onToggleRecipient(tok)}
-                        disabled={!selectedGroupId || busy === "send"}
+                        disabled={!selectedGroupId || busy === "send" || isRemoteTarget}
                         aria-pressed={active}
                       >
                         {renderRecipientChipContent(getRecipientDisplayLabel(tok))}
@@ -1045,7 +1129,7 @@ export function ChatComposer({
                             : chipInactiveClass,
                         )}
                         onClick={() => onToggleRecipient(id)}
-                        disabled={!selectedGroupId || busy === "send" || !!recipientActorsBusy}
+                        disabled={!selectedGroupId || busy === "send" || !!recipientActorsBusy || isRemoteTarget}
                         aria-pressed={active}
                       >
                         {renderRecipientChipContent(actor.title || id)}
@@ -1070,6 +1154,23 @@ export function ChatComposer({
                 </button>
               )}
             </div>
+
+            {remoteReceiptLabel || remoteStatusUnavailable ? (
+              <div
+                className={classNames(
+                  "flex flex-wrap items-center gap-2 border-b px-2.5 py-1.5 text-[11px]",
+                  isDark ? "border-white/[0.05] bg-cyan-400/[0.04] text-cyan-100/80" : "border-black/[0.05] bg-cyan-50/70 text-cyan-800",
+                )}
+              >
+                <span className="font-medium">{remoteStatusUnavailable ? "Remote status unavailable" : remoteReceiptLabel}</span>
+                {remoteReceiptStatus === "sent" && remoteReceiptEventId ? (
+                  <span className="min-w-0 truncate opacity-75" title={remoteReceiptEventId}>
+                    {remoteReceiptEventId}
+                  </span>
+                ) : null}
+                {remoteStatusUnavailable ? <span className="opacity-70">Last known receipt retained</span> : null}
+              </div>
+            ) : null}
 
             {computerControlEnabled && (
               <div className={classNames(
@@ -1259,7 +1360,7 @@ export function ChatComposer({
                     : "",
                 )}
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!selectedGroupId || busy === "send" || isCrossGroup}
+                  disabled={!selectedGroupId || busy === "send" || isCrossGroup || isRemoteTarget}
                 aria-label={t('attachFile')}
                 title={fileDisabledReason}
               >
@@ -1274,7 +1375,7 @@ export function ChatComposer({
                     : "border border-blue-600 bg-blue-600 text-white shadow-[var(--glass-accent-shadow)] hover:border-blue-700 hover:bg-blue-700 active:scale-[0.97] dark:border-blue-400 dark:bg-blue-500 dark:hover:border-blue-300 dark:hover:bg-blue-400",
                 )}
                 onClick={onSendMessage}
-                disabled={busy === "send" || !canSend}
+                  disabled={busy === "send" || !canSend}
                 aria-label={t('sendMessage')}
                 title={sendButtonTitle}
               >

@@ -163,6 +163,12 @@ export function ChatTab({
     setComputerControlActorId,
     destGroupId,
     composerGroupSettled,
+    remoteTargets,
+    remoteTargetsBusy,
+    remoteTargetId,
+    setRemoteTargetId,
+    remoteReceipt,
+    remoteStatusUnavailable,
     mentionSuggestions,
     composerHistoryEntries,
     suggestedUserMessage,
@@ -840,6 +846,12 @@ export function ChatTab({
             recipientActors={recipientActors}
             recipientActorsBusy={recipientActorsBusy}
             destGroupId={destGroupId}
+            remoteTargets={remoteTargets}
+            remoteTargetsBusy={remoteTargetsBusy}
+            remoteTargetId={remoteTargetId}
+            onRemoteTargetChange={setRemoteTargetId}
+            remoteReceipt={remoteReceipt}
+            remoteStatusUnavailable={remoteStatusUnavailable}
             busy={busy}
             replyTarget={replyTarget}
             onCancelReply={cancelReply}
