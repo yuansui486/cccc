@@ -32,6 +32,15 @@ from .session import (
     send_group_bridge_session_message,
 )
 from .remote_dispatch import RemoteDispatchError, enqueue_remote_send, remote_delivery_status
+from .pairing_transport import (
+    PairingTransportError,
+    create_pairing_connection,
+    receive_remote_pairing_request,
+    remote_pairing_status,
+    submit_remote_pairing,
+    sync_remote_pairing,
+)
+from .remote_outbox_worker import default_local_endpoint
 
 _SEND_OP = "group_bridge_session_send"
 _RECEIVE_OP = "group_bridge_session_receive"
@@ -46,7 +55,7 @@ _SEND_FIELDS = frozenset(
         "payload",
     }
 )
-_RECEIVE_FIELDS = frozenset({"group_id", "local_endpoint", "envelope"})
+_RECEIVE_FIELDS = frozenset({"group_id", "envelope"})
 _REMOTE_SEND_OP = "remote_send"
 _REMOTE_STATUS_OP = "remote_delivery_status"
 _REMOTE_SEND_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key", "payload"})
@@ -60,6 +69,11 @@ _MGMT_APPROVE_OP = "group_bridge_management_pairing_approve"
 _MGMT_REJECT_OP = "group_bridge_management_pairing_reject"
 _MGMT_ACCESS_OP = "group_bridge_management_trust_access"
 _MGMT_REVOKE_OP = "group_bridge_management_trust_revoke"
+_MGMT_CONNECTION_OP = "group_bridge_management_pairing_connection"
+_MGMT_REMOTE_SUBMIT_OP = "group_bridge_management_pairing_remote_submit"
+_MGMT_REMOTE_SYNC_OP = "group_bridge_management_pairing_remote_sync"
+_PUBLIC_PAIRING_REQUEST_OP = "group_bridge_pairing_remote_request"
+_PUBLIC_PAIRING_STATUS_OP = "group_bridge_pairing_remote_status"
 _MGMT_ALIASES = {
     "group_bridge_identity": _MGMT_IDENTITY_OP,
     "group_bridge_registrations": _MGMT_REGISTRATIONS_OP,
@@ -82,6 +96,12 @@ _MGMT_APPROVE_FIELDS = frozenset({"group_id", "request_id", "access_token"})
 _MGMT_REJECT_FIELDS = frozenset({"group_id", "request_id", "reason", "access_token"})
 _MGMT_ACCESS_FIELDS = frozenset({"group_id", "trust_id", "access_level", "expected_revision", "access_token"})
 _MGMT_REVOKE_FIELDS = frozenset({"group_id", "trust_id", "expected_revision", "access_token"})
+_MGMT_CONNECTION_FIELDS = frozenset(
+    {"group_id", "expected_remote_group_id", "expected_remote_peer_id", "multiaddrs", "ttl_seconds", "access_token"}
+)
+_MGMT_REMOTE_SUBMIT_FIELDS = frozenset({"group_id", "group_title", "connection", "access_token"})
+_MGMT_REMOTE_SYNC_FIELDS = frozenset({"group_id", "outbound_id", "access_token"})
+_PUBLIC_PAIRING_FIELDS = frozenset({"envelope"})
 
 
 def _error(code: str, message: str, *, retriable: bool = False) -> DaemonResponse:
@@ -210,7 +230,7 @@ def _handle_receive(
         receipt = receive_group_bridge_session_message(
             envelope.model_dump(),
             group_id=args["group_id"],
-            local_endpoint=args["local_endpoint"],
+            local_endpoint=default_local_endpoint(),
             deliver=deliver,
         )
         return DaemonResponse(ok=True, result={"receipt": receipt})
@@ -275,6 +295,9 @@ def _handle_management(args: Dict[str, Any], *, op: str) -> DaemonResponse:
         _MGMT_REJECT_OP: _MGMT_REJECT_FIELDS,
         _MGMT_ACCESS_OP: _MGMT_ACCESS_FIELDS,
         _MGMT_REVOKE_OP: _MGMT_REVOKE_FIELDS,
+        _MGMT_CONNECTION_OP: _MGMT_CONNECTION_FIELDS,
+        _MGMT_REMOTE_SUBMIT_OP: _MGMT_REMOTE_SUBMIT_FIELDS,
+        _MGMT_REMOTE_SYNC_OP: _MGMT_REMOTE_SYNC_FIELDS,
     }
     invalid = _closed_args(args, field_sets[op])
     if invalid is not None:
@@ -304,6 +327,38 @@ def _handle_management(args: Dict[str, Any], *, op: str) -> DaemonResponse:
             _management_read_principal(args, group_id)
             return DaemonResponse(ok=True, result={"requests": list_pairing_requests(group_id=group_id)})
         claim = _management_claim(args, group_id)
+        if op == _MGMT_CONNECTION_OP:
+            if type(args["expected_remote_group_id"]) is not str or type(args["expected_remote_peer_id"]) is not str:
+                raise ValueError("pairing connection identities are invalid")
+            if type(args["multiaddrs"]) is not list or not all(type(item) is str for item in args["multiaddrs"]):
+                raise ValueError("pairing connection addresses are invalid")
+            if type(args["ttl_seconds"]) is not int or isinstance(args["ttl_seconds"], bool):
+                raise ValueError("pairing connection ttl is invalid")
+            connection = create_pairing_connection(
+                group_id=group_id,
+                local_endpoint=default_local_endpoint(),
+                remote_group_id=args["expected_remote_group_id"],
+                remote_peer_id=args["expected_remote_peer_id"],
+                multiaddrs=args["multiaddrs"],
+                ttl_seconds=args["ttl_seconds"],
+            )
+            return DaemonResponse(ok=True, result={"connection": connection})
+        if op == _MGMT_REMOTE_SUBMIT_OP:
+            if type(args["group_title"]) is not str or not isinstance(args["connection"], dict):
+                raise ValueError("pairing remote submit facts are invalid")
+            outbound = submit_remote_pairing(
+                args["connection"],
+                local_group_id=group_id,
+                local_group_title=args["group_title"],
+                requester_endpoint=default_local_endpoint(),
+                claim=claim,
+            )
+            return DaemonResponse(ok=True, result={"outbound": outbound})
+        if op == _MGMT_REMOTE_SYNC_OP:
+            if type(args["outbound_id"]) is not str or not args["outbound_id"]:
+                raise ValueError("pairing outbound identity is invalid")
+            outbound = sync_remote_pairing(args["outbound_id"], local_group_id=group_id, claim=claim)
+            return DaemonResponse(ok=True, result={"outbound": outbound})
         if op == _MGMT_INVITE_OP:
             if type(args["expected_remote_group_id"]) is not str or type(args["expected_remote_peer_id"]) is not str:
                 raise ValueError("pairing invite identities are invalid")
@@ -362,8 +417,34 @@ def _handle_management(args: Dict[str, Any], *, op: str) -> DaemonResponse:
         if "access_level" in message:
             return _management_error("invalid_access_level", "access level is invalid")
         return _management_error("invalid_request", "Group Bridge management request is invalid")
+    except PairingTransportError as exc:
+        return _error(exc.code, str(exc), retriable=exc.retriable)
     except Exception:
         return _management_error("management_failed")
+
+
+def _handle_public_pairing(args: Dict[str, Any], *, op: str) -> DaemonResponse:
+    invalid = _closed_args(args, _PUBLIC_PAIRING_FIELDS)
+    if invalid is not None:
+        return invalid
+    try:
+        if not isinstance(args["envelope"], dict):
+            raise PairingTransportError("invalid_request", "Group Bridge pairing envelope is invalid")
+        if op == _PUBLIC_PAIRING_REQUEST_OP:
+            status = receive_remote_pairing_request(
+                args["envelope"],
+                local_endpoint=default_local_endpoint(),
+            )
+        else:
+            status = remote_pairing_status(
+                args["envelope"],
+                local_endpoint=default_local_endpoint(),
+            )
+        return DaemonResponse(ok=True, result={"status": status})
+    except PairingTransportError as exc:
+        return _error(exc.code, str(exc), retriable=exc.retriable)
+    except Exception:
+        return _error("pairing_failed", "Group Bridge pairing operation failed", retriable=True)
 
 
 def _handle_remote_send(args: Dict[str, Any]) -> DaemonResponse:
@@ -415,6 +496,8 @@ def try_handle_group_bridge_op(
         return _handle_remote_send(args)
     if op == _REMOTE_STATUS_OP:
         return _handle_remote_status(args)
+    if op in {_PUBLIC_PAIRING_REQUEST_OP, _PUBLIC_PAIRING_STATUS_OP}:
+        return _handle_public_pairing(args, op=op)
     canonical_management_op = _MGMT_ALIASES.get(op, op)
     if canonical_management_op in {
         _MGMT_IDENTITY_OP,
@@ -426,6 +509,9 @@ def try_handle_group_bridge_op(
         _MGMT_REJECT_OP,
         _MGMT_ACCESS_OP,
         _MGMT_REVOKE_OP,
+        _MGMT_CONNECTION_OP,
+        _MGMT_REMOTE_SUBMIT_OP,
+        _MGMT_REMOTE_SYNC_OP,
     }:
         return _handle_management(args, op=canonical_management_op)
     return None

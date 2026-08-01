@@ -54,7 +54,7 @@ def default_local_endpoint() -> str:
         return configured
     host = str(os.environ.get("CCCC_WEB_EFFECTIVE_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port = str(os.environ.get("CCCC_WEB_EFFECTIVE_PORT") or "8848").strip() or "8848"
-    return f"http://{host}:{port}/api/group-bridge/session"
+    return f"http://{host}:{port}/api/group-bridge/session/receive"
 
 
 def _client_nonce(idempotency_key: str) -> str:

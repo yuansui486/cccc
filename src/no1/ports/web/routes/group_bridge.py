@@ -7,14 +7,74 @@ the daemon operation boundary.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from ....contracts.v1.group_bridge import GroupBridgeSessionMessage
+from ....contracts.v1.group_bridge import (
+    GroupBridgePairingConnectionEnvelope,
+    GroupBridgePairingRequestEnvelope,
+    GroupBridgeSessionMessage,
+    GroupBridgeSignedMessageEnvelope,
+)
 from ..middleware import get_access_token_cookie
 from ..schemas import RouteContext, check_group, require_user
+
+_MAX_PUBLIC_ENVELOPE_BYTES = 256_000
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> Dict[str, Any]:
+    value: Dict[str, Any] = {}
+    for key, item in pairs:
+        if not isinstance(key, str) or key in value:
+            raise ValueError("duplicate JSON object key")
+        value[key] = item
+    return value
+
+
+async def _bounded_public_json(request: Request) -> Dict[str, Any]:
+    encoding = str(request.headers.get("content-encoding") or "").strip().lower()
+    if encoding not in {"", "identity"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_envelope", "message": "invalid envelope"})
+    length = str(request.headers.get("content-length") or "").strip()
+    if length:
+        if not length.isascii() or not length.isdigit():
+            raise HTTPException(status_code=400, detail={"code": "invalid_envelope", "message": "invalid envelope"})
+        if int(length) > _MAX_PUBLIC_ENVELOPE_BYTES:
+            raise HTTPException(status_code=413, detail={"code": "envelope_too_large", "message": "envelope too large"})
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        if not isinstance(chunk, bytes):
+            raise HTTPException(status_code=400, detail={"code": "invalid_envelope", "message": "invalid envelope"})
+        size += len(chunk)
+        if size > _MAX_PUBLIC_ENVELOPE_BYTES:
+            raise HTTPException(status_code=413, detail={"code": "envelope_too_large", "message": "envelope too large"})
+        chunks.append(chunk)
+    try:
+        value = json.loads(b"".join(chunks).decode("utf-8"), object_pairs_hook=_unique_json_object)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_envelope", "message": "invalid envelope"},
+        ) from None
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail={"code": "invalid_envelope", "message": "invalid envelope"})
+    return value
+
+
+async def _public_model(request: Request, model_type: Any) -> Any:
+    try:
+        return model_type.model_validate(await _bounded_public_json(request))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_envelope", "message": "invalid envelope"},
+        ) from None
 
 
 class GroupBridgeSessionSendRequest(BaseModel):
@@ -27,14 +87,6 @@ class GroupBridgeSessionSendRequest(BaseModel):
     remote_endpoint: str = Field(default="", max_length=2048)
     client_nonce: str = Field(min_length=43, max_length=43)
     payload: Dict[str, Any]
-
-
-class GroupBridgeSessionReceiveRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    group_id: str = Field(min_length=1, max_length=256)
-    local_endpoint: str = Field(min_length=1, max_length=2048)
-    envelope: Dict[str, Any]
 
 
 class GroupBridgeRemoteSendRequest(BaseModel):
@@ -65,6 +117,15 @@ class GroupBridgePairingInviteRequest(GroupBridgeManagementGroupRequest):
     expected_remote_peer_id: str = Field(default="", max_length=256)
     multiaddrs: list[str] = Field(default_factory=list, max_length=32)
     ttl_seconds: int = Field(default=600, ge=60, le=3600)
+
+
+class GroupBridgePairingConnectionRequest(GroupBridgePairingInviteRequest):
+    pass
+
+
+class GroupBridgeRemotePairingSubmitRequest(GroupBridgeManagementGroupRequest):
+    group_title: str = Field(default="", max_length=256)
+    connection: GroupBridgePairingConnectionEnvelope
 
 
 class GroupBridgePairingRequestAction(GroupBridgeManagementGroupRequest):
@@ -238,6 +299,49 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
         return {"ok": True, "result": _unwrap_daemon(response)}
 
+    @management_router.post("/pairing/connections")
+    async def group_bridge_management_pairing_connection(
+        request: Request,
+        req: GroupBridgePairingConnectionRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_connection",
+                "args": _management_args(request, req.model_dump()),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/pairing/remote/submit")
+    async def group_bridge_management_pairing_remote_submit(
+        request: Request,
+        req: GroupBridgeRemotePairingSubmitRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_remote_submit",
+                "args": _management_args(request, req.model_dump()),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
+    @management_router.post("/pairing/remote/{outbound_id}/sync")
+    async def group_bridge_management_pairing_remote_sync(
+        outbound_id: str,
+        request: Request,
+        req: GroupBridgeManagementGroupRequest,
+    ) -> Dict[str, Any]:
+        check_group(request, req.group_id)
+        response = await ctx.daemon(
+            {
+                "op": "group_bridge_management_pairing_remote_sync",
+                "args": _management_args(request, {"group_id": req.group_id, "outbound_id": outbound_id}),
+            }
+        )
+        return {"ok": True, "result": _unwrap_daemon(response)}
+
     @management_router.post("/pairing/requests/{request_id}/approve")
     async def group_bridge_management_pairing_approve(
         request: Request,
@@ -312,25 +416,48 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         )
         return {"ok": True, "result": _unwrap_daemon(response)}
 
+    @public_router.post("/pairing/remote/requests")
+    async def group_bridge_pairing_remote_request(
+        request: Request,
+    ) -> Dict[str, Any]:
+        req = await _public_model(request, GroupBridgePairingRequestEnvelope)
+        response = await ctx.daemon(
+            {"op": "group_bridge_pairing_remote_request", "args": {"envelope": req.model_dump()}}
+        )
+        return _unwrap_daemon(response)["status"]
+
+    @public_router.post("/pairing/remote/status")
+    async def group_bridge_pairing_remote_status(
+        request: Request,
+    ) -> Dict[str, Any]:
+        req = await _public_model(request, GroupBridgePairingRequestEnvelope)
+        response = await ctx.daemon(
+            {"op": "group_bridge_pairing_remote_status", "args": {"envelope": req.model_dump()}}
+        )
+        return _unwrap_daemon(response)["status"]
+
     @public_router.post("/session/receive")
     async def group_bridge_session_receive(
-        req: GroupBridgeSessionReceiveRequest,
+        request: Request,
     ) -> Dict[str, Any]:
+        req = await _public_model(request, GroupBridgeSignedMessageEnvelope)
         # This endpoint is reachable by a remote peer, so authentication is
         # the signed envelope and the daemon's exact-target/trust checks.
         response = await ctx.daemon(
             {
                 "op": "group_bridge_session_receive",
-                "args": req.model_dump(),
+                "args": {
+                    "group_id": req.target_group_id,
+                    "envelope": req.model_dump(),
+                },
             }
         )
-        return {"ok": True, "result": _unwrap_daemon(response)}
+        return _unwrap_daemon(response)["receipt"]
 
     return [public_router, management_router]
 
 
 __all__ = [
-    "GroupBridgeSessionReceiveRequest",
     "GroupBridgeSessionSendRequest",
     "GroupBridgeRemoteSendRequest",
     "GroupBridgeRemoteStatusRequest",

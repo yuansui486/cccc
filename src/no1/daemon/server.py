@@ -141,6 +141,7 @@ _DAEMON_CLIENT_WARNING_WINDOW_S = 5.0
 _DAEMON_CLIENT_WARN_LOCK = threading.Lock()
 _DAEMON_CLIENT_WARN_SEEN: Dict[tuple[str, str, str], float] = {}
 _SPACE_SYNC_RUN_QUEUE: Optional[GroupSpaceSyncRunQueue] = None
+_REQUEST_EXECUTION_SHUTDOWN_TIMEOUT_S = 20.0
 _REQUEST_FAST_QUEUE_OPS = {"send", "reply", "chat_ack"}
 _REQUEST_READ_QUEUE_OPS = {
     "branding_get",
@@ -491,6 +492,35 @@ def _start_daemon_computer_control_after_lock(home: Path, lock_handle: Any) -> A
     except Exception:
         logger.exception("Computer-control daemon service recovery is not ready")
         return None
+
+
+def _stop_request_execution_before_lock_release(
+    queue_workers: list[tuple[DaemonRequestExecutionQueue, list[threading.Thread]]],
+    *,
+    stop_event: Optional[threading.Event] = None,
+    timeout: float = _REQUEST_EXECUTION_SHUTDOWN_TIMEOUT_S,
+) -> bool:
+    for request_queue, workers in queue_workers:
+        request_queue.close_admission(worker_count=len(workers))
+    if stop_event is not None:
+        stop_event.set()
+    deadline = time.monotonic() + max(0.0, float(timeout or 0.0))
+    for _request_queue, workers in queue_workers:
+        for worker in workers:
+            worker.join(timeout=max(0.0, deadline - time.monotonic()))
+    active = [
+        worker.name
+        for _queue, workers in queue_workers
+        for worker in workers
+        if worker.is_alive()
+    ]
+    if active:
+        logger.error(
+            "Daemon requests did not drain; retaining daemon ownership workers=%s",
+            ",".join(active),
+        )
+        return False
+    return True
 
 
 def _desired_daemon_transport() -> str:
@@ -1169,10 +1199,28 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             logger=logger,
             on_should_exit=stop_event.set,
         )
-        start_request_execution_thread(request_queue=request_queue, name="onecolleague-request-worker-slow")
-        start_request_execution_thread(request_queue=fast_request_queue, name="onecolleague-request-worker-fast")
-        start_request_execution_thread(request_queue=read_request_queue, name="onecolleague-request-worker-read-1")
-        start_request_execution_thread(request_queue=read_request_queue, name="onecolleague-request-worker-read-2")
+        request_workers = [
+            start_request_execution_thread(
+                request_queue=request_queue,
+                name="onecolleague-request-worker-slow",
+            )
+        ]
+        fast_request_workers = [
+            start_request_execution_thread(
+                request_queue=fast_request_queue,
+                name="onecolleague-request-worker-fast",
+            )
+        ]
+        read_request_workers = [
+            start_request_execution_thread(
+                request_queue=read_request_queue,
+                name="onecolleague-request-worker-read-1",
+            ),
+            start_request_execution_thread(
+                request_queue=read_request_queue,
+                name="onecolleague-request-worker-read-2",
+            ),
+        ]
 
         should_exit = False
         while not should_exit and not stop_event.is_set():
@@ -1235,6 +1283,15 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             if should_exit:
                 stop_event.set()
 
+    if not _stop_request_execution_before_lock_release(
+        [
+            (request_queue, request_workers),
+            (fast_request_queue, fast_request_workers),
+            (read_request_queue, read_request_workers),
+        ],
+        stop_event=stop_event,
+    ):
+        return 1
     if remote_outbox_worker is not None and not remote_outbox_worker.stop(timeout=2.0):
         logger.error("Group Bridge remote outbox worker is still active; retaining daemon ownership")
         return 1

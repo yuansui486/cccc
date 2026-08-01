@@ -1075,6 +1075,136 @@ def list_pairing_requests(*, group_id: str = "", home: Optional[Path] = None) ->
     return [_project_request(request) for request in requests]
 
 
+def install_remote_pairing_approval(
+    *,
+    local_group_id: str,
+    remote_group_id: str,
+    remote_group_title: str,
+    remote_endpoint: str,
+    remote_peer_id: str,
+    remote_request_id: str,
+    client_nonce_hash: str,
+    claim: AccessTokenPrincipalClaim,
+    home: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Install an issuer-approved principal as a normal local pairing triad.
+
+    The remote approval is verified by the daemon transport before entering
+    this kernel boundary.  This helper preserves the pairing store's invariant
+    that every trust is backed by one approved local request and invite.
+    """
+
+    sealed = _require_claim(claim)
+    local_group = _input_identity(local_group_id, field="local_group_id")
+    remote_group = _input_identity(remote_group_id, field="remote_group_id")
+    remote_title = _input_identity(remote_group_title, field="remote_group_title", optional=True)
+    remote_url = _normalize_remote_endpoint(remote_endpoint)
+    remote_peer = _input_identity(remote_peer_id, field="remote_peer_id")
+    remote_request = _input_identity(remote_request_id, field="remote_request_id")
+    _record_id(remote_request, prefix=_REQUEST_PREFIX)
+    nonce_hash = _lower_hex(client_nonce_hash, length=64)
+
+    def install(principal: AccessTokenPrincipal, canonical_home: Path) -> Dict[str, Any]:
+        _require_group(principal, local_group)
+        material = "|".join((local_group, remote_group, remote_peer, remote_request))
+        invite_id = _INVITE_PREFIX + hashlib.sha256(f"invite|{material}".encode("utf-8")).hexdigest()[:16]
+        request_id = _REQUEST_PREFIX + hashlib.sha256(f"request|{material}".encode("utf-8")).hexdigest()[:16]
+        phase_lock = acquire_lockfile(_phase_lock_path("remote-approval", request_id, canonical_home), blocking=True)
+        try:
+            lock = acquire_lockfile(_lock_path(canonical_home), blocking=True)
+            try:
+                store = _load_store(canonical_home, for_write=True)
+                principal_facts = {
+                    "group_id": local_group,
+                    "transport": _PAIRING_TRANSPORT,
+                    "remote_endpoint": remote_url,
+                    "remote_group_id": remote_group,
+                    "remote_peer_id": remote_peer,
+                }
+                for trust in store["trusts"].values():
+                    if (
+                        trust["status"] == "active"
+                        and _principal_key(trust) == _principal_key(principal_facts)
+                        and _trust_registration_current(trust, canonical_home)
+                    ):
+                        request = store["requests"].get(trust["request_id"])
+                        if not isinstance(request, dict):
+                            raise PairingStoreError("Active pairing trust lost its request")
+                        return _approved_result(store, request, home=canonical_home)
+
+                existing_request = store["requests"].get(request_id)
+                if existing_request is not None:
+                    expected = (
+                        existing_request["group_id"],
+                        existing_request["remote_group_id"],
+                        existing_request["remote_endpoint"],
+                        existing_request["remote_peer_id"],
+                        existing_request["client_nonce_hash"],
+                    )
+                    if expected != (local_group, remote_group, remote_url, remote_peer, nonce_hash):
+                        raise PairingStoreError("Remote pairing approval conflicts with existing local facts")
+                else:
+                    if invite_id in store["invites"]:
+                        raise PairingStoreError("Remote pairing approval invite identity conflicts")
+                    now = _now()
+                    now_text = _timestamp(now)
+                    expires_at = _timestamp(now + timedelta(seconds=_DEFAULT_TTL_SECONDS))
+                    code_nonce = hashlib.sha256(f"nonce|{material}".encode("utf-8")).hexdigest()[:32]
+                    invite = {
+                        "invite_id": invite_id,
+                        "group_id": local_group,
+                        "expected_remote_group_id": remote_group,
+                        "expected_remote_peer_id": remote_peer,
+                        "local_multiaddrs": [],
+                        "transport": _PAIRING_TRANSPORT,
+                        "code_nonce": code_nonce,
+                        "pairing_code_hash": hashlib.sha256(f"code|{material}".encode("utf-8")).hexdigest(),
+                        "status": "requested",
+                        "created_at": now_text,
+                        "updated_at": now_text,
+                        "expires_at": expires_at,
+                        "request_id": request_id,
+                    }
+                    request = {
+                        "request_id": request_id,
+                        "invite_id": invite_id,
+                        "group_id": local_group,
+                        "remote_group_id": remote_group,
+                        "remote_group_title": remote_title,
+                        "remote_endpoint": remote_url,
+                        "remote_peer_id": remote_peer,
+                        "remote_multiaddrs": [],
+                        "transport": _PAIRING_TRANSPORT,
+                        "status": "pending",
+                        "created_at": now_text,
+                        "updated_at": now_text,
+                        "expires_at": expires_at,
+                        "approved_by": "",
+                        "rejected_by": "",
+                        "rejection_reason": "",
+                        "registration_id": "",
+                        "registration_fingerprint": "",
+                        "registration_url": "",
+                        "trust_id": "",
+                        "approval_nonce": "",
+                        "approval_fingerprint": "",
+                        "client_nonce_hash": nonce_hash,
+                        "request_fingerprint": "",
+                    }
+                    request["request_fingerprint"] = _request_fingerprint(request)
+                    candidate = copy.deepcopy(store)
+                    candidate["invites"][invite_id] = invite
+                    candidate["requests"][request_id] = request
+                    _save_store(candidate, canonical_home)
+            finally:
+                release_lockfile(lock)
+            return _approve_pairing_request(request_id, principal, home=canonical_home)
+        finally:
+            release_lockfile(phase_lock)
+
+    return sealed.consume_current_for_home(home, install)
+
+
 def _require_claim(claim: Any) -> AccessTokenPrincipalClaim:
     if not isinstance(claim, AccessTokenPrincipalClaim):
         raise PairingAuthorizationError("A live access token principal claim is required")

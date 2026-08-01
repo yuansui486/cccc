@@ -9,13 +9,34 @@ from fastapi.testclient import TestClient
 
 
 class TestGroupBridgeSurface(unittest.TestCase):
+    def _wire_envelope(self):
+        return {
+            "version": 1,
+            "kind": "message",
+            "transport": "group_bridge_session",
+            "nonce": "A" * 43,
+            "issued_at": "2026-08-01T00:00:00Z",
+            "source_group_id": "g_remote",
+            "source_peer_id": "peer_remote",
+            "source_public_key": ("A" * 43) + "=",
+            "source_endpoint": "https://remote.example/api/group-bridge/session/receive",
+            "target_group_id": "g_local",
+            "target_peer_id": "peer_local",
+            "target_endpoint": "https://local.example/api/group-bridge/session/receive",
+            "payload": {"text": "hello"},
+            "signature": ("A" * 86) + "==",
+        }
+
     def _route_client(self, calls):
         from no1.ports.web.routes.group_bridge import create_routers
         from no1.ports.web.schemas import RouteContext
 
         async def daemon(req):
             calls.append(req)
-            return {"ok": True, "result": {"session": {"status": "accepted"}}}
+            return {
+                "ok": True,
+                "result": {"session": {"status": "accepted"}, "receipt": {"status": "accepted"}},
+            }
 
         ctx = RouteContext(
             home=Path(tempfile.gettempdir()),
@@ -69,15 +90,14 @@ class TestGroupBridgeSurface(unittest.TestCase):
         client = self._route_client(calls)
         response = client.post(
             "/api/group-bridge/session/receive",
-            json={
-                "group_id": "g_local",
-                "local_endpoint": "https://local.example/session",
-                "envelope": {"opaque": "daemon-validates-this"},
-            },
+            json=self._wire_envelope(),
         )
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "accepted"})
         self.assertEqual(calls[0]["op"], "group_bridge_session_receive")
-        self.assertEqual(set(calls[0]["args"]), {"group_id", "local_endpoint", "envelope"})
+        self.assertEqual(set(calls[0]["args"]), {"group_id", "envelope"})
+        self.assertEqual(calls[0]["args"]["group_id"], "g_local")
+        self.assertNotIn("local_endpoint", calls[0]["args"])
 
     def test_web_rejects_extra_fields_before_daemon(self):
         calls = []
@@ -98,6 +118,29 @@ class TestGroupBridgeSurface(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(calls, [])
 
+    def test_public_wire_reader_rejects_duplicate_compressed_and_oversized_body_before_daemon(self):
+        calls = []
+        client = self._route_client(calls)
+        duplicate = client.post(
+            "/api/group-bridge/session/receive",
+            content=b'{"version":1,"version":1}',
+            headers={"Content-Type": "application/json"},
+        )
+        compressed = client.post(
+            "/api/group-bridge/pairing/remote/requests",
+            content=b"{}",
+            headers={"Content-Type": "application/json", "Content-Encoding": "gzip"},
+        )
+        oversized = client.post(
+            "/api/group-bridge/pairing/remote/status",
+            content=b"x" * 256_001,
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(compressed.status_code, 400)
+        self.assertEqual(oversized.status_code, 413)
+        self.assertEqual(calls, [])
+
     def test_create_app_keeps_receive_public_but_send_authenticated(self):
         from no1.kernel.access_tokens import create_access_token
         from no1.ports.web.app import create_app
@@ -109,20 +152,22 @@ class TestGroupBridgeSurface(unittest.TestCase):
 
             def fake_call_daemon(req, **_kwargs):
                 calls.append(req)
-                return {"ok": True, "result": {"session": {"status": "accepted"}}}
+                return {
+                    "ok": True,
+                    "result": {"session": {"status": "accepted"}, "receipt": {"status": "accepted"}},
+                }
 
             token = str(create_access_token("web-user", allowed_groups=["g_local"], is_admin=False).get("token") or "")
             with patch("no1.ports.web.app.call_daemon", side_effect=fake_call_daemon):
                 client = TestClient(create_app())
                 receive = client.post(
                     "/api/group-bridge/session/receive",
-                    json={
-                        "group_id": "g_local",
-                        "local_endpoint": "https://local.example/session",
-                        "envelope": {"opaque": "daemon-validates-this"},
-                    },
+                    json=self._wire_envelope(),
                 )
                 self.assertEqual(receive.status_code, 200)
+                self.assertEqual(receive.json(), {"status": "accepted"})
+                public_pairing = client.post("/api/group-bridge/pairing/remote/requests", json={})
+                self.assertEqual(public_pairing.status_code, 422)
 
                 send_body = {
                     "group_id": "g_local",
@@ -142,7 +187,10 @@ class TestGroupBridgeSurface(unittest.TestCase):
                     json=send_body,
                 )
                 self.assertEqual(authenticated_send.status_code, 200)
-            self.assertEqual([item["op"] for item in calls], ["group_bridge_session_receive", "group_bridge_session_send"])
+            self.assertEqual(
+                [item["op"] for item in calls],
+                ["group_bridge_session_receive", "group_bridge_session_send"],
+            )
 
         if old_home is None:
             os.environ.pop("CCCC_HOME", None)

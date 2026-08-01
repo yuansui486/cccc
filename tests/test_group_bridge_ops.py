@@ -27,7 +27,13 @@ class TestGroupBridgeOps(unittest.TestCase):
         self.remote_home = self.root / "remote"
         self.endpoint = "https://local.example.test/api/v1/group-bridge/session"
         self.remote_endpoint = "https://remote.example.test/api/v1/group-bridge/session"
-        self._env = patch.dict(os.environ, {"CCCC_HOME": str(self.home)})
+        self._env = patch.dict(
+            os.environ,
+            {
+                "CCCC_GROUP_BRIDGE_LOCAL_ENDPOINT": self.endpoint,
+                "CCCC_HOME": str(self.home),
+            },
+        )
         self._env.start()
         self.addCleanup(self._env.stop)
         self.addCleanup(self._td.cleanup)
@@ -97,7 +103,6 @@ class TestGroupBridgeOps(unittest.TestCase):
     def _receive_args(envelope: dict[str, object]) -> dict[str, object]:
         return {
             "group_id": "local-group",
-            "local_endpoint": "https://local.example.test/api/v1/group-bridge/session",
             "envelope": envelope,
         }
 
@@ -329,7 +334,24 @@ print(json.dumps({"response": response.model_dump(), "should_stop": should_stop}
                 assert response is not None and response.error is not None
                 self.assertFalse(response.ok)
                 self.assertEqual(response.error.code, expected)
-                dispatch.assert_not_called()
+        dispatch.assert_not_called()
+
+    def test_receive_rejects_caller_supplied_local_endpoint_before_dispatch(self) -> None:
+        from no1.daemon.group_bridge import ops
+
+        dispatch = Mock()
+        args = self._receive_args(self._signed_envelope())
+        args["local_endpoint"] = "https://attacker.example/api/group-bridge/session/receive"
+        response = ops.try_handle_group_bridge_op(
+            "group_bridge_session_receive",
+            args,
+            dispatch_send=dispatch,
+        )
+        self.assertIsNotNone(response)
+        assert response is not None and response.error is not None
+        self.assertFalse(response.ok)
+        self.assertEqual(response.error.code, "invalid_request")
+        dispatch.assert_not_called()
 
     def test_receive_preserves_permanent_local_delivery_conflict(self) -> None:
         from no1.contracts.v1 import DaemonError, DaemonResponse
@@ -560,7 +582,7 @@ print(json.dumps({"response": response.model_dump(), "should_stop": should_stop}
         )
         request = DaemonRequest(
             op="group_bridge_session_receive",
-            args={"group_id": group_id, "local_endpoint": self.endpoint, "envelope": envelope},
+            args={"group_id": group_id, "envelope": envelope},
         )
         first, first_stop = recurse(request)
         second, second_stop = recurse(request)

@@ -119,6 +119,12 @@ def _web_mode() -> Literal["normal", "exhibit"]:
 
 _PUBLIC_API_PATHS = frozenset({"/api/v1/health", "/api/v1/branding"})
 _GROUP_BRIDGE_SESSION_RECEIVE_PATH = "/api/group-bridge/session/receive"
+_GROUP_BRIDGE_PAIRING_PUBLIC_PATHS = frozenset(
+    {
+        "/api/group-bridge/pairing/remote/requests",
+        "/api/group-bridge/pairing/remote/status",
+    }
+)
 
 
 def _is_public_ui_path(request: Request) -> bool:
@@ -138,6 +144,7 @@ def _is_public_path(request: Request) -> bool:
         _is_public_ui_path(request)
         or path in _PUBLIC_API_PATHS
         or path == _GROUP_BRIDGE_SESSION_RECEIVE_PATH
+        or path in _GROUP_BRIDGE_PAIRING_PUBLIC_PATHS
         or path.startswith("/api/v1/branding/assets/")
         or path.startswith("/mcp/web-model/")
         or path.startswith("/nomcp/s/")

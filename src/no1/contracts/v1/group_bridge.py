@@ -12,6 +12,7 @@ DEFAULT_GROUP_BRIDGE_ACCESS_LEVEL: GroupBridgeAccessLevel = "messages"
 
 RegistrationStatus = Literal["active", "unauthorized", "revoked", "error"]
 RemoteSendStatus = Literal["queued", "sending", "retrying", "sent", "failed"]
+GroupBridgePairingStatus = Literal["submitted", "pending", "approving", "approved", "rejected", "expired"]
 
 
 class RemoteSendPayload(BaseModel):
@@ -137,6 +138,73 @@ class GroupBridgeSignedReceiptEnvelope(BaseModel):
         if type(value) is not int or value != 1:
             raise ValueError("version must be the integer 1")
         return value
+
+
+class GroupBridgePairingConnectionEnvelope(BaseModel):
+    """One-time signed connection information shown by the invite issuer."""
+
+    version: Literal[1] = 1
+    kind: Literal["pairing_connection"] = "pairing_connection"
+    transport: Literal["group_bridge_session"] = "group_bridge_session"
+    invite_id: str = Field(pattern=r"pinv_[0-9a-f]{16}")
+    pairing_code: str = Field(pattern=r"[0-9A-F]{8}(?:-[0-9A-F]{8}){3}")
+    issuer_group_id: str = Field(min_length=1, max_length=256)
+    issuer_peer_id: str = Field(min_length=1, max_length=256)
+    issuer_public_key: str = Field(min_length=44, max_length=44, pattern=r"[A-Za-z0-9+/]{43}=")
+    issuer_endpoint: str = Field(min_length=1, max_length=2048)
+    issued_at: str = Field(min_length=1, max_length=40)
+    expires_at: str = Field(min_length=1, max_length=40)
+    signature: str = Field(min_length=88, max_length=88, pattern=r"[A-Za-z0-9+/]{86}==")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class GroupBridgePairingRequestEnvelope(BaseModel):
+    """Signed requester facts submitted to the invite issuer."""
+
+    version: Literal[1] = 1
+    kind: Literal["pairing_request"] = "pairing_request"
+    transport: Literal["group_bridge_session"] = "group_bridge_session"
+    invite_id: str = Field(pattern=r"pinv_[0-9a-f]{16}")
+    pairing_code: str = Field(pattern=r"[0-9A-F]{8}(?:-[0-9A-F]{8}){3}")
+    client_nonce: str = Field(min_length=43, max_length=43, pattern=r"[A-Za-z0-9_-]{43}")
+    expires_at: str = Field(min_length=1, max_length=40)
+    issuer_group_id: str = Field(min_length=1, max_length=256)
+    issuer_peer_id: str = Field(min_length=1, max_length=256)
+    issuer_public_key: str = Field(min_length=44, max_length=44, pattern=r"[A-Za-z0-9+/]{43}=")
+    issuer_endpoint: str = Field(min_length=1, max_length=2048)
+    requester_group_id: str = Field(min_length=1, max_length=256)
+    requester_group_title: str = Field(default="", max_length=256)
+    requester_peer_id: str = Field(min_length=1, max_length=256)
+    requester_public_key: str = Field(min_length=44, max_length=44, pattern=r"[A-Za-z0-9+/]{43}=")
+    requester_endpoint: str = Field(min_length=1, max_length=2048)
+    signature: str = Field(min_length=88, max_length=88, pattern=r"[A-Za-z0-9+/]{86}==")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class GroupBridgePairingStatusEnvelope(BaseModel):
+    """Issuer-signed status consumed by one exact requester outbound."""
+
+    version: Literal[1] = 1
+    kind: Literal["pairing_status"] = "pairing_status"
+    transport: Literal["group_bridge_session"] = "group_bridge_session"
+    request_id: str = Field(pattern=r"preq_[0-9a-f]{16}")
+    invite_id: str = Field(pattern=r"pinv_[0-9a-f]{16}")
+    request_fingerprint: str = Field(pattern=r"[0-9a-f]{64}")
+    status: Literal["pending", "approving", "approved", "rejected", "expired"]
+    issued_at: str = Field(min_length=1, max_length=40)
+    expires_at: str = Field(min_length=1, max_length=40)
+    issuer_group_id: str = Field(min_length=1, max_length=256)
+    issuer_peer_id: str = Field(min_length=1, max_length=256)
+    issuer_public_key: str = Field(min_length=44, max_length=44, pattern=r"[A-Za-z0-9+/]{43}=")
+    issuer_endpoint: str = Field(min_length=1, max_length=2048)
+    requester_group_id: str = Field(min_length=1, max_length=256)
+    requester_peer_id: str = Field(min_length=1, max_length=256)
+    requester_endpoint: str = Field(min_length=1, max_length=2048)
+    signature: str = Field(min_length=88, max_length=88, pattern=r"[A-Za-z0-9+/]{86}==")
+
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class RegistrationRecord(BaseModel):
