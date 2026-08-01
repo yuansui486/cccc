@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class TestActorProfilesOps(unittest.TestCase):
@@ -1045,16 +1046,17 @@ class TestActorProfilesOps(unittest.TestCase):
             attach, _ = self._call("attach", {"group_id": group_id, "path": ".", "by": "user"})
             self.assertTrue(attach.ok, getattr(attach, "error", None))
 
-            start_global, _ = self._call(
-                "actor_start",
-                {
-                    "group_id": group_id,
-                    "actor_id": "peer1",
-                    "by": "user",
-                    "caller_id": "user-a",
-                    "is_admin": False,
-                },
-            )
+            with patch("no1.daemon.actors.actor_runtime_ops.codex_app_supervisor.start_actor"):
+                start_global, _ = self._call(
+                    "actor_start",
+                    {
+                        "group_id": group_id,
+                        "actor_id": "peer1",
+                        "by": "user",
+                        "caller_id": "user-a",
+                        "is_admin": False,
+                    },
+                )
             self.assertTrue(start_global.ok, getattr(start_global, "error", None))
             actor_global = (start_global.result or {}).get("actor") if isinstance(start_global.result, dict) else {}
             self.assertIsInstance(actor_global, dict)
