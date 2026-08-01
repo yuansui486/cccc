@@ -954,6 +954,31 @@ class RunAuthorityStore:
         with self._locked(identity["group_id"]):
             return self._require_legacy_run_current_unlocked(identity)
 
+    def read_legacy_run(self, group_id: str, resource_id: str) -> Dict[str, Any]:
+        """Read only runs whose stable namespace has no manual authority marker."""
+
+        group = self._required(group_id, "group_id")
+        resource = self._required(resource_id, "resource_id")
+        run_path = self._run_path(group, resource)
+        if not run_path.exists():
+            raise KeyError(resource)
+        with self._locked(group):
+            if self._path(group, resource).exists():
+                raise PermissionError("manual actor run requires operation authority")
+            if not run_path.exists():
+                raise KeyError(resource)
+            value = self._read(run_path)
+            if not value:
+                raise KeyError(resource)
+            origin = str(value.get("origin") or "legacy_internal")
+            if (
+                origin != "legacy_internal"
+                or str(value.get("group_id") or "") != group
+                or str(value.get("run_id") or "") != resource
+            ):
+                raise PermissionError("run is not a legacy internal resource")
+            return value
+
     @staticmethod
     def _require_synchronous_legacy_callback_result(
         result: Any,

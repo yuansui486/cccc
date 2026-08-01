@@ -50,6 +50,7 @@ _LEGACY_EXECUTION_SEAL = object()
 @dataclass(frozen=True)
 class _LegacyExecution:
     allocation: LegacyRunAllocationClaim
+    daemon_execution_claim: Any
     _seal: object = _LEGACY_EXECUTION_SEAL
 
 
@@ -146,7 +147,13 @@ class WorkflowRunner:
         self._manual_executions: Dict[tuple[str, str, str], _ManualExecution] = {}
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self._sync_thread: threading.Thread | None = None
-        self._sync_lock = threading.Lock()
+        self._sync_lock = threading.RLock()
+        self._daemon_execution_claim: Any = None
+        self._daemon_stopping = False
+        self._sync_futures: set[Any] = set()
+        self._sync_operations: set[asyncio.Task[Any]] = set()
+        self._daemon_cancelled_tasks: set[Any] = set()
+        self._daemon_cancelled_futures: set[Any] = set()
 
     class _ExternalLeaseLost(RuntimeError):
         def __init__(self, lease: Optional[Dict[str, Any]] = None):
@@ -183,29 +190,61 @@ class WorkflowRunner:
         values.pop(key, None)
         return True
 
-    def _recover_manual_runs_after_restart(self, owner: Any) -> None:
-        from .services import _daemon_owner_state
+    def _bind_daemon_execution_claim(self, claim: Any) -> None:
+        # Issuance happens while daemon recovery is still finishing. The first
+        # execution validates READY again at its own linearization point.
+        if claim is None:
+            raise PermissionError("current READY daemon execution claim is required")
+        with self._sync_lock:
+            self._daemon_execution_claim = claim
+            self._daemon_stopping = False
+            self._daemon_cancelled_tasks.clear()
+            self._daemon_cancelled_futures.clear()
 
-        _daemon_owner_state(owner, home=self.home)
-        assert self.run_authorities is not None
-        for candidate in self.run_authorities.restart_candidates():
-            expected = {
-                "expected_group_id": candidate["group_id"],
-                "expected_actor_id": candidate["actor_id"],
-                "expected_resource_id": candidate["resource_id"],
-                "expected_authority_id": candidate["authority_id"],
-                "expected_execution_id": candidate["execution_id"],
-            }
-            try:
-                if candidate["control_state"] == "revoked":
-                    claim = self.run_authorities.prepare_terminal_reconciliation(**expected)
-                    self.run_authorities.finish_terminal_reconciliation(claim)
-                else:
-                    claim = self.run_authorities.prepare_restart_recovery(**expected)
-                    self.lease.release_run_after_restart(authority=claim)
-                    self.run_authorities.finish_restart_recovery(claim)
-            except PermissionError:
-                continue
+    def _clear_daemon_execution_claim(self, expected: Any) -> None:
+        with self._sync_lock:
+            if self._daemon_execution_claim is expected:
+                self._daemon_execution_claim = None
+
+    def _require_daemon_execution_claim(self, expected: Any = None) -> Any:
+        from .services import _validate_daemon_execution_claim
+
+        claim = self._daemon_execution_claim if expected is None else expected
+        if self._daemon_execution_claim is not claim:
+            raise PermissionError("current READY daemon execution claim is required")
+        _validate_daemon_execution_claim(claim, home=self.home)
+        return claim
+
+    def _recover_manual_runs_after_restart(self, owner: Any) -> None:
+        from .services import _claim_daemon_generation, _release_daemon_generation
+
+        generation_claim = _claim_daemon_generation(
+            owner,
+            home=self.home,
+            subject="runner-recovery",
+        )
+        try:
+            assert self.run_authorities is not None
+            for candidate in self.run_authorities.restart_candidates():
+                expected = {
+                    "expected_group_id": candidate["group_id"],
+                    "expected_actor_id": candidate["actor_id"],
+                    "expected_resource_id": candidate["resource_id"],
+                    "expected_authority_id": candidate["authority_id"],
+                    "expected_execution_id": candidate["execution_id"],
+                }
+                try:
+                    if candidate["control_state"] == "revoked":
+                        claim = self.run_authorities.prepare_terminal_reconciliation(**expected)
+                        self.run_authorities.finish_terminal_reconciliation(claim)
+                    else:
+                        claim = self.run_authorities.prepare_restart_recovery(**expected)
+                        self.lease.release_run_after_restart(authority=claim)
+                        self.run_authorities.finish_restart_recovery(claim)
+                except PermissionError:
+                    continue
+        finally:
+            _release_daemon_generation(generation_claim)
 
     def _require_execution(
         self,
@@ -214,6 +253,7 @@ class WorkflowRunner:
     ) -> None:
         origin = str(run.get("origin") or "legacy_internal")
         if isinstance(execution, _LegacyExecution):
+            self._require_daemon_execution_claim(execution.daemon_execution_claim)
             if execution._seal is not _LEGACY_EXECUTION_SEAL or origin != "legacy_internal":
                 raise PermissionError("manual actor run requires execution authority")
             current = self.run_namespace.require_legacy_run_current(
@@ -444,19 +484,116 @@ class WorkflowRunner:
 
     def _ensure_sync_loop(self) -> asyncio.AbstractEventLoop:
         with self._sync_lock:
+            if self._daemon_stopping:
+                raise PermissionError("computer-control daemon is stopping")
             if self._sync_loop is not None and self._sync_loop.is_running():
                 return self._sync_loop
             loop = asyncio.new_event_loop()
 
             def run_loop() -> None:
                 asyncio.set_event_loop(loop)
-                loop.run_forever()
+                try:
+                    loop.run_forever()
+                finally:
+                    loop.close()
 
             thread = threading.Thread(target=run_loop, name="onecolleague-computer-runner", daemon=True)
             thread.start()
             self._sync_loop = loop
             self._sync_thread = thread
             return loop
+
+    def _run_sync_operation(self, operation: Any) -> Any:
+        with self._sync_lock:
+            if self._daemon_stopping:
+                close = getattr(operation, "close", None)
+                if callable(close):
+                    close()
+                raise PermissionError("computer-control daemon is stopping")
+            loop = self._ensure_sync_loop()
+
+            async def tracked() -> Any:
+                task = asyncio.current_task()
+                assert task is not None
+                with self._sync_lock:
+                    self._sync_operations.add(task)
+                try:
+                    return await operation
+                finally:
+                    with self._sync_lock:
+                        self._sync_operations.discard(task)
+
+            future = asyncio.run_coroutine_threadsafe(tracked(), loop)
+            self._sync_futures.add(future)
+        try:
+            return future.result()
+        finally:
+            with self._sync_lock:
+                self._sync_futures.discard(future)
+
+    @staticmethod
+    def _cancel_task_threadsafe(task: asyncio.Task[Any]) -> None:
+        if task.done():
+            return
+        loop = task.get_loop()
+        if loop.is_running():
+            loop.call_soon_threadsafe(task.cancel)
+
+    def request_daemon_stop(self) -> None:
+        with self._sync_lock:
+            self._daemon_stopping = True
+            futures = list(self._sync_futures)
+            tasks = list(self._tasks.values()) + list(self._sync_operations)
+            self._daemon_cancelled_futures.update(futures)
+            self._daemon_cancelled_tasks.update(tasks)
+        for future in futures:
+            future.cancel()
+        for task in tasks:
+            self._cancel_task_threadsafe(task)
+
+    def drain_daemon(self, *, timeout: float) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            with self._sync_lock:
+                futures = [future for future in self._sync_futures if not future.done()]
+                tasks = [
+                    task
+                    for task in list(self._tasks.values()) + list(self._sync_operations)
+                    if not task.done()
+                ]
+            for future in futures:
+                with self._sync_lock:
+                    should_cancel = future not in self._daemon_cancelled_futures
+                    self._daemon_cancelled_futures.add(future)
+                if should_cancel:
+                    future.cancel()
+            for task in tasks:
+                with self._sync_lock:
+                    should_cancel = task not in self._daemon_cancelled_tasks
+                    self._daemon_cancelled_tasks.add(task)
+                if should_cancel:
+                    self._cancel_task_threadsafe(task)
+            if not futures and not tasks:
+                break
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+
+        with self._sync_lock:
+            loop = self._sync_loop
+            thread = self._sync_thread
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                return False
+        with self._sync_lock:
+            if self._sync_loop is loop:
+                self._sync_loop = None
+            if self._sync_thread is thread:
+                self._sync_thread = None
+        return True
 
     async def _catalog(self) -> List[Dict[str, Any]]:
         method = getattr(self.session, "catalog", None)
@@ -878,8 +1015,8 @@ class WorkflowRunner:
         trigger_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Submit a run from the synchronous MCP tool server."""
-        loop = self._ensure_sync_loop()
-        future = asyncio.run_coroutine_threadsafe(
+        self._require_daemon_execution_claim()
+        return self._run_sync_operation(
             self.start(
                 group_id,
                 workflow_id,
@@ -888,13 +1025,8 @@ class WorkflowRunner:
                 inputs=inputs,
                 authorization=authorization,
                 trigger_context=trigger_context,
-            ),
-            loop,
+            )
         )
-        # Starting a run may have to wait for MCP discovery. The workflow
-        # itself is cancellable and intentionally has no implicit wall clock
-        # deadline.
-        return future.result()
 
     def _run_path(self, group_id: str, run_id: str) -> Path:
         resource = self._require_run_path_segment(run_id)
@@ -948,10 +1080,7 @@ class WorkflowRunner:
         return value
 
     def get(self, group_id: str, run_id: str) -> Dict[str, Any]:
-        run = self._get_unchecked(group_id, run_id)
-        if str(run.get("origin") or "legacy_internal") == "manual_actor":
-            raise PermissionError("manual actor run requires operation authority")
-        return run
+        return self.run_namespace.read_legacy_run(group_id, run_id)
 
     def get_manual(
         self,
@@ -1013,17 +1142,25 @@ class WorkflowRunner:
         root = self.store.state_root(group_id) / "runs"
         if not root.exists():
             return []
+        bounded_limit = max(1, min(limit, 200))
         result = []
-        for path in sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[: max(1, min(limit, 200))]:
+        for path in sorted(
+            root.glob("*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ):
             try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                value = self.run_namespace.read_legacy_run(group_id, path.stem)
+            except (KeyError, OSError, PermissionError, ValueError):
                 continue
-            if isinstance(value, dict) and str(value.get("origin") or "legacy_internal") != "manual_actor":
+            if isinstance(value, dict):
                 result.append(value)
+                if len(result) >= bounded_limit:
+                    break
         return result
 
     def decide_approval(self, group_id: str, run_id: str, node_id: str, *, approved: bool) -> Dict[str, Any]:
+        self._require_daemon_execution_claim()
         run = self.get(group_id, run_id)
         key = self._run_key(group_id, str(run.get("actor_id") or ""), run_id)
         execution = self._legacy_executions.get(key)
@@ -1133,6 +1270,7 @@ class WorkflowRunner:
         target: Optional[Dict[str, Any]] = None,
         idempotency_key: str = "",
     ) -> Dict[str, Any]:
+        self._require_daemon_execution_claim()
         run = self.get(group_id, run_id)
         run_key = self._run_key(group_id, actor_id, run_id)
         execution = self._legacy_executions.get(run_key)
@@ -1506,6 +1644,7 @@ class WorkflowRunner:
         authorization: Optional[Dict[str, Any]] = None,
         trigger_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        daemon_execution_claim = self._require_daemon_execution_claim()
         selected = self.store.get(group_id, workflow_id, version=version)
         definition = WorkflowDefinition.model_validate({k: v for k, v in selected["definition"].items() if k != "change_note"})
         self._validate_node_path_ids(definition)
@@ -1574,7 +1713,7 @@ class WorkflowRunner:
                 allocation=claim,
             ),
         )
-        execution = _LegacyExecution(allocation)
+        execution = _LegacyExecution(allocation, daemon_execution_claim)
         active_lease = False
         try:
             self._require_execution(run, execution)
@@ -1659,8 +1798,7 @@ class WorkflowRunner:
         request_id: str,
         start_claim: RunStartClaim,
     ) -> Dict[str, Any]:
-        loop = self._ensure_sync_loop()
-        future = asyncio.run_coroutine_threadsafe(
+        return self._run_sync_operation(
             self.start_manual(
                 group_id,
                 workflow_id,
@@ -1669,10 +1807,8 @@ class WorkflowRunner:
                 inputs=inputs,
                 request_id=request_id,
                 start_claim=start_claim,
-            ),
-            loop,
+            )
         )
-        return future.result()
 
     async def start_manual(
         self,
@@ -2462,6 +2598,7 @@ class WorkflowRunner:
         return False
 
     async def cancel(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
+        self._require_daemon_execution_claim()
         run = self.get(group_id, run_id)
         actor_id = str(run.get("actor_id") or "")
         key = self._run_key(group_id, actor_id, run_id)
@@ -2512,9 +2649,10 @@ class WorkflowRunner:
         return self._get_unchecked(group_id, run_id)
 
     def cancel_sync(self, group_id: str, run_id: str, *, emergency: bool = False) -> Dict[str, Any]:
-        loop = self._ensure_sync_loop()
-        future = asyncio.run_coroutine_threadsafe(self.cancel(group_id, run_id, emergency=emergency), loop)
-        return future.result()
+        self._require_daemon_execution_claim()
+        return self._run_sync_operation(
+            self.cancel(group_id, run_id, emergency=emergency)
+        )
 
     async def cancel_manual(
         self,
@@ -2580,17 +2718,14 @@ class WorkflowRunner:
         stop_claim: Optional[RunStopOwnerClaim],
         emergency: bool = False,
     ) -> Dict[str, Any]:
-        loop = self._ensure_sync_loop()
-        future = asyncio.run_coroutine_threadsafe(
+        return self._run_sync_operation(
             self.cancel_manual(
                 group_id,
                 run_id,
                 stop_claim=stop_claim,
                 emergency=emergency,
-            ),
-            loop,
+            )
         )
-        return future.result()
 
     def verify(
         self,
@@ -2603,6 +2738,7 @@ class WorkflowRunner:
         evidence_ids: List[str],
         fingerprint: str,
     ) -> Dict[str, Any]:
+        self._require_daemon_execution_claim()
         run = self.get(group_id, run_id)
         if str(run.get("actor_id") or "") != actor_id:
             raise PermissionError("run belongs to another actor")

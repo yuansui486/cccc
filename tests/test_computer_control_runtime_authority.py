@@ -19,7 +19,10 @@ from no1.computer_control.models import WorkflowDefinition
 from no1.computer_control.requests import ComputerRequestStore
 from no1.computer_control.run_authority import RunAuthorityStore
 from no1.computer_control.runtime import WorkflowRunner
-from no1.computer_control.services import issue_daemon_computer_control_owner
+from no1.computer_control.services import (
+    ComputerControlServices,
+    issue_daemon_computer_control_owner,
+)
 from no1.computer_control.storage import WorkflowStore
 from no1.contracts.v1 import ChatMessageData
 from no1.daemon.messaging.turn_provenance import (
@@ -59,15 +62,7 @@ class _Session:
 
 class TestManualRunAuthorityRuntime(unittest.TestCase):
     def _recover_runner(self, runner: WorkflowRunner) -> None:
-        lock = acquire_lockfile(
-            self.home / "daemon" / "onecolleagued.lock",
-            blocking=False,
-        )
-        try:
-            owner = issue_daemon_computer_control_owner(self.home, lock_handle=lock)
-            runner._recover_manual_runs_after_restart(owner)
-        finally:
-            release_lockfile(lock)
+        runner._recover_manual_runs_after_restart(self.daemon_owner)
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -89,8 +84,31 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
             generation_provider=get_actor_turn_generation,
         )
         self.session = _Session()
+        self.daemon_lock = acquire_lockfile(
+            self.home / "daemon" / "onecolleagued.lock",
+            blocking=False,
+        )
+        self.daemon_owner = issue_daemon_computer_control_owner(
+            self.home,
+            lock_handle=self.daemon_lock,
+        )
+        self.daemon_service = ComputerControlServices(self.home, role="daemon")
+        with patch.object(
+            self.daemon_service.recordings,
+            "_recover_after_restart",
+        ), patch.object(
+            self.daemon_service.runner,
+            "_recover_manual_runs_after_restart",
+        ), patch.object(
+            self.daemon_service.recordings,
+            "_start_watchdog",
+        ), patch.object(self.daemon_service.scheduler, "start_daemon"):
+            self.daemon_service.start_daemon(self.daemon_owner)
+        self.daemon_execution_claim = self.daemon_service._daemon_execution_claim
 
     def tearDown(self) -> None:
+        self.daemon_service.stop_daemon()
+        release_lockfile(self.daemon_lock)
         self.env.stop()
         self.temp.cleanup()
 
@@ -184,7 +202,7 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
         return request, claim
 
     def _runner(self, *, fingerprint: str = "fp") -> WorkflowRunner:
-        return WorkflowRunner(
+        runner = WorkflowRunner(
             self.home,
             self.store,
             self.lease,
@@ -193,6 +211,8 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
             run_authorities=self.authorities,
             requests=self.requests,
         )
+        runner._bind_daemon_execution_claim(self.daemon_execution_claim)
+        return runner
 
     @staticmethod
     def _wait_terminal(runner: WorkflowRunner, run_id: str) -> dict:
@@ -251,6 +271,35 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
             "completed",
         )
         self.assertEqual(runner.list("g"), [])
+
+        run_path = runner._run_path("g", started["run_id"])
+        for status in ("completed", "running"):
+            with self.subTest(raw_oracle_status=status):
+                runner._write_unchecked(
+                    "g",
+                    {**completed, "origin": "legacy_internal", "status": status},
+                )
+                tampered_bytes = run_path.read_bytes()
+                with self.assertRaisesRegex(PermissionError, "operation authority"):
+                    runner.get("g", started["run_id"])
+                self.assertNotIn(
+                    started["run_id"],
+                    {str(item.get("run_id") or "") for item in runner.list("g")},
+                )
+                self.assertEqual(run_path.read_bytes(), tampered_bytes)
+        runner._write_unchecked("g", completed)
+
+        legacy = runner.start_sync(
+            "g",
+            str(workflow["manifest"]["workflow_id"]),
+            actor_id="legacy",
+            version=1,
+            inputs={},
+        )
+        self._wait_terminal(runner, legacy["run_id"])
+        runner._write_unchecked("g", completed)
+        limited = runner.list("g", limit=1)
+        self.assertEqual([item["run_id"] for item in limited], [legacy["run_id"]])
 
         service = type("Service", (), {})()
         service.runner = runner
@@ -770,6 +819,7 @@ class TestManualRunAuthorityRuntime(unittest.TestCase):
             run_authorities=self.authorities,
             requests=self.requests,
         )
+        runner._bind_daemon_execution_claim(self.daemon_execution_claim)
         with patch.object(
             runtime_module.uuid,
             "uuid4",

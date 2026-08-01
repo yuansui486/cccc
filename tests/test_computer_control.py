@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import inspect
 import json
 import os
 import tempfile
@@ -41,6 +42,7 @@ from no1.ports.mcp.server import (
     _MCP_EXTRA_CONTENT_KEY,
     _attach_computer_artifacts,
     _authorize_local_computer_control_tool_call,
+    _handle_onecolleague_namespace,
     handle_tool_call,
     list_tools_for_caller,
 )
@@ -147,6 +149,29 @@ class TestComputerControlRunSurfaceDispatch(unittest.TestCase):
 
 
 class TestComputerControl(unittest.TestCase):
+    def _authorize_legacy_runner(self, home: Path, runner: WorkflowRunner) -> None:
+        lock = acquire_lockfile(
+            home / "daemon" / "onecolleagued.lock",
+            blocking=False,
+        )
+        self.addCleanup(release_lockfile, lock)
+        owner = issue_daemon_computer_control_owner(home, lock_handle=lock)
+        self.addCleanup(lambda retained_owner=owner: None)
+        service = ComputerControlServices(home, role="daemon")
+        service.runner = runner
+        self.addCleanup(service.stop_daemon)
+        with patch.object(
+            service.recordings,
+            "_recover_after_restart",
+        ), patch.object(
+            runner,
+            "_recover_manual_runs_after_restart",
+        ), patch.object(
+            service.recordings,
+            "_start_watchdog",
+        ), patch.object(service.scheduler, "start_daemon"):
+            service.start_daemon(owner)
+
     @staticmethod
     def _recover_recordings(home: Path, recordings: RecordingStore) -> None:
         lock = acquire_lockfile(home / "daemon" / "onecolleagued.lock", blocking=False)
@@ -413,6 +438,24 @@ class TestComputerControl(unittest.TestCase):
         ):
             with self.assertRaisesRegex(Exception, "Web Model"):
                 _authorize_local_computer_control_tool_call(tool)
+
+    def test_computer_control_mcp_daemon_failure_has_no_direct_service_fallback(self):
+        source = inspect.getsource(_handle_onecolleague_namespace)
+        self.assertNotIn("get_services", source)
+        self.assertNotIn("service.runner", source)
+        with patch(
+            "no1.ports.mcp.server._authorize_local_computer_control_tool_call",
+            return_value=("g", "actor"),
+        ), patch(
+            "no1.ports.mcp.server._call_daemon_or_raise",
+            side_effect=RuntimeError("daemon unavailable"),
+        ), patch("no1.computer_control.services.get_services") as get_services:
+            with self.assertRaisesRegex(RuntimeError, "daemon unavailable"):
+                handle_tool_call(
+                    "onecolleague_computer_run",
+                    {"action": "status", "run_id": "run"},
+                )
+        get_services.assert_not_called()
 
     def test_list_tools_exposes_computer_control_only_to_bound_local_standard_actor(self):
         from no1.kernel.actors import add_actor
@@ -2935,6 +2978,7 @@ class TestComputerControl(unittest.TestCase):
             self.assertEqual(len(committed["recording"]["steps"]), 1)
             self.assertEqual(committed["workflow"]["definition"]["nodes"][1]["arguments"]["text"], "${inputs.message}")
             runner = WorkflowRunner(Path(td), store, ComputerControlLease(Path(td)), session)
+            self._authorize_legacy_runner(Path(td), runner)
             run = runner.start_sync(
                 group.group_id,
                 committed["workflow"]["manifest"]["workflow_id"],
@@ -2985,6 +3029,7 @@ class TestComputerControl(unittest.TestCase):
             })
             created = store.create(group.group_id, definition)
             runner = WorkflowRunner(Path(td), store, ComputerControlLease(Path(td)), ReplaySession())
+            self._authorize_legacy_runner(Path(td), runner)
             run = runner.start_sync(
                 group.group_id,
                 created["manifest"]["workflow_id"],
@@ -3043,6 +3088,7 @@ class TestComputerControl(unittest.TestCase):
             })
             created = store.create(group.group_id, definition)
             runner = WorkflowRunner(Path(td), store, ComputerControlLease(Path(td)), BrokenSession())
+            self._authorize_legacy_runner(Path(td), runner)
             runner._wait_for_recovery = AsyncMock()
             run = runner.start_sync(group.group_id, created["manifest"]["workflow_id"], actor_id="a", version=1, inputs={})
             deadline = time.time() + 5
@@ -3079,6 +3125,7 @@ class TestComputerControl(unittest.TestCase):
             })
             created = store.create(group.group_id, definition)
             runner = WorkflowRunner(Path(td), store, ComputerControlLease(Path(td)), ToolErrorSession())
+            self._authorize_legacy_runner(Path(td), runner)
             run = runner.start_sync(group.group_id, created["manifest"]["workflow_id"], actor_id="a", version=1, inputs={})
             deadline = time.time() + 5
             while time.time() < deadline:

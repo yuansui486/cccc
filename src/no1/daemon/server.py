@@ -10,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger("no1.daemon.server")
 
@@ -142,6 +142,7 @@ _DAEMON_CLIENT_WARN_LOCK = threading.Lock()
 _DAEMON_CLIENT_WARN_SEEN: Dict[tuple[str, str, str], float] = {}
 _SPACE_SYNC_RUN_QUEUE: Optional[GroupSpaceSyncRunQueue] = None
 _REQUEST_EXECUTION_SHUTDOWN_TIMEOUT_S = 20.0
+_SHUTDOWN_DRAIN_RETRY_SECONDS = 0.1
 _REQUEST_FAST_QUEUE_OPS = {"send", "reply", "chat_ack"}
 _REQUEST_READ_QUEUE_OPS = {
     "branding_get",
@@ -521,6 +522,82 @@ def _stop_request_execution_before_lock_release(
         )
         return False
     return True
+
+
+def _stop_daemon_computer_control_before_lock_release(service: Any) -> bool:
+    if service is None:
+        return True
+    try:
+        service.begin_daemon_shutdown()
+        if service.stop_daemon() and service.daemon_shutdown_complete():
+            return True
+        logger.error(
+            "Computer-control execution did not drain; retaining daemon ownership"
+        )
+    except Exception:
+        logger.exception(
+            "Computer-control execution did not stop; retaining daemon ownership"
+        )
+    return False
+
+
+def _begin_daemon_computer_control_shutdown(service: Any) -> bool:
+    if service is None:
+        return True
+    try:
+        service.begin_daemon_shutdown()
+        return True
+    except Exception:
+        logger.exception(
+            "Computer-control shutdown admission did not close; retaining daemon ownership"
+        )
+        return False
+
+
+def _daemon_computer_control_shutdown_complete(service: Any) -> bool:
+    if service is None:
+        return True
+    try:
+        return bool(service.daemon_shutdown_complete())
+    except Exception:
+        logger.exception(
+            "Computer-control shutdown state could not be verified; retaining daemon ownership"
+        )
+        return False
+
+
+def _wait_for_daemon_drains_before_lock_release(
+    *,
+    stop_requests: Callable[[], bool],
+    stop_remote_outbox: Callable[[], bool],
+    stop_computer_control: Callable[[], bool],
+    retry_seconds: float = _SHUTDOWN_DRAIN_RETRY_SECONDS,
+) -> None:
+    stages = (
+        ("request execution", stop_requests),
+        ("Group Bridge remote outbox", stop_remote_outbox),
+        ("computer-control execution", stop_computer_control),
+    )
+    attempts = {label: 0 for label, _stop in stages}
+    completed: set[str] = set()
+    while len(completed) < len(stages):
+        for label, stop in stages:
+            if label in completed:
+                continue
+            attempts[label] += 1
+            try:
+                if stop():
+                    completed.add(label)
+                    continue
+            except Exception:
+                logger.exception("%s shutdown drain failed; retaining daemon ownership", label)
+            if attempts[label] == 1 or attempts[label] % 10 == 0:
+                logger.error(
+                    "%s did not drain; retaining daemon ownership and retrying",
+                    label,
+                )
+        if len(completed) < len(stages):
+            time.sleep(max(0.0, float(retry_seconds or 0.0)))
 
 
 def _desired_daemon_transport() -> str:
@@ -1283,23 +1360,29 @@ def serve_forever(paths: Optional[DaemonPaths] = None) -> int:
             if should_exit:
                 stop_event.set()
 
-    if not _stop_request_execution_before_lock_release(
-        [
-            (request_queue, request_workers),
-            (fast_request_queue, fast_request_workers),
-            (read_request_queue, read_request_workers),
-        ],
-        stop_event=stop_event,
-    ):
-        return 1
-    if remote_outbox_worker is not None and not remote_outbox_worker.stop(timeout=2.0):
-        logger.error("Group Bridge remote outbox worker is still active; retaining daemon ownership")
-        return 1
-    try:
-        if computer_control_service is not None:
-            computer_control_service.stop_daemon()
-    except Exception:
-        logger.exception("Computer-control daemon scheduler did not stop cleanly")
+    while not _begin_daemon_computer_control_shutdown(computer_control_service):
+        time.sleep(_SHUTDOWN_DRAIN_RETRY_SECONDS)
+    _wait_for_daemon_drains_before_lock_release(
+        stop_requests=lambda: _stop_request_execution_before_lock_release(
+            [
+                (request_queue, request_workers),
+                (fast_request_queue, fast_request_workers),
+                (read_request_queue, read_request_workers),
+            ],
+            stop_event=stop_event,
+        ),
+        stop_remote_outbox=lambda: (
+            remote_outbox_worker is None or remote_outbox_worker.stop(timeout=2.0)
+        ),
+        stop_computer_control=lambda: (
+            _stop_daemon_computer_control_before_lock_release(
+                computer_control_service
+            )
+        ),
+    )
+    while not _daemon_computer_control_shutdown_complete(computer_control_service):
+        _stop_daemon_computer_control_before_lock_release(computer_control_service)
+        time.sleep(_SHUTDOWN_DRAIN_RETRY_SECONDS)
     try:
         close_all_browser_surface_sessions()
     except Exception:

@@ -30,6 +30,7 @@ class RecordingStore:
     MAX_TOOL_CALLS = 100
     MAX_CONSECUTIVE_FAILURES = 3
     IDLE_SUSPEND_SECONDS = 300.0
+    WATCHDOG_INTERVAL_SECONDS = 5.0
 
     def __init__(
         self,
@@ -56,29 +57,104 @@ class RecordingStore:
         self._terminating: Dict[str, tuple[DerivedAuthorityClaim, DerivedAuthorityClaim, str]] = {}
         self._suspend_pending: Dict[str, tuple[str, str, DerivedAuthorityClaim, str]] = {}
         self._watchdog: Optional[threading.Thread] = None
+        self._watchdog_stop: Optional[threading.Event] = None
+        self._watchdog_owner: Optional[tuple[int, str, int]] = None
+        self._watchdog_generation_claim: Any = None
 
     def _recover_after_restart(self, owner: Any) -> None:
-        from .services import _daemon_owner_state
+        from .services import _claim_daemon_generation, _release_daemon_generation
 
-        _daemon_owner_state(owner, home=self.home)
-        self._suspend_recovered_recordings()
+        claim = _claim_daemon_generation(
+            owner,
+            home=self.home,
+            subject="recording-recovery",
+        )
+        try:
+            self._suspend_recovered_recordings()
+        finally:
+            _release_daemon_generation(claim)
 
     def _start_watchdog(self, owner: Any) -> None:
-        from .services import _daemon_owner_state
+        from .services import (
+            _claim_daemon_generation,
+            _release_daemon_generation,
+        )
 
-        _daemon_owner_state(owner, home=self.home)
+        generation_claim = _claim_daemon_generation(
+            owner,
+            home=self.home,
+            subject="recording-watchdog",
+        )
+        owner_key = generation_claim.owner_key
         with self._lock:
             if self._watchdog is not None:
-                if self._watchdog.is_alive():
+                if (
+                    self._watchdog.is_alive()
+                    and self._watchdog_stop is not None
+                    and not self._watchdog_stop.is_set()
+                    and self._watchdog_owner == owner_key
+                ):
+                    _release_daemon_generation(generation_claim)
                     return
+                _release_daemon_generation(generation_claim)
                 raise RuntimeError("computer-control recording watchdog terminated")
+            stopped = threading.Event()
             watchdog = threading.Thread(
                 target=self._watch,
+                args=(stopped,),
                 name="onecolleague-recording-watchdog",
                 daemon=True,
             )
-            watchdog.start()
             self._watchdog = watchdog
+            self._watchdog_stop = stopped
+            self._watchdog_owner = owner_key
+            self._watchdog_generation_claim = generation_claim
+            try:
+                watchdog.start()
+            except Exception:
+                self._watchdog = None
+                self._watchdog_stop = None
+                self._watchdog_owner = None
+                self._watchdog_generation_claim = None
+                _release_daemon_generation(generation_claim)
+                raise
+
+    def _request_watchdog_stop(self) -> None:
+        with self._lock:
+            stopped = self._watchdog_stop
+        if stopped is not None:
+            stopped.set()
+
+    def _drain_watchdog(self, *, timeout: float) -> bool:
+        from .services import _release_daemon_generation
+
+        with self._lock:
+            watchdog = self._watchdog
+            stopped = self._watchdog_stop
+        if watchdog is None:
+            with self._lock:
+                generation_claim = self._watchdog_generation_claim
+                self._watchdog_generation_claim = None
+            _release_daemon_generation(generation_claim)
+            return True
+        if stopped is not None:
+            stopped.set()
+        if watchdog is threading.current_thread():
+            return False
+        watchdog.join(timeout=max(0.0, float(timeout or 0.0)))
+        if watchdog.is_alive():
+            return False
+        with self._lock:
+            if self._watchdog is watchdog:
+                self._watchdog = None
+                self._watchdog_stop = None
+                self._watchdog_owner = None
+                generation_claim = self._watchdog_generation_claim
+                self._watchdog_generation_claim = None
+            else:
+                generation_claim = None
+        _release_daemon_generation(generation_claim)
+        return True
 
     def _enhance_snapshot(self, snapshot: Dict[str, Any], locator: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         method = getattr(self.observation_provider, "enhance_sync", None)
@@ -205,17 +281,20 @@ class RecordingStore:
         result["failure_count"] = len(failures)
         return result
 
-    def _watch(self) -> None:
-        while True:
-            time.sleep(5)
+    def _watch(self, stopped: threading.Event) -> None:
+        while not stopped.wait(max(0.01, float(self.WATCHDOG_INTERVAL_SECONDS))):
             with self._lock:
                 active = list(self._active.items())
             for recording_id, (group_id, actor_id, request_id, authority) in active:
+                if stopped.is_set():
+                    return
                 try:
                     value = self._read(group_id, recording_id, actor_id=actor_id)
                     if value.get("status") == "exploring":
                         idle = time.time() - float(value.get("last_activity_at") or 0)
                         if idle >= self.IDLE_SUSPEND_SECONDS and recording_id not in self._inflight:
+                            if stopped.is_set():
+                                return
                             self.suspend(
                                 group_id,
                                 recording_id,
@@ -223,6 +302,8 @@ class RecordingStore:
                                 authority=authority,
                             )
                         else:
+                            if stopped.is_set():
+                                return
                             self.lease.heartbeat(
                                 group_id=group_id,
                                 actor_id=actor_id,
@@ -230,6 +311,8 @@ class RecordingStore:
                                 authority=authority,
                             )
                 except Exception:
+                    if stopped.is_set():
+                        return
                     with self._lock:
                         if recording_id in self._inflight:
                             self._suspend_pending[recording_id] = (
@@ -240,6 +323,8 @@ class RecordingStore:
                             )
                             continue
                     try:
+                        if stopped.is_set():
+                            return
                         self.suspend(
                             group_id,
                             recording_id,
