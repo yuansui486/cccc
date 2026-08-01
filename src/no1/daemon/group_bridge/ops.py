@@ -17,6 +17,7 @@ from .session import (
     receive_group_bridge_session_message,
     send_group_bridge_session_message,
 )
+from .remote_dispatch import RemoteDispatchError, enqueue_remote_send, remote_delivery_status
 
 _SEND_OP = "group_bridge_session_send"
 _RECEIVE_OP = "group_bridge_session_receive"
@@ -32,6 +33,10 @@ _SEND_FIELDS = frozenset(
     }
 )
 _RECEIVE_FIELDS = frozenset({"group_id", "local_endpoint", "envelope"})
+_REMOTE_SEND_OP = "remote_send"
+_REMOTE_STATUS_OP = "remote_delivery_status"
+_REMOTE_SEND_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key", "payload"})
+_REMOTE_STATUS_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key"})
 
 
 def _error(code: str, message: str, *, retriable: bool = False) -> DaemonResponse:
@@ -175,6 +180,45 @@ def _handle_receive(
         return _error("session_failed", "Group Bridge session operation failed", retriable=True)
 
 
+def _remote_error(error: RemoteDispatchError) -> DaemonResponse:
+    return _error(error.code, str(error), retriable=error.retriable)
+
+
+def _handle_remote_send(args: Dict[str, Any]) -> DaemonResponse:
+    invalid = _closed_args(args, _REMOTE_SEND_FIELDS)
+    if invalid is not None:
+        return invalid
+    try:
+        result = enqueue_remote_send(
+            group_id=args["group_id"],
+            registration_id=args["registration_id"],
+            idempotency_key=args["idempotency_key"],
+            payload=copy.deepcopy(args["payload"]),
+        )
+        return DaemonResponse(ok=True, result=result)
+    except RemoteDispatchError as exc:
+        return _remote_error(exc)
+    except Exception:
+        return _error("remote_enqueue_failed", "Group Bridge remote enqueue failed", retriable=True)
+
+
+def _handle_remote_status(args: Dict[str, Any]) -> DaemonResponse:
+    invalid = _closed_args(args, _REMOTE_STATUS_FIELDS)
+    if invalid is not None:
+        return invalid
+    try:
+        result = remote_delivery_status(
+            group_id=args["group_id"],
+            registration_id=args["registration_id"],
+            idempotency_key=args["idempotency_key"],
+        )
+        return DaemonResponse(ok=True, result=result)
+    except RemoteDispatchError as exc:
+        return _remote_error(exc)
+    except Exception:
+        return _error("remote_status_failed", "Group Bridge remote status failed", retriable=True)
+
+
 def try_handle_group_bridge_op(
     op: str,
     args: Dict[str, Any],
@@ -185,6 +229,10 @@ def try_handle_group_bridge_op(
         return _handle_send(args)
     if op == _RECEIVE_OP:
         return _handle_receive(args, dispatch_send=dispatch_send)
+    if op == _REMOTE_SEND_OP:
+        return _handle_remote_send(args)
+    if op == _REMOTE_STATUS_OP:
+        return _handle_remote_status(args)
     return None
 
 

@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
-from ...contracts.v1.group_bridge import RemoteSendError, RemoteSendReceipt
+from ...contracts.v1.group_bridge import RemoteSendError, RemoteSendQueuedRequest, RemoteSendReceipt
 from ...paths import ensure_home
 from ...util.file_lock import acquire_lockfile, release_lockfile
 from ...util.fs import atomic_write_text
@@ -36,6 +36,24 @@ _STATUS_TRANSITIONS = {
     "sent": frozenset({"sent"}),
     "failed": frozenset({"failed"}),
 }
+_QUEUED_REQUEST_FIELD = "_queued_request"
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_unique_mapping(loader: yaml.Loader, node: yaml.MappingNode, deep: bool = False) -> Dict[Any, Any]:
+    mapping: Dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(None, None, "duplicate receipt store key", key_node.start_mark)
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
 
 
 class ReceiptConflictError(ValueError):
@@ -64,7 +82,7 @@ def _load_unlocked(home: Optional[Path] = None, *, for_write: bool = False) -> D
     if not path.exists():
         return {}
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader) or {}
     except Exception as exc:
         if for_write:
             raise ReceiptStoreError("Group Bridge receipt store is malformed") from exc
@@ -98,12 +116,42 @@ def load_receipts(home: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
         _validate_stored_receipts(receipts)
     except ReceiptStoreError:
         return {}
-    return copy.deepcopy(receipts)
+    return {key: _public_receipt(entry) for key, entry in receipts.items()}
 
 
 def get_receipt(registration_id: str, idempotency_key: str, home: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     entry = load_receipts(home).get(_compose_key(registration_id, idempotency_key))
     return copy.deepcopy(entry) if isinstance(entry, dict) else None
+
+
+def _public_receipt(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: copy.deepcopy(value) for key, value in entry.items() if key != _QUEUED_REQUEST_FIELD}
+
+
+def get_receipt_strict(
+    registration_id: str, idempotency_key: str, home: Optional[Path] = None
+) -> Optional[Dict[str, Any]]:
+    """Read a receipt while treating malformed persistent state as an error."""
+    lock = acquire_lockfile(_lock_path(home), blocking=True)
+    try:
+        entry = _load_unlocked(home, for_write=True).get(_compose_key(registration_id, idempotency_key))
+        return copy.deepcopy(_public_receipt(entry)) if isinstance(entry, dict) else None
+    finally:
+        release_lockfile(lock)
+
+
+def get_queued_request(
+    registration_id: str, idempotency_key: str, home: Optional[Path] = None
+) -> Optional[Dict[str, Any]]:
+    """Return the private queued facts for a future daemon-owned worker."""
+    lock = acquire_lockfile(_lock_path(home), blocking=True)
+    try:
+        entry = _load_unlocked(home, for_write=True).get(_compose_key(registration_id, idempotency_key))
+        if not isinstance(entry, dict) or _QUEUED_REQUEST_FIELD not in entry:
+            return None
+        return copy.deepcopy(entry[_QUEUED_REQUEST_FIELD])
+    finally:
+        release_lockfile(lock)
 
 
 def _strict_json_value(value: Any) -> Any:
@@ -120,6 +168,16 @@ def _strict_json_value(value: Any) -> Any:
             raise ValueError("request facts must use string object keys")
         return {key: _strict_json_value(item) for key, item in value.items()}
     raise ValueError("request facts must contain JSON values")
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        _strict_json_value(value),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 def _text_fact(facts: Dict[str, Any], name: str) -> str:
@@ -139,20 +197,8 @@ def _canonical_fingerprint(request_facts: Optional[Dict[str, Any]]) -> str:
     else:
         raise ValueError("request facts must be a JSON object")
     try:
-        canonical = {
-            "group_bridge_thread": _text_fact(facts, "group_bridge_thread"),
-            "payload": _strict_json_value(facts.get("payload") if facts.get("payload") is not None else {}),
-            "reply_to_remote_event_id": _text_fact(facts, "reply_to_remote_event_id"),
-            "source_event_id": _text_fact(facts, "source_event_id"),
-            "src_group_id": _text_fact(facts, "src_group_id"),
-        }
-        encoded = json.dumps(
-            canonical,
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
+        canonical = _strict_json_value(facts)
+        encoded = _canonical_json_bytes(canonical)
     except (TypeError, ValueError, RecursionError) as exc:
         raise ValueError("request facts must be finite JSON values") from exc
     return hashlib.sha256(encoded).hexdigest()
@@ -178,8 +224,19 @@ def safe_error_projection(data: Dict[str, Any]) -> Dict[str, Any]:
 def _validate_stored_receipts(receipts: Dict[str, Dict[str, Any]]) -> None:
     try:
         for key, entry in receipts.items():
-            normalized = RemoteSendReceipt.model_validate(entry).model_dump()
-            if normalized != entry or _compose_key(normalized["registration_id"], normalized["idempotency_key"]) != key:
+            if not isinstance(entry, dict):
+                raise ReceiptStoreError("Group Bridge receipt store is malformed")
+            public_entry = _public_receipt(entry)
+            normalized = RemoteSendReceipt.model_validate(public_entry).model_dump()
+            if _canonical_json_bytes(normalized) != _canonical_json_bytes(public_entry) or _compose_key(
+                normalized["registration_id"], normalized["idempotency_key"]
+            ) != key:
+                raise ReceiptStoreError("Group Bridge receipt store is malformed")
+            if _QUEUED_REQUEST_FIELD in entry:
+                queued = RemoteSendQueuedRequest.model_validate(entry[_QUEUED_REQUEST_FIELD]).model_dump()
+                if _canonical_json_bytes(queued) != _canonical_json_bytes(entry[_QUEUED_REQUEST_FIELD]):
+                    raise ReceiptStoreError("Group Bridge receipt store is malformed")
+            elif normalized["status"] == "queued" and normalized["transport"] == "group_bridge_session":
                 raise ReceiptStoreError("Group Bridge receipt store is malformed")
             fingerprint = normalized["request_fingerprint"]
             if len(fingerprint) != 64 or any(char not in "0123456789abcdef" for char in fingerprint):
@@ -222,12 +279,21 @@ def record_receipt(
     home: Optional[Path] = None,
     *,
     request_facts: Optional[Dict[str, Any]] = None,
+    queued_request: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], bool]:
     rid = str(registration_id or "").strip()
     ik = str(idempotency_key or "").strip()
     if not rid or not ik:
         raise ValueError("registration_id and idempotency_key are required")
     fingerprint = _canonical_fingerprint(request_facts)
+    queued = None
+    if queued_request is not None:
+        try:
+            queued = RemoteSendQueuedRequest.model_validate(queued_request).model_dump()
+        except Exception as exc:
+            raise ValueError("queued request facts are invalid") from exc
+        if queued["registration_id"] != rid or queued["idempotency_key"] != ik:
+            raise ValueError("queued request identity does not match receipt identity")
     key = _compose_key(rid, ik)
     lock = acquire_lockfile(_lock_path(home), blocking=True)
     try:
@@ -237,12 +303,20 @@ def record_receipt(
             existing_fingerprint = str(existing.get("request_fingerprint") or _canonical_fingerprint(None))
             if not hmac.compare_digest(existing_fingerprint, fingerprint):
                 raise ReceiptConflictError("idempotency key conflicts with the original request")
-            return copy.deepcopy(existing), False
+            if queued is not None:
+                if _QUEUED_REQUEST_FIELD not in existing:
+                    raise ReceiptStoreError("queued receipt facts are missing")
+                existing_queued = RemoteSendQueuedRequest.model_validate(existing[_QUEUED_REQUEST_FIELD]).model_dump()
+                if _canonical_json_bytes(existing_queued) != _canonical_json_bytes(queued):
+                    raise ReceiptConflictError("queued request facts conflict with the original request")
+            return _public_receipt(existing), False
         entry = _normalize_receipt(rid, ik, fingerprint, receipt)
+        if queued is not None:
+            entry[_QUEUED_REQUEST_FIELD] = queued
         receipts[key] = entry
         _validate_stored_receipts(receipts)
         _save_unlocked(receipts, home)
-        return copy.deepcopy(entry), True
+        return _public_receipt(entry), True
     finally:
         release_lockfile(lock)
 
@@ -273,11 +347,14 @@ def update_receipt(
             raise ValueError("receipt status transition is not allowed")
         if patch.get("error") is not None:
             patch["error"] = safe_error_projection(patch["error"] if isinstance(patch["error"], dict) else {})
-        candidate = {**existing, **patch}
+        candidate = {_key: copy.deepcopy(value) for _key, value in existing.items() if _key != _QUEUED_REQUEST_FIELD}
+        candidate.update(patch)
         normalized = RemoteSendReceipt.model_validate(candidate).model_dump()
+        if _QUEUED_REQUEST_FIELD in existing:
+            normalized[_QUEUED_REQUEST_FIELD] = copy.deepcopy(existing[_QUEUED_REQUEST_FIELD])
         receipts[key] = normalized
         _validate_stored_receipts(receipts)
         _save_unlocked(receipts, home)
-        return copy.deepcopy(normalized)
+        return _public_receipt(normalized)
     finally:
         release_lockfile(lock)
