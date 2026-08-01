@@ -40,6 +40,7 @@ EventKind = Literal[
     "actor.restart",
     "actor.remove",
     "actor.activity",
+    "actor.delivery.failed",
     "context.sync",
     "chat.message",
     "chat.stream",
@@ -193,6 +194,19 @@ class ActorActivityData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ActorDeliveryFailedData(BaseModel):
+    actor_id: str
+    event_ids: List[str] = Field(default_factory=list)
+    attempt_id: str = ""
+    generation: Optional[int] = None
+    accepted: Optional[bool] = None
+    retryable: bool
+    reason: str
+    error: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ContextSyncData(BaseModel):
     version: str = ""
     changes: List[Dict[str, Any]] = Field(default_factory=list)
@@ -269,6 +283,7 @@ _KIND_TO_MODEL = {
     "actor.restart": ActorLifecycleData,
     "actor.remove": ActorLifecycleData,
     "actor.activity": ActorActivityData,
+    "actor.delivery.failed": ActorDeliveryFailedData,
     "context.sync": ContextSyncData,
     "chat.message": ChatMessageData,
     "chat.stream": ChatStreamData,
