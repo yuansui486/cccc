@@ -8,7 +8,6 @@ from fastapi.responses import FileResponse
 
 from ....kernel.blobs import resolve_blob_attachment_path, store_blob_bytes
 from ....kernel.group import load_group
-from ....daemon.messaging.turn_provenance import INGRESS_WEB_USER, TRUSTED_INGRESS_ARG
 from ..schemas import (
     ReplyRequest,
     RouteContext,
@@ -63,8 +62,15 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
     def _normalize_client_id(raw: str) -> str:
         return str(raw or "").strip()
 
+    def _require_web_user(raw: str) -> None:
+        if str(raw or "").strip() != "user":
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "permission_denied", "message": "web messaging only sends as user"},
+            )
+
     def _build_message_request(op: str, *, group_id: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        return {"op": op, "args": {"group_id": group_id, **args, TRUSTED_INGRESS_ARG: INGRESS_WEB_USER}}
+        return {"op": op, "args": {"group_id": group_id, **args, "by": "user"}}
 
     async def _submit_message(req: Dict[str, Any]) -> Dict[str, Any]:
         return await ctx.daemon(req)
@@ -98,12 +104,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/send")
     async def send(group_id: str, req: SendRequest) -> Dict[str, Any]:
+        _require_web_user(req.by)
         daemon_req = _build_message_request(
-            "send",
+            "user_message_send",
             group_id=group_id,
             args={
                 "text": req.text,
-                "by": req.by,
+                "insight": req.insight,
                 "to": list(req.to),
                 "path": req.path,
                 "quote_text": req.quote_text,
@@ -127,15 +134,16 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         with (src_group_id, src_event_id) set.
         """
         check_group(request, req.dst_group_id)
+        _require_web_user(req.by)
         return await ctx.daemon(
             {
-                "op": "send_cross_group",
+                "op": "user_send_cross_group",
                 "args": {
                     "group_id": group_id,
-                    TRUSTED_INGRESS_ARG: INGRESS_WEB_USER,
                     "dst_group_id": req.dst_group_id,
                     "text": req.text,
-                    "by": req.by,
+                    "insight": req.insight,
+                    "by": "user",
                     "to": list(req.to),
                     "priority": req.priority,
                     "reply_required": _normalize_reply_required(req.reply_required),
@@ -146,13 +154,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/tracked_send")
     async def tracked_send(group_id: str, req: TrackedSendRequest) -> Dict[str, Any]:
+        _require_web_user(req.by)
         daemon_req = _build_message_request(
-            "tracked_send",
+            "user_tracked_send",
             group_id=group_id,
             args={
                 "title": req.title,
                 "text": req.text,
-                "by": req.by,
+                "insight": req.insight,
                 "to": list(req.to),
                 "outcome": req.outcome,
                 "checklist": list(req.checklist),
@@ -170,12 +179,13 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
 
     @group_router.post("/reply")
     async def reply(group_id: str, req: ReplyRequest) -> Dict[str, Any]:
+        _require_web_user(req.by)
         daemon_req = _build_message_request(
-            "reply",
+            "user_message_reply",
             group_id=group_id,
             args={
                 "text": req.text,
-                "by": req.by,
+                "insight": req.insight,
                 "to": list(req.to),
                 "reply_to": req.reply_to,
                 "priority": req.priority,
@@ -204,6 +214,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group_id: str,
         by: str = Form("user"),
         text: str = Form(""),
+        insight: str = Form(""),
         to_json: str = Form("[]"),
         path: str = Form(""),
         priority: str = Form("normal"),
@@ -214,6 +225,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         computer_control_request_json: str = Form(""),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
+        _require_web_user(by)
         group = load_group(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
@@ -267,11 +279,11 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         computer_control_request = _parse_optional_object_json(computer_control_request_json, field="computer_control_request")
         normalized_client_id = _normalize_client_id(client_id)
         daemon_req = _build_message_request(
-            "send",
+            "user_message_send",
             group_id=group_id,
             args={
                 "text": msg_text,
-                "by": by,
+                "insight": insight,
                 "to": canonical_to,
                 "path": path,
                 "attachments": attachments,
@@ -290,6 +302,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         group_id: str,
         by: str = Form("user"),
         text: str = Form(""),
+        insight: str = Form(""),
         to_json: str = Form("[]"),
         reply_to: str = Form(""),
         priority: str = Form("normal"),
@@ -299,6 +312,7 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         refs_json: str = Form("[]"),
         files: list[UploadFile] = File(default_factory=list),
     ) -> Dict[str, Any]:
+        _require_web_user(by)
         group = load_group(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail={"code": "group_not_found", "message": f"group not found: {group_id}"})
@@ -340,11 +354,11 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         refs = _parse_refs_json(refs_json)
         normalized_client_id = _normalize_client_id(client_id)
         daemon_req = _build_message_request(
-            "reply",
+            "user_message_reply",
             group_id=group_id,
             args={
                 "text": msg_text,
-                "by": by,
+                "insight": insight,
                 "to": canonical_to,
                 "reply_to": reply_to_id,
                 "attachments": attachments,

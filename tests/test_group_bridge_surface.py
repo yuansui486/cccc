@@ -71,7 +71,7 @@ class TestGroupBridgeSurface(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(calls[0]["op"], "group_bridge_session_send")
+        self.assertEqual(calls[0]["op"], "user_group_bridge_session_send")
         self.assertEqual(
             set(calls[0]["args"]),
             {
@@ -82,8 +82,11 @@ class TestGroupBridgeSurface(unittest.TestCase):
                 "remote_endpoint",
                 "client_nonce",
                 "payload",
+                "by",
             },
         )
+        self.assertEqual(calls[0]["args"]["by"], "user")
+        self.assertEqual(calls[0]["args"]["payload"]["source_by"], "user")
 
     def test_web_receive_delegates_signed_envelope_without_local_writer(self):
         calls = []
@@ -189,8 +192,10 @@ class TestGroupBridgeSurface(unittest.TestCase):
                 self.assertEqual(authenticated_send.status_code, 200)
             self.assertEqual(
                 [item["op"] for item in calls],
-                ["group_bridge_session_receive", "group_bridge_session_send"],
+                ["group_bridge_session_receive", "user_group_bridge_session_send"],
             )
+            self.assertEqual(calls[1]["args"]["by"], "user")
+            self.assertEqual(calls[1]["args"]["payload"]["source_by"], "user")
 
         if old_home is None:
             os.environ.pop("CCCC_HOME", None)
@@ -232,7 +237,7 @@ class TestGroupBridgeSurface(unittest.TestCase):
                     },
                 )
         self.assertEqual(result["session"]["status"], "accepted")
-        self.assertEqual(captured["req"]["op"], "group_bridge_session_send")
+        self.assertEqual(captured["req"]["op"], "actor_group_bridge_session_send")
         self.assertEqual(
             set(captured["req"]["args"]),
             {
@@ -243,8 +248,11 @@ class TestGroupBridgeSurface(unittest.TestCase):
                 "remote_endpoint",
                 "client_nonce",
                 "payload",
+                "by",
             },
         )
+        self.assertEqual(captured["req"]["args"]["by"], "actor_local")
+        self.assertEqual(captured["req"]["args"]["payload"]["source_by"], "actor_local")
 
     def test_mcp_rejects_non_local_source_and_extra_fields(self):
         from no1.ports.mcp import common as mcp_common

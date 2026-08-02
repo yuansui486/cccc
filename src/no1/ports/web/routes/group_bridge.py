@@ -195,8 +195,14 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         check_group(request, req.group_id)
         response = await ctx.daemon(
             {
-                "op": "group_bridge_session_send",
-                "args": req.model_dump(),
+                "op": "user_group_bridge_session_send",
+                "args": {
+                    **req.model_dump(exclude={"payload"}),
+                    "payload": GroupBridgeSessionMessage.model_validate(req.payload).model_copy(
+                        update={"source_by": "user"}
+                    ).model_dump(),
+                    "by": "user",
+                },
             }
         )
         return {"ok": True, "result": _unwrap_daemon(response)}
@@ -209,8 +215,12 @@ def create_routers(ctx: RouteContext) -> list[APIRouter]:
         check_group(request, req.group_id)
         response = await ctx.daemon(
             {
-                "op": "remote_send",
-                "args": req.model_dump(),
+                "op": "user_remote_send",
+                "args": {
+                    **req.model_dump(exclude={"payload"}),
+                    "payload": req.payload.model_copy(update={"source_by": "user"}).model_dump(),
+                    "by": "user",
+                },
             }
         )
         return {"ok": True, "result": _unwrap_daemon(response)}

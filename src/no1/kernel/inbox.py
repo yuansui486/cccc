@@ -1341,9 +1341,10 @@ def search_messages(
                 data = ev.get("data")
                 if isinstance(data, dict):
                     text = str(data.get("text") or "").lower()
+                    insight = str(data.get("insight") or "").lower()
                     title = str(data.get("title") or "").lower()
                     message = str(data.get("message") or "").lower()
-                    if query_lower not in text and query_lower not in title and query_lower not in message:
+                    if query_lower not in text and query_lower not in insight and query_lower not in title and query_lower not in message:
                         continue
                 else:
                     continue
@@ -1371,9 +1372,10 @@ def search_messages(
             data = ev.get("data")
             if isinstance(data, dict):
                 text = str(data.get("text") or "").lower()
+                insight = str(data.get("insight") or "").lower()
                 title = str(data.get("title") or "").lower()
                 message = str(data.get("message") or "").lower()
-                if query_lower not in text and query_lower not in title and query_lower not in message:
+                if query_lower not in text and query_lower not in insight and query_lower not in title and query_lower not in message:
                     continue
             else:
                 continue

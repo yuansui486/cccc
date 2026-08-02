@@ -1,6 +1,9 @@
+import ast
 import multiprocessing
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -49,6 +52,128 @@ def _run_receipt_processes(home: Path, *, count: int, same_key: bool):
 
 
 class TestGroupBridgeReceipts(unittest.TestCase):
+    _ATOMIC_KEY = "gbs_" + "a" * 32
+
+    @staticmethod
+    def _queued_request(key: str = _ATOMIC_KEY, event_id: str = "event-1") -> dict:
+        return {
+            "src_group_id": "source-group",
+            "registration_id": "reg_1",
+            "idempotency_key": key,
+            "payload": {
+                "text": f"hello from {event_id}",
+                "format": "plain",
+                "priority": "normal",
+                "reply_required": False,
+            },
+        }
+
+    def _record_after_admission(self, home: Path, callback, *, event_id: str = "event-1"):
+        from no1.kernel.group_bridge.receipts import record_receipt_after_admission
+
+        return record_receipt_after_admission(
+            "reg_1",
+            self._ATOMIC_KEY,
+            {"status": "queued", "transport": "group_bridge_session"},
+            home,
+            request_facts=_facts(event_id),
+            queued_request=self._queued_request(event_id=event_id),
+            admit_new=callback,
+        )
+
+    def test_atomic_admission_exact_replay_skips_callback(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            calls = []
+            first, created = self._record_after_admission(home, lambda: calls.append("new"))
+            replay, replay_created = self._record_after_admission(home, lambda: calls.append("replay"))
+            self.assertTrue(created)
+            self.assertFalse(replay_created)
+            self.assertEqual(replay, first)
+            self.assertEqual(calls, ["new"])
+
+    def test_atomic_admission_conflict_skips_callback(self) -> None:
+        from no1.kernel.group_bridge.receipts import ReceiptConflictError
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            calls = []
+            self._record_after_admission(home, lambda: calls.append("new"))
+            with self.assertRaises(ReceiptConflictError):
+                self._record_after_admission(home, lambda: calls.append("conflict"), event_id="event-2")
+            self.assertEqual(calls, ["new"])
+
+    def test_atomic_admission_runs_once_before_save(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            path = home / "group_bridge_receipts.yaml"
+            observations = []
+            receipt, created = self._record_after_admission(home, lambda: observations.append(path.exists()))
+            self.assertTrue(created)
+            self.assertEqual(observations, [False])
+            self.assertEqual(receipt["status"], "queued")
+
+    def test_atomic_admission_exception_does_not_write(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            path = home / "group_bridge_receipts.yaml"
+
+            def reject() -> None:
+                raise PermissionError("not admitted")
+
+            with self.assertRaises(PermissionError):
+                self._record_after_admission(home, reject)
+            self.assertFalse(path.exists())
+
+    def test_atomic_admission_serializes_two_threads(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            count = 0
+            count_lock = threading.Lock()
+
+            def admit() -> None:
+                nonlocal count
+                with count_lock:
+                    count += 1
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(lambda _: self._record_after_admission(home, admit), range(2)))
+            self.assertEqual(count, 1)
+            self.assertEqual(sorted(created for _, created in results), [False, True])
+
+    def test_atomic_admission_malformed_store_skips_callback_and_write(self) -> None:
+        from no1.kernel.group_bridge.receipts import ReceiptStoreError
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            path = home / "group_bridge_receipts.yaml"
+            original = b"receipts: [\n"
+            path.write_bytes(original)
+            calls = []
+            with self.assertRaises(ReceiptStoreError):
+                self._record_after_admission(home, lambda: calls.append("called"))
+            self.assertEqual(calls, [])
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_atomic_admission_has_one_production_caller_and_no_replay_preread(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        production = root / "src" / "no1"
+        callers = []
+        for path in production.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    if node.func.id == "record_receipt_after_admission":
+                        callers.append(path.relative_to(root).as_posix())
+        self.assertEqual(
+            callers,
+            ["src/no1/daemon/group_bridge/remote_dispatch.py"],
+        )
+        source = (production / "daemon" / "group_bridge" / "remote_dispatch.py").read_text(encoding="utf-8")
+        enqueue = source[source.index("def enqueue_remote_send(") : source.index("def remote_delivery_status(")]
+        self.assertNotIn("get_receipt_strict(", enqueue)
+        self.assertNotIn("request_fingerprint(", enqueue)
+
     def test_same_key_and_request_facts_replay_first_result(self) -> None:
         from no1.kernel.group_bridge.receipts import get_receipt, record_receipt
 

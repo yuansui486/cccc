@@ -26,6 +26,7 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         return td, cleanup
 
     def test_onecolleague_help_appends_runtime_skill_digest(self) -> None:
+        from no1.kernel.peer_insight import PEER_INSIGHT_RUNTIME_HELP
         from no1.ports.mcp.server import handle_tool_call
 
         with patch.dict(os.environ, {"CCCC_GROUP_ID": "g1", "CCCC_ACTOR_ID": "peer-1"}, clear=False), patch(
@@ -62,6 +63,10 @@ class TestMcpHelpSkillsDigest(unittest.TestCase):
         self.assertIn("## Memory and Recall", markdown)
         self.assertIn("## Capability", markdown)
         self.assertIn("## Role Notes", markdown)
+        self.assertEqual(markdown.count("## Peer Insight Contract (Runtime)"), 1)
+        self.assertIn(PEER_INSIGHT_RUNTIME_HELP.strip(), markdown)
+        self.assertIn("shared thinking space, not a delivery lane", markdown)
+        self.assertNotIn("Insight required", markdown)
         self.assertIn("## Active Skills (Runtime)", markdown)
         self.assertIn("Capsule skill is runtime capsule activation", markdown)
         self.assertIn("onecolleague_capability_install", markdown)

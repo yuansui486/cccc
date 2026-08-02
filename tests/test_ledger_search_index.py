@@ -97,6 +97,38 @@ class TestLedgerSearchIndex(unittest.TestCase):
         finally:
             cleanup()
 
+    def test_search_messages_finds_insight_in_index_and_ledger_fallback(self) -> None:
+        _, cleanup = self._with_home()
+        try:
+            from no1.kernel.group import load_group
+            from no1.kernel.inbox import search_messages
+
+            create, _ = self._call("group_create", {"title": "search-insight", "topic": "", "by": "user"})
+            self.assertTrue(create.ok, getattr(create, "error", None))
+            group_id = str((create.result or {}).get("group_id") or "").strip()
+            sent, _ = self._call(
+                "send",
+                {
+                    "group_id": group_id,
+                    "text": "ordinary body",
+                    "insight": "The quasar boundary is the durable message fact.",
+                    "by": "user",
+                    "to": ["user"],
+                },
+            )
+            self.assertTrue(sent.ok, getattr(sent, "error", None))
+            group = load_group(group_id)
+            self.assertIsNotNone(group)
+            assert group is not None
+
+            indexed, _ = search_messages(group, query="quasar", kind_filter="chat", limit=10)
+            self.assertEqual(len(indexed), 1)
+            with patch("no1.kernel.inbox.search_event_ids_indexed", return_value=([], False)):
+                fallback, _ = search_messages(group, query="quasar", kind_filter="chat", limit=10)
+            self.assertEqual([event.get("id") for event in fallback], [event.get("id") for event in indexed])
+        finally:
+            cleanup()
+
     def test_search_messages_avoids_per_event_lookup_round_trips(self) -> None:
         _, cleanup = self._with_home()
         try:

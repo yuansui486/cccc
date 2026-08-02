@@ -25,6 +25,11 @@ from ..messaging.chat_ops import (
     _GROUP_BRIDGE_DELIVERY_CLAIM_ARG,
     _issue_group_bridge_delivery_claim,
 )
+from ..messaging.message_admission import (
+    INGRESS_CLAIM_ARG,
+    MessageAdmissionError,
+    issue_remote_message_admission,
+)
 from ..messaging.turn_provenance import INGRESS_GROUP_BRIDGE, TRUSTED_INGRESS_ARG
 from .session import (
     GroupBridgeSessionError,
@@ -55,10 +60,12 @@ _SEND_FIELDS = frozenset(
         "payload",
     }
 )
+_CLOSED_SEND_FIELDS = _SEND_FIELDS | frozenset({"by", TRUSTED_INGRESS_ARG, INGRESS_CLAIM_ARG})
 _RECEIVE_FIELDS = frozenset({"group_id", "envelope"})
 _REMOTE_SEND_OP = "remote_send"
 _REMOTE_STATUS_OP = "remote_delivery_status"
 _REMOTE_SEND_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key", "payload"})
+_CLOSED_REMOTE_SEND_FIELDS = _REMOTE_SEND_FIELDS | frozenset({"by", TRUSTED_INGRESS_ARG, INGRESS_CLAIM_ARG})
 _REMOTE_STATUS_FIELDS = frozenset({"group_id", "registration_id", "idempotency_key"})
 _MGMT_IDENTITY_OP = "group_bridge_management_identity"
 _MGMT_REGISTRATIONS_OP = "group_bridge_management_registrations"
@@ -153,6 +160,7 @@ def _local_send_args(
     args = {
         "group_id": envelope.target_group_id,
         "text": payload["text"],
+        "insight": payload.get("insight"),
         "format": payload["format"],
         "priority": payload["priority"],
         "reply_required": payload["reply_required"],
@@ -167,6 +175,13 @@ def _local_send_args(
         "source_user_id": envelope.source_peer_id,
         "src_group_id": envelope.source_group_id,
         "src_event_id": delivery_id,
+        "src_by": str(payload.get("source_by") or "").strip(),
+        "remote_reply_to": (
+            [str(payload.get("source_by") or "").strip()]
+            if str(payload.get("source_by") or "").strip()
+            and not str(payload.get("source_by") or "").strip().startswith(("@", "#", "group_bridge:"))
+            else []
+        ),
         "client_id": delivery_id,
         TRUSTED_INGRESS_ARG: INGRESS_GROUP_BRIDGE,
     }
@@ -175,10 +190,29 @@ def _local_send_args(
 
 
 def _handle_send(args: Dict[str, Any]) -> DaemonResponse:
-    invalid = _closed_args(args, _SEND_FIELDS)
+    fields = _CLOSED_SEND_FIELDS if INGRESS_CLAIM_ARG in args else _SEND_FIELDS
+    invalid = _closed_args(args, fields)
     if invalid is not None:
         return invalid
     try:
+        if INGRESS_CLAIM_ARG in args:
+            destination_facts = {
+                "group_id": args["group_id"],
+                "local_endpoint": args["local_endpoint"],
+                "remote_group_id": args["remote_group_id"],
+                "remote_peer_id": args["remote_peer_id"],
+                "remote_endpoint": args["remote_endpoint"],
+                "client_nonce": args["client_nonce"],
+                "payload": copy.deepcopy(args["payload"]),
+            }
+            admission = issue_remote_message_admission(
+                args,
+                expected_op="group_bridge_session_send",
+                destination_facts=destination_facts,
+                current_destination_facts=lambda: copy.deepcopy(destination_facts),
+            )
+            admission.consume_current()
+
         result = send_group_bridge_session_message(
             group_id=args["group_id"],
             local_endpoint=args["local_endpoint"],
@@ -189,6 +223,8 @@ def _handle_send(args: Dict[str, Any]) -> DaemonResponse:
             payload=copy.deepcopy(args["payload"]),
         )
         return DaemonResponse(ok=True, result={"session": result})
+    except MessageAdmissionError as exc:
+        return _error(exc.code, exc.message)
     except GroupBridgeSessionError as exc:
         return _session_error(exc)
     except Exception:
@@ -448,17 +484,33 @@ def _handle_public_pairing(args: Dict[str, Any], *, op: str) -> DaemonResponse:
 
 
 def _handle_remote_send(args: Dict[str, Any]) -> DaemonResponse:
-    invalid = _closed_args(args, _REMOTE_SEND_FIELDS)
+    fields = _CLOSED_REMOTE_SEND_FIELDS if INGRESS_CLAIM_ARG in args else _REMOTE_SEND_FIELDS
+    invalid = _closed_args(args, fields)
     if invalid is not None:
         return invalid
     try:
+        def admit_new(
+            destination_facts: Dict[str, Any],
+            current_destination_facts: Callable[[], Dict[str, Any]],
+        ) -> None:
+            admission = issue_remote_message_admission(
+                args,
+                expected_op="remote_send",
+                destination_facts=destination_facts,
+                current_destination_facts=current_destination_facts,
+            )
+            admission.consume_current()
+
         result = enqueue_remote_send(
             group_id=args["group_id"],
             registration_id=args["registration_id"],
             idempotency_key=args["idempotency_key"],
             payload=copy.deepcopy(args["payload"]),
+            admit_new=admit_new if INGRESS_CLAIM_ARG in args else None,
         )
         return DaemonResponse(ok=True, result=result)
+    except MessageAdmissionError as exc:
+        return _error(exc.code, exc.message)
     except RemoteDispatchError as exc:
         return _remote_error(exc)
     except Exception:

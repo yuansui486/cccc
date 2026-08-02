@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from ..util.conv import coerce_bool
 from .actors import get_effective_role, is_voice_secretary_actor, list_visible_actors
 from .group import Group
+from .peer_insight import TEAM_MODE_SEED
 from .prompt_files import DEFAULT_PREAMBLE_BODY, PREAMBLE_FILENAME, read_group_prompt_file
 
 
@@ -155,6 +156,8 @@ def render_role_system_prompt(
         "- Once scope is approved, finish it end-to-end; do not ask to continue on obvious next steps.",
         "- For strategy or scope discussion, align first; implement only after explicit action intent.",
     ]
+    if not is_solo:
+        core_lines.append(TEAM_MODE_SEED)
 
     # Group override: ONECOLLEAGUE_PREAMBLE.md under ONECOLLEAGUE_HOME.
     pf = read_group_prompt_file(group, PREAMBLE_FILENAME)

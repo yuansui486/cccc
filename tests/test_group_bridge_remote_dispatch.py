@@ -32,17 +32,26 @@ class TestGroupBridgeRemoteDispatch(unittest.TestCase):
             _approved_by_pairing=True,
         )
 
-    def _args(self, *, key: str = "gbs_" + "a" * 32, text: str = "hello") -> dict[str, object]:
+    def _args(
+        self,
+        *,
+        key: str = "gbs_" + "a" * 32,
+        text: str = "hello",
+        insight: str | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "text": text,
+            "format": "markdown",
+            "priority": "attention",
+            "reply_required": True,
+        }
+        if insight is not None:
+            payload["insight"] = insight
         return {
             "group_id": "local-group",
             "registration_id": self.registration["registration_id"],
             "idempotency_key": key,
-            "payload": {
-                "text": text,
-                "format": "markdown",
-                "priority": "attention",
-                "reply_required": True,
-            },
+            "payload": payload,
         }
 
     def _op(self, op: str, args: dict[str, object]):
@@ -90,11 +99,18 @@ class TestGroupBridgeRemoteDispatch(unittest.TestCase):
         self.assertEqual(conflict.error.code, "remote_receipt_conflict")
         self.assertEqual((self.home / "group_bridge_receipts.yaml").read_bytes(), before)
 
+        insight_conflict = self._op(
+            "remote_send",
+            self._args(insight="The same transport key cannot replace the original perspective."),
+        )
+        self.assertFalse(insight_conflict.ok)
+        self.assertEqual(insight_conflict.error.code, "remote_receipt_conflict")
+        self.assertEqual((self.home / "group_bridge_receipts.yaml").read_bytes(), before)
+
     def test_payload_is_exact_session_message_and_args_are_closed(self) -> None:
         for field, value in (
             ("attachments", [{"name": "x"}]),
             ("refs", [{"id": "x"}]),
-            ("source_by", "remote"),
             ("to", ["user"]),
         ):
             with self.subTest(field=field):
@@ -103,6 +119,27 @@ class TestGroupBridgeRemoteDispatch(unittest.TestCase):
                 response = self._op("remote_send", args)
                 self.assertFalse(response.ok)
                 self.assertEqual(response.error.code, "invalid_request")
+
+        signed_args = self._args(key="gbs_" + "e" * 32)
+        signed_args["payload"] = {
+            **signed_args["payload"],  # type: ignore[dict-item]
+            "insight": "The remote sender remains part of the message fact.",
+            "source_by": "remote-peer",
+        }
+        signed = self._op("remote_send", signed_args)
+        self.assertTrue(signed.ok, signed.error)
+        from no1.kernel.group_bridge.receipts import get_queued_request
+
+        queued = get_queued_request(
+            self.registration["registration_id"],
+            signed_args["idempotency_key"],
+            self.home,
+        )
+        self.assertEqual(queued["payload"]["source_by"], "remote-peer")
+        self.assertEqual(
+            queued["payload"]["insight"],
+            "The remote sender remains part of the message fact.",
+        )
 
         for args in (
             {key: value for key, value in self._args().items() if key != "payload"},

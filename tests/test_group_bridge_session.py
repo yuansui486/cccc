@@ -543,6 +543,39 @@ class TestGroupBridgeSession(unittest.TestCase):
             )
         )
 
+    def test_insight_and_source_sender_are_natural_fingerprint_and_signature_facts(self) -> None:
+        from no1.contracts.v1.group_bridge import GroupBridgeSignedMessageEnvelope
+        from no1.daemon.group_bridge import identity as identity_module
+        from no1.daemon.group_bridge import session
+
+        base = self._signed_request(nonce=session.new_group_bridge_session_nonce())
+
+        def changed(field: str, value: str) -> dict[str, object]:
+            envelope = copy.deepcopy(base)
+            envelope["payload"][field] = value  # type: ignore[index]
+            unsigned = {key: item for key, item in envelope.items() if key != "signature"}
+            envelope["signature"] = identity_module.sign_group_bridge_payload(
+                identity_module.canonical_payload_bytes(unsigned),
+                home=self.home_a,
+            )
+            return envelope
+
+        with_insight = changed("insight", "The remote ownership boundary changed.")
+        with_sender = changed("source_by", "remote-peer")
+        base_model = GroupBridgeSignedMessageEnvelope.model_validate(base)
+        insight_model = GroupBridgeSignedMessageEnvelope.model_validate(with_insight)
+        sender_model = GroupBridgeSignedMessageEnvelope.model_validate(with_sender)
+        self.assertNotEqual(base["signature"], with_insight["signature"])
+        self.assertNotEqual(base["signature"], with_sender["signature"])
+        self.assertNotEqual(session._request_fingerprint(base_model), session._request_fingerprint(insight_model))
+        self.assertNotEqual(session._request_fingerprint(base_model), session._request_fingerprint(sender_model))
+
+        tampered = copy.deepcopy(with_insight)
+        tampered["payload"]["insight"] = "Unsigned replacement"  # type: ignore[index]
+        with self.assertRaises(session.GroupBridgeSessionError) as raised:
+            self._receive(tampered, [])
+        self.assertEqual(raised.exception.code, "invalid_signature")
+
     def test_terminal_inbound_replay_can_answer_stale_request_but_still_reauthorizes(self) -> None:
         from no1.daemon.group_bridge import session
 

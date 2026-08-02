@@ -1715,7 +1715,7 @@ class TestTurnProvenance(unittest.TestCase):
         self.assertTrue(completed_restart._turn_queue.empty())
         self.assertEqual(completed_restart._recovery_markers, {})
 
-    def test_tracked_send_preserves_actor_ingress(self) -> None:
+    def test_tracked_send_rejects_unclosed_actor_ingress_marker(self) -> None:
         from no1.daemon.messaging.chat_ops import handle_tracked_send
 
         with patch("no1.daemon.messaging.chat_ops.handle_context_sync") as context_sync:
@@ -1734,6 +1734,46 @@ class TestTurnProvenance(unittest.TestCase):
                     "text": "actor work",
                     "to": ["user"],
                 },
+                coerce_bool=bool,
+                normalize_attachments=lambda _group, _raw: [],
+                effective_runner_kind=lambda value: str(value or "pty"),
+                auto_wake_recipients=lambda _group, _to, _by: [],
+                automation_on_resume=lambda _group: None,
+                automation_on_new_message=lambda _group: None,
+                clear_pending_system_notifies=lambda _group_id, _kinds: None,
+            )
+
+        self.assertTrue(response.ok)
+        provenance = response.result["event"]["data"]["turn_provenance"]
+        self.assertEqual(provenance["origin"], "untrusted")
+        self.assertFalse(provenance["fresh_local_request"])
+
+    def test_tracked_send_preserves_closed_actor_ingress(self) -> None:
+        from no1.daemon.messaging.chat_ops import handle_tracked_send
+        from no1.daemon.messaging.message_admission import close_message_dispatch
+        from no1.kernel.actors import add_actor
+
+        add_actor(self.group, actor_id="peer1", runner="headless", runtime="codex")
+        _op, closed_args = close_message_dispatch(
+            "actor_tracked_send",
+            {
+                "group_id": self.group.group_id,
+                "by": "peer1",
+                "title": "Tracked",
+                "text": "actor work",
+                "to": ["user"],
+            },
+        )
+
+        with patch("no1.daemon.messaging.chat_ops.handle_context_sync") as context_sync:
+            from no1.contracts.v1 import DaemonResponse
+
+            context_sync.return_value = DaemonResponse(
+                ok=True,
+                result={"changes": [{"op": "task.create", "task_id": "task-1"}]},
+            )
+            response = handle_tracked_send(
+                closed_args,
                 coerce_bool=bool,
                 normalize_attachments=lambda _group, _raw: [],
                 effective_runner_kind=lambda value: str(value or "pty"),

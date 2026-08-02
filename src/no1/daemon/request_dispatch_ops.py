@@ -22,6 +22,7 @@ from .ops.daemon_core_ops import try_handle_daemon_core_op
 from .ops.remote_access_ops import try_handle_remote_access_op
 from .ops.hermes_runtime_ops import try_handle_hermes_runtime_op
 from .messaging.chat_ops import try_handle_chat_op
+from .messaging.message_admission import MessageAdmissionError, close_message_dispatch
 from .messaging.system_notify_ops import try_handle_system_notify_op
 from .group.group_state_ops import try_handle_group_state_op
 from .group.group_lifecycle_ops import try_handle_group_lifecycle_op
@@ -113,6 +114,16 @@ def dispatch_request(
 ) -> tuple[DaemonResponse, bool]:
     op = str(req.op or "").strip()
     args = req.args or {}
+    try:
+        op, args = close_message_dispatch(op, args)
+    except MessageAdmissionError as exc:
+        return (
+            DaemonResponse(
+                ok=False,
+                error={"code": exc.code, "message": exc.message, "details": exc.details},
+            ),
+            False,
+        )
 
     computer_control_resp = try_handle_computer_control_op(op, args)
     if computer_control_resp is not None:

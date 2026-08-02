@@ -4,7 +4,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.mcp_router_harness import route_tool_call
+from tests.mcp_router_harness import route_tool_call as _route_tool_call
+
+
+def route_tool_call(name: str, arguments: dict) -> dict:
+    group_id = str(arguments.get("group_id") or "").strip()
+    actor_id = str(arguments.get("actor_id") or "").strip()
+    if not group_id or not actor_id:
+        return _route_tool_call(name, arguments)
+    from no1.ports.mcp.common import runtime_context_override
+
+    with runtime_context_override(group_id=group_id, actor_id=actor_id, source="local_mcp"):
+        return _route_tool_call(name, arguments)
 
 
 class TestMcpToolBoolCoercion(unittest.TestCase):
@@ -17,14 +28,12 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
         ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = onecolleague_messaging.message_send(
-                group_id="g_test",
-                actor_id="peer1",
-                text="hello",
-                to=["user"],
+            result = route_tool_call(
+                "onecolleague_message_send",
+                {"group_id": "g_test", "actor_id": "peer1", "text": "hello", "to": ["user"]},
             )
         self.assertEqual(result.get("kind"), "chat.message")
-        self.assertEqual(call_daemon.call_args.args[0]["op"], "send")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "actor_message_send")
 
     def test_headless_codex_message_reply_is_allowed(self) -> None:
         from no1.ports.mcp.handlers import onecolleague_messaging
@@ -35,15 +44,18 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
         ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = onecolleague_messaging.message_reply(
-                group_id="g_test",
-                actor_id="peer1",
-                reply_to="ev_1",
-                text="hello",
-                to=["user"],
+            result = route_tool_call(
+                "onecolleague_message_reply",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "reply_to": "ev_1",
+                    "text": "hello",
+                    "to": ["user"],
+                },
             )
         self.assertEqual(result.get("kind"), "chat.message")
-        self.assertEqual(call_daemon.call_args.args[0]["op"], "reply")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "actor_message_reply")
 
     def test_headless_claude_message_send_is_allowed(self) -> None:
         from no1.ports.mcp.handlers import onecolleague_messaging
@@ -54,14 +66,12 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
         ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = onecolleague_messaging.message_send(
-                group_id="g_test",
-                actor_id="peer1",
-                text="hello",
-                to=["user"],
+            result = route_tool_call(
+                "onecolleague_message_send",
+                {"group_id": "g_test", "actor_id": "peer1", "text": "hello", "to": ["user"]},
             )
         self.assertEqual(result.get("kind"), "chat.message")
-        self.assertEqual(call_daemon.call_args.args[0]["op"], "send")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "actor_message_send")
 
     def test_headless_claude_message_reply_is_allowed(self) -> None:
         from no1.ports.mcp.handlers import onecolleague_messaging
@@ -72,27 +82,22 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup()), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude", "runner": "headless"}
         ), patch.object(onecolleague_messaging, "_call_daemon_or_raise", return_value={"ok": True, "kind": "chat.message"}) as call_daemon:
-            result = onecolleague_messaging.message_reply(
-                group_id="g_test",
-                actor_id="peer1",
-                reply_to="ev_1",
-                text="hello",
-                to=["user"],
+            result = route_tool_call(
+                "onecolleague_message_reply",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "reply_to": "ev_1",
+                    "text": "hello",
+                    "to": ["user"],
+                },
             )
         self.assertEqual(result.get("kind"), "chat.message")
-        self.assertEqual(call_daemon.call_args.args[0]["op"], "reply")
+        self.assertEqual(call_daemon.call_args.args[0]["op"], "actor_message_reply")
 
-    def test_file_send_blocks_path_outside_scope_root(self) -> None:
+    def test_file_send_delegates_path_validation_to_closed_daemon_op(self) -> None:
         from no1.ports.mcp import server as mcp_server
         from no1.ports.mcp.handlers import onecolleague_messaging
-
-        class _FakeGroup:
-            def __init__(self, root: str) -> None:
-                self.group_id = "g_test"
-                self.doc = {
-                    "active_scope_key": "s1",
-                    "scopes": [{"scope_key": "s1", "url": root}],
-                }
 
         with tempfile.TemporaryDirectory() as td:
             scope_root = os.path.join(td, "scope")
@@ -102,69 +107,69 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
             outside_file = os.path.join(outside_root, "note.txt")
             with open(outside_file, "w", encoding="utf-8") as f:
                 f.write("x")
+            captured: dict[str, object] = {}
 
-            with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup(scope_root)):
+            def _reject_path(req: dict[str, object]) -> dict[str, object]:
+                captured.update(req)
+                raise mcp_server.MCPError(code="invalid_path", message="path must be under the active scope")
+
+            with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_reject_path):
                 with self.assertRaises(mcp_server.MCPError) as cm:
-                    mcp_server.file_send(
-                        group_id="g_test",
-                        actor_id="peer1",
-                        path=outside_file,
-                        text="hello",
+                    route_tool_call(
+                        "onecolleague_file",
+                        {
+                            "action": "send",
+                            "group_id": "g_test",
+                            "actor_id": "peer1",
+                            "path": outside_file,
+                            "text": "hello",
+                        },
                     )
             self.assertEqual(cm.exception.code, "invalid_path")
+            self.assertEqual(captured.get("op"), "actor_file_send")
+            self.assertEqual((captured.get("args") or {}).get("path"), outside_file)
 
-    def test_file_send_stores_scope_file_as_chat_attachment(self) -> None:
-        from no1.ports.mcp import server as mcp_server
+    def test_file_send_forwards_scope_path_without_adapter_blob_side_effects(self) -> None:
+        from no1.kernel.peer_insight import POST_MESSAGE_NUDGE
         from no1.ports.mcp.handlers import onecolleague_messaging
-
-        class _FakeGroup:
-            def __init__(self, root: str, group_path: str) -> None:
-                self.group_id = "g_test"
-                self.path = Path(group_path)
-                self.doc = {
-                    "active_scope_key": "s1",
-                    "scopes": [{"scope_key": "s1", "url": root}],
-                }
 
         with tempfile.TemporaryDirectory() as td:
             scope_root = Path(td) / "scope"
-            group_path = Path(td) / "group"
             scope_root.mkdir()
-            group_path.mkdir()
             report_path = scope_root / "report.md"
             report_path.write_text("# Report\n\nok\n", encoding="utf-8")
             captured: dict[str, object] = {}
 
             def _fake_call(payload: dict[str, object]) -> dict[str, object]:
                 captured.update(payload)
-                return {"ok": True}
+                return {"ok": True, "event_id": "ev-file"}
 
-            with patch.object(onecolleague_messaging, "load_group", return_value=_FakeGroup(str(scope_root), str(group_path))), patch.object(
-                onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call
-            ):
-                out = mcp_server.file_send(
-                    group_id="g_test",
-                    actor_id="peer1",
-                    path="report.md",
-                    text="final report",
-                    to=["user"],
+            with patch.object(onecolleague_messaging, "_call_daemon_or_raise", side_effect=_fake_call):
+                out = route_tool_call(
+                    "onecolleague_file",
+                    {
+                        "action": "send",
+                        "group_id": "g_test",
+                        "actor_id": "peer1",
+                        "path": "report.md",
+                        "text": "final report",
+                        "to": ["user"],
+                    },
                 )
 
             self.assertTrue(out.get("ok"))
-            self.assertEqual(captured.get("op"), "send")
+            self.assertEqual(
+                out.get("post_message_nudge"),
+                {"kind": "whole_situation_reconstruction", "message": POST_MESSAGE_NUDGE},
+            )
+            self.assertEqual(captured.get("op"), "actor_file_send")
             args = captured.get("args")
             self.assertIsInstance(args, dict)
             self.assertEqual(args.get("text"), "final report")
             self.assertEqual(args.get("by"), "peer1")
             self.assertEqual(args.get("to"), ["user"])
-            attachments = args.get("attachments")
-            self.assertIsInstance(attachments, list)
-            self.assertEqual(len(attachments), 1)
-            att = attachments[0]
-            self.assertIsInstance(att, dict)
-            self.assertEqual(att.get("title"), "report.md")
-            self.assertEqual(att.get("mime_type"), "text/markdown")
-            self.assertTrue(str(att.get("path") or "").startswith("state/blobs/"))
+            self.assertEqual(args.get("path"), "report.md")
+            self.assertNotIn("attachments", args)
 
     def test_blob_read_reads_blob_attachment_with_limit(self) -> None:
         from no1.kernel.blobs import store_blob_bytes
@@ -190,43 +195,39 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
 
     def test_repo_edit_requires_web_model_actor_even_when_called_directly(self) -> None:
         from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
 
         class _FakeGroup:
             pass
 
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "_resolve_self_actor_id", return_value="peer1"
-        ), patch.object(mcp_server, "load_group", return_value=_FakeGroup()), patch.object(
-            mcp_server, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
-        ), patch.object(
-            mcp_server, "repo_tool", return_value={"ok": True}
-        ) as mock_repo_tool:
-            with self.assertRaises(mcp_server.MCPError) as cm:
-                mcp_server.handle_tool_call(
-                    "onecolleague_repo_edit",
-                    {"action": "write", "path": "notes.txt", "content": "blocked"},
-                )
+        with runtime_context_override(group_id="g_test", actor_id="peer1", source="local_mcp"):
+            with patch.object(mcp_server, "load_group", return_value=_FakeGroup()), patch.object(
+                mcp_server, "find_actor", return_value={"id": "peer1", "runtime": "codex", "runner": "headless"}
+            ), patch.object(mcp_server, "repo_tool", return_value={"ok": True}) as mock_repo_tool:
+                with self.assertRaises(mcp_server.MCPError) as cm:
+                    mcp_server.handle_tool_call(
+                        "onecolleague_repo_edit",
+                        {"action": "write", "path": "notes.txt", "content": "blocked"},
+                    )
 
         self.assertEqual(cm.exception.code, "invalid_actor_runtime")
         mock_repo_tool.assert_not_called()
 
     def test_repo_edit_allows_web_model_actor(self) -> None:
         from no1.ports.mcp import server as mcp_server
+        from no1.ports.mcp.common import runtime_context_override
 
         class _FakeGroup:
             pass
 
-        with patch.object(mcp_server, "_resolve_group_id", return_value="g_test"), patch.object(
-            mcp_server, "_resolve_self_actor_id", return_value="peer1"
-        ), patch.object(mcp_server, "load_group", return_value=_FakeGroup()), patch.object(
-            mcp_server, "find_actor", return_value={"id": "peer1", "runtime": "web_model", "runner": "headless"}
-        ), patch.object(
-            mcp_server, "repo_tool", return_value={"ok": True}
-        ) as mock_repo_tool:
-            result = mcp_server.handle_tool_call(
-                "onecolleague_repo_edit",
-                {"action": "write", "path": "notes.txt", "content": "ok"},
-            )
+        with runtime_context_override(group_id="g_test", actor_id="peer1", source="local_mcp"):
+            with patch.object(mcp_server, "load_group", return_value=_FakeGroup()), patch.object(
+                mcp_server, "find_actor", return_value={"id": "peer1", "runtime": "web_model", "runner": "headless"}
+            ), patch.object(mcp_server, "repo_tool", return_value={"ok": True}) as mock_repo_tool:
+                result = mcp_server.handle_tool_call(
+                    "onecolleague_repo_edit",
+                    {"action": "write", "path": "notes.txt", "content": "ok"},
+                )
 
         self.assertEqual(result.get("ok"), True)
         mock_repo_tool.assert_called_once()
@@ -249,11 +250,14 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         ), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
         ):
-            mcp_server.message_send(
-                group_id="g_test",
-                actor_id="peer1",
-                text="line1\\nline2\\tindent",
-                to=["user"],
+            route_tool_call(
+                "onecolleague_message_send",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "text": "line1\\nline2\\tindent",
+                    "to": ["user"],
+                },
             )
 
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
@@ -278,12 +282,15 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         ), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
         ):
-            mcp_server.message_reply(
-                group_id="g_test",
-                actor_id="peer1",
-                reply_to="ev_1",
-                text="line1\nline2",
-                to=["user"],
+            route_tool_call(
+                "onecolleague_message_reply",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "reply_to": "ev_1",
+                    "text": "line1\nline2",
+                    "to": ["user"],
+                },
             )
 
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
@@ -308,11 +315,14 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         ), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "claude"}
         ):
-            mcp_server.message_send(
-                group_id="g_test",
-                actor_id="peer1",
-                text=r"C:\\temp\\new",
-                to=["user"],
+            route_tool_call(
+                "onecolleague_message_send",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "text": r"C:\\temp\\new",
+                    "to": ["user"],
+                },
             )
 
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
@@ -337,11 +347,14 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         ), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
         ):
-            mcp_server.message_send(
-                group_id="g_test",
-                actor_id="peer1",
-                text=r"literal \\n path C:\\temp\\new",
-                to=["user"],
+            route_tool_call(
+                "onecolleague_message_send",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "text": r"literal \\n path C:\\temp\\new",
+                    "to": ["user"],
+                },
             )
 
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}
@@ -366,12 +379,15 @@ class TestMcpToolBoolCoercion(unittest.TestCase):
         ), patch.object(
             onecolleague_messaging, "find_actor", return_value={"id": "peer1", "runtime": "codex"}
         ):
-            mcp_server.message_reply(
-                group_id="g_test",
-                actor_id="peer1",
-                reply_to="ev_1",
-                text=r"regex \\t token",
-                to=["user"],
+            route_tool_call(
+                "onecolleague_message_reply",
+                {
+                    "group_id": "g_test",
+                    "actor_id": "peer1",
+                    "reply_to": "ev_1",
+                    "text": r"regex \\t token",
+                    "to": ["user"],
+                },
             )
 
         req = captured.get("req") if isinstance(captured.get("req"), dict) else {}

@@ -163,7 +163,7 @@ class TestWebMessagingClientId(unittest.TestCase):
         finally:
             cleanup()
 
-    def test_send_duplicate_client_id_is_scoped_to_sender(self) -> None:
+    def test_send_rejects_body_actor_before_daemon_or_client_id_replay(self) -> None:
         from no1.kernel.group import create_group
         from no1.kernel.registry import load_registry
 
@@ -171,7 +171,7 @@ class TestWebMessagingClientId(unittest.TestCase):
         try:
             reg = load_registry()
             group = create_group(reg, title="client-id-sender-scope", topic="")
-            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon):
+            with patch("no1.ports.web.app.call_daemon", side_effect=self._local_call_daemon) as daemon_call:
                 client = self._client()
                 first_resp = client.post(
                     f"/api/v1/groups/{group.group_id}/send",
@@ -193,14 +193,11 @@ class TestWebMessagingClientId(unittest.TestCase):
                 )
 
                 self.assertEqual(first_resp.status_code, 200)
-                self.assertEqual(second_resp.status_code, 200)
-                first_result = first_resp.json().get("result") or {}
-                second_result = second_resp.json().get("result") or {}
-                first_event = first_result.get("event") or {}
-                second_event = second_result.get("event") or {}
-                self.assertNotEqual(first_event.get("id"), second_event.get("id"))
-                self.assertFalse(bool(second_result.get("replayed")))
-                self.assertEqual(str(second_event.get("by") or ""), "peer-1")
+                self.assertEqual(second_resp.status_code, 403)
+                error = second_resp.json().get("error") or {}
+                self.assertEqual(error.get("code"), "permission_denied")
+                self.assertEqual(error.get("message"), "web messaging only sends as user")
+                self.assertEqual(daemon_call.call_count, 1)
         finally:
             cleanup()
 

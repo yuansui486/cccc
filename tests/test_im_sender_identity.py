@@ -691,6 +691,43 @@ class TestImSenderIdentity(unittest.TestCase):
                 bridge.stop()
             cleanup()
 
+    def test_completed_stream_projects_insight_once_without_repeating_body(self) -> None:
+        _, cleanup = self._with_home()
+        bridge: IMBridge | None = None
+        try:
+            group, _group_id = self._create_group_with_peer()
+            adapter = _FakeDingTalkAdapter([])
+            bridge = IMBridge(group=group, adapter=adapter)
+            self.assertTrue(bridge.start())
+            bridge.key_manager.is_authorized = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+            bridge.subscribers.subscribe("cid_g1", "ops", platform="dingtalk")
+            target = bridge._stream_target_key("cid_g1", 0)
+            bridge._completed_stream_targets["stream-insight"] = {target}
+
+            bridge._forward_event(
+                {
+                    "kind": "chat.message",
+                    "by": "claude-1",
+                    "data": {
+                        "text": "already streamed body",
+                        "insight": "The stream completion does not own the higher-order message fact.",
+                        "stream_id": "stream-insight",
+                        "to": ["user"],
+                        "attachments": [],
+                    },
+                }
+            )
+
+            self.assertEqual(len(adapter.sent_messages), 1)
+            projected = str(adapter.sent_messages[0]["text"])
+            self.assertNotIn("already streamed body", projected)
+            self.assertEqual(projected.count("Peer perspective (provisional"), 1)
+            self.assertIn("The stream completion does not own the higher-order message fact.", projected)
+        finally:
+            if bridge is not None:
+                bridge.stop()
+            cleanup()
+
     def test_bridge_forward_passes_explicit_mention_targets_to_file_caption(self) -> None:
         _, cleanup = self._with_home()
         bridge: IMBridge | None = None

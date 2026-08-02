@@ -33,6 +33,7 @@ class AttachRequest(BaseModel):
 
 class SendRequest(BaseModel):
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     path: str = Field(default="")
@@ -49,6 +50,7 @@ class SendRequest(BaseModel):
 
 class SendCrossGroupRequest(BaseModel):
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     dst_group_id: str
     to: list[str] = Field(default_factory=list)
@@ -60,6 +62,7 @@ class SendCrossGroupRequest(BaseModel):
 class TrackedSendRequest(BaseModel):
     title: str
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     outcome: str = Field(default="")
@@ -76,6 +79,7 @@ class TrackedSendRequest(BaseModel):
 
 class ReplyRequest(BaseModel):
     text: str
+    insight: Optional[str] = None
     by: str = Field(default="user")
     to: list[str] = Field(default_factory=list)
     reply_to: str

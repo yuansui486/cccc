@@ -11,6 +11,14 @@ _CLEAN_ENV = {"CCCC_GROUP_ID": "", "CCCC_ACTOR_ID": ""}
 
 
 class TestMcpMessageSendReplyRequired(unittest.TestCase):
+    def assert_post_message_nudge(self, result: dict) -> None:
+        from no1.kernel.peer_insight import POST_MESSAGE_NUDGE
+
+        self.assertEqual(
+            result.get("post_message_nudge"),
+            {"kind": "whole_situation_reconstruction", "message": POST_MESSAGE_NUDGE},
+        )
+
     def test_message_send_coerces_reply_required_string(self) -> None:
         from no1.ports.mcp import server as mcp_server
         from no1.ports.mcp import common as mcp_common
@@ -35,11 +43,12 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
             )
 
         self.assertEqual(out.get("event_id"), "ev_test")
+        self.assert_post_message_nudge(out)
         req = captured.get("req") or {}
-        self.assertEqual(req.get("op"), "send")
+        self.assertEqual(req.get("op"), "actor_message_send")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertTrue(args.get("reply_required") is True)
-        self.assertEqual(args.get("__turn_ingress"), "actor_mcp")
+        self.assertFalse(any(str(key).startswith("__") for key in args))
 
     def test_message_send_passes_refs(self) -> None:
         from no1.ports.mcp import server as mcp_server
@@ -67,6 +76,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
             )
 
         self.assertEqual(out.get("event_id"), "ev_test")
+        self.assert_post_message_nudge(out)
         req = captured.get("req") or {}
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("refs"), refs)
@@ -95,13 +105,14 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
             )
 
         self.assertEqual((out.get("dst_event") or {}).get("id"), "dst-1")
+        self.assert_post_message_nudge(out)
         req = captured.get("req") or {}
-        self.assertEqual(req.get("op"), "send_cross_group")
+        self.assertEqual(req.get("op"), "actor_send_cross_group")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("group_id"), "g_runtime")
         self.assertEqual(args.get("dst_group_id"), "g_selected")
         self.assertEqual(args.get("to"), ["@foreman"])
-        self.assertEqual(args.get("__turn_ingress"), "actor_mcp")
+        self.assertFalse(any(str(key).startswith("__") for key in args))
 
     def test_message_reply_passes_refs(self) -> None:
         from no1.ports.mcp import server as mcp_server
@@ -129,6 +140,7 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
             )
 
         self.assertEqual(out.get("event_id"), "ev_test")
+        self.assert_post_message_nudge(out)
         req = captured.get("req") or {}
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("refs"), refs)
@@ -218,14 +230,23 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
             )
 
         self.assertEqual(out.get("task_id"), "T001")
+        self.assert_post_message_nudge(out)
         req = captured.get("req") or {}
-        self.assertEqual(req.get("op"), "tracked_send")
+        self.assertEqual(req.get("op"), "actor_tracked_send")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("to"), ["reviewer"])
         self.assertEqual(args.get("title"), "Review PR")
         self.assertEqual(args.get("checklist"), checklist)
         self.assertTrue(args.get("reply_required"))
-        self.assertEqual(args.get("__turn_ingress"), "actor_mcp")
+        self.assertFalse(any(str(key).startswith("__") for key in args))
+
+    def test_post_message_nudge_is_omitted_for_partial_or_unsent_results(self) -> None:
+        from no1.ports.mcp.handlers.onecolleague_messaging import _with_post_message_nudge
+
+        partial = {"task_id": "T001", "partial_failure": True, "message_sent": False}
+        unsent = {"task_id": "T002", "message_sent": False}
+        self.assertIs(_with_post_message_nudge(partial), partial)
+        self.assertIs(_with_post_message_nudge(unsent), unsent)
 
     def test_tracked_send_persists_actor_provenance_through_daemon(self) -> None:
         from no1.contracts.v1 import DaemonRequest
@@ -327,10 +348,11 @@ class TestMcpMessageSendReplyRequired(unittest.TestCase):
 
         self.assertEqual(out.get("event_id"), "ev_headless")
         req = captured.get("req") or {}
-        self.assertEqual(req.get("op"), "send")
+        self.assertEqual(req.get("op"), "actor_message_send")
         args = req.get("args") if isinstance(req.get("args"), dict) else {}
         self.assertEqual(args.get("group_id"), group_id)
         self.assertEqual(args.get("by"), "peer1")
+        self.assertFalse(any(str(key).startswith("__") for key in args))
 
 
 if __name__ == "__main__":

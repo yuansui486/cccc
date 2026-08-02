@@ -71,6 +71,8 @@ class TestGroupBridgeOps(unittest.TestCase):
         issued_at: str | None = None,
         target_group_id: str = "local-group",
         text: str = "verified remote message",
+        insight: str | None = None,
+        source_by: str = "",
     ) -> dict[str, object]:
         from no1.contracts.v1.group_bridge import GroupBridgeSessionMessage
         from no1.daemon.group_bridge import identity, session
@@ -87,6 +89,8 @@ class TestGroupBridgeOps(unittest.TestCase):
                 format="markdown",
                 priority="attention",
                 reply_required=True,
+                insight=insight,
+                source_by=source_by,
             ),
             home=self.remote_home,
         ).model_dump()
@@ -226,7 +230,10 @@ print(json.dumps({"response": response.model_dump(), "should_stop": should_stop}
         from no1.daemon.group_bridge import ops
         from no1.daemon.messaging.turn_provenance import INGRESS_GROUP_BRIDGE, TRUSTED_INGRESS_ARG
 
-        envelope = self._signed_envelope()
+        envelope = self._signed_envelope(
+            insight="Remote ownership remains authoritative.",
+            source_by="remote-peer",
+        )
         dispatched: list[dict[str, object]] = []
 
         def dispatch_send(args: dict[str, object]):
@@ -258,6 +265,7 @@ print(json.dumps({"response": response.model_dump(), "should_stop": should_stop}
             {
                 "group_id",
                 "text",
+                "insight",
                 "format",
                 "priority",
                 "reply_required",
@@ -272,6 +280,8 @@ print(json.dumps({"response": response.model_dump(), "should_stop": should_stop}
                 "source_user_id",
                 "src_group_id",
                 "src_event_id",
+                "src_by",
+                "remote_reply_to",
                 "client_id",
                 TRUSTED_INGRESS_ARG,
                 ops._GROUP_BRIDGE_DELIVERY_CLAIM_ARG,
@@ -283,6 +293,9 @@ print(json.dumps({"response": response.model_dump(), "should_stop": should_stop}
         self.assertEqual(delivery["source_user_id"], self.remote_identity.peer_id)
         self.assertEqual(delivery["src_group_id"], "remote-group")
         self.assertEqual(delivery["source_platform"], "group_bridge_session")
+        self.assertEqual(delivery["insight"], "Remote ownership remains authoritative.")
+        self.assertEqual(delivery["src_by"], "remote-peer")
+        self.assertEqual(delivery["remote_reply_to"], ["remote-peer"])
         self.assertEqual(delivery[TRUSTED_INGRESS_ARG], INGRESS_GROUP_BRIDGE)
         self.assertEqual(delivery["src_event_id"], delivery["client_id"])
         self.assertTrue(str(delivery["client_id"]).startswith("gbs_"))

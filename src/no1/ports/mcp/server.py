@@ -95,6 +95,7 @@ from .handlers.onecolleague_messaging import (  # noqa: F401
     message_send,
     tracked_send,
 )
+from .actor_authority import ActorMessageAuthority, _issue_actor_message_authority
 from .group_bridge import (
     group_bridge_session_send,
     remote_delivery_status,
@@ -648,7 +649,12 @@ def _validate_tool_call_certificate(certificate: _ToolCallCertificate, arguments
         raise MCPError(code="permission_denied", message="tool call certificate runtime binding changed")
 
 
-def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _handle_onecolleague_namespace(
+    name: str,
+    arguments: Dict[str, Any],
+    *,
+    actor_message_authority: Optional[ActorMessageAuthority] = None,
+) -> Optional[Dict[str, Any]]:
     computer_command: Optional[str] = None
     if name == "onecolleague_computer_control_catalog":
         computer_command = "catalog"
@@ -843,6 +849,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             remote_endpoint=str(arguments.get("remote_endpoint") or ""),
             client_nonce=str(arguments.get("client_nonce") or ""),
             payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_group_bridge_remote_send":
@@ -857,6 +864,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             registration_id=str(arguments.get("registration_id") or ""),
             idempotency_key=str(arguments.get("idempotency_key") or ""),
             payload=arguments.get("payload") if isinstance(arguments.get("payload"), dict) else {},
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_group_bridge_remote_delivery_status":
@@ -884,10 +892,12 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             dst_group_id=arguments.get("dst_group_id"),
             actor_id=aid,
             text=str(arguments.get("text") or ""),
+            insight=arguments.get("insight"),
             to=to_val,
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
             refs=refs_val,
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_tracked_send":
@@ -904,6 +914,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             actor_id=aid,
             title=str(arguments.get("title") or ""),
             text=str(arguments.get("text") or ""),
+            insight=arguments.get("insight"),
             to=to_val,
             outcome=str(arguments.get("outcome") or ""),
             checklist=checklist_val,
@@ -915,6 +926,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             reply_required=coerce_bool(arguments.get("reply_required"), default=True),
             idempotency_key=str(arguments.get("idempotency_key") or ""),
             refs=refs_val,
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_message_reply":
@@ -930,6 +942,7 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             actor_id=aid,
             reply_to=reply_to,
             text=str(arguments.get("text") or ""),
+            insight=arguments.get("insight"),
             to=to_val_reply,
             priority=str(arguments.get("priority") or "normal"),
             reply_required=coerce_bool(arguments.get("reply_required"), default=False),
@@ -937,6 +950,8 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
             completion_receipt=(
                 arguments.get("completion_receipt") if isinstance(arguments.get("completion_receipt"), dict) else None
             ),
+            client_id=str(arguments.get("client_id") or ""),
+            actor_authority=actor_message_authority,
         )
 
     if name == "onecolleague_voice_secretary_document":
@@ -1103,9 +1118,11 @@ def _handle_onecolleague_namespace(name: str, arguments: Dict[str, Any]) -> Opti
                 actor_id=aid,
                 path=str(arguments.get("path") or ""),
                 text=str(arguments.get("text") or ""),
+                insight=arguments.get("insight"),
                 to=to_val_file,
                 priority=str(arguments.get("priority") or "normal"),
                 reply_required=coerce_bool(arguments.get("reply_required"), default=False),
+                actor_authority=actor_message_authority,
             )
         raise MCPError(code="invalid_request", message="onecolleague_file action must be send|blob_path|info|read")
 
@@ -1807,8 +1824,29 @@ def _route_tool_call(certificate: _ToolCallCertificate, arguments: Dict[str, Any
     _validate_tool_call_certificate(certificate, arguments)
     requested_name = certificate.requested_name
     name = certificate.canonical_name
+    actor_message_authority: Optional[ActorMessageAuthority] = None
+    if name in {
+        "onecolleague_message_send",
+        "onecolleague_tracked_send",
+        "onecolleague_message_reply",
+        "onecolleague_group_bridge_session_send",
+        "onecolleague_group_bridge_remote_send",
+    } or (name == "onecolleague_file" and str(arguments.get("action") or "send").strip() == "send"):
+        actor_message_authority = _issue_actor_message_authority(
+            group_id=certificate.group_id,
+            actor_id=certificate.actor_id,
+            source=certificate.source,
+            tool_name=name,
+            nonce=certificate.nonce,
+        )
+    out = _handle_onecolleague_namespace(
+        name,
+        arguments,
+        actor_message_authority=actor_message_authority,
+    )
+    if out is not None:
+        return out
     for handler in (
-        _handle_onecolleague_namespace,
         _handle_context_namespace,
         _handle_memory_namespace,
         _handle_experience_namespace,

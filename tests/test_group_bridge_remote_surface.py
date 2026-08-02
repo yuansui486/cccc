@@ -59,8 +59,10 @@ class TestGroupBridgeRemoteSurface(unittest.TestCase):
             },
         )
         self.assertEqual(send.status_code, 200)
-        self.assertEqual(calls[0]["op"], "remote_send")
-        self.assertEqual(set(calls[0]["args"]), {"group_id", "registration_id", "idempotency_key", "payload"})
+        self.assertEqual(calls[0]["op"], "user_remote_send")
+        self.assertEqual(set(calls[0]["args"]), {"group_id", "registration_id", "idempotency_key", "payload", "by"})
+        self.assertEqual(calls[0]["args"]["by"], "user")
+        self.assertEqual(calls[0]["args"]["payload"]["source_by"], "user")
         self.assertNotIn("attachments", calls[0]["args"]["payload"])
 
         status = client.post(
@@ -123,7 +125,9 @@ class TestGroupBridgeRemoteSurface(unittest.TestCase):
                     json=body,
                 )
                 self.assertEqual(allowed.status_code, 200)
-            self.assertEqual([item["op"] for item in calls], ["remote_send"])
+            self.assertEqual([item["op"] for item in calls], ["user_remote_send"])
+            self.assertEqual(calls[0]["args"]["by"], "user")
+            self.assertEqual(calls[0]["args"]["payload"]["source_by"], "user")
 
     def test_mcp_remote_tools_delegate_only_from_local_runtime(self) -> None:
         from no1.ports.mcp import common as mcp_common
@@ -154,7 +158,9 @@ class TestGroupBridgeRemoteSurface(unittest.TestCase):
                     {key: value for key, value in args.items() if key != "payload"},
                 )
                 self.assertEqual(status["receipt"]["status"], "queued")
-        self.assertEqual([item["op"] for item in captured], ["remote_send", "remote_delivery_status"])
+        self.assertEqual([item["op"] for item in captured], ["actor_remote_send", "remote_delivery_status"])
+        self.assertEqual(captured[0]["args"]["by"], "actor_local")
+        self.assertEqual(captured[0]["args"]["payload"]["source_by"], "actor_local")
         self.assertNotIn("payload", captured[1]["args"])
 
         with tempfile.TemporaryDirectory() as td, patch.object(

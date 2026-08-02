@@ -11,7 +11,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import yaml
 
@@ -330,6 +330,59 @@ def record_receipt(
         receipts[key] = entry
         _validate_stored_receipts(receipts)
         _save_unlocked(receipts, home)
+        return _public_receipt(entry), True
+    finally:
+        release_lockfile(lock)
+
+
+def record_receipt_after_admission(
+    registration_id: str,
+    idempotency_key: str,
+    receipt: Dict[str, Any],
+    home: Optional[Path] = None,
+    *,
+    request_facts: Optional[Dict[str, Any]] = None,
+    queued_request: Optional[Dict[str, Any]] = None,
+    admit_new: Callable[[], None],
+) -> Tuple[Dict[str, Any], bool]:
+    """Atomically admit and persist a receipt only when its request is new."""
+    rid = str(registration_id or "").strip()
+    ik = str(idempotency_key or "").strip()
+    if not rid or not ik:
+        raise ValueError("registration_id and idempotency_key are required")
+    if not callable(admit_new):
+        raise ValueError("admit_new must be callable")
+    fingerprint = _canonical_fingerprint(request_facts)
+    try:
+        queued = RemoteSendQueuedRequest.model_validate(queued_request).model_dump()
+    except Exception as exc:
+        raise ValueError("queued request facts are invalid") from exc
+    if queued["registration_id"] != rid or queued["idempotency_key"] != ik:
+        raise ValueError("queued request identity does not match receipt identity")
+
+    key = _compose_key(rid, ik)
+    lock = acquire_lockfile(_lock_path(home), blocking=True)
+    try:
+        receipts = _load_unlocked(home, for_write=True)
+        existing = receipts.get(key)
+        if isinstance(existing, dict):
+            existing_fingerprint = str(existing.get("request_fingerprint") or _canonical_fingerprint(None))
+            if not hmac.compare_digest(existing_fingerprint, fingerprint):
+                raise ReceiptConflictError("idempotency key conflicts with the original request")
+            if _QUEUED_REQUEST_FIELD not in existing:
+                raise ReceiptStoreError("queued receipt facts are missing")
+            existing_queued = RemoteSendQueuedRequest.model_validate(existing[_QUEUED_REQUEST_FIELD]).model_dump()
+            if _canonical_json_bytes(existing_queued) != _canonical_json_bytes(queued):
+                raise ReceiptConflictError("queued request facts conflict with the original request")
+            return _public_receipt(existing), False
+
+        entry = _normalize_receipt(rid, ik, fingerprint, receipt)
+        entry[_QUEUED_REQUEST_FIELD] = queued
+        candidate = copy.deepcopy(receipts)
+        candidate[key] = entry
+        _validate_stored_receipts(candidate)
+        admit_new()
+        _save_unlocked(candidate, home)
         return _public_receipt(entry), True
     finally:
         release_lockfile(lock)

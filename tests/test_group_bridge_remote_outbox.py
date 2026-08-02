@@ -68,7 +68,17 @@ class TestGroupBridgeRemoteOutbox(unittest.TestCase):
         self.assertEqual(receipt["status"], "sent")
         self.assertEqual(receipt["remote_event_id"], "remote-event-1")
         self.assertEqual(receipt["attempt"], 1)
-        self.assertEqual(calls[0]["payload"], {"text": "hello", "format": "markdown", "priority": "attention", "reply_required": True})
+        self.assertEqual(
+            calls[0]["payload"],
+            {
+                "text": "hello",
+                "format": "markdown",
+                "priority": "attention",
+                "reply_required": True,
+                "insight": None,
+                "source_by": "",
+            },
+        )
         self.assertEqual(len(calls[0]["client_nonce"]), 43)
 
         again = sweep_remote_outbox(home=self.home, session_sender=sender)

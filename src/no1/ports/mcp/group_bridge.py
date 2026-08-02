@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from ...contracts.v1.group_bridge import GroupBridgeSessionMessage
 from .common import MCPError, _call_daemon_or_raise, _runtime_context
+from .actor_authority import ActorMessageAuthority, consume_actor_message_authority
 
 _REMOTE_IDEMPOTENCY_PATTERN = re.compile(r"gbs_[0-9a-f]{32}")
 
@@ -49,8 +50,15 @@ def group_bridge_session_send(
     remote_endpoint: str,
     client_nonce: str,
     payload: Dict[str, Any],
+    actor_authority: ActorMessageAuthority,
 ) -> Dict[str, Any]:
     """Delegate one closed outbound session request to the daemon owner."""
+    authority = consume_actor_message_authority(
+        actor_authority,
+        group_id=group_id,
+        actor_id=str(actor_authority.actor_id if isinstance(actor_authority, ActorMessageAuthority) else ""),
+        tool_names={"onecolleague_group_bridge_session_send"},
+    )
     runtime = require_local_runtime_binding()
     if str(group_id or "").strip() != str(runtime.group_id or "").strip():
         raise MCPError(code="group_id_mismatch", message="group_id does not match the MCP runtime group")
@@ -79,13 +87,13 @@ def group_bridge_session_send(
     if not isinstance(payload, dict):
         raise MCPError(code="invalid_request", message="payload must be an object")
     try:
-        message = GroupBridgeSessionMessage.model_validate(payload)
+        message = GroupBridgeSessionMessage.model_validate(payload).model_copy(update={"source_by": authority.actor_id})
     except Exception as exc:
         raise MCPError(code="invalid_request", message="session message payload is invalid") from exc
 
     return _call_daemon_or_raise(
         {
-            "op": "group_bridge_session_send",
+            "op": "actor_group_bridge_session_send",
             "args": {
                 "group_id": str(group_id).strip(),
                 "local_endpoint": str(local_endpoint).strip(),
@@ -94,6 +102,7 @@ def group_bridge_session_send(
                 "remote_endpoint": remote_endpoint.strip(),
                 "client_nonce": client_nonce.strip(),
                 "payload": message.model_dump(),
+                "by": authority.actor_id,
             },
         }
     )
@@ -105,8 +114,15 @@ def remote_send(
     registration_id: str,
     idempotency_key: str,
     payload: Dict[str, Any],
+    actor_authority: ActorMessageAuthority,
 ) -> Dict[str, Any]:
     """Queue a remote Group Bridge message through the daemon owner."""
+    authority = consume_actor_message_authority(
+        actor_authority,
+        group_id=group_id,
+        actor_id=str(actor_authority.actor_id if isinstance(actor_authority, ActorMessageAuthority) else ""),
+        tool_names={"onecolleague_group_bridge_remote_send"},
+    )
     require_local_runtime_binding()
     _validate_remote_identity(
         group_id=group_id,
@@ -116,17 +132,18 @@ def remote_send(
     if not isinstance(payload, dict):
         raise MCPError(code="invalid_request", message="payload must be an object")
     try:
-        message = GroupBridgeSessionMessage.model_validate(payload)
+        message = GroupBridgeSessionMessage.model_validate(payload).model_copy(update={"source_by": authority.actor_id})
     except Exception as exc:
         raise MCPError(code="invalid_request", message="remote message payload is invalid") from exc
     return _call_daemon_or_raise(
         {
-            "op": "remote_send",
+            "op": "actor_remote_send",
             "args": {
                 "group_id": str(group_id).strip(),
                 "registration_id": str(registration_id).strip(),
                 "idempotency_key": str(idempotency_key).strip(),
                 "payload": message.model_dump(),
+                "by": authority.actor_id,
             },
         }
     )

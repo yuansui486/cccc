@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import hashlib
 import json
+import mimetypes
 import os
 import re
+import stat
 import threading
 import time
 import uuid
@@ -18,7 +20,12 @@ from ...computer_control.models import computer_control_permissions
 from ...contracts.v1 import ChatMessageData, ChatStreamData, DaemonError, DaemonResponse, SystemNotifyData
 from ...kernel.actors import find_actor, list_actors, resolve_recipient_tokens
 from ...kernel.group import get_group_state, load_group, set_group_state
-from ...kernel.inbox import find_event_with_chat_ack, get_quote_text_from_message_data, is_message_for_actor
+from ...kernel.inbox import (
+    find_event_with_chat_ack,
+    get_quote_text_from_message_data,
+    is_message_for_actor,
+    iter_events_reverse,
+)
 from ...kernel.context import ContextStorage
 from ...kernel.ledger import (
     MAX_CHAT_TEXT_BYTES,
@@ -31,9 +38,12 @@ from ...kernel.messaging import (
     default_reply_recipients,
     enabled_recipient_actor_ids,
     get_default_send_to,
+    recipient_actor_ids,
     targets_any_agent,
 )
+from ...contracts.v1.message import normalize_insight
 from ...kernel.message_sender_snapshot import build_sender_snapshot
+from ...kernel.blobs import store_blob_bytes
 from ...kernel.scope import detect_scope
 from ...util.time import utc_now_iso
 from ..claude_app_sessions import SUPERVISOR as claude_app_supervisor
@@ -75,14 +85,26 @@ from .turn_provenance import (
     build_send_turn_provenance,
     invalidate_turn_grant_from_completion_receipt,
 )
+from .message_admission import (
+    ADMISSION_CLAIM_ARG,
+    INGRESS_CLAIM_ARG,
+    MessageAdmissionError,
+    bind_file_descriptor,
+    consume_admission_claim,
+    issue_admission_claim,
+    issue_message_admission,
+)
 
 logger = logging.getLogger("no1.daemon.server")
+
+_MAX_FILE_SEND_BYTES = 20 * 1024 * 1024
 
 _GROUP_BRIDGE_DELIVERY_CLAIM_ARG = "__group_bridge_delivery_claim"
 _GROUP_BRIDGE_DELIVERY_FIELDS = frozenset(
     {
         "group_id",
         "text",
+        "insight",
         "format",
         "priority",
         "reply_required",
@@ -97,6 +119,8 @@ _GROUP_BRIDGE_DELIVERY_FIELDS = frozenset(
         "source_user_id",
         "src_group_id",
         "src_event_id",
+        "src_by",
+        "remote_reply_to",
         "client_id",
         TRUSTED_INGRESS_ARG,
         _GROUP_BRIDGE_DELIVERY_CLAIM_ARG,
@@ -154,6 +178,7 @@ def _group_bridge_delivery_projection(
     if set(args) != expected_fields:
         return None
     text = args.get("text")
+    insight = args.get("insight")
     delivery_id = args.get("src_event_id")
     try:
         text_bytes = (
@@ -169,6 +194,7 @@ def _group_bridge_delivery_projection(
         and bool(text)
         and len(text) <= MAX_CHAT_TEXT_BYTES
         and text_bytes <= MAX_CHAT_TEXT_BYTES
+        and (insight is None or type(insight) is str)
         and type(args.get("format")) is str
         and args.get("format") in ("plain", "markdown")
         and type(args.get("priority")) is str
@@ -193,6 +219,17 @@ def _group_bridge_delivery_projection(
         and args.get("source_platform") == "group_bridge_session"
         and _closed_identity(args.get("source_user_id"))
         and _closed_identity(args.get("src_group_id"))
+        and type(args.get("src_by")) is str
+        and len(args["src_by"]) <= 256
+        and type(args.get("remote_reply_to")) is list
+        and len(args["remote_reply_to"]) <= 1
+        and all(_closed_identity(item) for item in args["remote_reply_to"])
+        and args["remote_reply_to"]
+        == (
+            [args["src_by"]]
+            if args["src_by"] and not args["src_by"].startswith(("@", "#", "group_bridge:"))
+            else []
+        )
         and type(delivery_id) is str
         and _GROUP_BRIDGE_DELIVERY_ID_PATTERN.fullmatch(delivery_id) is not None
         and type(args.get("client_id")) is str
@@ -205,6 +242,7 @@ def _group_bridge_delivery_projection(
     return (
         args["group_id"],
         text,
+        insight,
         args["format"],
         args["priority"],
         args["reply_required"],
@@ -219,6 +257,8 @@ def _group_bridge_delivery_projection(
         args["source_user_id"],
         args["src_group_id"],
         delivery_id,
+        args["src_by"],
+        tuple(args["remote_reply_to"]),
         args["client_id"],
         args[TRUSTED_INGRESS_ARG],
     )
@@ -318,6 +358,42 @@ def _normalize_to_tokens(raw: Any) -> list[str]:
     return []
 
 
+def _resolve_send_audience(group: Any, *, args: Dict[str, Any], by: str) -> tuple[list[str], list[str], list[str]]:
+    input_tokens = _normalize_to_tokens(args.get("to"))
+    explicitly_set = bool(input_tokens)
+    try:
+        to = resolve_recipient_tokens(group, input_tokens)
+    except Exception as exc:
+        raise MessageAdmissionError("invalid_recipient", str(exc)) from exc
+    if not to:
+        mentions = re.findall(r"@(\w[\w-]*)", str(args.get("text") or ""))
+        if mentions:
+            actor_ids = {
+                str(actor.get("id") or "")
+                for actor in list_actors(group)
+                if isinstance(actor, dict)
+            }
+            mention_tokens = [
+                f"@{item}" if item in {"all", "peers", "foreman"} else item
+                for item in mentions
+                if item in actor_ids or item in {"all", "peers", "foreman"}
+            ]
+            if mention_tokens:
+                input_tokens = mention_tokens
+                try:
+                    to = resolve_recipient_tokens(group, mention_tokens)
+                except Exception as exc:
+                    raise MessageAdmissionError("invalid_recipient", str(exc)) from exc
+    if not to and not explicitly_set and get_default_send_to(group.doc) == "foreman":
+        to = ["@foreman"]
+    peers = [actor_id for actor_id in recipient_actor_ids(group, to) if actor_id != by]
+    return input_tokens, to, peers
+
+
+def _admission_error_response(exc: MessageAdmissionError) -> DaemonResponse:
+    return _error(exc.code, exc.message, details=exc.details)
+
+
 def _tracked_send_client_id(*, group_id: str, by: str, idempotency_key: str) -> str:
     basis = "\0".join([str(group_id or ""), str(by or ""), str(idempotency_key or "")])
     digest = hashlib.sha256(basis.encode("utf-8", errors="replace")).hexdigest()[:32]
@@ -392,6 +468,57 @@ def _tracked_send_existing_task(group: Any, *, client_request_id: str) -> Option
         reverse=True,
     )
     return matches[0]
+
+
+def _reply_request_fingerprint(
+    *,
+    group_id: str,
+    by: str,
+    client_id: str,
+    reply_to: str,
+    text: str,
+    insight: Optional[str],
+    to: list[str],
+    priority: str,
+    reply_required: bool,
+    collaboration_required: bool,
+    refs: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+) -> str:
+    facts = {
+        "version": 1,
+        "group_id": group_id,
+        "by": by,
+        "client_id": client_id,
+        "reply_to": reply_to,
+        "text": text,
+        "insight": insight,
+        "to": to,
+        "priority": priority,
+        "reply_required": reply_required,
+        "collaboration_required": collaboration_required,
+        "refs": refs,
+        "attachments": attachments,
+    }
+    encoded = json.dumps(facts, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _reply_existing_event(group: Any, *, client_id: str, by: str) -> Optional[dict[str, Any]]:
+    if not client_id:
+        return None
+    try:
+        for event in iter_events_reverse(group.ledger_path):
+            if not isinstance(event, dict) or str(event.get("kind") or "") != "chat.message":
+                continue
+            if str(event.get("by") or "").strip() != by:
+                continue
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            if str(data.get("client_id") or "").strip() == client_id and str(data.get("reply_to") or "").strip():
+                return event
+    except Exception:
+        return None
+    return None
 
 
 def _derive_tracked_send_assignee(args: Dict[str, Any]) -> str:
@@ -602,6 +729,35 @@ def handle_send(
         if existing is not None:
             return DaemonResponse(ok=True, result=existing)
 
+    try:
+        admission_ingress = ""
+        if ADMISSION_CLAIM_ARG in args:
+            committed = consume_admission_claim(args, group_id=group_id, sender_id=by)
+            to = list(committed.to)
+            insight = committed.insight
+            admission_ingress = committed.ingress
+        else:
+            input_tokens, to, peers = _resolve_send_audience(group, args=args, by=by)
+            if INGRESS_CLAIM_ARG in args:
+                pending = issue_message_admission(
+                    args,
+                    expected_op="send",
+                    destination_group=group,
+                    input_tokens=input_tokens,
+                    to=to,
+                    peer_actor_ids=peers,
+                )
+                committed = pending.consume_current(lambda value: value)
+                to = list(committed.to)
+                insight = committed.insight
+                admission_ingress = committed.ingress
+            else:
+                insight = normalize_insight(args.get("insight"))
+    except MessageAdmissionError as exc:
+        return _admission_error_response(exc)
+    except ValueError as exc:
+        return _error("invalid_insight", str(exc))
+
     group = _wake_group_on_human_message(
         group,
         by=by,
@@ -609,28 +765,6 @@ def handle_send(
         automation_on_resume=automation_on_resume,
         clear_pending_system_notifies=clear_pending_system_notifies,
     )
-
-    try:
-        to = resolve_recipient_tokens(group, to_tokens)
-    except Exception as e:
-        return _error("invalid_recipient", str(e))
-
-    if not to:
-        mention_pattern = re.compile(r"@(\w[\w-]*)")
-        mentions = mention_pattern.findall(text)
-        if mentions:
-            actors = list_actors(group)
-            actor_ids = {str(actor.get("id") or "") for actor in actors if isinstance(actor, dict)}
-            valid_mentions = [m for m in mentions if m in actor_ids or m in ("all", "peers", "foreman")]
-            if valid_mentions:
-                mention_tokens = [f"@{m}" if m in ("all", "peers", "foreman") else m for m in valid_mentions]
-                try:
-                    to = resolve_recipient_tokens(group, mention_tokens)
-                except Exception:
-                    pass
-
-    if not to and not to_explicitly_set and get_default_send_to(group.doc) == "foreman":
-        to = ["@foreman"]
 
     woken: list[str] = []
     if targets_any_agent(to):
@@ -697,6 +831,7 @@ def handle_send(
     event_data = ChatMessageData(
         text=text,
         format=message_format,
+        insight=insight,
         priority=priority,
         reply_required=reply_required,
         collaboration_required=collaboration_required,
@@ -712,10 +847,18 @@ def handle_send(
         **build_sender_snapshot(group, by=by),
         src_group_id=src_group_id or None,
         src_event_id=src_event_id or None,
+        src_by=str(args.get("src_by") or "").strip() or None,
+        remote_reply_to=(
+            [str(item).strip() for item in args.get("remote_reply_to", []) if str(item).strip()]
+            if isinstance(args.get("remote_reply_to"), list)
+            else None
+        ),
         dst_group_id=dst_group_id or None,
         dst_to=dst_to if dst_group_id else None,
         client_id=client_id or None,
-        turn_provenance=build_send_turn_provenance(args),
+        turn_provenance=build_send_turn_provenance(
+            {**args, **({TRUSTED_INGRESS_ARG: admission_ingress} if admission_ingress else {})}
+        ),
     ).model_dump()
     group_bridge_replayed = False
     if group_bridge_delivery:
@@ -769,6 +912,7 @@ def handle_send(
     event_ts = str(event.get("ts") or "").strip()
     delivery_text = _build_delivery_text(
         text=delivery_body_text,
+        insight=insight,
         priority=priority,
         reply_required=reply_required,
         collaboration_required=collaboration_required,
@@ -976,7 +1120,6 @@ def handle_tracked_send(
     reply_required = coerce_bool(args.get("reply_required")) if "reply_required" in args else True
     message_args = {
         "group_id": group_id,
-        TRUSTED_INGRESS_ARG: str(args.get(TRUSTED_INGRESS_ARG) or "").strip(),
         "text": text,
         "by": by,
         "to": _normalize_to_tokens(args.get("to")),
@@ -987,6 +1130,33 @@ def handle_tracked_send(
     }
     if client_id:
         message_args["client_id"] = client_id
+    if INGRESS_CLAIM_ARG in args:
+        try:
+            input_tokens, canonical_to, peers = _resolve_send_audience(group, args=message_args, by=by)
+            pending_admission = issue_message_admission(
+                args,
+                expected_op="tracked_send",
+                destination_group=group,
+                input_tokens=input_tokens,
+                to=canonical_to,
+                peer_actor_ids=peers,
+            )
+            committed_admission = pending_admission.consume_current(lambda value: value)
+        except MessageAdmissionError as exc:
+            if existing_task is not None and exc.code == "peer_insight_required":
+                exc.details.update(
+                    existing_task_preserved=True,
+                    existing_task_id=str(getattr(existing_task, "id", "") or "").strip(),
+                )
+            return _admission_error_response(exc)
+        message_args["to"] = list(committed_admission.to)
+        message_args["insight"] = committed_admission.insight
+        message_args[ADMISSION_CLAIM_ARG] = issue_admission_claim(committed_admission)
+    else:
+        try:
+            message_args["insight"] = normalize_insight(args.get("insight"))
+        except ValueError as exc:
+            return _error("invalid_insight", str(exc))
 
     if existing_task is not None:
         existing_task_id = str(getattr(existing_task, "id", "") or "").strip()
@@ -1165,14 +1335,6 @@ def handle_reply(
     if group is None:
         return _error("group_not_found", f"group not found: {group_id}")
 
-    group = _wake_group_on_human_message(
-        group,
-        by=by,
-        state_at_accept=str(args.get("__group_state_at_accept") or ""),
-        automation_on_resume=automation_on_resume,
-        clear_pending_system_notifies=clear_pending_system_notifies,
-    )
-
     original, existing_ack = find_event_with_chat_ack(group, event_id=reply_to, actor_id=by)
     if original is None:
         return _error("event_not_found", f"event not found: {reply_to}")
@@ -1196,6 +1358,64 @@ def handle_reply(
     except Exception as e:
         return _error("invalid_recipient", str(e))
 
+    try:
+        attachments = normalize_attachments(group, args.get("attachments"))
+    except Exception as e:
+        return _error("invalid_attachments", str(e))
+    refs = _normalize_refs(args.get("refs"))
+    if not text.strip() and not attachments:
+        return _error("empty_message", "message text cannot be empty")
+    try:
+        insight = normalize_insight(args.get("insight"))
+    except ValueError as exc:
+        return _error("invalid_insight", str(exc))
+    request_fingerprint = _reply_request_fingerprint(
+        group_id=group_id,
+        by=by,
+        client_id=client_id,
+        reply_to=target_event_id or reply_to,
+        text=text,
+        insight=insight,
+        to=to,
+        priority=priority,
+        reply_required=reply_required,
+        collaboration_required=collaboration_required,
+        refs=refs,
+        attachments=attachments,
+    )
+    existing_reply = _reply_existing_event(group, client_id=client_id, by=by)
+    if existing_reply is not None:
+        existing_data = existing_reply.get("data") if isinstance(existing_reply.get("data"), dict) else {}
+        if str(existing_data.get("request_fingerprint") or "") != request_fingerprint:
+            return _error("message_replay_conflict", "reply client_id conflicts with the original request")
+        return DaemonResponse(ok=True, result={"event": existing_reply, "replayed": True})
+
+    if INGRESS_CLAIM_ARG in args:
+        try:
+            peers = [actor_id for actor_id in recipient_actor_ids(group, to) if actor_id != by]
+            pending_admission = issue_message_admission(
+                args,
+                expected_op="reply",
+                destination_group=group,
+                input_tokens=to_tokens,
+                to=to,
+                peer_actor_ids=peers,
+            )
+            committed_admission = pending_admission.consume_current(lambda value: value)
+            to = list(committed_admission.to)
+            insight = committed_admission.insight
+            admission_ingress = committed_admission.ingress
+        except MessageAdmissionError as exc:
+            return _admission_error_response(exc)
+
+    group = _wake_group_on_human_message(
+        group,
+        by=by,
+        state_at_accept=str(args.get("__group_state_at_accept") or ""),
+        automation_on_resume=automation_on_resume,
+        clear_pending_system_notifies=clear_pending_system_notifies,
+    )
+
     woken: list[str] = []
     if targets_any_agent(to):
         matched_enabled = enabled_recipient_actor_ids(group, to)
@@ -1216,13 +1436,6 @@ def handle_reply(
                 )
 
     scope_key = str(group.doc.get("active_scope_key") or "").strip()
-    try:
-        attachments = normalize_attachments(group, args.get("attachments"))
-    except Exception as e:
-        return _error("invalid_attachments", str(e))
-    refs = _normalize_refs(args.get("refs"))
-    if not text.strip() and not attachments:
-        return _error("empty_message", "message text cannot be empty")
 
     event = append_event(
         group.ledger_path,
@@ -1233,6 +1446,7 @@ def handle_reply(
         data=ChatMessageData(
             text=text,
             format="plain",
+            insight=insight,
             priority=priority,
             reply_required=reply_required,
             collaboration_required=collaboration_required,
@@ -1247,7 +1461,11 @@ def handle_reply(
             mention_user_ids=original_mention_user_ids or None,
             **build_sender_snapshot(group, by=by),
             client_id=client_id or None,
-            turn_provenance=build_reply_turn_provenance(original, args),
+            request_fingerprint=request_fingerprint if client_id else None,
+            turn_provenance=build_reply_turn_provenance(
+                original,
+                {**args, **({TRUSTED_INGRESS_ARG: admission_ingress} if INGRESS_CLAIM_ARG in args else {})},
+            ),
         ).model_dump(),
     )
 
@@ -1286,6 +1504,7 @@ def handle_reply(
     event_ts = str(event.get("ts") or "").strip()
     delivery_text = _build_delivery_text(
         text=text,
+        insight=insight,
         priority=priority,
         reply_required=reply_required,
         collaboration_required=collaboration_required,
@@ -1476,6 +1695,155 @@ def handle_stream_emit(args: Dict[str, Any]) -> DaemonResponse:
     return DaemonResponse(ok=True, result={"event": event, "stream_id": stream_id})
 
 
+def _open_active_scope_file(group: Any, raw_path: str) -> tuple[int, os.stat_result, str]:
+    scope_key = str(group.doc.get("active_scope_key") or "").strip()
+    scopes = group.doc.get("scopes") if isinstance(group.doc.get("scopes"), list) else []
+    scope_url = next(
+        (
+            str(item.get("url") or "").strip()
+            for item in scopes
+            if isinstance(item, dict) and str(item.get("scope_key") or "").strip() == scope_key
+        ),
+        "",
+    )
+    if not scope_key or not scope_url:
+        raise MessageAdmissionError("missing_scope", "group has no active scope")
+    root = Path(scope_url).expanduser().resolve(strict=True)
+    candidate = Path(str(raw_path or "").strip()).expanduser()
+    if candidate.is_absolute():
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError as exc:
+            raise MessageAdmissionError("invalid_path", "path must be under the active scope") from exc
+    else:
+        relative = candidate
+    parts = relative.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise MessageAdmissionError("invalid_path", "path must identify a file under the active scope")
+    directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        before = os.stat(parts[-1], dir_fd=directory_fd, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise MessageAdmissionError("not_found", "file is not a regular active-scope file")
+        if before.st_size > _MAX_FILE_SEND_BYTES:
+            raise MessageAdmissionError("file_too_large", "file is too large to send")
+        file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        after = os.fstat(file_fd)
+        if (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            os.close(file_fd)
+            raise MessageAdmissionError("file_changed", "file changed while it was opened")
+        return file_fd, after, parts[-1]
+    except OSError as exc:
+        raise MessageAdmissionError("read_failed", str(exc)) from exc
+    finally:
+        os.close(directory_fd)
+
+
+def handle_file_send(
+    args: Dict[str, Any],
+    *,
+    coerce_bool: Callable[[Any], bool],
+    normalize_attachments: Callable[[Any, Any], list[dict[str, Any]]],
+    effective_runner_kind: Callable[[str], str],
+    auto_wake_recipients: Callable[[Any, list[str], str], list[str]],
+    automation_on_resume: Callable[[Any], None],
+    automation_on_new_message: Callable[[Any], None],
+    clear_pending_system_notifies: Callable[[str, set[str]], None],
+) -> DaemonResponse:
+    group_id = str(args.get("group_id") or "").strip()
+    by = str(args.get("by") or "").strip()
+    group = load_group(group_id)
+    if group is None:
+        return _error("group_not_found", f"group not found: {group_id}")
+    priority = str(args.get("priority") or "normal").strip() or "normal"
+    if priority not in {"normal", "attention"}:
+        return _error("invalid_priority", "priority must be 'normal' or 'attention'")
+    try:
+        input_tokens, to, peers = _resolve_send_audience(group, args=args, by=by)
+        pending = issue_message_admission(
+            args,
+            expected_op="file_send",
+            destination_group=group,
+            input_tokens=input_tokens,
+            to=to,
+            peer_actor_ids=peers,
+        )
+    except MessageAdmissionError as exc:
+        return _admission_error_response(exc)
+
+    try:
+        file_fd, opened_stat, filename = _open_active_scope_file(group, str(args.get("path") or ""))
+    except MessageAdmissionError as exc:
+        return _admission_error_response(exc)
+    try:
+        bound = bind_file_descriptor(pending, file_fd, opened_stat)
+
+        def complete(committed: Any) -> DaemonResponse:
+            chunks: list[bytes] = []
+            remaining = opened_stat.st_size
+            while remaining > 0:
+                chunk = os.read(file_fd, min(remaining, 1024 * 1024))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            final_stat = os.fstat(file_fd)
+            if (
+                len(raw) != opened_stat.st_size
+                or (final_stat.st_dev, final_stat.st_ino, final_stat.st_size, final_stat.st_mtime_ns)
+                != (opened_stat.st_dev, opened_stat.st_ino, opened_stat.st_size, opened_stat.st_mtime_ns)
+            ):
+                return _error("file_changed", "file changed while it was read")
+            mime_type, _ = mimetypes.guess_type(filename)
+            attachment = store_blob_bytes(
+                group,
+                data=raw,
+                filename=filename,
+                mime_type=str(mime_type or ""),
+            )
+            text = str(args.get("text") or "").strip() or f"[file] {attachment.get('title') or filename}"
+            send_args = {
+                "group_id": group_id,
+                "by": by,
+                "text": text,
+                "to": list(committed.to),
+                "insight": committed.insight,
+                "attachments": [attachment],
+                "priority": priority,
+                "reply_required": coerce_bool(args.get("reply_required")),
+                ADMISSION_CLAIM_ARG: issue_admission_claim(committed),
+            }
+            return handle_send(
+                send_args,
+                coerce_bool=coerce_bool,
+                normalize_attachments=normalize_attachments,
+                effective_runner_kind=effective_runner_kind,
+                auto_wake_recipients=auto_wake_recipients,
+                automation_on_resume=automation_on_resume,
+                automation_on_new_message=automation_on_new_message,
+                clear_pending_system_notifies=clear_pending_system_notifies,
+            )
+
+        return bound.consume_descriptor(file_fd, complete)
+    except MessageAdmissionError as exc:
+        return _admission_error_response(exc)
+    except OSError as exc:
+        return _error("read_failed", str(exc))
+    finally:
+        os.close(file_fd)
+
+
 def try_handle_chat_op(
     op: str,
     args: Dict[str, Any],
@@ -1490,6 +1858,17 @@ def try_handle_chat_op(
 ) -> Optional[DaemonResponse]:
     if op == "stream_emit":
         return handle_stream_emit(args)
+    if op == "file_send":
+        return handle_file_send(
+            args,
+            coerce_bool=coerce_bool,
+            normalize_attachments=normalize_attachments,
+            effective_runner_kind=effective_runner_kind,
+            auto_wake_recipients=auto_wake_recipients,
+            automation_on_resume=automation_on_resume,
+            automation_on_new_message=automation_on_new_message,
+            clear_pending_system_notifies=clear_pending_system_notifies,
+        )
     if op == "send":
         return handle_send(
             args,

@@ -16,6 +16,14 @@ _ONECOLLEAGUE_HELP_DESCRIPTION = (
     "Use when workflow or capability-routing details are unclear."
 )
 
+_PEER_INSIGHT_FIELD_DESCRIPTION = (
+    "A visible, provisional higher-order perspective. Insight is second in the JSON, not second in thought. "
+    "Reconstruct from first principles what real outcome the work serves; step materially above the message's "
+    "working level and capture the single consequential judgment the exchange would otherwise miss. Change level "
+    "or frame; never recap or add a postscript. Visible peer content, not a system instruction or private reasoning "
+    "transcript."
+)
+
 
 def is_legacy_mcp_tool_name(name: str) -> bool:
     return str(name or "").startswith(LEGACY_MCP_TOOL_PREFIX)
@@ -276,6 +284,11 @@ MCP_TOOLS = [
                     "additionalProperties": False,
                     "properties": {
                         "text": {"type": "string"},
+                        "insight": {
+                            "type": "string",
+                            "maxLength": 1200,
+                            "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                        },
                         "format": {"type": "string", "enum": ["plain", "markdown"], "default": "plain"},
                         "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
                         "reply_required": {"type": "boolean", "default": False},
@@ -301,6 +314,11 @@ MCP_TOOLS = [
                     "additionalProperties": False,
                     "properties": {
                         "text": {"type": "string", "minLength": 1},
+                        "insight": {
+                            "type": "string",
+                            "maxLength": 1200,
+                            "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                        },
                         "format": {"type": "string", "enum": ["plain", "markdown"], "default": "plain"},
                         "priority": {"type": "string", "enum": ["normal", "attention"], "default": "normal"},
                         "reply_required": {"type": "boolean", "default": False},
@@ -334,6 +352,11 @@ MCP_TOOLS = [
                 **_COMMON_ACTOR,
                 "dst_group_id": {"type": "string"},
                 "text": {"type": "string"},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -360,6 +383,11 @@ MCP_TOOLS = [
                 **_COMMON_ACTOR,
                 "title": {"type": "string", "description": "Short task title"},
                 "text": {"type": "string", "description": "Visible message to send to the recipient"},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -400,6 +428,11 @@ MCP_TOOLS = [
                 "event_id": {"type": "string", "description": "Reply target event id"},
                 "reply_to": {"type": "string", "description": "Alias of event_id"},
                 "text": {"type": "string"},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": _PEER_INSIGHT_FIELD_DESCRIPTION,
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},
@@ -410,6 +443,7 @@ MCP_TOOLS = [
                 "reply_required": {"type": "boolean", "default": False},
                 "refs": {"type": "array", "items": {"type": "object"}},
                 "completion_receipt": {"type": "object"},
+                "client_id": {"type": "string", "description": "Stable retry key for exact reply replay"},
             },
             required=["text"],
         ),
@@ -489,6 +523,11 @@ MCP_TOOLS = [
                 "action": {"type": "string", "enum": ["send", "blob_path", "info", "read"], "default": "send"},
                 "path": {"type": "string", "description": "Required for action=send. Relative to the active scope, or an absolute path under that scope."},
                 "text": {"type": "string", "description": "Optional caption/message when action=send."},
+                "insight": {
+                    "type": "string",
+                    "maxLength": 1200,
+                    "description": f"For action=send, {_PEER_INSIGHT_FIELD_DESCRIPTION}",
+                },
                 "to": {
                     "anyOf": [
                         {"type": "string"},

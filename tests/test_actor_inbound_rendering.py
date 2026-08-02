@@ -117,3 +117,19 @@ def test_actor_delivery_text_points_attachments_to_file_read_tools() -> None:
     assert 'action="blob_path"' in text
     assert "binary/local tools" in text
     assert "- notes.txt (12 bytes) [state/blobs/sha256_notes.txt]" in text
+
+
+def test_actor_delivery_text_projects_peer_insight_once_after_operational_body() -> None:
+    text = build_actor_delivery_text(
+        text="review the current boundary",
+        insight="The authorization owner may be split across two transports.",
+        priority="normal",
+        reply_required=False,
+        event_id="evt-insight",
+        refs=[],
+        attachments=[],
+    )
+
+    assert text.startswith("review the current boundary\n\n")
+    assert text.count("[Peer higher-order perspective - provisional.") == 1
+    assert text.endswith("The authorization owner may be split across two transports.")

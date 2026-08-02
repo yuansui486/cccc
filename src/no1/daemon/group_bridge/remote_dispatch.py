@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from ...contracts.v1.group_bridge import (
     GroupBridgeSessionMessage,
@@ -15,7 +15,7 @@ from ...kernel.group_bridge.receipts import (
     ReceiptStoreError,
     get_queued_request,
     get_receipt_strict,
-    record_receipt,
+    record_receipt_after_admission,
 )
 from ...kernel.group_bridge.registration import get_registration
 
@@ -86,6 +86,7 @@ def enqueue_remote_send(
     idempotency_key: str,
     payload: Any,
     home: Optional[Path] = None,
+    admit_new: Optional[Callable[[Dict[str, Any], Callable[[], Dict[str, Any]]], None]] = None,
 ) -> Dict[str, Any]:
     """Persist one queued request; no network or local message delivery occurs here."""
     if type(group_id) is not str or not group_id:
@@ -98,8 +99,13 @@ def enqueue_remote_send(
         payload=payload,
     )
     facts = _request_facts(request, registration)
+
+    def current_facts() -> Dict[str, Any]:
+        current_registration = _registration_or_error(request.registration_id, request.src_group_id, home)
+        return _request_facts(request, current_registration)
+
     try:
-        receipt, created = record_receipt(
+        receipt, created = record_receipt_after_admission(
             request.registration_id,
             request.idempotency_key,
             {
@@ -111,6 +117,11 @@ def enqueue_remote_send(
             home,
             request_facts=facts,
             queued_request=request.model_dump(),
+            admit_new=(
+                lambda: admit_new(copy.deepcopy(facts), current_facts)
+                if admit_new is not None
+                else None
+            ),
         )
     except ReceiptConflictError as exc:
         raise RemoteDispatchError("remote_receipt_conflict", "Idempotency key conflicts with the original request") from exc

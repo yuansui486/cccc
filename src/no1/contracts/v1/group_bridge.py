@@ -6,6 +6,8 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .message import INSIGHT_MAX_CHARS, normalize_insight
+
 GroupBridgeAccessLevel = Literal["messages", "read", "full"]
 GROUP_BRIDGE_ACCESS_LEVELS = ("messages", "read", "full")
 DEFAULT_GROUP_BRIDGE_ACCESS_LEVEL: GroupBridgeAccessLevel = "messages"
@@ -17,6 +19,7 @@ GroupBridgePairingStatus = Literal["submitted", "pending", "approving", "approve
 
 class RemoteSendPayload(BaseModel):
     text: str
+    insight: Optional[str] = Field(default=None, max_length=INSIGHT_MAX_CHARS)
     format: Literal["plain", "markdown"] = "plain"
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
@@ -24,6 +27,11 @@ class RemoteSendPayload(BaseModel):
     refs: List[Dict[str, object]] = Field(default_factory=list)
     attachments: List[Dict[str, object]] = Field(default_factory=list)
     source_by: str = ""
+
+    @field_validator("insight", mode="before")
+    @classmethod
+    def _normalize_insight(cls, value: object) -> Optional[str]:
+        return normalize_insight(value)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -71,6 +79,13 @@ class GroupBridgeSessionMessage(BaseModel):
     format: Literal["plain", "markdown"] = "plain"
     priority: Literal["normal", "attention"] = "normal"
     reply_required: bool = False
+    insight: Optional[str] = Field(default=None, max_length=INSIGHT_MAX_CHARS)
+    source_by: str = Field(default="", max_length=256)
+
+    @field_validator("insight", mode="before")
+    @classmethod
+    def _normalize_insight(cls, value: object) -> Optional[str]:
+        return normalize_insight(value)
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
