@@ -180,23 +180,30 @@ class TestWebDoneHubRoutes(unittest.TestCase):
         def _factory(*args, **kwargs):
             return _FakeAsyncClient(responses, calls)
 
-        with (
-            patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
-            patch("no1.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value={"codex_api_key": "sk-codex-token"})),
-        ):
-            client = self._create_client()
-            resp = client.post(
-                "/api/v1/done_hub/self",
-                json={"base_url": base, "access_token": "token-32"},
-            )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home_path = Path(tmpdir)
+            config_path = home_path / ".codex" / "config.toml"
+            with (
+                patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
+                patch("no1.ports.web.routes.done_hub._configure_local_clients", new=AsyncMock(return_value={"codex_api_key": "sk-codex-token"})),
+                patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
+                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
+            ):
+                client = self._create_client()
+                resp = client.post(
+                    "/api/v1/done_hub/self",
+                    json={"base_url": base, "access_token": "token-32"},
+                )
 
-        self.assertEqual(resp.status_code, 200)
-        body = resp.json()
-        self.assertTrue(bool(body.get("ok")))
-        session = ((body.get("result") or {}).get("session") or {})
-        self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-token")
-        headers = calls[0][2].get("headers") or {}
-        self.assertEqual(headers.get("Authorization"), "Bearer token-32")
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertTrue(bool(body.get("ok")))
+            session = ((body.get("result") or {}).get("session") or {})
+            self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-token")
+            headers = calls[0][2].get("headers") or {}
+            self.assertEqual(headers.get("Authorization"), "Bearer token-32")
+            self.assertFalse(config_path.exists())
+            sync_config.assert_not_called()
 
     def test_done_hub_team_presets_proxy_uses_bearer_token(self) -> None:
         base = "https://peer.shierkeji.com"
@@ -495,6 +502,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
+                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 try:
@@ -520,22 +528,9 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 "unlimited_quota": True,
             })
             self.assertFalse((codex_dir / "auth.json").exists())
-            self.assertEqual(
-                (codex_dir / "config.toml").read_text(encoding="utf-8"),
-                'model_provider = "custom"\n'
-                "disable_response_storage = true\n"
-                "\n"
-                "[model_providers.custom]\n"
-                'name = "custom"\n'
-                'wire_api = "responses"\n'
-                'base_url = "https://peer.shierkeji.com/v1"\n'
-                'env_key = "ONECOLLEAGUE_API_KEY"\n'
-                "[model_providers.legacy]\n"
-                'name = "legacy"\n'
-                "\n"
-                f"{existing_tail}",
-            )
+            self.assertEqual((codex_dir / "config.toml").read_text(encoding="utf-8"), existing_config)
             self.assertFalse((home_path / ".gemini").exists())
+            sync_config.assert_not_called()
 
     def test_done_hub_login_skips_client_files_for_pro_user(self) -> None:
         base = "https://peer.shierkeji.com"
@@ -667,6 +662,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
                 patch("no1.ports.web.routes.done_hub._TOKEN_PAGE_SIZE", 2),
+                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 try:
@@ -693,15 +689,12 @@ class TestWebDoneHubRoutes(unittest.TestCase):
                 {"page": 2, "size": 2, "keyword": "", "order": "-id"},
             ])
             codex_config = home_path / ".codex" / "config.toml"
-            self.assertTrue(codex_config.exists())
-            content = codex_config.read_text(encoding="utf-8")
-            self.assertIn('model_provider = "custom"\n', content)
-            self.assertNotIn('model = "gpt-5.4"\n', content)
-            self.assertIn('env_key = "ONECOLLEAGUE_API_KEY"\n', content)
+            self.assertFalse(codex_config.exists())
             self.assertFalse((home_path / ".codex" / "auth.json").exists())
             self.assertFalse((home_path / ".gemini").exists())
+            sync_config.assert_not_called()
 
-    def test_done_hub_login_writes_only_codex_provider_config(self) -> None:
+    def test_done_hub_login_does_not_create_codex_provider_config(self) -> None:
         base = "https://peer.shierkeji.com"
         calls: list[tuple[str, str, dict]] = []
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -778,6 +771,7 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             with (
                 patch("no1.ports.web.routes.done_hub.httpx.AsyncClient", side_effect=_factory),
                 patch("no1.ports.web.codex_client_config.Path.home", return_value=home_path),
+                patch("no1.ports.web.codex_client_config.sync_codex_custom_provider_config") as sync_config,
             ):
                 client = self._create_client()
                 try:
@@ -793,9 +787,10 @@ class TestWebDoneHubRoutes(unittest.TestCase):
             self.assertTrue(bool(body.get("ok")))
             session = ((body.get("result") or {}).get("session") or {})
             self.assertEqual(str(session.get("codex_api_key") or ""), "sk-codex-secret")
-            self.assertTrue((home_path / ".codex" / "config.toml").exists())
+            self.assertFalse((home_path / ".codex" / "config.toml").exists())
             self.assertFalse((home_path / ".codex" / "auth.json").exists())
             self.assertFalse((home_path / ".gemini").exists())
+            sync_config.assert_not_called()
 
 
 if __name__ == "__main__":
